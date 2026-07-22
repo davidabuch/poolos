@@ -10,9 +10,8 @@ This module provides two climate entity types:
   For ordinary Pool/Spa bodies with heating-only equipment such as gas,
   solar, or heat-pump heating. It exposes only OFF and HEAT and combines:
 
-  - Pool/Spa body STATUS for circulation and pump operation
-  - LOTMP for the heating target
-  - HEATER/HTMODE for heating configuration
+  - Immutable body state from coordinator.api
+  - Pool/Spa body control through the existing command path
   - OFF, IDLE, and HEATING thermostat activity
 
 The heat-only entity intentionally does not expose fan modes, cooling, or auto.
@@ -43,9 +42,7 @@ from pyintellicenter import (
     HTMODE_ATTR,
     LOTMP_ATTR,
     LSTTMP_ATTR,
-    NULL_OBJNAM,
     STATUS_ATTR,
-    STATUS_OFF,
     PoolObject,
 )
 
@@ -54,9 +51,9 @@ from . import (
     PoolEntity,
     async_setup_pool_entities,
     bodies_affected_by,
-    body_temperature_limits,
     heaters_for_body,
 )
+from .api import BodyState, HeatMode
 from .coordinator import IntelliCenterCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -158,13 +155,17 @@ class PoolClimate(PoolEntity, ClimateEntity):
         ]
 
     @property
+    def _body_state(self) -> BodyState | None:
+        """Return this body's latest immutable API snapshot."""
+        return self.coordinator.api.get_body(self._pool_object.objnam)
+
+    @property
     def _heater_list(self) -> list[str]:
         """Return heaters currently wired to this body."""
-        live = heaters_for_body(
-            self.coordinator,
-            self._pool_object.objnam,
-        )
-        return live if live else self._seed_heater_list
+        body = self._body_state
+        if body is not None and body.available_heaters:
+            return [heater.id for heater in body.available_heaters]
+        return self._seed_heater_list
 
     @property
     def unique_id(self) -> str:
@@ -184,46 +185,52 @@ class PoolClimate(PoolEntity, ClimateEntity):
     @property
     def temperature_unit(self) -> str:
         """Return the IntelliCenter temperature unit."""
-        return self.pentairTemperatureSettings()
+        body = self._body_state
+        return (
+            body.temperature_unit
+            if body is not None
+            else self.pentairTemperatureSettings()
+        )
 
     @property
     def min_temp(self) -> float:
         """Return the minimum target temperature."""
-        return body_temperature_limits(self.coordinator)[0]
+        body = self._body_state
+        return body.min_temperature if body is not None else 40.0
 
     @property
     def max_temp(self) -> float:
         """Return the maximum target temperature."""
-        return body_temperature_limits(self.coordinator)[1]
+        body = self._body_state
+        return body.max_temperature if body is not None else 104.0
 
     @property
     def current_temperature(self) -> float | None:
         """Return the current water temperature."""
-        return self._safe_float_conversion(
-            self._pool_object[LSTTMP_ATTR]
-        )
+        body = self._body_state
+        return body.current_temperature if body is not None else None
 
     @property
     def target_temperature_low(self) -> float | None:
         """Return the heating setpoint."""
-        return self._safe_float_conversion(
-            self._pool_object[LOTMP_ATTR]
-        )
+        body = self._body_state
+        return body.target_temperature if body is not None else None
 
     @property
     def target_temperature_high(self) -> float | None:
         """Return the cooling setpoint."""
-        return self._safe_float_conversion(
-            self._pool_object[HITMP_ATTR]
-        )
+        body = self._body_state
+        return body.cooling_target_temperature if body is not None else None
 
     @property
     def hvac_mode(self) -> HVACMode:
         """Return the current HVAC mode."""
-        status = self._pool_object[STATUS_ATTR]
-        heater = self._pool_object[HEATER_ATTR]
-
-        if status == STATUS_OFF or heater == NULL_OBJNAM:
+        body = self._body_state
+        if (
+            body is None
+            or not body.is_on
+            or body.selected_heater_id is None
+        ):
             return HVACMode.OFF
 
         return HVACMode.HEAT_COOL
@@ -231,51 +238,46 @@ class PoolClimate(PoolEntity, ClimateEntity):
     @property
     def preset_mode(self) -> str | None:
         """Return the selected heater."""
-        heater = self._pool_object[HEATER_ATTR]
+        body = self._body_state
+        if body is None or body.selected_heater_id is None:
+            return None
 
-        if heater in self._heater_list:
-            heater_obj = self.coordinator.model[heater]
-
-            if heater_obj is not None and heater_obj.sname is not None:
-                return str(heater_obj.sname)
-
-        return None
+        selected = next(
+            (
+                heater
+                for heater in body.available_heaters
+                if heater.id == body.selected_heater_id
+            ),
+            None,
+        )
+        return selected.name if selected is not None else None
 
     @property
     def preset_modes(self) -> list[str]:
         """Return available heater selections."""
-        presets: list[str] = []
-
-        for heater in self._heater_list:
-            heater_obj = self.coordinator.model[heater]
-
-            if heater_obj is not None and heater_obj.sname is not None:
-                presets.append(str(heater_obj.sname))
-
-        return presets
+        body = self._body_state
+        if body is None:
+            return []
+        return [heater.name for heater in body.available_heaters]
 
     @property
     def hvac_action(self) -> HVACAction:
         """Return the current heating or cooling action."""
-        status = self._pool_object[STATUS_ATTR]
-        heater = self._pool_object[HEATER_ATTR]
-
-        if status == STATUS_OFF or heater == NULL_OBJNAM:
+        body = self._body_state
+        if (
+            body is None
+            or not body.is_on
+            or body.selected_heater_id is None
+        ):
             return HVACAction.OFF
 
-        htmode = self._pool_object[HTMODE_ATTR]
-
-        if htmode in (None, "", "0"):
+        if body.heat_mode is HeatMode.OFF:
             return HVACAction.IDLE
 
-        if self._controller.is_body_cooling(
-            self._pool_object.objnam
-        ):
+        if body.cooling_active:
             return HVACAction.COOLING
 
-        if self._controller.is_body_heating(
-            self._pool_object.objnam
-        ):
+        if body.heating_active:
             return HVACAction.HEATING
 
         return HVACAction.IDLE
@@ -475,13 +477,17 @@ class PoolHeatOnlyClimate(PoolEntity, ClimateEntity):
         ]
 
     @property
+    def _body_state(self) -> BodyState | None:
+        """Return this body's latest immutable API snapshot."""
+        return self.coordinator.api.get_body(self._pool_object.objnam)
+
+    @property
     def _heater_list(self) -> list[str]:
         """Return heaters currently wired to this body."""
-        live = heaters_for_body(
-            self.coordinator,
-            self._pool_object.objnam,
-        )
-        return live if live else self._seed_heater_list
+        body = self._body_state
+        if body is not None and body.available_heaters:
+            return [heater.id for heater in body.available_heaters]
+        return self._seed_heater_list
 
     @property
     def unique_id(self) -> str:
@@ -500,36 +506,42 @@ class PoolHeatOnlyClimate(PoolEntity, ClimateEntity):
     @property
     def temperature_unit(self) -> str:
         """Return the IntelliCenter temperature unit."""
-        return self.pentairTemperatureSettings()
+        body = self._body_state
+        return (
+            body.temperature_unit
+            if body is not None
+            else self.pentairTemperatureSettings()
+        )
 
     @property
     def min_temp(self) -> float:
         """Return the minimum target temperature."""
-        return body_temperature_limits(self.coordinator)[0]
+        body = self._body_state
+        return body.min_temperature if body is not None else 40.0
 
     @property
     def max_temp(self) -> float:
         """Return the maximum target temperature."""
-        return body_temperature_limits(self.coordinator)[1]
+        body = self._body_state
+        return body.max_temperature if body is not None else 104.0
 
     @property
     def current_temperature(self) -> float | None:
         """Return the current Pool/Spa water temperature."""
-        return self._safe_float_conversion(
-            self._pool_object[LSTTMP_ATTR]
-        )
+        body = self._body_state
+        return body.current_temperature if body is not None else None
 
     @property
     def target_temperature(self) -> float | None:
         """Return the heating target."""
-        return self._safe_float_conversion(
-            self._pool_object[LOTMP_ATTR]
-        )
+        body = self._body_state
+        return body.target_temperature if body is not None else None
 
     @property
     def hvac_mode(self) -> HVACMode:
         """Return OFF when the body is off and HEAT when it is on."""
-        if self._pool_object[STATUS_ATTR] == STATUS_OFF:
+        body = self._body_state
+        if body is None or not body.is_on:
             return HVACMode.OFF
 
         return HVACMode.HEAT
@@ -549,25 +561,17 @@ class PoolHeatOnlyClimate(PoolEntity, ClimateEntity):
         - HTMODE is active
         - The current water temperature is below the target
         """
-        if self._pool_object[STATUS_ATTR] == STATUS_OFF:
+        body = self._body_state
+        if body is None or not body.is_on:
             return HVACAction.OFF
 
-        heater = self._pool_object[HEATER_ATTR]
-        htmode = self._pool_object[HTMODE_ATTR]
-
-        if heater in (None, "", NULL_OBJNAM):
+        if (
+            body.selected_heater_id is None
+            or body.heat_mode is HeatMode.OFF
+        ):
             return HVACAction.IDLE
 
-        if htmode in (None, "", "0"):
-            return HVACAction.IDLE
-
-        current = self.current_temperature
-        target = self.target_temperature
-
-        if current is None or target is None:
-            return HVACAction.IDLE
-
-        if current < target:
+        if body.heating_requested:
             return HVACAction.HEATING
 
         return HVACAction.IDLE
