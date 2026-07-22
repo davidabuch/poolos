@@ -62,7 +62,7 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
-    Platform.WATER_HEATER,
+    # Platform.WATER_HEATER,
 ]
 
 type IntelliCenterConfigEntry = ConfigEntry[IntelliCenterCoordinator]
