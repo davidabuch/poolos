@@ -62,7 +62,6 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
-    # Platform.WATER_HEATER,
 ]
 
 type IntelliCenterConfigEntry = ConfigEntry[IntelliCenterCoordinator]
@@ -274,9 +273,8 @@ def bodies_affected_by(
 ) -> list[PoolObject]:
     """Return bodies of water touched by the candidate objects.
 
-    Heater-dependent platforms (water_heater, climate) create one entity per
-    body, but whether that entity exists depends on the heaters wired to the
-    body. A body is included when it is itself a candidate OR when a candidate
+    Climate entities create one entity per body, but whether that entity
+    exists depends on the heaters wired to the body. A body is included when it is itself a candidate OR when a candidate
     heater serves it, so adding a heater to a body re-evaluates that body
     (issue #42). When the body already has an entity, the duplicate is filtered
     by ``async_setup_pool_entities`` via ``unique_id`` and the existing entity
@@ -336,10 +334,9 @@ def heaters_for_body(
     (space-separated) ``BODY`` attribute. Heaters are ordered by ``LISTORD``;
     those without one sort last.
 
-    Heater-dependent entities (water_heater, climate) call this against the
-    *live* model so their heater composition tracks heaters added to an existing
-    body at runtime, rather than being frozen when the entity was built (issue
-    #57).
+    Climate entities call this against the *live* model so their heater
+    composition tracks heaters added to an existing body at runtime, rather
+    than being frozen when the entity was built (issue #57).
 
     Args:
         coordinator: The coordinator providing the pool model.

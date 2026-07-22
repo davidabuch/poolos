@@ -91,6 +91,7 @@ from pyintellicenter import (
     PoolObject,
 )
 
+from .api import IntelliCenterAPI
 from .const import DEFAULT_TRANSPORT, DOMAIN, TransportType
 
 _LOGGER = logging.getLogger(__name__)
@@ -258,6 +259,9 @@ class IntelliCenterCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         self._stop_listener: CALLBACK_TYPE | None = None
         self._connected = False
 
+        # Stable, read-only snapshot API for entities and future Pool Manager use.
+        self._api = IntelliCenterAPI(self)
+
         # Dynamic-entity-addition state (issue #42).
         # `_known_objnams` is the set of object identifiers the platforms have
         # already created entities for. It is seeded once the initial connection
@@ -277,6 +281,11 @@ class IntelliCenterCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # builders gated on attributes missing at first dispatch (e.g. pump
         # PWR/RPM/GPM sensors) get a second chance.
         self._pending_redispatch: set[str] = set()
+
+    @property
+    def api(self) -> IntelliCenterAPI:
+        """Return the stable read-only IntelliCenter API."""
+        return self._api
 
     @property
     def controller(self) -> ICModelController:
@@ -319,6 +328,7 @@ class IntelliCenterCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # equipment and dispatched to the registered platform listeners.
         self._known_objnams = {obj.objnam for obj in self._model}
         self._started = True
+        self._api.refresh()
 
     async def async_stop(self) -> None:
         """Stop the connection to the IntelliCenter."""
@@ -330,6 +340,7 @@ class IntelliCenterCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # Stop the handler
         self._handler.stop()
         self._connected = False
+        self._api.refresh()
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch data from the IntelliCenter.
@@ -513,6 +524,8 @@ class IntelliCenterCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # The update that introduced an object is not its backfill; only later
         # updates for that object complete it.
         self._async_redispatch_backfilled(set(data) - just_added)
+        # Rebuild one immutable snapshot before listeners read the new state.
+        self._api.refresh()
         self.async_update_listeners()
 
     @callback
@@ -535,6 +548,7 @@ class IntelliCenterCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         # "unavailable" after a reconnect). Entities read their values from the live
         # model objects, not from this diff, so clearing it loses nothing.
         self.data = {}
+        self._api.refresh()
         # Notify all listeners of the connection state change
         self.async_update_listeners()
 
