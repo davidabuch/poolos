@@ -25,8 +25,8 @@ def test_refresh_replaces_snapshot_and_supports_lookup(
     assert refreshed is not original
     assert api.pool is not None and api.pool.id == "B1101"
     assert api.spa is not None and api.spa.id == "B1102"
-    assert api.get_body("B1102") is api.spa
-    assert api.get_body("missing") is None
+    assert api.body("B1102") is api.spa
+    assert api.body("missing") is None
 
 
 def test_snapshot_is_immutable_and_tracks_connection_state(

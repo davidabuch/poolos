@@ -74,6 +74,20 @@ class BodyState:
 
 
 @dataclass(frozen=True, slots=True)
+class CircuitState:
+    """Immutable snapshot of one IntelliCenter circuit."""
+
+    id: str
+    name: str
+    is_on: bool
+    subtype: str | None
+    use: str | None
+    feature: bool
+    freeze_protected: bool
+    egg_timer_minutes: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class IntelliCenterSnapshot:
     """Immutable system-level read-model snapshot."""
 
@@ -83,3 +97,4 @@ class IntelliCenterSnapshot:
     software_version: str | None
     temperature_unit: UnitOfTemperature
     bodies: tuple[BodyState, ...]
+    circuits: tuple[CircuitState, ...]

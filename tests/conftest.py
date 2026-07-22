@@ -118,6 +118,9 @@ def _install_stub_modules() -> None:
     pyic = ModuleType("pyintellicenter")
     constants = {
         "BODY_TYPE": "BODY",
+        "CIRCUIT_TYPE": "CIRCUIT",
+        "FEATR_ATTR": "FEATR",
+        "FREEZE_ATTR": "FREEZE",
         "HEATER_ATTR": "HEATER",
         "HITMP_ATTR": "HITMP",
         "HTMODE_ATTR": "HTMODE",
@@ -126,6 +129,8 @@ def _install_stub_modules() -> None:
         "NULL_OBJNAM": "00000",
         "STATUS_ATTR": "STATUS",
         "STATUS_OFF": "OFF",
+        "TIME_ATTR": "TIME",
+        "USE_ATTR": "USE",
     }
     for name, value in constants.items():
         setattr(pyic, name, value)
@@ -163,12 +168,15 @@ def _load_module(name: str, path: Path) -> ModuleType:
 _install_stub_modules()
 MODELS = _load_module("intellicenter.api.models", API_ROOT / "models.py")
 BODY = _load_module("intellicenter.api.body", API_ROOT / "body.py")
+CIRCUIT = _load_module("intellicenter.api.circuit", API_ROOT / "circuit.py")
 SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
 
 
 @pytest.fixture
 def api_modules() -> SimpleNamespace:
-    return SimpleNamespace(models=MODELS, body=BODY, system=SYSTEM)
+    return SimpleNamespace(
+        models=MODELS, body=BODY, circuit=CIRCUIT, system=SYSTEM
+    )
 
 
 @pytest.fixture
@@ -233,6 +241,36 @@ def coordinator_factory():
             objects,
             connected=connected,
             system_info=FakeSystemInfo(uses_metric=metric),
+        )
+
+    return factory
+
+
+@pytest.fixture
+def circuit_object_factory():
+    def factory(
+        objnam: str = "C0001",
+        *,
+        name: str = "Waterfall",
+        subtype: str = "GENERIC",
+        status: Any = "ON",
+        use: Any = "FEATURE",
+        feature: Any = "1",
+        freeze: Any = "0",
+        egg_timer: Any = 30,
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="CIRCUIT",
+            sname=name,
+            subtype=subtype,
+            attrs={
+                "STATUS": status,
+                "USE": use,
+                "FEATR": feature,
+                "FREEZE": freeze,
+                "TIME": egg_timer,
+            },
         )
 
     return factory

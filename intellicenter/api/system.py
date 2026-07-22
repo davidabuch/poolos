@@ -5,10 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from homeassistant.const import UnitOfTemperature
-from pyintellicenter import BODY_TYPE
+from pyintellicenter import BODY_TYPE, CIRCUIT_TYPE
 
 from .body import build_body_state
-from .models import API_VERSION, BodyState, BodyType, IntelliCenterSnapshot
+from .circuit import build_circuit_state
+from .models import (
+    API_VERSION,
+    BodyState,
+    BodyType,
+    CircuitState,
+    IntelliCenterSnapshot,
+)
 
 if TYPE_CHECKING:
     from ..coordinator import IntelliCenterCoordinator
@@ -26,6 +33,7 @@ class IntelliCenterAPI:
             software_version=None,
             temperature_unit=UnitOfTemperature.FAHRENHEIT,
             bodies=(),
+            circuits=(),
         )
 
     @property
@@ -37,6 +45,11 @@ class IntelliCenterAPI:
     def bodies(self) -> tuple[BodyState, ...]:
         """Return all Pool/Spa body snapshots."""
         return self._snapshot.bodies
+
+    @property
+    def circuits(self) -> tuple[CircuitState, ...]:
+        """Return all circuit snapshots."""
+        return self._snapshot.circuits
 
     @property
     def pool(self) -> BodyState | None:
@@ -54,10 +67,17 @@ class IntelliCenterAPI:
             None,
         )
 
-    def get_body(self, body_id: str) -> BodyState | None:
+    def body(self, body_id: str) -> BodyState | None:
         """Return a body by its IntelliCenter object name."""
         return next(
             (body for body in self._snapshot.bodies if body.id == body_id),
+            None,
+        )
+
+    def circuit(self, circuit_id: str) -> CircuitState | None:
+        """Return a circuit by its IntelliCenter object name."""
+        return next(
+            (circuit for circuit in self._snapshot.circuits if circuit.id == circuit_id),
             None,
         )
 
@@ -90,6 +110,11 @@ class IntelliCenterAPI:
                 )
             )
 
+        circuits = tuple(
+            build_circuit_state(self._coordinator, circuit)
+            for circuit in self._coordinator.model.get_by_type(CIRCUIT_TYPE)
+        )
+
         self._snapshot = IntelliCenterSnapshot(
             api_version=API_VERSION,
             connected=self._coordinator.connected,
@@ -97,6 +122,7 @@ class IntelliCenterAPI:
             software_version=system_info.sw_version if system_info else None,
             temperature_unit=temperature_unit,
             bodies=tuple(bodies),
+            circuits=circuits,
         )
         return self._snapshot
 
