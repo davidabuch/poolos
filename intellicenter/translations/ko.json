@@ -1,0 +1,99 @@
+{
+  "entity": {
+    "sensor": {
+      "system_mode": {
+        "state": {
+          "auto": "자동",
+          "service": "서비스",
+          "timeout": "시간 초과"
+        }
+      }
+    }
+  },
+  "config": {
+    "flow_title": "Pentair IntelliCenter: {name}",
+    "step": {
+      "user": {
+        "title": "Pentair IntelliCenter 설정",
+        "description": "IntelliCenter 시스템을 설정할 방법을 선택하세요.",
+        "data": {
+          "setup_method": "설정 방법"
+        }
+      },
+      "discover": {
+        "title": "IntelliCenter 장치 선택",
+        "description": "네트워크에서 {count}개의 IntelliCenter 장치를 발견했습니다. 구성할 장치를 선택하세요.",
+        "data": {
+          "device": "장치"
+        }
+      },
+      "manual": {
+        "title": "IntelliCenter 주소 입력",
+        "description": "IntelliCenter 시스템의 IP 주소를 입력하고 연결 유형을 선택하세요.",
+        "data": {
+          "host": "IP 주소",
+          "transport": "연결 유형"
+        },
+        "data_description": {
+          "transport": "TCP는 표준 연결 방법입니다 (포트 6681). WebSocket (포트 6680)은 일부 네트워크 구성에서 더 안정적일 수 있습니다."
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Pentair IntelliCenter에 연결",
+        "description": "{name} ({host})을(를) 설정하시겠습니까?"
+      },
+      "reconfigure": {
+        "title": "IntelliCenter 재구성",
+        "description": "{name}의 연결 설정을 업데이트합니다.",
+        "data": {
+          "host": "IP 주소",
+          "transport": "연결 유형"
+        },
+        "data_description": {
+          "transport": "TCP는 표준 연결 방법입니다 (포트 6681). WebSocket (포트 6680)은 일부 네트워크 구성에서 더 안정적일 수 있습니다."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "IntelliCenter에 연결할 수 없습니다. IP 주소와 시스템 전원이 켜져 있는지 확인하세요.",
+      "invalid_host": "잘못된 IP 주소 또는 호스트 이름입니다.",
+      "unknown": "예기치 않은 오류가 발생했습니다. 자세한 내용은 로그를 확인하세요."
+    },
+    "abort": {
+      "already_configured": "이 IntelliCenter 장치는 이미 구성되어 있습니다.",
+      "cannot_connect": "발견된 장치에 연결할 수 없습니다.",
+      "unknown": "설정 중 예기치 않은 오류가 발생했습니다.",
+      "reconfigure_successful": "구성이 성공적으로 업데이트되었습니다."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IntelliCenter 옵션",
+        "description": "IntelliCenter 시스템의 연결 설정을 구성합니다.\n\n연결됨: {host}",
+        "data": {
+          "keepalive_interval": "연결 유지 간격 (초)",
+          "reconnect_delay": "초기 재연결 지연 (초)"
+        },
+        "data_description": {
+          "keepalive_interval": "연결을 유지하기 위해 연결 유지 쿼리를 보내는 빈도. 범위: 30-300초.",
+          "reconnect_delay": "연결이 끊어진 후 재연결을 시도하기 전 초기 지연. 지수 백오프 사용. 범위: 10-120초."
+        }
+      }
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "네트워크에서 장치 검색",
+        "manual": "IP 주소 수동 입력"
+      }
+    },
+    "transport": {
+      "options": {
+        "tcp": "TCP (포트 6681)",
+        "websocket": "WebSocket (포트 6680)"
+      }
+    }
+  }
+}

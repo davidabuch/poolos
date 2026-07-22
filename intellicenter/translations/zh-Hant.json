@@ -1,0 +1,99 @@
+{
+  "entity": {
+    "sensor": {
+      "system_mode": {
+        "state": {
+          "auto": "自動",
+          "service": "維護",
+          "timeout": "逾時"
+        }
+      }
+    }
+  },
+  "config": {
+    "flow_title": "Pentair IntelliCenter: {name}",
+    "step": {
+      "user": {
+        "title": "設定 Pentair IntelliCenter",
+        "description": "選擇您想要如何設定 IntelliCenter 系統。",
+        "data": {
+          "setup_method": "設定方式"
+        }
+      },
+      "discover": {
+        "title": "選擇 IntelliCenter 裝置",
+        "description": "在您的網路上發現了 {count} 個 IntelliCenter 裝置。選擇您要設定的裝置。",
+        "data": {
+          "device": "裝置"
+        }
+      },
+      "manual": {
+        "title": "輸入 IntelliCenter 位址",
+        "description": "輸入您的 IntelliCenter 系統的 IP 位址並選擇連線類型。",
+        "data": {
+          "host": "IP 位址",
+          "transport": "連線類型"
+        },
+        "data_description": {
+          "transport": "TCP 是標準連線方式（連接埠 6681）。WebSocket（連接埠 6680）在某些網路設定中可能更可靠。"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "連線到 Pentair IntelliCenter",
+        "description": "您要設定 {name} ({host}) 嗎？"
+      },
+      "reconfigure": {
+        "title": "重新設定 IntelliCenter",
+        "description": "更新 {name} 的連線設定。",
+        "data": {
+          "host": "IP 位址",
+          "transport": "連線類型"
+        },
+        "data_description": {
+          "transport": "TCP 是標準連線方式（連接埠 6681）。WebSocket（連接埠 6680）在某些網路設定中可能更可靠。"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "無法連線到 IntelliCenter。請確認 IP 位址以及系統是否已開機。",
+      "invalid_host": "IP 位址或主機名稱無效。",
+      "unknown": "發生意外錯誤。請查看記錄檔了解更多資訊。"
+    },
+    "abort": {
+      "already_configured": "此 IntelliCenter 裝置已設定。",
+      "cannot_connect": "無法連線到已發現的裝置。",
+      "unknown": "設定過程中發生意外錯誤。",
+      "reconfigure_successful": "設定已成功更新。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IntelliCenter 選項",
+        "description": "設定 IntelliCenter 系統的連線設定。\n\n已連線到：{host}",
+        "data": {
+          "keepalive_interval": "保活間隔（秒）",
+          "reconnect_delay": "初始重新連線延遲（秒）"
+        },
+        "data_description": {
+          "keepalive_interval": "傳送保活查詢以維持連線的頻率。範圍：30-300 秒。",
+          "reconnect_delay": "連線中斷後嘗試重新連線前的初始延遲。使用指數退避。範圍：10-120 秒。"
+        }
+      }
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "在網路上探索裝置",
+        "manual": "手動輸入 IP 位址"
+      }
+    },
+    "transport": {
+      "options": {
+        "tcp": "TCP（連接埠 6681）",
+        "websocket": "WebSocket（連接埠 6680）"
+      }
+    }
+  }
+}

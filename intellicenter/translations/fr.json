@@ -1,0 +1,99 @@
+{
+  "entity": {
+    "sensor": {
+      "system_mode": {
+        "state": {
+          "auto": "Automatique",
+          "service": "Maintenance",
+          "timeout": "Temporisation"
+        }
+      }
+    }
+  },
+  "config": {
+    "flow_title": "Pentair IntelliCenter: {name}",
+    "step": {
+      "user": {
+        "title": "Configurer Pentair IntelliCenter",
+        "description": "Choisissez comment vous souhaitez configurer votre système IntelliCenter.",
+        "data": {
+          "setup_method": "Méthode de configuration"
+        }
+      },
+      "discover": {
+        "title": "Sélectionner un appareil IntelliCenter",
+        "description": "{count} appareil(s) IntelliCenter trouvé(s) sur votre réseau. Sélectionnez celui que vous souhaitez configurer.",
+        "data": {
+          "device": "Appareil"
+        }
+      },
+      "manual": {
+        "title": "Entrer l'adresse IntelliCenter",
+        "description": "Entrez l'adresse IP de votre système IntelliCenter et sélectionnez le type de connexion.",
+        "data": {
+          "host": "Adresse IP",
+          "transport": "Type de connexion"
+        },
+        "data_description": {
+          "transport": "TCP est la méthode de connexion standard (port 6681). WebSocket (port 6680) peut être plus fiable dans certaines configurations réseau."
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Connecter à Pentair IntelliCenter",
+        "description": "Voulez-vous configurer {name} ({host}) ?"
+      },
+      "reconfigure": {
+        "title": "Reconfigurer IntelliCenter",
+        "description": "Mettre à jour les paramètres de connexion pour {name}.",
+        "data": {
+          "host": "Adresse IP",
+          "transport": "Type de connexion"
+        },
+        "data_description": {
+          "transport": "TCP est la méthode de connexion standard (port 6681). WebSocket (port 6680) peut être plus fiable dans certaines configurations réseau."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de se connecter à l'IntelliCenter. Vérifiez l'adresse IP et que le système est allumé.",
+      "invalid_host": "Adresse IP ou nom d'hôte invalide.",
+      "unknown": "Une erreur inattendue s'est produite. Consultez les journaux pour plus d'informations."
+    },
+    "abort": {
+      "already_configured": "Cet appareil IntelliCenter est déjà configuré.",
+      "cannot_connect": "Impossible de se connecter à l'appareil découvert.",
+      "unknown": "Une erreur inattendue s'est produite lors de la configuration.",
+      "reconfigure_successful": "Configuration mise à jour avec succès."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options IntelliCenter",
+        "description": "Configurez les paramètres de connexion pour votre système IntelliCenter.\n\nConnecté à : {host}",
+        "data": {
+          "keepalive_interval": "Intervalle de keepalive (secondes)",
+          "reconnect_delay": "Délai initial de reconnexion (secondes)"
+        },
+        "data_description": {
+          "keepalive_interval": "Fréquence d'envoi des requêtes keepalive pour maintenir la connexion. Plage : 30-300 secondes.",
+          "reconnect_delay": "Délai initial avant de tenter une reconnexion après une perte de connexion. Utilise un recul exponentiel. Plage : 10-120 secondes."
+        }
+      }
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "Découvrir les appareils sur le réseau",
+        "manual": "Entrer l'adresse IP manuellement"
+      }
+    },
+    "transport": {
+      "options": {
+        "tcp": "TCP (port 6681)",
+        "websocket": "WebSocket (port 6680)"
+      }
+    }
+  }
+}

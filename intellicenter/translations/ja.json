@@ -1,0 +1,99 @@
+{
+  "entity": {
+    "sensor": {
+      "system_mode": {
+        "state": {
+          "auto": "自動",
+          "service": "サービス",
+          "timeout": "タイムアウト"
+        }
+      }
+    }
+  },
+  "config": {
+    "flow_title": "Pentair IntelliCenter: {name}",
+    "step": {
+      "user": {
+        "title": "Pentair IntelliCenter のセットアップ",
+        "description": "IntelliCenter システムのセットアップ方法を選択してください。",
+        "data": {
+          "setup_method": "セットアップ方法"
+        }
+      },
+      "discover": {
+        "title": "IntelliCenter デバイスを選択",
+        "description": "ネットワーク上で {count} 台の IntelliCenter デバイスが見つかりました。設定するデバイスを選択してください。",
+        "data": {
+          "device": "デバイス"
+        }
+      },
+      "manual": {
+        "title": "IntelliCenter アドレスを入力",
+        "description": "IntelliCenter システムの IP アドレスを入力し、接続タイプを選択してください。",
+        "data": {
+          "host": "IP アドレス",
+          "transport": "接続タイプ"
+        },
+        "data_description": {
+          "transport": "TCP は標準の接続方法です（ポート 6681）。WebSocket（ポート 6680）は一部のネットワーク構成でより信頼性が高い場合があります。"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Pentair IntelliCenter に接続",
+        "description": "{name} ({host}) をセットアップしますか？"
+      },
+      "reconfigure": {
+        "title": "IntelliCenter を再設定",
+        "description": "{name} の接続設定を更新します。",
+        "data": {
+          "host": "IP アドレス",
+          "transport": "接続タイプ"
+        },
+        "data_description": {
+          "transport": "TCP は標準の接続方法です（ポート 6681）。WebSocket（ポート 6680）は一部のネットワーク構成でより信頼性が高い場合があります。"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "IntelliCenter に接続できませんでした。IP アドレスとシステムの電源が入っているか確認してください。",
+      "invalid_host": "IP アドレスまたはホスト名が無効です。",
+      "unknown": "予期しないエラーが発生しました。詳細についてはログを確認してください。"
+    },
+    "abort": {
+      "already_configured": "この IntelliCenter デバイスは既に設定されています。",
+      "cannot_connect": "検出されたデバイスに接続できませんでした。",
+      "unknown": "セットアップ中に予期しないエラーが発生しました。",
+      "reconfigure_successful": "設定が正常に更新されました。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IntelliCenter オプション",
+        "description": "IntelliCenter システムの接続設定を構成します。\n\n接続先：{host}",
+        "data": {
+          "keepalive_interval": "キープアライブ間隔（秒）",
+          "reconnect_delay": "初期再接続遅延（秒）"
+        },
+        "data_description": {
+          "keepalive_interval": "接続を維持するためにキープアライブクエリを送信する頻度。範囲：30〜300 秒。",
+          "reconnect_delay": "接続が失われた後、再接続を試みる前の初期遅延。指数バックオフを使用。範囲：10〜120 秒。"
+        }
+      }
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "ネットワーク上のデバイスを検出",
+        "manual": "IP アドレスを手動で入力"
+      }
+    },
+    "transport": {
+      "options": {
+        "tcp": "TCP（ポート 6681）",
+        "websocket": "WebSocket（ポート 6680）"
+      }
+    }
+  }
+}

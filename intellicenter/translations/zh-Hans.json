@@ -1,0 +1,99 @@
+{
+  "entity": {
+    "sensor": {
+      "system_mode": {
+        "state": {
+          "auto": "自动",
+          "service": "维护",
+          "timeout": "超时"
+        }
+      }
+    }
+  },
+  "config": {
+    "flow_title": "Pentair IntelliCenter: {name}",
+    "step": {
+      "user": {
+        "title": "设置 Pentair IntelliCenter",
+        "description": "选择您想要如何设置 IntelliCenter 系统。",
+        "data": {
+          "setup_method": "设置方式"
+        }
+      },
+      "discover": {
+        "title": "选择 IntelliCenter 设备",
+        "description": "在您的网络上发现了 {count} 个 IntelliCenter 设备。选择您要配置的设备。",
+        "data": {
+          "device": "设备"
+        }
+      },
+      "manual": {
+        "title": "输入 IntelliCenter 地址",
+        "description": "输入您的 IntelliCenter 系统的 IP 地址并选择连接类型。",
+        "data": {
+          "host": "IP 地址",
+          "transport": "连接类型"
+        },
+        "data_description": {
+          "transport": "TCP 是标准连接方式（端口 6681）。WebSocket（端口 6680）在某些网络配置中可能更可靠。"
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "连接到 Pentair IntelliCenter",
+        "description": "您要设置 {name} ({host}) 吗？"
+      },
+      "reconfigure": {
+        "title": "重新配置 IntelliCenter",
+        "description": "更新 {name} 的连接设置。",
+        "data": {
+          "host": "IP 地址",
+          "transport": "连接类型"
+        },
+        "data_description": {
+          "transport": "TCP 是标准连接方式（端口 6681）。WebSocket（端口 6680）在某些网络配置中可能更可靠。"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接到 IntelliCenter。请验证 IP 地址以及系统是否已开机。",
+      "invalid_host": "IP 地址或主机名无效。",
+      "unknown": "发生意外错误。请查看日志了解更多信息。"
+    },
+    "abort": {
+      "already_configured": "此 IntelliCenter 设备已配置。",
+      "cannot_connect": "无法连接到已发现的设备。",
+      "unknown": "设置过程中发生意外错误。",
+      "reconfigure_successful": "配置已成功更新。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IntelliCenter 选项",
+        "description": "配置 IntelliCenter 系统的连接设置。\n\n已连接到：{host}",
+        "data": {
+          "keepalive_interval": "保活间隔（秒）",
+          "reconnect_delay": "初始重连延迟（秒）"
+        },
+        "data_description": {
+          "keepalive_interval": "发送保活查询以维持连接的频率。范围：30-300 秒。",
+          "reconnect_delay": "连接丢失后尝试重连前的初始延迟。使用指数退避。范围：10-120 秒。"
+        }
+      }
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "在网络上发现设备",
+        "manual": "手动输入 IP 地址"
+      }
+    },
+    "transport": {
+      "options": {
+        "tcp": "TCP（端口 6681）",
+        "websocket": "WebSocket（端口 6680）"
+      }
+    }
+  }
+}

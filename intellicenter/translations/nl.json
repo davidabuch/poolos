@@ -1,0 +1,99 @@
+{
+  "entity": {
+    "sensor": {
+      "system_mode": {
+        "state": {
+          "auto": "Automatisch",
+          "service": "Service",
+          "timeout": "Time-out"
+        }
+      }
+    }
+  },
+  "config": {
+    "flow_title": "Pentair IntelliCenter: {name}",
+    "step": {
+      "user": {
+        "title": "Pentair IntelliCenter instellen",
+        "description": "Kies hoe u uw IntelliCenter-systeem wilt instellen.",
+        "data": {
+          "setup_method": "Installatiemethode"
+        }
+      },
+      "discover": {
+        "title": "Selecteer IntelliCenter-apparaat",
+        "description": "{count} IntelliCenter-apparaat(en) gevonden op uw netwerk. Selecteer degene die u wilt configureren.",
+        "data": {
+          "device": "Apparaat"
+        }
+      },
+      "manual": {
+        "title": "Voer IntelliCenter-adres in",
+        "description": "Voer het IP-adres van uw IntelliCenter-systeem in en selecteer het verbindingstype.",
+        "data": {
+          "host": "IP-adres",
+          "transport": "Verbindingstype"
+        },
+        "data_description": {
+          "transport": "TCP is de standaard verbindingsmethode (poort 6681). WebSocket (poort 6680) kan betrouwbaarder zijn in sommige netwerkconfiguraties."
+        }
+      },
+      "zeroconf_confirm": {
+        "title": "Verbinden met Pentair IntelliCenter",
+        "description": "Wilt u {name} ({host}) instellen?"
+      },
+      "reconfigure": {
+        "title": "IntelliCenter herconfigureren",
+        "description": "Werk de verbindingsinstellingen bij voor {name}.",
+        "data": {
+          "host": "IP-adres",
+          "transport": "Verbindingstype"
+        },
+        "data_description": {
+          "transport": "TCP is de standaard verbindingsmethode (poort 6681). WebSocket (poort 6680) kan betrouwbaarder zijn in sommige netwerkconfiguraties."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kan geen verbinding maken met de IntelliCenter. Controleer het IP-adres en of het systeem is ingeschakeld.",
+      "invalid_host": "Ongeldig IP-adres of hostnaam.",
+      "unknown": "Er is een onverwachte fout opgetreden. Controleer de logs voor meer informatie."
+    },
+    "abort": {
+      "already_configured": "Dit IntelliCenter-apparaat is al geconfigureerd.",
+      "cannot_connect": "Kan geen verbinding maken met het ontdekte apparaat.",
+      "unknown": "Er is een onverwachte fout opgetreden tijdens de installatie.",
+      "reconfigure_successful": "Configuratie succesvol bijgewerkt."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IntelliCenter-opties",
+        "description": "Configureer de verbindingsinstellingen voor uw IntelliCenter-systeem.\n\nVerbonden met: {host}",
+        "data": {
+          "keepalive_interval": "Keepalive-interval (seconden)",
+          "reconnect_delay": "Initiële herverbindingsvertraging (seconden)"
+        },
+        "data_description": {
+          "keepalive_interval": "Hoe vaak keepalive-query's worden verzonden om de verbinding te behouden. Bereik: 30-300 seconden.",
+          "reconnect_delay": "Initiële vertraging voordat opnieuw verbinding wordt gemaakt na verbindingsverlies. Gebruikt exponentiële uitstel. Bereik: 10-120 seconden."
+        }
+      }
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "discover": "Apparaten op netwerk ontdekken",
+        "manual": "IP-adres handmatig invoeren"
+      }
+    },
+    "transport": {
+      "options": {
+        "tcp": "TCP (poort 6681)",
+        "websocket": "WebSocket (poort 6680)"
+      }
+    }
+  }
+}
