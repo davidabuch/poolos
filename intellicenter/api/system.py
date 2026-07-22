@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from homeassistant.const import UnitOfTemperature
-from pyintellicenter import BODY_TYPE, CIRCUIT_TYPE
+from pyintellicenter import (
+    BODY_TYPE,
+    CIRCUIT_TYPE,
+    PMPCIRC_TYPE,
+    PUMP_TYPE,
+    CIRCUIT_ATTR,
+    PARENT_ATTR,
+)
 
 from .body import build_body_state
 from .circuit import build_circuit_state
@@ -15,7 +22,10 @@ from .models import (
     BodyType,
     CircuitState,
     IntelliCenterSnapshot,
+    PumpCircuitState,
+    PumpState,
 )
+from .pump import build_pump_circuit_state, build_pump_state
 
 if TYPE_CHECKING:
     from ..coordinator import IntelliCenterCoordinator
@@ -34,6 +44,7 @@ class IntelliCenterAPI:
             temperature_unit=UnitOfTemperature.FAHRENHEIT,
             bodies=(),
             circuits=(),
+            pumps=(),
         )
 
     @property
@@ -50,6 +61,11 @@ class IntelliCenterAPI:
     def circuits(self) -> tuple[CircuitState, ...]:
         """Return all circuit snapshots."""
         return self._snapshot.circuits
+
+    @property
+    def pumps(self) -> tuple[PumpState, ...]:
+        """Return all pump snapshots."""
+        return self._snapshot.pumps
 
     @property
     def pool(self) -> BodyState | None:
@@ -69,10 +85,7 @@ class IntelliCenterAPI:
 
     def body(self, body_id: str) -> BodyState | None:
         """Return a body by its IntelliCenter object name."""
-        return next(
-            (body for body in self._snapshot.bodies if body.id == body_id),
-            None,
-        )
+        return next((body for body in self._snapshot.bodies if body.id == body_id), None)
 
     def circuit(self, circuit_id: str) -> CircuitState | None:
         """Return a circuit by its IntelliCenter object name."""
@@ -80,6 +93,10 @@ class IntelliCenterAPI:
             (circuit for circuit in self._snapshot.circuits if circuit.id == circuit_id),
             None,
         )
+
+    def pump(self, pump_id: str) -> PumpState | None:
+        """Return a pump by its IntelliCenter object name."""
+        return next((pump for pump in self._snapshot.pumps if pump.id == pump_id), None)
 
     def refresh(self) -> IntelliCenterSnapshot:
         """Atomically rebuild the read model from the coordinator's live model."""
@@ -114,6 +131,24 @@ class IntelliCenterAPI:
             build_circuit_state(self._coordinator, circuit)
             for circuit in self._coordinator.model.get_by_type(CIRCUIT_TYPE)
         )
+        circuit_names = {circuit.id: circuit.name for circuit in circuits}
+
+        programs_by_pump: dict[str, list[PumpCircuitState]] = {}
+        for pump_circuit in self._coordinator.model.get_by_type(PMPCIRC_TYPE):
+            pump_id = str(pump_circuit[PARENT_ATTR] or "")
+            if not pump_id:
+                continue
+            circuit_id = str(pump_circuit[CIRCUIT_ATTR] or "")
+            program = build_pump_circuit_state(
+                pump_circuit,
+                circuit_names.get(circuit_id),
+            )
+            programs_by_pump.setdefault(pump_id, []).append(program)
+
+        pumps = tuple(
+            build_pump_state(pump, programs_by_pump.get(pump.objnam, ()))
+            for pump in self._coordinator.model.get_by_type(PUMP_TYPE)
+        )
 
         self._snapshot = IntelliCenterSnapshot(
             api_version=API_VERSION,
@@ -123,6 +158,7 @@ class IntelliCenterAPI:
             temperature_unit=temperature_unit,
             bodies=tuple(bodies),
             circuits=circuits,
+            pumps=pumps,
         )
         return self._snapshot
 

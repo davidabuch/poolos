@@ -39,6 +39,23 @@ class HeatSource(StrEnum):
     UNKNOWN = "unknown"
 
 
+class PumpType(StrEnum):
+    """Normalized IntelliCenter pump capability."""
+
+    VARIABLE_SPEED = "variable_speed"
+    VARIABLE_FLOW = "variable_flow"
+    VARIABLE_SPEED_FLOW = "variable_speed_flow"
+    UNKNOWN = "unknown"
+
+
+class PumpMode(StrEnum):
+    """Normalized per-circuit pump control mode."""
+
+    RPM = "rpm"
+    GPM = "gpm"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class HeaterState:
     """Immutable snapshot of one heater available to a body."""
@@ -88,6 +105,37 @@ class CircuitState:
 
 
 @dataclass(frozen=True, slots=True)
+class PumpCircuitState:
+    """Immutable snapshot of one pump program assigned to a circuit."""
+
+    id: str
+    pump_id: str
+    circuit_id: str
+    circuit_name: str | None
+    mode: PumpMode
+    rpm_setpoint: float | None
+    flow_setpoint_gpm: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class PumpState:
+    """Immutable snapshot of one IntelliCenter pump."""
+
+    id: str
+    name: str
+    pump_type: PumpType
+    is_running: bool
+    power_watts: float | None
+    rpm: float | None
+    flow_gpm: float | None
+    minimum_rpm: float | None
+    maximum_rpm: float | None
+    minimum_flow_gpm: float | None
+    maximum_flow_gpm: float | None
+    circuits: tuple[PumpCircuitState, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class IntelliCenterSnapshot:
     """Immutable system-level read-model snapshot."""
 
@@ -98,3 +146,4 @@ class IntelliCenterSnapshot:
     temperature_unit: UnitOfTemperature
     bodies: tuple[BodyState, ...]
     circuits: tuple[CircuitState, ...]
+    pumps: tuple[PumpState, ...]

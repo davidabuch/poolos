@@ -119,8 +119,22 @@ def _install_stub_modules() -> None:
     constants = {
         "BODY_TYPE": "BODY",
         "CIRCUIT_TYPE": "CIRCUIT",
+        "PMPCIRC_TYPE": "PMPCIRC",
+        "PUMP_TYPE": "PUMP",
         "FEATR_ATTR": "FEATR",
         "FREEZE_ATTR": "FREEZE",
+        "SPEED_ATTR": "SPEED",
+        "SELECT_ATTR": "SELECT",
+        "RPM_ATTR": "RPM",
+        "PWR_ATTR": "PWR",
+        "PUMP_STATUS_ON": "ON",
+        "PARENT_ATTR": "PARENT",
+        "MINF_ATTR": "MINF",
+        "MIN_ATTR": "MIN",
+        "MAXF_ATTR": "MAXF",
+        "MAX_ATTR": "MAX",
+        "GPM_ATTR": "GPM",
+        "CIRCUIT_ATTR": "CIRCUIT",
         "HEATER_ATTR": "HEATER",
         "HITMP_ATTR": "HITMP",
         "HTMODE_ATTR": "HTMODE",
@@ -169,6 +183,7 @@ _install_stub_modules()
 MODELS = _load_module("intellicenter.api.models", API_ROOT / "models.py")
 BODY = _load_module("intellicenter.api.body", API_ROOT / "body.py")
 CIRCUIT = _load_module("intellicenter.api.circuit", API_ROOT / "circuit.py")
+PUMP = _load_module("intellicenter.api.pump", API_ROOT / "pump.py")
 SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
 
 
@@ -270,6 +285,68 @@ def circuit_object_factory():
                 "FEATR": feature,
                 "FREEZE": freeze,
                 "TIME": egg_timer,
+            },
+        )
+
+    return factory
+
+
+@pytest.fixture
+def pump_object_factory():
+    def factory(
+        objnam: str = "P0001",
+        *,
+        name: str = "Main Pump",
+        subtype: str = "VSF",
+        status: Any = "ON",
+        power: Any = 1450,
+        rpm: Any = 2400,
+        gpm: Any = 48,
+        minimum_rpm: Any = 450,
+        maximum_rpm: Any = 3450,
+        minimum_flow: Any = 15,
+        maximum_flow: Any = 130,
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="PUMP",
+            sname=name,
+            subtype=subtype,
+            attrs={
+                "STATUS": status,
+                "PWR": power,
+                "RPM": rpm,
+                "GPM": gpm,
+                "MIN": minimum_rpm,
+                "MAX": maximum_rpm,
+                "MINF": minimum_flow,
+                "MAXF": maximum_flow,
+            },
+        )
+
+    return factory
+
+
+@pytest.fixture
+def pump_circuit_object_factory():
+    def factory(
+        objnam: str = "PC0001",
+        *,
+        pump_id: Any = "P0001",
+        circuit_id: Any = "C0001",
+        mode: Any = "RPM",
+        rpm_setpoint: Any = 2200,
+        flow_setpoint: Any = 45,
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="PMPCIRC",
+            attrs={
+                "PARENT": pump_id,
+                "CIRCUIT": circuit_id,
+                "SELECT": mode,
+                "SPEED": rpm_setpoint,
+                "GPM": flow_setpoint,
             },
         )
 

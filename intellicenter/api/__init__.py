@@ -9,6 +9,10 @@ from .models import (
     HeatMode,
     HeatSource,
     IntelliCenterSnapshot,
+    PumpCircuitState,
+    PumpMode,
+    PumpState,
+    PumpType,
 )
 from .system import IntelliCenterAPI
 
@@ -22,4 +26,8 @@ __all__ = [
     "HeatSource",
     "IntelliCenterAPI",
     "IntelliCenterSnapshot",
+    "PumpCircuitState",
+    "PumpMode",
+    "PumpState",
+    "PumpType",
 ]
