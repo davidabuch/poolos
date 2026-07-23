@@ -118,7 +118,29 @@ def _install_stub_modules() -> None:
     pyic = ModuleType("pyintellicenter")
     constants = {
         "BODY_TYPE": "BODY",
+        "CHEM_TYPE": "CHEM",
         "CIRCUIT_TYPE": "CIRCUIT",
+        "ALK_ATTR": "ALK",
+        "BODY_ATTR": "BODY",
+        "CALC_ATTR": "CALC",
+        "CYACID_ATTR": "CYACID",
+        "ORPHI_ATTR": "ORPHI",
+        "ORPLO_ATTR": "ORPLO",
+        "ORPSET_ATTR": "ORPSET",
+        "ORPTNK_ATTR": "ORPTNK",
+        "ORPVAL_ATTR": "ORPVAL",
+        "ORPVOL_ATTR": "ORPVOL",
+        "PHHI_ATTR": "PHHI",
+        "PHLO_ATTR": "PHLO",
+        "PHSET_ATTR": "PHSET",
+        "PHTNK_ATTR": "PHTNK",
+        "PHVAL_ATTR": "PHVAL",
+        "PHVOL_ATTR": "PHVOL",
+        "PRIM_ATTR": "PRIM",
+        "QUALTY_ATTR": "QUALTY",
+        "SALT_ATTR": "SALT",
+        "SEC_ATTR": "SEC",
+        "SUPER_ATTR": "SUPER",
         "PMPCIRC_TYPE": "PMPCIRC",
         "PUMP_TYPE": "PUMP",
         "FEATR_ATTR": "FEATR",
@@ -182,6 +204,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 _install_stub_modules()
 MODELS = _load_module("intellicenter.api.models", API_ROOT / "models.py")
 BODY = _load_module("intellicenter.api.body", API_ROOT / "body.py")
+CHEMISTRY = _load_module("intellicenter.api.chemistry", API_ROOT / "chemistry.py")
 CIRCUIT = _load_module("intellicenter.api.circuit", API_ROOT / "circuit.py")
 PUMP = _load_module("intellicenter.api.pump", API_ROOT / "pump.py")
 SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
@@ -190,7 +213,7 @@ SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
 @pytest.fixture
 def api_modules() -> SimpleNamespace:
     return SimpleNamespace(
-        models=MODELS, body=BODY, circuit=CIRCUIT, system=SYSTEM
+        models=MODELS, body=BODY, chemistry=CHEMISTRY, circuit=CIRCUIT, pump=PUMP, system=SYSTEM
     )
 
 
@@ -347,6 +370,68 @@ def pump_circuit_object_factory():
                 "SELECT": mode,
                 "SPEED": rpm_setpoint,
                 "GPM": flow_setpoint,
+            },
+        )
+
+    return factory
+
+
+@pytest.fixture
+def chemistry_object_factory():
+    def factory(
+        objnam: str = "CH0001",
+        *,
+        name: str = "IntelliChem",
+        subtype: str = "ICHEM",
+        body_ids: Any = "B1101",
+        ph: Any = 7.4,
+        orp: Any = 675,
+        quality: Any = 95,
+        ph_setpoint: Any = 7.3,
+        orp_setpoint: Any = 700,
+        alkalinity: Any = 90,
+        calcium: Any = 350,
+        cyanuric_acid: Any = 40,
+        ph_tank: Any = 6,
+        orp_tank: Any = 4,
+        ph_volume: Any = 1250,
+        orp_volume: Any = 850,
+        ph_high: Any = "0",
+        ph_low: Any = "1",
+        orp_high: Any = "false",
+        orp_low: Any = "ON",
+        salt: Any = None,
+        primary_output: Any = None,
+        secondary_output: Any = None,
+        superchlorinate: Any = "0",
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="CHEM",
+            sname=name,
+            subtype=subtype,
+            attrs={
+                "BODY": body_ids,
+                "PHVAL": ph,
+                "ORPVAL": orp,
+                "QUALTY": quality,
+                "PHSET": ph_setpoint,
+                "ORPSET": orp_setpoint,
+                "ALK": alkalinity,
+                "CALC": calcium,
+                "CYACID": cyanuric_acid,
+                "PHTNK": ph_tank,
+                "ORPTNK": orp_tank,
+                "PHVOL": ph_volume,
+                "ORPVOL": orp_volume,
+                "PHHI": ph_high,
+                "PHLO": ph_low,
+                "ORPHI": orp_high,
+                "ORPLO": orp_low,
+                "SALT": salt,
+                "PRIM": primary_output,
+                "SEC": secondary_output,
+                "SUPER": superchlorinate,
             },
         )
 

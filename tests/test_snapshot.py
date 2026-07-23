@@ -9,12 +9,14 @@ def test_refresh_replaces_snapshot_and_supports_lookup(
     heater_object_factory,
     coordinator_factory,
     pump_object_factory,
+    chemistry_object_factory,
 ):
     pool = pool_object_factory("B1101", name="Pool", subtype="POOL")
     spa = pool_object_factory("B1102", name="Spa", subtype="SPA")
     heater = heater_object_factory()
     pump = pump_object_factory()
-    coordinator = coordinator_factory([pool, spa, heater, pump])
+    chemistry = chemistry_object_factory()
+    coordinator = coordinator_factory([pool, spa, heater, pump, chemistry])
     coordinator.heaters_by_body = {
         pool.objnam: (heater.objnam,),
         spa.objnam: (heater.objnam,),
@@ -31,6 +33,8 @@ def test_refresh_replaces_snapshot_and_supports_lookup(
     assert api.body("missing") is None
     assert api.pump("P0001") is api.pumps[0]
     assert api.pump("missing") is None
+    assert api.chemistry("CH0001") is api.chemistries[0]
+    assert api.chemistry("missing") is None
 
 
 def test_snapshot_is_immutable_and_tracks_connection_state(

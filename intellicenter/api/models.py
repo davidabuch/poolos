@@ -48,6 +48,14 @@ class PumpType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ChemistryType(StrEnum):
+    """Normalized IntelliCenter chemistry-controller type."""
+
+    INTELLICHEM = "intellichem"
+    INTELLICHLOR = "intellichlor"
+    UNKNOWN = "unknown"
+
+
 class PumpMode(StrEnum):
     """Normalized per-circuit pump control mode."""
 
@@ -136,6 +144,38 @@ class PumpState:
 
 
 @dataclass(frozen=True, slots=True)
+class ChemistryState:
+    """Immutable snapshot of one IntelliChem or IntelliChlor controller."""
+
+    id: str
+    name: str
+    chemistry_type: ChemistryType
+    subtype: str | None
+    body_ids: tuple[str, ...]
+    body_names: tuple[str, ...]
+    ph: float | None
+    orp_mv: float | None
+    water_quality: float | str | None
+    ph_setpoint: float | None
+    orp_setpoint_mv: int | None
+    alkalinity_ppm: int | None
+    calcium_hardness_ppm: int | None
+    cyanuric_acid_ppm: int | None
+    ph_tank_level: int | None
+    orp_tank_level: int | None
+    ph_dosing_volume_ml: float | None
+    orp_dosing_volume_ml: float | None
+    ph_high_alarm: bool
+    ph_low_alarm: bool
+    orp_high_alarm: bool
+    orp_low_alarm: bool
+    salt_ppm: int | None
+    primary_output_percent: int | None
+    secondary_output_percent: int | None
+    superchlorinate: bool
+
+
+@dataclass(frozen=True, slots=True)
 class IntelliCenterSnapshot:
     """Immutable system-level read-model snapshot."""
 
@@ -147,3 +187,4 @@ class IntelliCenterSnapshot:
     bodies: tuple[BodyState, ...]
     circuits: tuple[CircuitState, ...]
     pumps: tuple[PumpState, ...]
+    chemistries: tuple[ChemistryState, ...]

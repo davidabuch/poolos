@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.const import UnitOfTemperature
 from pyintellicenter import (
     BODY_TYPE,
+    CHEM_TYPE,
     CIRCUIT_TYPE,
     PMPCIRC_TYPE,
     PUMP_TYPE,
@@ -15,11 +16,13 @@ from pyintellicenter import (
 )
 
 from .body import build_body_state
+from .chemistry import build_chemistry_state
 from .circuit import build_circuit_state
 from .models import (
     API_VERSION,
     BodyState,
     BodyType,
+    ChemistryState,
     CircuitState,
     IntelliCenterSnapshot,
     PumpCircuitState,
@@ -45,6 +48,7 @@ class IntelliCenterAPI:
             bodies=(),
             circuits=(),
             pumps=(),
+            chemistries=(),
         )
 
     @property
@@ -66,6 +70,11 @@ class IntelliCenterAPI:
     def pumps(self) -> tuple[PumpState, ...]:
         """Return all pump snapshots."""
         return self._snapshot.pumps
+
+    @property
+    def chemistries(self) -> tuple[ChemistryState, ...]:
+        """Return all chemistry-controller snapshots."""
+        return self._snapshot.chemistries
 
     @property
     def pool(self) -> BodyState | None:
@@ -97,6 +106,17 @@ class IntelliCenterAPI:
     def pump(self, pump_id: str) -> PumpState | None:
         """Return a pump by its IntelliCenter object name."""
         return next((pump for pump in self._snapshot.pumps if pump.id == pump_id), None)
+
+    def chemistry(self, chemistry_id: str) -> ChemistryState | None:
+        """Return a chemistry controller by its IntelliCenter object name."""
+        return next(
+            (
+                chemistry
+                for chemistry in self._snapshot.chemistries
+                if chemistry.id == chemistry_id
+            ),
+            None,
+        )
 
     def refresh(self) -> IntelliCenterSnapshot:
         """Atomically rebuild the read model from the coordinator's live model."""
@@ -150,6 +170,15 @@ class IntelliCenterAPI:
             for pump in self._coordinator.model.get_by_type(PUMP_TYPE)
         )
 
+        body_names = {
+            body.objnam: str(body.sname or body.objnam)
+            for body in self._coordinator.model.get_by_type(BODY_TYPE)
+        }
+        chemistries = tuple(
+            build_chemistry_state(chemistry, body_names)
+            for chemistry in self._coordinator.model.get_by_type(CHEM_TYPE)
+        )
+
         self._snapshot = IntelliCenterSnapshot(
             api_version=API_VERSION,
             connected=self._coordinator.connected,
@@ -159,6 +188,7 @@ class IntelliCenterAPI:
             bodies=tuple(bodies),
             circuits=circuits,
             pumps=pumps,
+            chemistries=chemistries,
         )
         return self._snapshot
 
