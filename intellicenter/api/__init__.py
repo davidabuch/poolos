@@ -15,6 +15,8 @@ from .models import (
     PumpMode,
     PumpState,
     PumpType,
+    SystemMode,
+    SystemState,
 )
 from .system import IntelliCenterAPI
 
@@ -34,4 +36,6 @@ __all__ = [
     "PumpMode",
     "PumpState",
     "PumpType",
+    "SystemMode",
+    "SystemState",
 ]

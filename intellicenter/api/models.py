@@ -56,6 +56,15 @@ class ChemistryType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class SystemMode(StrEnum):
+    """Normalized IntelliCenter controller operating mode."""
+
+    AUTO = "auto"
+    SERVICE = "service"
+    TIMEOUT = "timeout"
+    UNKNOWN = "unknown"
+
+
 class PumpMode(StrEnum):
     """Normalized per-circuit pump control mode."""
 
@@ -176,6 +185,19 @@ class ChemistryState:
 
 
 @dataclass(frozen=True, slots=True)
+class SystemState:
+    """Immutable snapshot of controller-wide IntelliCenter state."""
+
+    id: str
+    name: str
+    operating_mode: SystemMode
+    raw_operating_mode: str | None
+    controller_mode: str | None
+    vacation_mode: bool
+    firmware_version: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class IntelliCenterSnapshot:
     """Immutable system-level read-model snapshot."""
 
@@ -188,3 +210,4 @@ class IntelliCenterSnapshot:
     circuits: tuple[CircuitState, ...]
     pumps: tuple[PumpState, ...]
     chemistries: tuple[ChemistryState, ...]
+    system: SystemState | None

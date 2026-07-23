@@ -143,6 +143,7 @@ def _install_stub_modules() -> None:
         "SUPER_ATTR": "SUPER",
         "PMPCIRC_TYPE": "PMPCIRC",
         "PUMP_TYPE": "PUMP",
+        "SYSTEM_TYPE": "SYSTEM",
         "FEATR_ATTR": "FEATR",
         "FREEZE_ATTR": "FREEZE",
         "SPEED_ATTR": "SPEED",
@@ -164,6 +165,10 @@ def _install_stub_modules() -> None:
         "LSTTMP_ATTR": "LSTTMP",
         "NULL_OBJNAM": "00000",
         "STATUS_ATTR": "STATUS",
+        "MODE_ATTR": "MODE",
+        "SERVICE_ATTR": "SERVICE",
+        "VACFLO_ATTR": "VACFLO",
+        "VER_ATTR": "VER",
         "STATUS_OFF": "OFF",
         "TIME_ATTR": "TIME",
         "USE_ATTR": "USE",
@@ -207,13 +212,14 @@ BODY = _load_module("intellicenter.api.body", API_ROOT / "body.py")
 CHEMISTRY = _load_module("intellicenter.api.chemistry", API_ROOT / "chemistry.py")
 CIRCUIT = _load_module("intellicenter.api.circuit", API_ROOT / "circuit.py")
 PUMP = _load_module("intellicenter.api.pump", API_ROOT / "pump.py")
+PANEL = _load_module("intellicenter.api.panel", API_ROOT / "panel.py")
 SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
 
 
 @pytest.fixture
 def api_modules() -> SimpleNamespace:
     return SimpleNamespace(
-        models=MODELS, body=BODY, chemistry=CHEMISTRY, circuit=CIRCUIT, pump=PUMP, system=SYSTEM
+        models=MODELS, body=BODY, chemistry=CHEMISTRY, circuit=CIRCUIT, pump=PUMP, panel=PANEL, system=SYSTEM
     )
 
 
@@ -262,6 +268,32 @@ def heater_object_factory():
             objtype="HEATER",
             sname=name,
             subtype=subtype,
+        )
+
+    return factory
+
+
+@pytest.fixture
+def system_object_factory():
+    def factory(
+        objnam: str = "SYSTM",
+        *,
+        name: str = "IntelliCenter",
+        service: Any = "AUTO",
+        mode: Any = "NORMAL",
+        vacation: Any = "OFF",
+        version: Any = "2.017",
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="SYSTEM",
+            sname=name,
+            attrs={
+                "SERVICE": service,
+                "MODE": mode,
+                "VACFLO": vacation,
+                "VER": version,
+            },
         )
 
     return factory

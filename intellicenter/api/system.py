@@ -11,6 +11,7 @@ from pyintellicenter import (
     CIRCUIT_TYPE,
     PMPCIRC_TYPE,
     PUMP_TYPE,
+    SYSTEM_TYPE,
     CIRCUIT_ATTR,
     PARENT_ATTR,
 )
@@ -27,7 +28,9 @@ from .models import (
     IntelliCenterSnapshot,
     PumpCircuitState,
     PumpState,
+    SystemState,
 )
+from .panel import build_system_state
 from .pump import build_pump_circuit_state, build_pump_state
 
 if TYPE_CHECKING:
@@ -49,6 +52,7 @@ class IntelliCenterAPI:
             circuits=(),
             pumps=(),
             chemistries=(),
+            system=None,
         )
 
     @property
@@ -75,6 +79,11 @@ class IntelliCenterAPI:
     def chemistries(self) -> tuple[ChemistryState, ...]:
         """Return all chemistry-controller snapshots."""
         return self._snapshot.chemistries
+
+    @property
+    def system(self) -> SystemState | None:
+        """Return controller-wide state, when the SYSTEM object is available."""
+        return self._snapshot.system
 
     @property
     def pool(self) -> BodyState | None:
@@ -179,16 +188,25 @@ class IntelliCenterAPI:
             for chemistry in self._coordinator.model.get_by_type(CHEM_TYPE)
         )
 
+        system_objects = self._coordinator.model.get_by_type(SYSTEM_TYPE)
+        system = build_system_state(system_objects[0]) if system_objects else None
+        software_version = (
+            system.firmware_version
+            if system is not None and system.firmware_version is not None
+            else system_info.sw_version if system_info else None
+        )
+
         self._snapshot = IntelliCenterSnapshot(
             api_version=API_VERSION,
             connected=self._coordinator.connected,
             panel_name=system_info.prop_name if system_info else None,
-            software_version=system_info.sw_version if system_info else None,
+            software_version=software_version,
             temperature_unit=temperature_unit,
             bodies=tuple(bodies),
             circuits=circuits,
             pumps=pumps,
             chemistries=chemistries,
+            system=system,
         )
         return self._snapshot
 
