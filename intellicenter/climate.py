@@ -157,7 +157,7 @@ class PoolClimate(PoolEntity, ClimateEntity):
     @property
     def _body_state(self) -> BodyState | None:
         """Return this body's latest immutable API snapshot."""
-        return self.coordinator.api.get_body(self._pool_object.objnam)
+        return self.coordinator.api.body(self._pool_object.objnam)
 
     @property
     def _heater_list(self) -> list[str]:
@@ -303,7 +303,8 @@ class PoolClimate(PoolEntity, ClimateEntity):
                 f"Unsupported HVAC mode '{hvac_mode}'"
             )
 
-        current_heater = self._pool_object[HEATER_ATTR]
+        body = self._body_state
+        current_heater = body.selected_heater_id if body is not None else None
 
         if current_heater not in self._heater_list:
             if not self._heater_list:
@@ -334,18 +335,18 @@ class PoolClimate(PoolEntity, ClimateEntity):
         preset_mode: str,
     ) -> None:
         """Select a heater."""
-        for heater in self._heater_list:
-            heater_obj = self.coordinator.model[heater]
-
-            if (
-                heater_obj is not None
-                and preset_mode == heater_obj.sname
-            ):
+        body = self._body_state
+        if body is not None:
+            selected = next(
+                (heater for heater in body.available_heaters if heater.name == preset_mode),
+                None,
+            )
+            if selected is not None:
                 await self._async_execute_command(
                     self._controller.request_changes(
                         self._pool_object.objnam,
                         {
-                            HEATER_ATTR: heater,
+                            HEATER_ATTR: selected.id,
                         },
                     )
                 )
@@ -479,7 +480,7 @@ class PoolHeatOnlyClimate(PoolEntity, ClimateEntity):
     @property
     def _body_state(self) -> BodyState | None:
         """Return this body's latest immutable API snapshot."""
-        return self.coordinator.api.get_body(self._pool_object.objnam)
+        return self.coordinator.api.body(self._pool_object.objnam)
 
     @property
     def _heater_list(self) -> list[str]:
@@ -629,7 +630,8 @@ class PoolHeatOnlyClimate(PoolEntity, ClimateEntity):
                 f"Unsupported HVAC mode '{hvac_mode}'"
             )
 
-        current_heater = self._pool_object[HEATER_ATTR]
+        body = self._body_state
+        current_heater = body.selected_heater_id if body is not None else None
 
         if current_heater not in self._heater_list:
             if not self._heater_list:
