@@ -185,6 +185,18 @@ class ChemistryState:
 
 
 @dataclass(frozen=True, slots=True)
+class CoverState:
+    """Immutable snapshot of one IntelliCenter external cover."""
+
+    id: str
+    name: str
+    subtype: str | None
+    is_closed: bool | None
+    status_is_on: bool | None
+    normal_is_on: bool | None
+
+
+@dataclass(frozen=True, slots=True)
 class SystemState:
     """Immutable snapshot of controller-wide IntelliCenter state."""
 
@@ -210,4 +222,5 @@ class IntelliCenterSnapshot:
     circuits: tuple[CircuitState, ...]
     pumps: tuple[PumpState, ...]
     chemistries: tuple[ChemistryState, ...]
+    covers: tuple[CoverState, ...]
     system: SystemState | None

@@ -120,6 +120,7 @@ def _install_stub_modules() -> None:
         "BODY_TYPE": "BODY",
         "CHEM_TYPE": "CHEM",
         "CIRCUIT_TYPE": "CIRCUIT",
+        "EXTINSTR_TYPE": "EXTINSTR",
         "ALK_ATTR": "ALK",
         "BODY_ATTR": "BODY",
         "CALC_ATTR": "CALC",
@@ -170,6 +171,8 @@ def _install_stub_modules() -> None:
         "VACFLO_ATTR": "VACFLO",
         "VER_ATTR": "VER",
         "STATUS_OFF": "OFF",
+        "STATUS_ON": "ON",
+        "NORMAL_ATTR": "NORMAL",
         "TIME_ATTR": "TIME",
         "USE_ATTR": "USE",
     }
@@ -211,6 +214,7 @@ MODELS = _load_module("intellicenter.api.models", API_ROOT / "models.py")
 BODY = _load_module("intellicenter.api.body", API_ROOT / "body.py")
 CHEMISTRY = _load_module("intellicenter.api.chemistry", API_ROOT / "chemistry.py")
 CIRCUIT = _load_module("intellicenter.api.circuit", API_ROOT / "circuit.py")
+COVER = _load_module("intellicenter.api.cover", API_ROOT / "cover.py")
 PUMP = _load_module("intellicenter.api.pump", API_ROOT / "pump.py")
 PANEL = _load_module("intellicenter.api.panel", API_ROOT / "panel.py")
 SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
@@ -219,7 +223,14 @@ SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
 @pytest.fixture
 def api_modules() -> SimpleNamespace:
     return SimpleNamespace(
-        models=MODELS, body=BODY, chemistry=CHEMISTRY, circuit=CIRCUIT, pump=PUMP, panel=PANEL, system=SYSTEM
+        models=MODELS,
+        body=BODY,
+        chemistry=CHEMISTRY,
+        circuit=CIRCUIT,
+        cover=COVER,
+        pump=PUMP,
+        panel=PANEL,
+        system=SYSTEM,
     )
 
 
@@ -465,6 +476,27 @@ def chemistry_object_factory():
                 "SEC": secondary_output,
                 "SUPER": superchlorinate,
             },
+        )
+
+    return factory
+
+
+@pytest.fixture
+def cover_object_factory():
+    def factory(
+        objnam: str = "X0001",
+        *,
+        name: str = "Pool Cover",
+        subtype: str | None = "COVER",
+        status: Any = "ON",
+        normal: Any = "ON",
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="EXTINSTR",
+            sname=name,
+            subtype=subtype,
+            attrs={"STATUS": status, "NORMAL": normal},
         )
 
     return factory

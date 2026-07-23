@@ -11,6 +11,7 @@ def test_refresh_replaces_snapshot_and_supports_lookup(
     pump_object_factory,
     chemistry_object_factory,
     system_object_factory,
+    cover_object_factory,
 ):
     pool = pool_object_factory("B1101", name="Pool", subtype="POOL")
     spa = pool_object_factory("B1102", name="Spa", subtype="SPA")
@@ -18,7 +19,10 @@ def test_refresh_replaces_snapshot_and_supports_lookup(
     pump = pump_object_factory()
     chemistry = chemistry_object_factory()
     system = system_object_factory()
-    coordinator = coordinator_factory([pool, spa, heater, pump, chemistry, system])
+    cover = cover_object_factory()
+    coordinator = coordinator_factory(
+        [pool, spa, heater, pump, chemistry, system, cover]
+    )
     coordinator.heaters_by_body = {
         pool.objnam: (heater.objnam,),
         spa.objnam: (heater.objnam,),
@@ -37,6 +41,9 @@ def test_refresh_replaces_snapshot_and_supports_lookup(
     assert api.pump("missing") is None
     assert api.chemistry("CH0001") is api.chemistries[0]
     assert api.chemistry("missing") is None
+    assert api.cover("X0001") is api.covers[0]
+    assert api.cover("missing") is None
+    assert refreshed.covers == api.covers
     assert api.system is refreshed.system
     assert api.system is not None and api.system.id == "SYSTM"
 

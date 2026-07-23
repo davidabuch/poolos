@@ -9,6 +9,7 @@ from pyintellicenter import (
     BODY_TYPE,
     CHEM_TYPE,
     CIRCUIT_TYPE,
+    EXTINSTR_TYPE,
     PMPCIRC_TYPE,
     PUMP_TYPE,
     SYSTEM_TYPE,
@@ -19,11 +20,13 @@ from pyintellicenter import (
 from .body import build_body_state
 from .chemistry import build_chemistry_state
 from .circuit import build_circuit_state
+from .cover import build_cover_state
 from .models import (
     API_VERSION,
     BodyState,
     BodyType,
     ChemistryState,
+    CoverState,
     CircuitState,
     IntelliCenterSnapshot,
     PumpCircuitState,
@@ -52,6 +55,7 @@ class IntelliCenterAPI:
             circuits=(),
             pumps=(),
             chemistries=(),
+            covers=(),
             system=None,
         )
 
@@ -79,6 +83,11 @@ class IntelliCenterAPI:
     def chemistries(self) -> tuple[ChemistryState, ...]:
         """Return all chemistry-controller snapshots."""
         return self._snapshot.chemistries
+
+    @property
+    def covers(self) -> tuple[CoverState, ...]:
+        """Return all external-cover snapshots."""
+        return self._snapshot.covers
 
     @property
     def system(self) -> SystemState | None:
@@ -115,6 +124,12 @@ class IntelliCenterAPI:
     def pump(self, pump_id: str) -> PumpState | None:
         """Return a pump by its IntelliCenter object name."""
         return next((pump for pump in self._snapshot.pumps if pump.id == pump_id), None)
+
+    def cover(self, cover_id: str) -> CoverState | None:
+        """Return a cover by its IntelliCenter object name."""
+        return next(
+            (cover for cover in self._snapshot.covers if cover.id == cover_id), None
+        )
 
     def chemistry(self, chemistry_id: str) -> ChemistryState | None:
         """Return a chemistry controller by its IntelliCenter object name."""
@@ -188,6 +203,12 @@ class IntelliCenterAPI:
             for chemistry in self._coordinator.model.get_by_type(CHEM_TYPE)
         )
 
+        covers = tuple(
+            build_cover_state(cover)
+            for cover in self._coordinator.model.get_by_type(EXTINSTR_TYPE)
+            if str(cover.subtype or "").strip().upper() == "COVER"
+        )
+
         system_objects = self._coordinator.model.get_by_type(SYSTEM_TYPE)
         system = build_system_state(system_objects[0]) if system_objects else None
         software_version = (
@@ -206,6 +227,7 @@ class IntelliCenterAPI:
             circuits=circuits,
             pumps=pumps,
             chemistries=chemistries,
+            covers=covers,
             system=system,
         )
         return self._snapshot
