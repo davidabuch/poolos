@@ -2,6 +2,7 @@
 
 from .models import (
     API_VERSION,
+    BodyHeatMode,
     BodyState,
     BodyType,
     ChemistryState,
@@ -23,6 +24,7 @@ from .system import IntelliCenterAPI
 
 __all__ = [
     "API_VERSION",
+    "BodyHeatMode",
     "BodyState",
     "BodyType",
     "ChemistryState",

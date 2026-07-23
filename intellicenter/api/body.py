@@ -18,7 +18,14 @@ from pyintellicenter import (
     PoolObject,
 )
 
-from .models import BodyState, BodyType, HeatMode, HeatSource, HeaterState
+from .models import (
+    BodyHeatMode,
+    BodyState,
+    BodyType,
+    HeatMode,
+    HeatSource,
+    HeaterState,
+)
 
 if TYPE_CHECKING:
     from ..coordinator import IntelliCenterCoordinator
@@ -74,6 +81,35 @@ def _heat_source(heater: PoolObject) -> HeatSource:
     return HeatSource.UNKNOWN
 
 
+
+def _body_heat_mode(heater: PoolObject) -> BodyHeatMode:
+    """Normalize a selectable heater object into a user-facing heat strategy.
+
+    IntelliCenter represents Gas, Solar, and Solar Preferred as selectable
+    heater entries. Solar Preferred must be checked before Solar because its
+    label contains the word ``solar``.
+    """
+    text = " ".join(
+        value
+        for value in (heater.subtype, heater.sname, heater.objnam)
+        if isinstance(value, str)
+    ).casefold().replace("-", " ").replace("_", " ")
+
+    if "solar preferred" in text or "solarpref" in text:
+        return BodyHeatMode.SOLAR_PREFERRED
+    if "solar" in text:
+        return BodyHeatMode.SOLAR
+    if "hybrid" in text or "hcombo" in text:
+        return BodyHeatMode.HYBRID
+    if "heat pump" in text or "heatpump" in text or "ultratemp" in text:
+        return BodyHeatMode.HEAT_PUMP
+    if "gas" in text or "mastertemp" in text:
+        return BodyHeatMode.GAS
+    if "electric" in text:
+        return BodyHeatMode.ELECTRIC
+    return BodyHeatMode.UNKNOWN
+
+
 def _normalize_heat_mode(
     *,
     is_on: bool,
@@ -101,10 +137,12 @@ def build_body_state(
 ) -> BodyState:
     """Build one immutable body snapshot from the coordinator's live model."""
     heater_states: list[HeaterState] = []
+    heater_modes: dict[str, BodyHeatMode] = {}
     for heater_objnam in heater_objnams:
         heater = coordinator.model[heater_objnam]
         if heater is None:
             continue
+        heater_modes[heater.objnam] = _body_heat_mode(heater)
         heater_states.append(
             HeaterState(
                 id=heater.objnam,
@@ -153,6 +191,17 @@ def build_body_state(
         is_on and coordinator.controller.is_body_cooling(body.objnam)
     )
 
+    selected_heat_mode = (
+        heater_modes.get(selected_heater_id, BodyHeatMode.UNKNOWN)
+        if selected_heater_id is not None
+        else BodyHeatMode.OFF
+    )
+    available_heat_modes = [BodyHeatMode.OFF]
+    for heater in heater_states:
+        mode = heater_modes[heater.id]
+        if mode not in available_heat_modes:
+            available_heat_modes.append(mode)
+
     selected_state = next(
         (heater for heater in heater_states if heater.id == selected_heater_id),
         None,
@@ -174,6 +223,8 @@ def build_body_state(
         available_heaters=tuple(heater_states),
         selected_heater_id=selected_heater_id,
         active_heat_source=selected_state.source if selected_state else None,
+        selected_heat_mode=selected_heat_mode,
+        available_heat_modes=tuple(available_heat_modes),
         min_temperature=minimum_temperature,
         max_temperature=maximum_temperature,
         temperature_unit=temperature_unit,

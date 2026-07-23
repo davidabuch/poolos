@@ -28,6 +28,19 @@ class HeatMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class BodyHeatMode(StrEnum):
+    """Normalized user-selectable heating strategy for a Pool/Spa body."""
+
+    OFF = "off"
+    GAS = "gas"
+    SOLAR = "solar"
+    SOLAR_PREFERRED = "solar_preferred"
+    ELECTRIC = "electric"
+    HEAT_PUMP = "heat_pump"
+    HYBRID = "hybrid"
+    UNKNOWN = "unknown"
+
+
 class HeatSource(StrEnum):
     """Normalized heat-source type."""
 
@@ -102,6 +115,8 @@ class BodyState:
     available_heaters: tuple[HeaterState, ...]
     selected_heater_id: str | None
     active_heat_source: HeatSource | None
+    selected_heat_mode: BodyHeatMode
+    available_heat_modes: tuple[BodyHeatMode, ...]
     min_temperature: float
     max_temperature: float
     temperature_unit: UnitOfTemperature
