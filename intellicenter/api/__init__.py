@@ -19,6 +19,8 @@ from .models import (
     PumpType,
     SystemMode,
     SystemState,
+    TemperatureSensorState,
+    TemperatureSensorType,
 )
 from .system import IntelliCenterAPI
 
@@ -42,4 +44,6 @@ __all__ = [
     "PumpType",
     "SystemMode",
     "SystemState",
+    "TemperatureSensorState",
+    "TemperatureSensorType",
 ]

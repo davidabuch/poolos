@@ -69,6 +69,15 @@ class ChemistryType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class TemperatureSensorType(StrEnum):
+    """Normalized physical IntelliCenter temperature-probe type."""
+
+    AIR = "air"
+    WATER = "water"
+    SOLAR = "solar"
+    UNKNOWN = "unknown"
+
+
 class SystemMode(StrEnum):
     """Normalized IntelliCenter controller operating mode."""
 
@@ -84,6 +93,17 @@ class PumpMode(StrEnum):
     RPM = "rpm"
     GPM = "gpm"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class TemperatureSensorState:
+    """Immutable snapshot of one physical IntelliCenter temperature probe."""
+
+    id: str
+    name: str
+    sensor_type: TemperatureSensorType
+    subtype: str | None
+    temperature: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +253,7 @@ class IntelliCenterSnapshot:
     panel_name: str | None
     software_version: str | None
     temperature_unit: UnitOfTemperature
+    temperature_sensors: tuple[TemperatureSensorState, ...]
     bodies: tuple[BodyState, ...]
     circuits: tuple[CircuitState, ...]
     pumps: tuple[PumpState, ...]

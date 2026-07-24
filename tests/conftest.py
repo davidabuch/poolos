@@ -145,6 +145,7 @@ def _install_stub_modules() -> None:
         "PMPCIRC_TYPE": "PMPCIRC",
         "PUMP_TYPE": "PUMP",
         "SYSTEM_TYPE": "SYSTEM",
+        "SENSE_TYPE": "SENSE",
         "FEATR_ATTR": "FEATR",
         "FREEZE_ATTR": "FREEZE",
         "SPEED_ATTR": "SPEED",
@@ -168,6 +169,7 @@ def _install_stub_modules() -> None:
         "STATUS_ATTR": "STATUS",
         "MODE_ATTR": "MODE",
         "SERVICE_ATTR": "SERVICE",
+        "SOURCE_ATTR": "SOURCE",
         "VACFLO_ATTR": "VACFLO",
         "VER_ATTR": "VER",
         "STATUS_OFF": "OFF",
@@ -216,6 +218,9 @@ CHEMISTRY = _load_module("intellicenter.api.chemistry", API_ROOT / "chemistry.py
 CIRCUIT = _load_module("intellicenter.api.circuit", API_ROOT / "circuit.py")
 COVER = _load_module("intellicenter.api.cover", API_ROOT / "cover.py")
 PUMP = _load_module("intellicenter.api.pump", API_ROOT / "pump.py")
+TEMPERATURE = _load_module(
+    "intellicenter.api.temperature", API_ROOT / "temperature.py"
+)
 PANEL = _load_module("intellicenter.api.panel", API_ROOT / "panel.py")
 SYSTEM = _load_module("intellicenter.api.system", API_ROOT / "system.py")
 
@@ -231,6 +236,7 @@ def api_modules() -> SimpleNamespace:
         pump=PUMP,
         panel=PANEL,
         system=SYSTEM,
+        temperature=TEMPERATURE,
     )
 
 
@@ -279,6 +285,26 @@ def heater_object_factory():
             objtype="HEATER",
             sname=name,
             subtype=subtype,
+        )
+
+    return factory
+
+
+@pytest.fixture
+def temperature_sensor_object_factory():
+    def factory(
+        objnam: str = "S0001",
+        *,
+        name: str = "Air Temperature",
+        subtype: str | None = "AIR",
+        temperature: Any = 74,
+    ) -> FakePoolObject:
+        return FakePoolObject(
+            objnam,
+            objtype="SENSE",
+            sname=name,
+            subtype=subtype,
+            attrs={"SOURCE": temperature},
         )
 
     return factory

@@ -1,18 +1,14 @@
-"""Pentair Intellicenter sensors.
+"""Pentair IntelliCenter sensors backed by the immutable read model.
 
-This module provides sensor entities for various pool measurements including:
-- Temperature sensors (air, water)
-- Pump sensors (power, RPM, GPM)
-- Chemistry sensors (pH, ORP, salt level, water quality)
-- Dosing volume sensors (cumulative pH and ORP chemical volumes in mL)
-
-Note: IntelliChem configuration values (ALK, CALC, CYACID) are in number.py
-as they are user-entered configuration, not sensor readings.
+Entity discovery still inspects raw ``PoolObject`` instances so dynamically
+appearing equipment continues to create entities without a restart. Entity
+state, however, is read exclusively from ``IntelliCenterAPI`` snapshots.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from functools import partial
 import logging
 from typing import Any
 
@@ -56,27 +52,36 @@ from pyintellicenter import (
     PoolObject,
 )
 
-from . import (
-    IntelliCenterConfigEntry,
-    PoolEntity,
-    async_setup_pool_entities,
-    safe_int,
-)
+from . import IntelliCenterConfigEntry, PoolEntity, async_setup_pool_entities, safe_int
+from .api import SystemMode
 from .const import CONST_GPM, CONST_RPM
 from .coordinator import IntelliCenterCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Coordinator handles updates via push, so no parallel update limit needed
 PARALLEL_UPDATES = 0
 
-# -------------------------------------------------------------------------------------
+StateGetter = Callable[[], Any]
+
+
+def _state_field(
+    lookup: Callable[[str], Any], object_id: str, field_name: str
+) -> Any:
+    """Return one field from an immutable API object, or None if absent."""
+    state = lookup(object_id)
+    return getattr(state, field_name, None) if state is not None else None
+
+
+def _system_field(coordinator: IntelliCenterCoordinator, field_name: str) -> Any:
+    """Return one field from immutable controller-wide state."""
+    state = coordinator.api.system
+    return getattr(state, field_name, None) if state is not None else None
 
 
 def _build_entities(
     coordinator: IntelliCenterCoordinator, candidates: Iterable[PoolObject]
 ) -> list[PoolSensor]:
-    """Build sensor entities for the given candidate pool objects."""
+    """Build sensor entities for candidate pool objects."""
     sensors: list[PoolSensor] = []
 
     for obj in candidates:
@@ -87,13 +92,16 @@ def _build_entities(
                     obj,
                     device_class=SensorDeviceClass.TEMPERATURE,
                     attribute_key=SOURCE_ATTR,
+                    value_getter=partial(
+                        _state_field,
+                        coordinator.api.temperature_sensor,
+                        obj.objnam,
+                        "temperature",
+                    ),
                 )
             )
+
         elif obj.objtype == BODY_TYPE:
-            # "Last Temp" = the body's last recorded (latched) temperature.
-            # Unlike the physical SENSE water probe (which cools in an
-            # above-ground pipe when the pump stops), LSTTMP holds the last
-            # circulating temperature, so it stays accurate when idle (#75).
             if LSTTMP_ATTR in obj.attribute_keys:
                 sensors.append(
                     PoolSensor(
@@ -102,205 +110,174 @@ def _build_entities(
                         device_class=SensorDeviceClass.TEMPERATURE,
                         attribute_key=LSTTMP_ATTR,
                         name="+ Last Temp",
+                        value_getter=partial(
+                            _state_field,
+                            coordinator.api.body,
+                            obj.objnam,
+                            "current_temperature",
+                        ),
                     )
                 )
+
         elif obj.objtype == PUMP_TYPE:
-            if obj[PWR_ATTR]:
+            pump_fields = (
+                (
+                    PWR_ATTR,
+                    "power_watts",
+                    SensorDeviceClass.POWER,
+                    UnitOfPower.WATT,
+                    "+ power",
+                    25,
+                    None,
+                    None,
+                ),
+                (RPM_ATTR, "rpm", None, CONST_RPM, "+ rpm", 0, None, None),
+                (GPM_ATTR, "flow_gpm", None, CONST_GPM, "+ gpm", 0, None, None),
+                (
+                    MAX_ATTR,
+                    "maximum_rpm",
+                    None,
+                    CONST_RPM,
+                    "+ Max RPM",
+                    0,
+                    "mdi:speedometer",
+                    EntityCategory.DIAGNOSTIC,
+                ),
+                (
+                    MIN_ATTR,
+                    "minimum_rpm",
+                    None,
+                    CONST_RPM,
+                    "+ Min RPM",
+                    0,
+                    "mdi:speedometer-slow",
+                    EntityCategory.DIAGNOSTIC,
+                ),
+            )
+            for (
+                attribute_key,
+                field_name,
+                device_class,
+                unit,
+                name,
+                rounding_factor,
+                icon,
+                category,
+            ) in pump_fields:
+                if attribute_key not in obj.attribute_keys:
+                    continue
+                if attribute_key in {PWR_ATTR, RPM_ATTR, GPM_ATTR} and not obj[attribute_key]:
+                    continue
                 sensors.append(
                     PoolSensor(
                         coordinator,
                         obj,
-                        device_class=SensorDeviceClass.POWER,
-                        unit_of_measurement=UnitOfPower.WATT,
-                        attribute_key=PWR_ATTR,
-                        name="+ power",
-                        rounding_factor=25,
+                        device_class=device_class,
+                        unit_of_measurement=unit,
+                        attribute_key=attribute_key,
+                        name=name,
+                        rounding_factor=rounding_factor,
+                        icon=icon,
+                        entity_category=category,
+                        value_getter=partial(
+                            _state_field,
+                            coordinator.api.pump,
+                            obj.objnam,
+                            field_name,
+                        ),
                     )
                 )
-            if obj[RPM_ATTR]:
-                sensors.append(
-                    PoolSensor(
-                        coordinator,
-                        obj,
-                        device_class=None,
-                        unit_of_measurement=CONST_RPM,
-                        attribute_key=RPM_ATTR,
-                        name="+ rpm",
-                    )
-                )
-            if obj[GPM_ATTR]:
+
+            flow_limits = (
+                (MAXF_ATTR, "maximum_flow_gpm", "+ Max GPM", "mdi:water-pump"),
+                (MINF_ATTR, "minimum_flow_gpm", "+ Min GPM", "mdi:water-pump-off"),
+            )
+            for attribute_key, field_name, name, icon in flow_limits:
+                if attribute_key not in obj.attribute_keys:
+                    continue
+                if (safe_int(obj[attribute_key]) or 0) <= 0:
+                    continue
                 sensors.append(
                     PoolSensor(
                         coordinator,
                         obj,
                         device_class=None,
                         unit_of_measurement=CONST_GPM,
-                        attribute_key=GPM_ATTR,
-                        name="+ gpm",
-                    )
-                )
-            # Pump operational limits (diagnostic sensors)
-            if MAX_ATTR in obj.attribute_keys:
-                sensors.append(
-                    PoolSensor(
-                        coordinator,
-                        obj,
-                        device_class=None,
-                        unit_of_measurement=CONST_RPM,
-                        attribute_key=MAX_ATTR,
-                        name="+ Max RPM",
-                        icon="mdi:speedometer",
+                        attribute_key=attribute_key,
+                        name=name,
+                        icon=icon,
                         entity_category=EntityCategory.DIAGNOSTIC,
+                        value_getter=partial(
+                            _state_field,
+                            coordinator.api.pump,
+                            obj.objnam,
+                            field_name,
+                        ),
                     )
                 )
-            if MIN_ATTR in obj.attribute_keys:
-                sensors.append(
-                    PoolSensor(
-                        coordinator,
-                        obj,
-                        device_class=None,
-                        unit_of_measurement=CONST_RPM,
-                        attribute_key=MIN_ATTR,
-                        name="+ Min RPM",
-                        icon="mdi:speedometer-slow",
-                        entity_category=EntityCategory.DIAGNOSTIC,
-                    )
-                )
-            # safe_int: a malformed MAXF/MINF must skip this sensor, not raise
-            # ValueError inside platform setup and take down every sensor.
-            if MAXF_ATTR in obj.attribute_keys and (safe_int(obj[MAXF_ATTR]) or 0) > 0:
-                sensors.append(
-                    PoolSensor(
-                        coordinator,
-                        obj,
-                        device_class=None,
-                        unit_of_measurement=CONST_GPM,
-                        attribute_key=MAXF_ATTR,
-                        name="+ Max GPM",
-                        icon="mdi:water-pump",
-                        entity_category=EntityCategory.DIAGNOSTIC,
-                    )
-                )
-            if MINF_ATTR in obj.attribute_keys and (safe_int(obj[MINF_ATTR]) or 0) > 0:
-                sensors.append(
-                    PoolSensor(
-                        coordinator,
-                        obj,
-                        device_class=None,
-                        unit_of_measurement=CONST_GPM,
-                        attribute_key=MINF_ATTR,
-                        name="+ Min GPM",
-                        icon="mdi:water-pump-off",
-                        entity_category=EntityCategory.DIAGNOSTIC,
-                    )
-                )
+
         elif obj.objtype == CHEM_TYPE:
             if obj.subtype == "ICHEM":
-                if PHVAL_ATTR in obj.attribute_keys:
+                chemistry_fields = (
+                    (PHVAL_ATTR, "ph", SensorDeviceClass.PH, None, "+ (pH)", None, None, SensorStateClass.MEASUREMENT),
+                    (ORPVAL_ATTR, "orp_mv", None, "mV", "+ (ORP)", "mdi:react", None, SensorStateClass.MEASUREMENT),
+                    (QUALTY_ATTR, "water_quality", None, None, "+ (Water Quality)", "mdi:test-tube", None, SensorStateClass.MEASUREMENT),
+                    (PHTNK_ATTR, "ph_tank_level", None, None, "+ (pH Tank Level)", "mdi:barrel", EntityCategory.DIAGNOSTIC, SensorStateClass.MEASUREMENT),
+                    (ORPTNK_ATTR, "orp_tank_level", None, None, "+ (ORP Tank Level)", "mdi:barrel", EntityCategory.DIAGNOSTIC, SensorStateClass.MEASUREMENT),
+                    (PHVOL_ATTR, "ph_dosing_volume_ml", None, "mL", "+ (pH Dosing Volume)", "mdi:beaker-outline", EntityCategory.DIAGNOSTIC, SensorStateClass.TOTAL_INCREASING),
+                    (ORPVOL_ATTR, "orp_dosing_volume_ml", None, "mL", "+ (ORP Dosing Volume)", "mdi:beaker-outline", EntityCategory.DIAGNOSTIC, SensorStateClass.TOTAL_INCREASING),
+                )
+                for (
+                    attribute_key,
+                    field_name,
+                    device_class,
+                    unit,
+                    name,
+                    icon,
+                    category,
+                    state_class,
+                ) in chemistry_fields:
+                    if attribute_key not in obj.attribute_keys:
+                        continue
                     sensors.append(
                         PoolSensor(
                             coordinator,
                             obj,
-                            device_class=SensorDeviceClass.PH,
-                            attribute_key=PHVAL_ATTR,
-                            name="+ (pH)",
+                            device_class=device_class,
+                            attribute_key=attribute_key,
+                            unit_of_measurement=unit,
+                            name=name,
+                            icon=icon,
+                            entity_category=category,
+                            state_class=state_class,
+                            value_getter=partial(
+                                _state_field,
+                                coordinator.api.chemistry,
+                                obj.objnam,
+                                field_name,
+                            ),
                         )
                     )
-                if ORPVAL_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            attribute_key=ORPVAL_ATTR,
-                            name="+ (ORP)",
-                            icon="mdi:react",
-                            unit_of_measurement="mV",
-                        )
+            elif obj.subtype == "ICHLOR" and SALT_ATTR in obj.attribute_keys:
+                sensors.append(
+                    PoolSensor(
+                        coordinator,
+                        obj,
+                        device_class=None,
+                        unit_of_measurement=CONCENTRATION_PARTS_PER_MILLION,
+                        attribute_key=SALT_ATTR,
+                        name="+ (Salt)",
+                        icon="mdi:shaker-outline",
+                        value_getter=partial(
+                            _state_field,
+                            coordinator.api.chemistry,
+                            obj.objnam,
+                            "salt_ppm",
+                        ),
                     )
-                if QUALTY_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            attribute_key=QUALTY_ATTR,
-                            name="+ (Water Quality)",
-                            icon="mdi:test-tube",
-                        )
-                    )
-                if PHTNK_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            attribute_key=PHTNK_ATTR,
-                            name="+ (pH Tank Level)",
-                            icon="mdi:barrel",
-                            entity_category=EntityCategory.DIAGNOSTIC,
-                            value_offset=-1,
-                        )
-                    )
-                if ORPTNK_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            attribute_key=ORPTNK_ATTR,
-                            name="+ (ORP Tank Level)",
-                            icon="mdi:barrel",
-                            entity_category=EntityCategory.DIAGNOSTIC,
-                            value_offset=-1,
-                        )
-                    )
-                # Cumulative dosing volume sensors (mL)
-                if PHVOL_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            attribute_key=PHVOL_ATTR,
-                            name="+ (pH Dosing Volume)",
-                            icon="mdi:beaker-outline",
-                            unit_of_measurement="mL",
-                            entity_category=EntityCategory.DIAGNOSTIC,
-                            state_class=SensorStateClass.TOTAL_INCREASING,
-                        )
-                    )
-                if ORPVOL_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            attribute_key=ORPVOL_ATTR,
-                            name="+ (ORP Dosing Volume)",
-                            icon="mdi:beaker-outline",
-                            unit_of_measurement="mL",
-                            entity_category=EntityCategory.DIAGNOSTIC,
-                            state_class=SensorStateClass.TOTAL_INCREASING,
-                        )
-                    )
-                # Note: ALK, CALC, CYACID are configuration values (user-entered)
-                # and are handled as number entities in number.py
-            elif obj.subtype == "ICHLOR":
-                if SALT_ATTR in obj.attribute_keys:
-                    sensors.append(
-                        PoolSensor(
-                            coordinator,
-                            obj,
-                            device_class=None,
-                            unit_of_measurement=CONCENTRATION_PARTS_PER_MILLION,
-                            attribute_key=SALT_ATTR,
-                            name="+ (Salt)",
-                            icon="mdi:shaker-outline",
-                        )
-                    )
+                )
+
         elif obj.objtype == SYSTEM_TYPE:
-            # Firmware version (diagnostic sensor, non-numeric string value)
             if VER_ATTR in obj.attribute_keys:
                 sensors.append(
                     PoolSensor(
@@ -311,14 +288,15 @@ def _build_entities(
                         name="Firmware Version",
                         icon="mdi:chip",
                         entity_category=EntityCategory.DIAGNOSTIC,
-                        state_class=None,  # Non-numeric value
+                        state_class=None,
+                        value_getter=partial(
+                            _system_field, coordinator, "firmware_version"
+                        ),
                     )
                 )
-            # System operating mode (Auto / Service / Time out). Shown as a
-            # primary sensor (not diagnostic) to mirror the IntelliCenter app's
-            # dashboard mode banner.
             if SERVICE_ATTR in obj.attribute_keys:
                 sensors.append(SystemModeSensor(coordinator, obj))
+
     return sensors
 
 
@@ -331,117 +309,70 @@ async def async_setup_entry(
     async_setup_pool_entities(entry, async_add_entities, _build_entities)
 
 
-# -------------------------------------------------------------------------------------
-
-
 class PoolSensor(PoolEntity, SensorEntity):
-    """Representation of a Pentair sensor.
-
-    Supports temperature, power, and chemistry measurements with optional
-    value rounding for sensors with high update frequency.
-    """
+    """Representation of an IntelliCenter sensor using immutable API state."""
 
     def __init__(
         self,
         coordinator: IntelliCenterCoordinator,
         pool_object: PoolObject,
         device_class: SensorDeviceClass | None,
+        value_getter: StateGetter,
         rounding_factor: int = 0,
-        value_offset: int = 0,
         entity_category: EntityCategory | None = None,
         state_class: SensorStateClass | None = SensorStateClass.MEASUREMENT,
         **kwargs: Any,
     ) -> None:
-        """Initialize a pool sensor.
-
-        Args:
-            coordinator: The coordinator for this integration
-            pool_object: The PoolObject this sensor represents
-            device_class: The device class for this sensor
-            rounding_factor: If non-zero, round values to this factor
-            value_offset: Fixed offset added to raw values (e.g., -1 for tank levels)
-            entity_category: The entity category (e.g., DIAGNOSTIC)
-            state_class: The state class (default: MEASUREMENT, None for non-numeric)
-            **kwargs: Additional arguments passed to PoolEntity
-        """
+        """Initialize a read-model-backed pool sensor."""
         super().__init__(coordinator, pool_object, **kwargs)
         self._attr_device_class = device_class
+        self._value_getter = value_getter
         self._rounding_factor = rounding_factor
-        self._value_offset = value_offset
         if state_class is not None:
             self._attr_state_class = state_class
-        if entity_category:
+        if entity_category is not None:
             self._attr_entity_category = entity_category
 
     @property
     def native_value(self) -> float | int | str | None:
-        """Return the native value of the sensor.
-
-        Integer values are adjusted by value_offset (e.g., -1 for tank levels
-        to correct IntelliCenter's off-by-one reporting) then optionally rounded
-        to the nearest multiple of rounding_factor (used by pump sensors to
-        smooth high-frequency updates).
-        """
-        raw_value = self._pool_object[self._attribute_key]
+        """Return the normalized value from the latest immutable snapshot."""
+        raw_value = self._value_getter()
         if raw_value is None:
             return None
 
-        try:
-            value = int(raw_value) + self._value_offset
-            if self._rounding_factor:
-                value = int(
-                    round(value / self._rounding_factor) * self._rounding_factor
-                )
-            return value
-        except (ValueError, TypeError):
-            # Return as-is if not convertible to int (e.g., pH values as float)
+        if isinstance(raw_value, bool):
+            return int(raw_value)
+        if isinstance(raw_value, int):
+            value: float | int = raw_value
+        elif isinstance(raw_value, float):
+            value = int(raw_value) if raw_value.is_integer() else raw_value
+        else:
+            text = str(raw_value)
             try:
-                return float(raw_value)
-            except (ValueError, TypeError):
-                return str(raw_value)
+                value = int(text)
+            except ValueError:
+                try:
+                    value = float(text)
+                except ValueError:
+                    return text
+
+        if self._rounding_factor:
+            return int(round(float(value) / self._rounding_factor) * self._rounding_factor)
+        return value
 
     @property
     def native_unit_of_measurement(self) -> str | None:
         """Return the unit of measurement of this entity, if any."""
         if self._attr_device_class == SensorDeviceClass.TEMPERATURE:
-            return self.pentairTemperatureSettings()
+            return self.coordinator.api.snapshot.temperature_unit
         return self._attr_native_unit_of_measurement
 
 
-# The canonical IntelliCenter system operating modes exposed as enum states
-# (localized via the ``system_mode`` translation key).
 SYSTEM_MODE_OPTIONS = ["auto", "service", "timeout"]
-
-# Raw SERVICE protocol strings -> canonical option. Values are matched after
-# normalizing (lower-case, spaces removed). Two modes are hardware-confirmed:
-# ``AUTO`` in normal automatic operation, and ``TIMOUT`` -- Pentair's misspelled
-# protocol string for the timed service mode (issue #80), which would not match
-# the ``timeout`` option on its own. The indefinite ``SERVICE`` string is
-# documented but not yet observed on hardware.
-SYSTEM_MODE_ALIASES = {
-    "auto": "auto",
-    "service": "service",
-    "timeout": "timeout",
-    "timout": "timeout",  # hardware protocol spelling (issue #80)
-}
 
 
 class SystemModeSensor(PoolSensor):
-    """System operating-mode sensor (Auto / Service / Time out).
-
-    IntelliCenter reports the operating mode on the SYSTEM object via the
-    SERVICE attribute. It is exposed as an enum sensor; the per-state labels
-    are localized via ``translation_key`` (``entity.sensor.system_mode.state``).
-    The entity name itself is set explicitly -- like the Firmware Version sensor
-    -- because ``PoolEntity.name`` overrides Home Assistant's translation-based
-    naming, so a ``translation_key`` name would never be consulted.
-
-    ``AUTO`` and ``TIMOUT`` are hardware-confirmed; the indefinite ``SERVICE``
-    string is documented but not yet observed. Raw values are normalized
-    case- and space-insensitively and mapped via ``SYSTEM_MODE_ALIASES``, and
-    any value outside the known set is reported as unknown so the enum sensor
-    never raises on an unexpected string.
-    """
+    """System operating-mode sensor backed by immutable system state."""
 
     _attr_translation_key = "system_mode"
 
@@ -458,25 +389,16 @@ class SystemModeSensor(PoolSensor):
             attribute_key=SERVICE_ATTR,
             name="System Mode",
             icon="mdi:cog-sync",
-            # ENUM sensors must not declare a state_class.
             state_class=None,
+            value_getter=partial(_system_field, coordinator, "operating_mode"),
         )
         self._attr_options = SYSTEM_MODE_OPTIONS
 
     @property
     def native_value(self) -> str | None:
-        """Return the normalized system mode, or None if unrecognized.
-
-        The raw SERVICE value is normalized case- and space-insensitively and
-        resolved through ``SYSTEM_MODE_ALIASES`` so variants like "AUTO",
-        "Service", "TIME OUT", or the hardware spelling "TIMOUT" map onto the
-        ``auto``/``service``/``timeout`` options. A value outside that set is
-        reported as ``None`` (unknown) rather than returned verbatim, because
-        Home Assistant raises ``ValueError`` when an enum sensor's state is not
-        one of its declared ``options``.
-        """
-        raw_value = self._pool_object[self._attribute_key]
-        if raw_value is None:
+        """Return a supported normalized system mode, or unknown."""
+        mode = self._value_getter()
+        if mode is None or mode is SystemMode.UNKNOWN:
             return None
-        normalized = str(raw_value).strip().lower().replace(" ", "")
-        return SYSTEM_MODE_ALIASES.get(normalized)
+        value = str(mode)
+        return value if value in self._attr_options else None

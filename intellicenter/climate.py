@@ -157,7 +157,7 @@ class PoolClimate(PoolEntity, ClimateEntity):
     @property
     def _body_state(self) -> BodyState | None:
         """Return this body's latest immutable API snapshot."""
-        return self.coordinator.api.get_body(self._pool_object.objnam)
+        return self.coordinator.api.body(self._pool_object.objnam)
 
     @property
     def _heater_list(self) -> list[str]:
@@ -479,7 +479,7 @@ class PoolHeatOnlyClimate(PoolEntity, ClimateEntity):
     @property
     def _body_state(self) -> BodyState | None:
         """Return this body's latest immutable API snapshot."""
-        return self.coordinator.api.get_body(self._pool_object.objnam)
+        return self.coordinator.api.body(self._pool_object.objnam)
 
     @property
     def _heater_list(self) -> list[str]:

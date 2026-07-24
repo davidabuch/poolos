@@ -12,6 +12,7 @@ from pyintellicenter import (
     EXTINSTR_TYPE,
     PMPCIRC_TYPE,
     PUMP_TYPE,
+    SENSE_TYPE,
     SYSTEM_TYPE,
     CIRCUIT_ATTR,
     PARENT_ATTR,
@@ -32,9 +33,11 @@ from .models import (
     PumpCircuitState,
     PumpState,
     SystemState,
+    TemperatureSensorState,
 )
 from .panel import build_system_state
 from .pump import build_pump_circuit_state, build_pump_state
+from .temperature import build_temperature_sensor_state
 
 if TYPE_CHECKING:
     from ..coordinator import IntelliCenterCoordinator
@@ -51,6 +54,7 @@ class IntelliCenterAPI:
             panel_name=None,
             software_version=None,
             temperature_unit=UnitOfTemperature.FAHRENHEIT,
+            temperature_sensors=(),
             bodies=(),
             circuits=(),
             pumps=(),
@@ -63,6 +67,24 @@ class IntelliCenterAPI:
     def snapshot(self) -> IntelliCenterSnapshot:
         """Return the latest completed system snapshot."""
         return self._snapshot
+
+    @property
+    def temperature_sensors(self) -> tuple[TemperatureSensorState, ...]:
+        """Return all physical IntelliCenter temperature-probe snapshots."""
+        return self._snapshot.temperature_sensors
+
+    def temperature_sensor(
+        self, sensor_id: str
+    ) -> TemperatureSensorState | None:
+        """Return a physical temperature probe by object name."""
+        return next(
+            (
+                sensor
+                for sensor in self._snapshot.temperature_sensors
+                if sensor.id == sensor_id
+            ),
+            None,
+        )
 
     @property
     def bodies(self) -> tuple[BodyState, ...]:
@@ -155,11 +177,14 @@ class IntelliCenterAPI:
             (5.0, 40.0) if uses_metric else (40.0, 104.0)
         )
 
+        temperature_sensors = tuple(
+            build_temperature_sensor_state(probe)
+            for probe in self._coordinator.model.get_by_type(SENSE_TYPE)
+        )
+
         bodies: list[BodyState] = []
         for body in self._coordinator.model.get_by_type(BODY_TYPE):
             heater_objnams = self._heater_objnams_for_body(body.objnam)
-            if not heater_objnams:
-                continue
             bodies.append(
                 build_body_state(
                     self._coordinator,
@@ -223,6 +248,7 @@ class IntelliCenterAPI:
             panel_name=system_info.prop_name if system_info else None,
             software_version=software_version,
             temperature_unit=temperature_unit,
+            temperature_sensors=temperature_sensors,
             bodies=tuple(bodies),
             circuits=circuits,
             pumps=pumps,

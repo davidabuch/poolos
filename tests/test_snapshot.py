@@ -64,3 +64,18 @@ def test_snapshot_is_immutable_and_tracks_connection_state(
     assert snapshot.connected is False
     with pytest.raises(FrozenInstanceError):
         snapshot.connected = True
+
+
+def test_body_without_heater_remains_in_hardware_snapshot(
+    api_modules, pool_object_factory, coordinator_factory
+):
+    body = pool_object_factory(current=82)
+    coordinator = coordinator_factory([body])
+
+    api = api_modules.system.IntelliCenterAPI(coordinator)
+    snapshot = api.refresh()
+
+    assert len(snapshot.bodies) == 1
+    assert snapshot.bodies[0].id == body.objnam
+    assert snapshot.bodies[0].current_temperature == 82
+    assert snapshot.bodies[0].available_heaters == ()
