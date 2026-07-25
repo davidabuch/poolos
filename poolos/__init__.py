@@ -15,6 +15,12 @@ from .enums import (
 )
 from .equipment import Equipment
 from .events import EventBus, PoolEvent
+from .default_policies import (
+    CirculationSafetyPolicy,
+    HeatingDemandPolicy,
+    SanitizerCirculationInterlockPolicy,
+    build_default_policy_engine,
+)
 from .execution import (
     CommandExecutor,
     ExecutionEngine,
@@ -22,13 +28,23 @@ from .execution import (
     ExecutionStatus,
 )
 from .exceptions import (
+    DuplicatePolicyError,
     DuplicateRegistrationError,
     PoolOSError,
     UnknownBodyError,
     UnknownEquipmentError,
+    UnknownPolicyError,
 )
 from .kernel import PoolKernel
 from .models import BodyState, TemperatureState
+from .policies import (
+    Policy,
+    PolicyContext,
+    PolicyEngine,
+    PolicyEvaluation,
+    PolicyOutcome,
+    PolicySuppression,
+)
 from .registry import EquipmentRegistry
 from .state import EquipmentState, RuntimeState
 

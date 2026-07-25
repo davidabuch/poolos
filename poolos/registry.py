@@ -70,7 +70,7 @@ class EquipmentRegistry:
         for equipment in self._equipment.values():
             if not equipment.enabled or not equipment.has_capability(capability):
                 continue
-            if body is not None and equipment.body is not body:
+            if body is not None and equipment.body not in (None, body):
                 continue
             return equipment
         return None

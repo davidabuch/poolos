@@ -15,3 +15,11 @@ class UnknownEquipmentError(PoolOSError, KeyError):
 
 class UnknownBodyError(PoolOSError, KeyError):
     """Raised when a body cannot be found in the registry."""
+
+
+class DuplicatePolicyError(PoolOSError, ValueError):
+    """Raised when a policy identifier is registered more than once."""
+
+
+class UnknownPolicyError(PoolOSError, KeyError):
+    """Raised when a policy cannot be found in the policy engine."""
