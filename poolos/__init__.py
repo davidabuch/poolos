@@ -34,6 +34,9 @@ from .exceptions import (
     UnknownBodyError,
     UnknownEquipmentError,
     UnknownPolicyError,
+    DuplicatePlanningStrategyError,
+    PlanningStrategyNotFoundError,
+    PlanNotFoundError,
 )
 from .kernel import PoolKernel
 from .models import BodyState, TemperatureState
@@ -44,6 +47,22 @@ from .policies import (
     PolicyEvaluation,
     PolicyOutcome,
     PolicySuppression,
+)
+from .planning import (
+    ConditionKind,
+    FailureBehavior,
+    ObjectiveType,
+    Plan,
+    PlanCondition,
+    PlanObjective,
+    PlanStatus,
+    PlanStep,
+    Planner,
+    PlanningStrategy,
+)
+from .planning_strategies import (
+    PrepareBodyByDeadlineStrategy,
+    build_default_planner,
 )
 from .registry import EquipmentRegistry
 from .state import EquipmentState, RuntimeState
