@@ -15,6 +15,12 @@ from .enums import (
 )
 from .equipment import Equipment
 from .events import EventBus, PoolEvent
+from .execution import (
+    CommandExecutor,
+    ExecutionEngine,
+    ExecutionRecord,
+    ExecutionStatus,
+)
 from .exceptions import (
     DuplicateRegistrationError,
     PoolOSError,
