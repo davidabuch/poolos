@@ -37,6 +37,9 @@ from .exceptions import (
     DuplicatePlanningStrategyError,
     PlanningStrategyNotFoundError,
     PlanNotFoundError,
+    DuplicateScheduledPlanError,
+    ScheduledPlanNotFoundError,
+    ScheduledStepNotFoundError,
 )
 from .kernel import PoolKernel
 from .models import BodyState, TemperatureState
@@ -63,6 +66,14 @@ from .planning import (
 from .planning_strategies import (
     PrepareBodyByDeadlineStrategy,
     build_default_planner,
+)
+from .scheduling import (
+    ScheduledPlan,
+    ScheduledPlanStatus,
+    ScheduledStepStatus,
+    Scheduler,
+    SchedulerEvaluation,
+    StepRuntime,
 )
 from .registry import EquipmentRegistry
 from .state import EquipmentState, RuntimeState

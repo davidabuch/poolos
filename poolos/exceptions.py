@@ -35,3 +35,15 @@ class PlanningStrategyNotFoundError(PoolOSError):
 
 class PlanNotFoundError(PoolOSError):
     """Raised when a requested plan ID is unknown."""
+
+
+class DuplicateScheduledPlanError(PoolOSError, ValueError):
+    """Raised when a plan is activated or restored more than once."""
+
+
+class ScheduledPlanNotFoundError(PoolOSError, KeyError):
+    """Raised when scheduler runtime state for a plan is unknown."""
+
+
+class ScheduledStepNotFoundError(PoolOSError, KeyError):
+    """Raised when a plan does not contain a requested step."""
