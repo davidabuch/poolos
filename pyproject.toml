@@ -7,7 +7,7 @@ name = "poolos"
 version = "1.0.0"
 description = "A vendor-independent operating system for intelligent pool and spa control."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = { text = "Proprietary" }
 authors = [
   { name = "PoolOS contributors" },
@@ -15,9 +15,6 @@ authors = [
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
 dependencies = []
@@ -53,7 +50,7 @@ exclude_lines = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py313"
 line-length = 100
 extend-exclude = [
   ".git",
@@ -74,7 +71,7 @@ select = ["E4", "E7", "E9", "F"]
 "poolos/hal/__init__.py" = ["F401"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.13"
 packages = ["poolos"]
 warn_unused_configs = true
 warn_redundant_casts = true
