@@ -88,3 +88,16 @@ __all__ = [
     "PolicyPriority",
     "RecommendationSeverity",
 ]
+from .simulation import (
+    BodyThermalModel,
+    Simulation,
+    SimulationClock,
+    SimulationEvent,
+    SimulationEventKind,
+    SimulationExecutor,
+    SimulationResult,
+    SimulationScenario,
+    SimulationSnapshot,
+    WeatherState,
+)
+from .scenarios import power_outage_scenario, spa_heat_scenario
