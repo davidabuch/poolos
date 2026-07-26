@@ -1,42 +1,34 @@
-# Buch IntelliCenter
+# PoolOS
 
-A professionally maintained Home Assistant integration for Pentair IntelliCenter systems.
+**A vendor-independent operating system for intelligent pool and spa control.**
 
-## Purpose
+PoolOS provides a deterministic control runtime, authority and safety layers,
+constraint evaluation, planning, scheduling, execution, verification,
+reconciliation, runtime memory, and explainability.
 
-Buch IntelliCenter provides a stable hardware interface between Pentair IntelliCenter equipment and higher-level automation platforms.
+PoolOS is intentionally focused on pool and spa equipment. Home Assistant,
+mobile apps, voice assistants, weather services, utility pricing, and battery
+systems can provide commands or context without becoming competing controllers.
 
-Its responsibilities include:
+## Current milestone
 
-- Communication with Pentair IntelliCenter
-- Equipment state management
-- Home Assistant entity creation
-- Reliable local control
-- Diagnostic reporting
-- Stable APIs for automation
+`poolos-core-1.0` marks completion of the runtime kernel. Phase 2 defines the
+pool domain model, hardware abstraction layer, vendor adapters, and native pool
+applications.
 
-## Design Philosophy
+## Architecture
 
-This project intentionally separates equipment communication from automation logic.
+```text
+Intent -> Authority -> Constraints -> Planning -> Scheduling
+       -> Execution -> Verification -> Reconciliation -> Memory
+```
 
-Buch IntelliCenter is responsible for **how to communicate with the equipment**.
+PoolOS models bodies, pool systems, equipment, hydraulic routes, features,
+resources, and observations. Information is explicitly classified as measured,
+calculated, learned, or predicted, with confidence and explainable evidence.
 
-Pool Manager is responsible for **deciding what the equipment should do**.
+## Legacy IntelliCenter integration
 
-Keeping these responsibilities separate results in a cleaner, safer, and more maintainable architecture.
-
-## Current Status
-
-Baseline release:
-
-**v3.8.1-buch.1**
-
-Based on the excellent IntelliCenter integration originally developed by the `joyfulhouse/intellicenter` project.
-
-This repository maintains a stable, versioned branch customized for the Buch Home Assistant environment while preserving compatibility with future upstream improvements where appropriate.
-
-## Credits
-
-This project is based on the outstanding Pentair IntelliCenter integration originally developed and maintained by the **joyfulhouse/intellicenter** project.
-
-Buch IntelliCenter is a privately maintained derivative that preserves upstream compatibility where practical while adding features and architectural enhancements to support the Buch Home Assistant ecosystem and the Pool Manager platform.
+The repository may also contain the existing Home Assistant IntelliCenter
+integration. It will become the first vendor adapter while PoolOS remains
+hardware-independent.

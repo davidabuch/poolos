@@ -29,6 +29,8 @@ class EquipmentType(str, Enum):
     WATER_FEATURE = "water_feature"
     CLEANER = "cleaner"
     SENSOR = "sensor"
+    FILTER = "filter"
+    COVER = "cover"
 
 
 class HeatingSource(str, Enum):

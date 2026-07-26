@@ -138,3 +138,17 @@ from .runtime_memory import (
 from .runtime_context import RuntimeContext
 from .event_bus import RuntimeEventPublisher, RuntimeEventTopic
 from .runtime import RuntimeExplanation
+
+from .domain import (
+    ConfidenceBand,
+    Evidence,
+    Feature,
+    HydraulicRoute,
+    Installation,
+    Observation,
+    PoolSystem,
+    Resource,
+    ResourceType,
+    TruthLevel,
+)
+from .equipment import FilterEquipment
