@@ -175,3 +175,68 @@ def test_runtime_applies_authority_before_execution():
     assert cycle.submission_records == ()
     assert cycle.execution_records == ()
     assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "ready"
+
+
+def test_runtime_applies_constraints_after_authority_and_before_execution():
+    from poolos.constraints import ConstraintDecision, ConstraintDisposition
+
+    @dataclass
+    class CapConstraint:
+        constraint_id: str = "cap"
+        priority: int = 10
+
+        def evaluate(self, command, context):
+            replacement = runtime.constraints.replace_command(command, value=1800)
+            return ConstraintDecision.modify(
+                self.constraint_id,
+                command,
+                replacement,
+                context.evaluated_at,
+                "energy cap",
+            )
+
+    runtime, kernel = make_runtime()
+    runtime.constraints.register(CapConstraint())
+    command = Command(target="pump.rpm", action=CommandAction.SET, value=3200)
+    executor = RecordingExecutor([])
+    runtime.execution.register_executor("pump.rpm", executor)
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    cycle = runtime.tick()
+
+    assert cycle.constraint_evaluations[0].disposition is ConstraintDisposition.MODIFY
+    assert executor.commands[0].value == 1800
+    assert executor.commands[0].command_id == command.command_id
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "completed"
+
+
+def test_runtime_keeps_step_ready_when_constraint_defers_command():
+    from poolos.constraints import ConstraintDecision, ConstraintDisposition
+
+    @dataclass
+    class WaitForPrime:
+        constraint_id: str = "wait_for_prime"
+        priority: int = 10
+
+        def evaluate(self, command, context):
+            return ConstraintDecision.defer(
+                self.constraint_id,
+                command,
+                context.evaluated_at,
+                "not primed",
+            )
+
+    runtime, kernel = make_runtime()
+    runtime.constraints.register(WaitForPrime())
+    command = Command(target="heater", action=CommandAction.START)
+    runtime.execution.register_executor("heater", RecordingExecutor([]))
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    cycle = runtime.tick()
+
+    assert cycle.constraint_evaluations[0].disposition is ConstraintDisposition.DEFER
+    assert cycle.submission_records == ()
+    assert cycle.execution_records == ()
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "ready"

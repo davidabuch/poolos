@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Callable, Optional
 
 from .authority import AuthorityDecision, ControlAuthority
+from .constraints import ConstraintEngine, ConstraintEvaluation
 from .events import PoolEvent
 from .exceptions import RuntimeLifecycleError
 from .execution import ExecutionEngine, ExecutionRecord, ExecutionStatus
@@ -49,6 +50,7 @@ class RuntimeCycle:
     submission_records: tuple[ExecutionRecord, ...]
     execution_records: tuple[ExecutionRecord, ...]
     authority_decisions: tuple[AuthorityDecision, ...] = ()
+    constraint_evaluations: tuple[ConstraintEvaluation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.started_at.tzinfo is None or self.completed_at.tzinfo is None:
@@ -69,9 +71,8 @@ class PoolRuntime:
     4. Submit resulting commands through the sole Execution Engine path.
     5. Optionally drain the execution queue and update scheduler progress.
 
-    This class deliberately does not yet decide control authority, apply hard
-    safety constraints, or reconcile desired and actual state. Those concerns
-    are added by Milestones 9.2 through 9.4 without changing this lifecycle.
+    Authority and constraints are resolved before submission. Reconciliation
+    and learned operational memory remain later Runtime milestones.
     """
 
     kernel: PoolKernel
@@ -79,6 +80,7 @@ class PoolRuntime:
     policies: PolicyEngine = field(default_factory=PolicyEngine)
     execution: ExecutionEngine = field(default_factory=ExecutionEngine)
     authority: ControlAuthority = field(default_factory=ControlAuthority)
+    constraints: ConstraintEngine = field(default_factory=ConstraintEngine)
     status: RuntimeStatus = RuntimeStatus.STOPPED
     _active_plan_ids: list[str] = field(default_factory=list)
     _event_queue: list[PoolEvent] = field(default_factory=list)
@@ -92,6 +94,7 @@ class PoolRuntime:
         self.execution.clock = self.kernel.clock
         self.authority.clock = self.kernel.clock
         self.authority.events = self.kernel.events
+        self.constraints.events = self.kernel.events
         self._unsubscribe = self.kernel.events.subscribe("*", self._event_queue.append)
 
     def start(self) -> None:
@@ -197,8 +200,17 @@ class PoolRuntime:
             authorized_commands = tuple(
                 decision.command for decision in authority_decisions if decision.allowed
             )
+            constraint_evaluations = tuple(
+                self.constraints.evaluate(command, self.kernel)
+                for command in authorized_commands
+            )
+            executable_commands = tuple(
+                evaluation.effective_command
+                for evaluation in constraint_evaluations
+                if evaluation.executable and evaluation.effective_command is not None
+            )
             submissions = tuple(
-                self.execution.submit(command) for command in authorized_commands
+                self.execution.submit(command) for command in executable_commands
             )
             self._update_submitted_steps(evaluations, submissions)
 
@@ -218,6 +230,7 @@ class PoolRuntime:
                 submission_records=submissions,
                 execution_records=executions,
                 authority_decisions=authority_decisions,
+                constraint_evaluations=constraint_evaluations,
             )
             self._cycles.append(cycle)
             self.kernel.events.publish(
@@ -230,6 +243,9 @@ class PoolRuntime:
                         "events": len(events),
                         "submitted": len(submissions),
                         "executed": len(executions),
+                        "constraint_blocked": sum(
+                            1 for item in constraint_evaluations if not item.executable
+                        ),
                     },
                 )
             )
