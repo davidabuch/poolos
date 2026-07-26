@@ -56,3 +56,11 @@ python3 -m pytest
 
 See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for validation, coverage,
 static analysis, CI, and troubleshooting instructions.
+
+## Pentair vendor domain
+
+PoolOS includes a transport-independent Pentair domain under
+`poolos.vendors.pentair`. It models Pentair bodies, circuits, pumps, heaters,
+valves, shared equipment, and heat selections without depending on Home
+Assistant or direct RS-485 hardware. See
+[`docs/PENTAIR_DOMAIN.md`](docs/PENTAIR_DOMAIN.md).
