@@ -20,6 +20,7 @@ from .commands import Command
 from .events import EventBus, PoolEvent
 from .execution import ExecutionRecord, ExecutionStatus
 from .kernel import PoolKernel
+from .runtime_memory import RuntimeMemory
 
 
 class DriftCategory(str, Enum):
@@ -123,6 +124,7 @@ class ReconciliationEngine:
 
     clock: Clock = field(default_factory=SystemClock)
     events: Optional[EventBus] = None
+    memory: Optional[RuntimeMemory] = None
     _registrations: list[_VerifierRegistration] = field(default_factory=list)
     _expectations: dict[str, ReconciliationExpectation] = field(default_factory=dict)
     _audit: list[ReconciliationRecord] = field(default_factory=list)
@@ -185,7 +187,7 @@ class ReconciliationEngine:
             expectation_id=str(uuid4()),
             command=record.command,
             created_at=now,
-            verify_at=now + registration.policy.verification_delay,
+            verify_at=now + self._verification_delay(record.command, registration.policy),
         )
         self._expectations[expectation.expectation_id] = expectation
         self._publish(
@@ -236,6 +238,13 @@ class ReconciliationEngine:
             )
 
             if observation.matched:
+                if self.memory is not None:
+                    elapsed = max(0.0, (now - checked.created_at).total_seconds())
+                    self.memory.observe(
+                        f"reconciliation.{checked.command.target}.response_seconds",
+                        elapsed,
+                        observed_at=now,
+                    )
                 record = self._record(
                     checked,
                     ReconciliationDisposition.STABLE,
@@ -282,6 +291,15 @@ class ReconciliationEngine:
         """Return all reconciliation transitions."""
 
         return tuple(self._audit)
+
+
+    def _verification_delay(self, command: Command, policy: VerificationPolicy) -> timedelta:
+        if self.memory is None:
+            return policy.verification_delay
+        return self.memory.recommended_delay(
+            f"reconciliation.{command.target}.response_seconds",
+            policy.verification_delay,
+        )
 
     def _registration_for(self, target: str) -> Optional[_VerifierRegistration]:
         exact = [

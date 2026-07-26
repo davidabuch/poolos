@@ -284,3 +284,15 @@ def test_runtime_records_stable_reconciliation_on_following_cycle():
     second = runtime.tick()
     assert second.reconciliation_evaluation.records[0].disposition.value == "stable"
     assert runtime.reconciliation.pending() == ()
+
+
+def test_runtime_records_execution_and_cycle_memory():
+    runtime, kernel = make_runtime()
+    command = Command(target="pump", action=CommandAction.START, issued_at=kernel.clock.now())
+    runtime.execution.register_executor("pump", RecordingExecutor([]))
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+    runtime.tick()
+    assert runtime.memory.summary("runtime.cycle_seconds").count == 1
+    assert runtime.memory.summary("execution.pump.success").latest == 1.0
+    assert runtime.memory.summary("execution.pump.latency_seconds").count == 1

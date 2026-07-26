@@ -151,3 +151,22 @@ def test_duplicate_verifier_registration_requires_explicit_replace():
     else:
         raise AssertionError("duplicate verifier should fail")
     engine.register_verifier("pump", verifier, replace_existing=True)
+
+
+def test_reconciliation_uses_runtime_memory_for_adaptive_delay():
+    from poolos.runtime_memory import RuntimeMemory
+    now = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
+    clock = FixedClock(now)
+    memory = RuntimeMemory(clock=clock, retention_per_metric=10)
+    for seconds in (8, 10, 12):
+        memory.observe("reconciliation.pump.response_seconds", seconds)
+    engine = ReconciliationEngine(clock=clock, memory=memory)
+    engine.register_verifier(
+        "pump",
+        lambda kernel, command: VerificationObservation(True),
+        policy=VerificationPolicy(verification_delay=timedelta(seconds=60)),
+    )
+    command = Command(target="pump", action=CommandAction.START, issued_at=now)
+    record = ExecutionRecord(command, ExecutionStatus.SUCCEEDED, now)
+    expectation = engine.track(record)
+    assert expectation.verify_at == now + timedelta(seconds=15)

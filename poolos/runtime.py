@@ -20,6 +20,7 @@ from .execution import ExecutionEngine, ExecutionRecord, ExecutionStatus
 from .kernel import PoolKernel
 from .planning import Plan
 from .reconciliation import ReconciliationEngine, ReconciliationEvaluation
+from .runtime_memory import RuntimeMemory
 from .policies import PolicyEngine, PolicyEvaluation
 from .scheduling import (
     ScheduledPlanStatus,
@@ -86,6 +87,7 @@ class PoolRuntime:
     authority: ControlAuthority = field(default_factory=ControlAuthority)
     constraints: ConstraintEngine = field(default_factory=ConstraintEngine)
     reconciliation: ReconciliationEngine = field(default_factory=ReconciliationEngine)
+    memory: RuntimeMemory = field(default_factory=RuntimeMemory)
     status: RuntimeStatus = RuntimeStatus.STOPPED
     _active_plan_ids: list[str] = field(default_factory=list)
     _event_queue: list[PoolEvent] = field(default_factory=list)
@@ -100,8 +102,10 @@ class PoolRuntime:
         self.authority.clock = self.kernel.clock
         self.authority.events = self.kernel.events
         self.constraints.events = self.kernel.events
+        self.memory.clock = self.kernel.clock
         self.reconciliation.clock = self.kernel.clock
         self.reconciliation.events = self.kernel.events
+        self.reconciliation.memory = self.memory
         self._unsubscribe = self.kernel.events.subscribe("*", self._event_queue.append)
 
     def start(self) -> None:
@@ -228,6 +232,7 @@ class PoolRuntime:
                 executions = self.execution.drain(limit=execution_limit)
                 self._update_completed_steps(executions)
                 for record in executions:
+                    self._remember_execution(record)
                     self.reconciliation.track(record)
 
             self._cycle_number += 1
@@ -245,6 +250,11 @@ class PoolRuntime:
                 reconciliation_evaluation=reconciliation_evaluation,
             )
             self._cycles.append(cycle)
+            self.memory.observe(
+                "runtime.cycle_seconds",
+                max(0.0, (cycle.completed_at - cycle.started_at).total_seconds()),
+                observed_at=cycle.completed_at,
+            )
             self.kernel.events.publish(
                 PoolEvent(
                     topic="runtime.cycle.completed",
@@ -353,6 +363,23 @@ class PoolRuntime:
                         self.kernel,
                         detail="all commands executed successfully",
                     )
+
+
+    def _remember_execution(self, record: ExecutionRecord) -> None:
+        observed_at = record.recorded_at
+        latency = max(0.0, (record.recorded_at - record.command.issued_at).total_seconds())
+        prefix = f"execution.{record.command.target}"
+        self.memory.observe(
+            f"{prefix}.latency_seconds",
+            latency,
+            observed_at=observed_at,
+            tags={"status": record.status.value},
+        )
+        self.memory.observe(
+            f"{prefix}.success",
+            1.0 if record.status is ExecutionStatus.SUCCEEDED else 0.0,
+            observed_at=observed_at,
+        )
 
     def _drain_events(self) -> tuple[PoolEvent, ...]:
         events = tuple(self._event_queue)
