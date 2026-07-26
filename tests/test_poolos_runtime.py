@@ -240,3 +240,47 @@ def test_runtime_keeps_step_ready_when_constraint_defers_command():
     assert cycle.submission_records == ()
     assert cycle.execution_records == ()
     assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "ready"
+
+
+def test_runtime_tracks_success_and_resubmits_reconciliation_retry():
+    from poolos.reconciliation import VerificationObservation, VerificationPolicy
+
+    runtime, kernel = make_runtime()
+    command = Command(target="pump", action=CommandAction.START)
+    executor = RecordingExecutor([])
+    runtime.execution.register_executor("pump", executor)
+    runtime.reconciliation.register_verifier(
+        "pump",
+        lambda observed_kernel, requested: VerificationObservation(False, detail="not running"),
+        policy=VerificationPolicy(retry_delay=timedelta(0), max_attempts=2),
+    )
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    first = runtime.tick()
+    assert len(runtime.reconciliation.pending()) == 1
+    assert first.reconciliation_evaluation.records == ()
+
+    second = runtime.tick()
+    assert second.reconciliation_evaluation.records[0].disposition.value == "retry"
+    assert len(second.submission_records) == 1
+    assert second.submission_records[0].command.metadata["retry_of"] == command.command_id
+    assert len(executor.commands) == 2
+
+
+def test_runtime_records_stable_reconciliation_on_following_cycle():
+    from poolos.reconciliation import VerificationObservation
+
+    runtime, kernel = make_runtime()
+    command = Command(target="pump", action=CommandAction.START)
+    runtime.execution.register_executor("pump", RecordingExecutor([]))
+    runtime.reconciliation.register_verifier(
+        "pump", lambda observed_kernel, requested: VerificationObservation(True, actual="on")
+    )
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+    runtime.tick()
+
+    second = runtime.tick()
+    assert second.reconciliation_evaluation.records[0].disposition.value == "stable"
+    assert runtime.reconciliation.pending() == ()

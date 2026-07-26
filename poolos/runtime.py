@@ -19,6 +19,7 @@ from .exceptions import RuntimeLifecycleError
 from .execution import ExecutionEngine, ExecutionRecord, ExecutionStatus
 from .kernel import PoolKernel
 from .planning import Plan
+from .reconciliation import ReconciliationEngine, ReconciliationEvaluation
 from .policies import PolicyEngine, PolicyEvaluation
 from .scheduling import (
     ScheduledPlanStatus,
@@ -51,6 +52,9 @@ class RuntimeCycle:
     execution_records: tuple[ExecutionRecord, ...]
     authority_decisions: tuple[AuthorityDecision, ...] = ()
     constraint_evaluations: tuple[ConstraintEvaluation, ...] = ()
+    reconciliation_evaluation: ReconciliationEvaluation = field(
+        default_factory=lambda: ReconciliationEvaluation((), ())
+    )
 
     def __post_init__(self) -> None:
         if self.started_at.tzinfo is None or self.completed_at.tzinfo is None:
@@ -81,6 +85,7 @@ class PoolRuntime:
     execution: ExecutionEngine = field(default_factory=ExecutionEngine)
     authority: ControlAuthority = field(default_factory=ControlAuthority)
     constraints: ConstraintEngine = field(default_factory=ConstraintEngine)
+    reconciliation: ReconciliationEngine = field(default_factory=ReconciliationEngine)
     status: RuntimeStatus = RuntimeStatus.STOPPED
     _active_plan_ids: list[str] = field(default_factory=list)
     _event_queue: list[PoolEvent] = field(default_factory=list)
@@ -95,6 +100,8 @@ class PoolRuntime:
         self.authority.clock = self.kernel.clock
         self.authority.events = self.kernel.events
         self.constraints.events = self.kernel.events
+        self.reconciliation.clock = self.kernel.clock
+        self.reconciliation.events = self.kernel.events
         self._unsubscribe = self.kernel.events.subscribe("*", self._event_queue.append)
 
     def start(self) -> None:
@@ -176,6 +183,7 @@ class PoolRuntime:
         evaluations: list[SchedulerEvaluation] = []
 
         try:
+            reconciliation_evaluation = self.reconciliation.evaluate(self.kernel)
             for plan_id in tuple(self._active_plan_ids):
                 evaluation = self.scheduler.tick(plan_id, self.kernel)
                 evaluations.append(evaluation)
@@ -195,6 +203,7 @@ class PoolRuntime:
                 for command in evaluation.commands
             ]
             commands.extend(policy_evaluation.commands)
+            commands.extend(reconciliation_evaluation.retry_commands)
 
             authority_decisions = tuple(self.authority.resolve(command) for command in commands)
             authorized_commands = tuple(
@@ -218,6 +227,8 @@ class PoolRuntime:
             if execute:
                 executions = self.execution.drain(limit=execution_limit)
                 self._update_completed_steps(executions)
+                for record in executions:
+                    self.reconciliation.track(record)
 
             self._cycle_number += 1
             cycle = RuntimeCycle(
@@ -231,6 +242,7 @@ class PoolRuntime:
                 execution_records=executions,
                 authority_decisions=authority_decisions,
                 constraint_evaluations=constraint_evaluations,
+                reconciliation_evaluation=reconciliation_evaluation,
             )
             self._cycles.append(cycle)
             self.kernel.events.publish(
@@ -246,6 +258,8 @@ class PoolRuntime:
                         "constraint_blocked": sum(
                             1 for item in constraint_evaluations if not item.executable
                         ),
+                        "reconciliation_records": len(reconciliation_evaluation.records),
+                        "reconciliation_retries": len(reconciliation_evaluation.retry_commands),
                     },
                 )
             )
