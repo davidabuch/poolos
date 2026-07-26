@@ -1,5 +1,14 @@
 """Public API for the hardware-independent PoolOS domain and kernel."""
 
+from .authority import (
+    AuthorityDecision,
+    AuthorityDecisionReason,
+    AuthorityLease,
+    AuthorityLevel,
+    ControlAuthority,
+    ControlSource,
+    ControlSourceType,
+)
 from .bodies import Body, BodyRegistry
 from .capabilities import Capability
 from .clock import Clock, FixedClock, SystemClock

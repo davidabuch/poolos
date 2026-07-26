@@ -149,3 +149,29 @@ def test_dry_run_command_completes_step_when_executed_on_later_cycle():
 
     assert second.execution_records[0].status is ExecutionStatus.SUCCEEDED
     assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "completed"
+
+
+
+def test_runtime_applies_authority_before_execution():
+    """Scoped manual ownership suppresses competing runtime commands."""
+    from poolos.authority import ControlSource, ControlSourceType
+
+    runtime, kernel = make_runtime()
+    runtime.authority.register_source(
+        ControlSource("pentair_panel", ControlSourceType.LOCAL_PANEL)
+    )
+    runtime.authority.acquire_override(
+        source_id="pentair_panel", scope="pump.main", duration=timedelta(minutes=30)
+    )
+    command = Command(target="pump.main", action=CommandAction.START)
+    runtime.execution.register_executor("pump.main", RecordingExecutor([]))
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    cycle = runtime.tick()
+
+    assert len(cycle.authority_decisions) == 1
+    assert not cycle.authority_decisions[0].allowed
+    assert cycle.submission_records == ()
+    assert cycle.execution_records == ()
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "ready"

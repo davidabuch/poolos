@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Callable, Optional
 
+from .authority import AuthorityDecision, ControlAuthority
 from .events import PoolEvent
 from .exceptions import RuntimeLifecycleError
 from .execution import ExecutionEngine, ExecutionRecord, ExecutionStatus
@@ -47,6 +48,7 @@ class RuntimeCycle:
     policy_evaluation: PolicyEvaluation
     submission_records: tuple[ExecutionRecord, ...]
     execution_records: tuple[ExecutionRecord, ...]
+    authority_decisions: tuple[AuthorityDecision, ...] = ()
 
     def __post_init__(self) -> None:
         if self.started_at.tzinfo is None or self.completed_at.tzinfo is None:
@@ -76,6 +78,7 @@ class PoolRuntime:
     scheduler: Scheduler = field(default_factory=Scheduler)
     policies: PolicyEngine = field(default_factory=PolicyEngine)
     execution: ExecutionEngine = field(default_factory=ExecutionEngine)
+    authority: ControlAuthority = field(default_factory=ControlAuthority)
     status: RuntimeStatus = RuntimeStatus.STOPPED
     _active_plan_ids: list[str] = field(default_factory=list)
     _event_queue: list[PoolEvent] = field(default_factory=list)
@@ -87,6 +90,8 @@ class PoolRuntime:
     def __post_init__(self) -> None:
         # Runtime and execution audit records must share the same clock.
         self.execution.clock = self.kernel.clock
+        self.authority.clock = self.kernel.clock
+        self.authority.events = self.kernel.events
         self._unsubscribe = self.kernel.events.subscribe("*", self._event_queue.append)
 
     def start(self) -> None:
@@ -188,7 +193,13 @@ class PoolRuntime:
             ]
             commands.extend(policy_evaluation.commands)
 
-            submissions = tuple(self.execution.submit(command) for command in commands)
+            authority_decisions = tuple(self.authority.resolve(command) for command in commands)
+            authorized_commands = tuple(
+                decision.command for decision in authority_decisions if decision.allowed
+            )
+            submissions = tuple(
+                self.execution.submit(command) for command in authorized_commands
+            )
             self._update_submitted_steps(evaluations, submissions)
 
             executions: tuple[ExecutionRecord, ...] = ()
@@ -206,6 +217,7 @@ class PoolRuntime:
                 policy_evaluation=policy_evaluation,
                 submission_records=submissions,
                 execution_records=executions,
+                authority_decisions=authority_decisions,
             )
             self._cycles.append(cycle)
             self.kernel.events.publish(
@@ -257,7 +269,13 @@ class PoolRuntime:
         by_id = {record.command.command_id: record for record in submissions}
         for evaluation in evaluations:
             for step in evaluation.ready_steps:
-                records = [by_id[command.command_id] for command in step.commands]
+                records = [
+                    by_id[command.command_id]
+                    for command in step.commands
+                    if command.command_id in by_id
+                ]
+                if len(records) != len(step.commands):
+                    continue
                 if all(record.status is ExecutionStatus.QUEUED for record in records):
                     self.scheduler.mark_submitted(
                         evaluation.plan_id, step.step_id, self.kernel
