@@ -1,1 +1,36 @@
+# macOS
 .DS_Store
+__MACOSX/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test, lint, typing, and coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging output
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
