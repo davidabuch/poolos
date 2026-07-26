@@ -267,6 +267,16 @@ class Scheduler:
     def snapshot(self, plan_id: str) -> dict[str, Any]:
         return self.get(plan_id).to_dict()
 
+    def plan(self, plan_id: str) -> Plan:
+        """Return the immutable source plan for an active scheduler entry."""
+
+        return self._plan(plan_id)
+
+    def step(self, plan_id: str, step_id: str) -> PlanStep:
+        """Return one immutable source step from a scheduled plan."""
+
+        return self._step(self._plan(plan_id), step_id)
+
     def _transition(self, plan_id: str, step_id: str, kernel: PoolKernel, allowed: set[ScheduledStepStatus], target: ScheduledStepStatus, detail: Optional[str] = None, *, refresh_plan: bool = True) -> StepRuntime:
         runtime = self.get(plan_id)
         self._step(self._plan(plan_id), step_id)

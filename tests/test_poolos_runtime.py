@@ -1,0 +1,151 @@
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from poolos.clock import FixedClock
+from poolos.commands import Command, CommandAction
+from poolos.events import PoolEvent
+from poolos.exceptions import RuntimeLifecycleError
+from poolos.execution import ExecutionStatus
+from poolos.kernel import PoolKernel
+from poolos.planning import Plan, PlanStatus, PlanStep
+from poolos.policies import PolicyEngine
+from poolos.runtime import PoolRuntime, RuntimeStatus
+
+
+@dataclass
+class RecordingExecutor:
+    commands: list
+
+    def execute(self, command):
+        self.commands.append(command)
+        return {"ok": True}
+
+
+def make_runtime():
+    now = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
+    kernel = PoolKernel(clock=FixedClock(now))
+    runtime = PoolRuntime(kernel=kernel, policies=PolicyEngine())
+    return runtime, kernel
+
+
+def make_plan(now, command):
+    step = PlanStep(
+        step_id="step-1",
+        sequence=1,
+        earliest_eligible=now,
+        latest_eligible=now + timedelta(hours=1),
+        commands=(command,),
+    )
+    return Plan(
+        plan_id="plan-1",
+        objective_id="objective-1",
+        created_at=now,
+        horizon_start=now,
+        horizon_end=now + timedelta(hours=2),
+        status=PlanStatus.ACTIVE,
+        steps=(step,),
+    )
+
+
+def test_runtime_lifecycle_and_event_pump():
+    runtime, _ = make_runtime()
+    runtime.start()
+    assert runtime.status is RuntimeStatus.RUNNING
+    assert runtime.pending_events()[0].topic == "runtime.started"
+
+    cycle = runtime.tick(execute=False)
+    assert cycle.cycle_number == 1
+    assert [event.topic for event in cycle.events] == ["runtime.started"]
+
+    runtime.pause()
+    assert runtime.status is RuntimeStatus.PAUSED
+    with pytest.raises(RuntimeLifecycleError):
+        runtime.tick()
+    runtime.resume()
+    runtime.stop()
+    assert runtime.status is RuntimeStatus.STOPPED
+
+
+def test_runtime_executes_ready_plan_step_and_marks_complete():
+    runtime, kernel = make_runtime()
+    command = Command(target="pump", action=CommandAction.START)
+    executor = RecordingExecutor([])
+    runtime.execution.register_executor("pump", executor)
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    cycle = runtime.tick()
+
+    assert [record.status for record in cycle.submission_records] == [ExecutionStatus.QUEUED]
+    assert [record.status for record in cycle.execution_records] == [ExecutionStatus.SUCCEEDED]
+    assert executor.commands == [command]
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "completed"
+
+
+def test_runtime_dry_run_leaves_command_pending_and_step_submitted():
+    runtime, kernel = make_runtime()
+    command = Command(target="pump", action=CommandAction.START)
+    runtime.execution.register_executor("pump", RecordingExecutor([]))
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    cycle = runtime.tick(execute=False)
+
+    assert cycle.execution_records == ()
+    assert runtime.execution.pending() == (command,)
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "submitted"
+
+
+def test_missing_executor_is_audited_without_faulting_runtime():
+    runtime, kernel = make_runtime()
+    command = Command(target="missing", action=CommandAction.START)
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    cycle = runtime.tick()
+
+    assert cycle.execution_records[0].status is ExecutionStatus.REJECTED
+    assert runtime.status is RuntimeStatus.RUNNING
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "failed"
+
+
+def test_runtime_close_unsubscribes_from_event_bus():
+    runtime, kernel = make_runtime()
+    runtime.start()
+    runtime.close()
+    count = len(runtime.pending_events())
+    kernel.events.publish(
+        PoolEvent(
+            topic="external.test",
+            occurred_at=kernel.clock.now(),
+            source="test",
+        )
+    )
+    assert len(runtime.pending_events()) == count
+
+
+def test_invalid_lifecycle_transitions_are_rejected():
+    runtime, _ = make_runtime()
+    with pytest.raises(RuntimeLifecycleError):
+        runtime.pause()
+    with pytest.raises(RuntimeLifecycleError):
+        runtime.resume()
+    runtime.start()
+    with pytest.raises(RuntimeLifecycleError):
+        runtime.start()
+
+
+def test_dry_run_command_completes_step_when_executed_on_later_cycle():
+    runtime, kernel = make_runtime()
+    command = Command(target="pump", action=CommandAction.START)
+    runtime.execution.register_executor("pump", RecordingExecutor([]))
+    runtime.activate_plan(make_plan(kernel.clock.now(), command))
+    runtime.start()
+
+    runtime.tick(execute=False)
+    second = runtime.tick(execute=True)
+
+    assert second.execution_records[0].status is ExecutionStatus.SUCCEEDED
+    assert runtime.scheduler.get("plan-1").steps["step-1"].status.value == "completed"

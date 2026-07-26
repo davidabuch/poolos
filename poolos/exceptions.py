@@ -47,3 +47,7 @@ class ScheduledPlanNotFoundError(PoolOSError, KeyError):
 
 class ScheduledStepNotFoundError(PoolOSError, KeyError):
     """Raised when a plan does not contain a requested step."""
+
+
+class RuntimeLifecycleError(PoolOSError, RuntimeError):
+    """Raised when a PoolRuntime lifecycle transition is invalid."""
