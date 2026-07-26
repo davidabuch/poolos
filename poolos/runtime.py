@@ -10,17 +10,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .authority import AuthorityDecision, ControlAuthority
 from .constraints import ConstraintEngine, ConstraintEvaluation
 from .events import PoolEvent
+from .event_bus import RuntimeEventPublisher, RuntimeEventTopic
 from .exceptions import RuntimeLifecycleError
 from .execution import ExecutionEngine, ExecutionRecord, ExecutionStatus
 from .kernel import PoolKernel
 from .planning import Plan
 from .reconciliation import ReconciliationEngine, ReconciliationEvaluation
 from .runtime_memory import RuntimeMemory
+from .runtime_context import RuntimeContext
 from .policies import PolicyEngine, PolicyEvaluation
 from .scheduling import (
     ScheduledPlanStatus,
@@ -37,6 +39,52 @@ class RuntimeStatus(str, Enum):
     RUNNING = "running"
     PAUSED = "paused"
     FAULTED = "faulted"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeExplanation:
+    """Structured explanation of the most recently completed runtime cycle."""
+
+    cycle_number: int
+    status: RuntimeStatus
+    authority_allowed: int
+    authority_blocked: int
+    constraints_modified: int
+    constraints_blocked: int
+    submitted: int
+    executed: int
+    execution_succeeded: int
+    execution_failed: int
+    reconciliation_records: int
+    reconciliation_retries: int
+    active_plan_ids: tuple[str, ...]
+    learned_cycle_seconds: Optional[float]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "cycle_number": self.cycle_number,
+            "status": self.status.value,
+            "authority": {
+                "allowed": self.authority_allowed,
+                "blocked": self.authority_blocked,
+            },
+            "constraints": {
+                "modified": self.constraints_modified,
+                "blocked": self.constraints_blocked,
+            },
+            "execution": {
+                "submitted": self.submitted,
+                "executed": self.executed,
+                "succeeded": self.execution_succeeded,
+                "failed": self.execution_failed,
+            },
+            "reconciliation": {
+                "records": self.reconciliation_records,
+                "retries": self.reconciliation_retries,
+            },
+            "active_plan_ids": self.active_plan_ids,
+            "memory": {"learned_cycle_seconds": self.learned_cycle_seconds},
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +143,8 @@ class PoolRuntime:
     _cycle_number: int = 0
     _command_owners: dict[str, tuple[str, str]] = field(default_factory=dict)
     _unsubscribe: Optional[Callable[[], None]] = field(default=None, init=False, repr=False)
+    _event_publisher: RuntimeEventPublisher = field(init=False, repr=False)
+    _last_context: Optional[RuntimeContext] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Runtime and execution audit records must share the same clock.
@@ -106,6 +156,7 @@ class PoolRuntime:
         self.reconciliation.clock = self.kernel.clock
         self.reconciliation.events = self.kernel.events
         self.reconciliation.memory = self.memory
+        self._event_publisher = RuntimeEventPublisher(self.kernel.events)
         self._unsubscribe = self.kernel.events.subscribe("*", self._event_queue.append)
 
     def start(self) -> None:
@@ -183,7 +234,22 @@ class PoolRuntime:
             raise ValueError("execution_limit must be zero or greater")
 
         started_at = self._now()
+        next_cycle = self._cycle_number + 1
         events = self._drain_events()
+        self._event_publisher.publish(
+            RuntimeEventTopic.CYCLE_STARTED,
+            started_at,
+            payload={"cycle_number": next_cycle},
+        )
+        self._last_context = RuntimeContext(
+            cycle_number=next_cycle,
+            observed_at=started_at,
+            runtime_status=self.status.value,
+            active_plan_ids=tuple(self._active_plan_ids),
+            pending_execution_count=len(self.execution.pending()),
+            pending_reconciliation_count=len(self.reconciliation.pending()),
+            events=events,
+        )
         evaluations: list[SchedulerEvaluation] = []
 
         try:
@@ -255,23 +321,20 @@ class PoolRuntime:
                 max(0.0, (cycle.completed_at - cycle.started_at).total_seconds()),
                 observed_at=cycle.completed_at,
             )
-            self.kernel.events.publish(
-                PoolEvent(
-                    topic="runtime.cycle.completed",
-                    occurred_at=cycle.completed_at,
-                    source="pool_runtime",
-                    payload={
-                        "cycle_number": cycle.cycle_number,
-                        "events": len(events),
-                        "submitted": len(submissions),
-                        "executed": len(executions),
-                        "constraint_blocked": sum(
-                            1 for item in constraint_evaluations if not item.executable
-                        ),
-                        "reconciliation_records": len(reconciliation_evaluation.records),
-                        "reconciliation_retries": len(reconciliation_evaluation.retry_commands),
-                    },
-                )
+            self._event_publisher.publish(
+                RuntimeEventTopic.CYCLE_COMPLETED,
+                cycle.completed_at,
+                payload={
+                    "cycle_number": cycle.cycle_number,
+                    "events": len(events),
+                    "submitted": len(submissions),
+                    "executed": len(executions),
+                    "constraint_blocked": sum(
+                        1 for item in constraint_evaluations if not item.executable
+                    ),
+                    "reconciliation_records": len(reconciliation_evaluation.records),
+                    "reconciliation_retries": len(reconciliation_evaluation.retry_commands),
+                },
             )
             return cycle
         except Exception as exc:
@@ -300,6 +363,45 @@ class PoolRuntime:
         """Return plans currently evaluated by the runtime."""
 
         return tuple(self._active_plan_ids)
+
+    def context(self) -> Optional[RuntimeContext]:
+        """Return the immutable context captured at the latest cycle start."""
+
+        return self._last_context
+
+    def explain(self) -> Optional[RuntimeExplanation]:
+        """Explain the latest completed cycle without changing runtime state."""
+
+        if not self._cycles:
+            return None
+        cycle = self._cycles[-1]
+        modified = sum(
+            1 for item in cycle.constraint_evaluations
+            if item.disposition.value == "modify"
+        )
+        blocked = sum(
+            1 for item in cycle.constraint_evaluations if not item.executable
+        )
+        succeeded = sum(
+            1 for item in cycle.execution_records
+            if item.status is ExecutionStatus.SUCCEEDED
+        )
+        return RuntimeExplanation(
+            cycle_number=cycle.cycle_number,
+            status=self.status,
+            authority_allowed=sum(1 for item in cycle.authority_decisions if item.allowed),
+            authority_blocked=sum(1 for item in cycle.authority_decisions if not item.allowed),
+            constraints_modified=modified,
+            constraints_blocked=blocked,
+            submitted=len(cycle.submission_records),
+            executed=len(cycle.execution_records),
+            execution_succeeded=succeeded,
+            execution_failed=len(cycle.execution_records) - succeeded,
+            reconciliation_records=len(cycle.reconciliation_evaluation.records),
+            reconciliation_retries=len(cycle.reconciliation_evaluation.retry_commands),
+            active_plan_ids=tuple(self._active_plan_ids),
+            learned_cycle_seconds=self.memory.predict("runtime.cycle_seconds"),
+        )
 
     def _update_submitted_steps(
         self,
