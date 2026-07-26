@@ -32,3 +32,10 @@ calculated, learned, or predicted, with confidence and explainable evidence.
 The repository may also contain the existing Home Assistant IntelliCenter
 integration. It will become the first vendor adapter while PoolOS remains
 hardware-independent.
+
+## Hardware abstraction
+
+PoolOS includes a transport-independent hardware abstraction layer. Runtime and
+applications target vendor-neutral equipment contracts; vendor adapters and
+transports provide the implementation. Home Assistant and direct RS-485 are
+supported architectural paths, but neither is a core dependency.
