@@ -257,7 +257,6 @@ class PoolRuntime:
             for plan_id in tuple(self._active_plan_ids):
                 evaluation = self.scheduler.tick(plan_id, self.kernel)
                 evaluations.append(evaluation)
-                plan = self.scheduler.plan(plan_id)
                 for step in evaluation.ready_steps:
                     for command in step.commands:
                         self._command_owners[command.command_id] = (plan_id, step.step_id)

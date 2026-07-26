@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import FrozenSet, Iterable, Optional
+from typing import FrozenSet, Optional
 
 from .capabilities import Capability
 from .enums import BodyType, EquipmentType

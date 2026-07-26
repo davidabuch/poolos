@@ -1,7 +1,6 @@
 """Registry for adapter discovery and hot-swappable transport-backed adapters."""
 from __future__ import annotations
 
-from typing import Iterable
 
 from .adapter import HardwareAdapter
 from .exceptions import AdapterNotFoundError, DuplicateAdapterError

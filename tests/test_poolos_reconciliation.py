@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from poolos.clock import FixedClock
@@ -142,7 +141,8 @@ def test_verifier_exception_is_classified_as_communications_drift():
 
 def test_duplicate_verifier_registration_requires_explicit_replace():
     engine, _ = make_engine()
-    verifier = lambda kernel, command: VerificationObservation(True)
+    def verifier(kernel, command):
+        return VerificationObservation(True)
     engine.register_verifier("pump", verifier)
     try:
         engine.register_verifier("pump", verifier)

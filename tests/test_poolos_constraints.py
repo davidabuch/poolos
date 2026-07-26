@@ -6,7 +6,6 @@ import pytest
 from poolos.clock import FixedClock
 from poolos.commands import Command, CommandAction
 from poolos.constraints import (
-    ConstraintContext,
     ConstraintDecision,
     ConstraintDisposition,
     ConstraintEngine,

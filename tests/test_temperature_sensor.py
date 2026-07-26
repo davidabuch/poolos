@@ -23,10 +23,9 @@ def test_temperature_probe_is_included_in_snapshot(
 
 
 def test_invalid_temperature_probe_value_is_contained(
-    api_modules, temperature_sensor_object_factory, coordinator_factory
+    api_modules, temperature_sensor_object_factory
 ):
     probe = temperature_sensor_object_factory(temperature="not-a-number")
-    coordinator = coordinator_factory([probe])
 
     state = api_modules.temperature.build_temperature_sensor_state(probe)
 

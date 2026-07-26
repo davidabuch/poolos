@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, IntEnum
-from typing import Callable, Optional
+from typing import Optional
 from uuid import uuid4
 
 from .clock import Clock, SystemClock

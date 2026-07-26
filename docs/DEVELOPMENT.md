@@ -106,3 +106,17 @@ PoolOS compilation failure. Activate the project virtual environment and run:
 ```bash
 python3 -m pip install -e ".[dev]"
 ```
+## Code quality policy
+
+PoolOS treats compilation, tests, and Ruff as required quality gates:
+
+```bash
+python -m compileall poolos
+python -m pytest
+python -m ruff check poolos tests
+```
+
+Package initializer modules intentionally re-export convenience symbols. Ruff's F401 rule is
+therefore disabled only for `poolos/__init__.py` and `poolos/hal/__init__.py`; unused imports
+remain enforced everywhere else.
+
