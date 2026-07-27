@@ -53,6 +53,24 @@ class StopPump(PoolOperation):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SetHydraulicRoute(PoolOperation):
+    """Request a route from one hydraulic body to another.
+
+    ``equipment_id`` identifies the hydraulic system or shared-equipment group
+    receiving the route request. Body identifiers refer to entries in the
+    translation context equipment inventory.
+    """
+
+    suction_body_id: str
+    return_body_id: str
+
+    def __post_init__(self) -> None:
+        super(SetHydraulicRoute, self).__post_init__()
+        _require_identifier(self.suction_body_id, "suction_body_id")
+        _require_identifier(self.return_body_id, "return_body_id")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SetHeatMode(PoolOperation):
     """Request a hardware-independent heat mode for a body or heater."""
 

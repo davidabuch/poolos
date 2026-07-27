@@ -14,6 +14,7 @@ from poolos.integration import (
     MissingCapabilityError,
     PoolOperation,
     SetHeatMode,
+    SetHydraulicRoute,
     SetPumpSpeed,
     SetpointOutOfRangeError,
     StartPump,
@@ -24,6 +25,7 @@ from poolos.integration import (
     TranslatorRegistry,
     UnsupportedOperationError,
     VendorCommand,
+    TranslationConfigurationError,
     VendorMismatchError,
 )
 from poolos.integration.pentair import (
@@ -32,10 +34,14 @@ from poolos.integration.pentair import (
     PentairTranslator,
 )
 from poolos.vendors.pentair import (
+    PentairBody,
+    PentairBodyKind,
     PentairObjectAddress,
     PentairObjectKind,
     PentairPump,
     PentairPumpControlMode,
+    PentairSharedEquipment,
+    PentairTemperatureUnit,
 )
 
 
@@ -87,6 +93,13 @@ def test_initial_operation_classes_can_be_constructed() -> None:
     assert StartPump(equipment_id="pump").equipment_id == "pump"
     assert StopPump(equipment_id="pump").equipment_id == "pump"
     assert SetHeatMode(equipment_id="spa", mode="heat").mode == "heat"
+    route = SetHydraulicRoute(
+        equipment_id="shared-1",
+        suction_body_id="pool",
+        return_body_id="spa",
+    )
+    assert route.suction_body_id == "pool"
+    assert route.return_body_id == "spa"
 
 
 def test_vendor_command_is_validated_and_deeply_read_only_at_mapping_boundary() -> None:
@@ -288,4 +301,152 @@ def test_pentair_scaffold_rejects_wrong_vendor_context() -> None:
         translator.translate(
             StartPump(equipment_id="pump"),
             TranslationContext(vendor="hayward"),
+        )
+
+
+def _pentair_body(
+    *,
+    object_id: str,
+    body_kind: PentairBodyKind,
+    circuit_id: str,
+    shared_equipment_group: str | None = "shared-1",
+) -> PentairBody:
+    return PentairBody(
+        address=PentairObjectAddress(
+            object_id=object_id,
+            kind=PentairObjectKind.BODY,
+            panel_name=body_kind.value.title(),
+        ),
+        name=body_kind.value.title(),
+        body_kind=body_kind,
+        circuit_id=circuit_id,
+        temperature_unit=PentairTemperatureUnit.FAHRENHEIT,
+        minimum_temperature=40,
+        maximum_temperature=104,
+        shared_equipment_group=shared_equipment_group,
+    )
+
+
+def _shared_route_context() -> TranslationContext:
+    pool = _pentair_body(
+        object_id="body-pool",
+        body_kind=PentairBodyKind.POOL,
+        circuit_id="circuit-pool",
+    )
+    spa = _pentair_body(
+        object_id="body-spa",
+        body_kind=PentairBodyKind.SPA,
+        circuit_id="circuit-spa",
+    )
+    group = PentairSharedEquipment(
+        group_id="shared-1",
+        body_ids=frozenset({"body-pool", "body-spa"}),
+        pump_ids=frozenset({"pump-1"}),
+        intake_valve_id="valve-intake",
+        return_valve_id="valve-return",
+    )
+    return TranslationContext(
+        vendor="pentair",
+        equipment={"pool": pool, "spa": spa, "shared": group},
+    )
+
+
+@pytest.mark.parametrize(
+    ("suction", "return_body", "expected_suction", "expected_return"),
+    [
+        ("pool", "pool", "body-pool", "body-pool"),
+        ("spa", "spa", "body-spa", "body-spa"),
+        ("pool", "spa", "body-pool", "body-spa"),
+        ("spa", "pool", "body-spa", "body-pool"),
+    ],
+)
+def test_pentair_translates_all_four_shared_hydraulic_routes(
+    suction: str,
+    return_body: str,
+    expected_suction: str,
+    expected_return: str,
+) -> None:
+    result = PentairTranslator().translate(
+        SetHydraulicRoute(
+            equipment_id="shared-1",
+            suction_body_id=suction,
+            return_body_id=return_body,
+            correlation_id="route-session",
+        ),
+        _shared_route_context(),
+    )
+
+    command = result.commands[0]
+    assert command.operation == PentairCommandOperation.SET_HYDRAULIC_ROUTE
+    assert command.target == "shared-1"
+    assert command.parameters[PentairCommandParameter.SUCTION_BODY_ID] == expected_suction
+    assert command.parameters[PentairCommandParameter.RETURN_BODY_ID] == expected_return
+    assert command.parameters[PentairCommandParameter.INTAKE_VALVE_ID] == "valve-intake"
+    assert command.parameters[PentairCommandParameter.RETURN_VALVE_ID] == "valve-return"
+    assert command.metadata["correlation_id"] == "route-session"
+    assert result.metadata["hydraulic_route"] == {
+        "suction": expected_suction,
+        "return": expected_return,
+    }
+
+
+def test_cross_body_route_requires_common_shared_equipment() -> None:
+    pool = _pentair_body(
+        object_id="body-pool",
+        body_kind=PentairBodyKind.POOL,
+        circuit_id="circuit-pool",
+        shared_equipment_group=None,
+    )
+    spa = _pentair_body(
+        object_id="body-spa",
+        body_kind=PentairBodyKind.SPA,
+        circuit_id="circuit-spa",
+        shared_equipment_group=None,
+    )
+    context = TranslationContext(vendor="pentair", equipment={"pool": pool, "spa": spa})
+
+    with pytest.raises(TranslationConfigurationError, match="shared equipment group"):
+        PentairTranslator().translate(
+            SetHydraulicRoute(
+                equipment_id="hydraulics",
+                suction_body_id="pool",
+                return_body_id="spa",
+            ),
+            context,
+        )
+
+
+def test_hydraulic_route_validates_body_inventory_and_group_membership() -> None:
+    translator = PentairTranslator()
+    context = _shared_route_context()
+
+    with pytest.raises(EquipmentNotFoundError):
+        translator.translate(
+            SetHydraulicRoute(
+                equipment_id="shared-1",
+                suction_body_id="missing",
+                return_body_id="spa",
+            ),
+            context,
+        )
+
+    pool = context.equipment["pool"]
+    spa = context.equipment["spa"]
+    invalid_group = PentairSharedEquipment(
+        group_id="shared-1",
+        body_ids=frozenset({"body-pool", "body-other"}),
+        pump_ids=frozenset({"pump-1"}),
+    )
+    bad_context = TranslationContext(
+        vendor="pentair",
+        equipment={"pool": pool, "spa": spa, "shared": invalid_group},
+    )
+    with pytest.raises(TranslationConfigurationError, match="not members"):
+        translator.translate(
+            SetHydraulicRoute(
+                equipment_id="shared-1",
+                suction_body_id="pool",
+                return_body_id="spa",
+            ),
+            bad_context,
         )

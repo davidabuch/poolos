@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from poolos.capabilities import Capability
-from poolos.vendors.pentair import PentairPump
+from poolos.vendors.pentair import PentairBody, PentairPump, PentairSharedEquipment
 
 from ..command import VendorCommand
 from ..context import TranslationContext
@@ -15,12 +15,18 @@ from ..exceptions import (
     EquipmentTypeError,
     MissingCapabilityError,
     SetpointOutOfRangeError,
+    TranslationConfigurationError,
     UnsupportedOperationError,
     VendorMismatchError,
 )
-from ..operations import PoolOperation, SetPumpSpeed, StartPump, StopPump
+from ..operations import PoolOperation, SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump
 from ..response import TranslationResult
-from .capabilities import PENTAIR_START_STOP, PENTAIR_VARIABLE_SPEED
+from .capabilities import (
+    PENTAIR_HYDRAULIC_ROUTING,
+    PENTAIR_SHARED_EQUIPMENT_ROUTING,
+    PENTAIR_START_STOP,
+    PENTAIR_VARIABLE_SPEED,
+)
 from .commands import PentairCommandOperation, PentairCommandParameter
 
 
@@ -30,7 +36,7 @@ class PentairTranslator:
 
     vendor: str = "pentair"
 
-    _supported_types = (SetPumpSpeed, StartPump, StopPump)
+    _supported_types = (SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump)
 
     def supports(self, operation: PoolOperation) -> bool:
         return isinstance(operation, self._supported_types)
@@ -44,7 +50,10 @@ class PentairTranslator:
         if not self.supports(operation):
             raise UnsupportedOperationError(self.vendor, type(operation))
 
-        pump = self._resolve_pump(operation.equipment_id, context)
+        if isinstance(operation, SetHydraulicRoute):
+            return self._translate_hydraulic_route(operation, context)
+
+        pump = self._resolve_equipment(operation.equipment_id, context, PentairPump)
         if isinstance(operation, SetPumpSpeed):
             return self._translate_set_speed(operation, pump)
         if isinstance(operation, StartPump):
@@ -59,14 +68,113 @@ class PentairTranslator:
             raise VendorMismatchError(self.vendor, actual)
 
     @staticmethod
-    def _resolve_pump(equipment_id: str, context: TranslationContext) -> PentairPump:
+    def _resolve_equipment(
+        equipment_id: str,
+        context: TranslationContext,
+        expected_type: type[Any],
+    ) -> Any:
         try:
             equipment = context.equipment[equipment_id]
         except KeyError as exc:
             raise EquipmentNotFoundError(equipment_id) from exc
-        if not isinstance(equipment, PentairPump):
-            raise EquipmentTypeError(equipment_id, PentairPump, type(equipment))
+        if not isinstance(equipment, expected_type):
+            raise EquipmentTypeError(equipment_id, expected_type, type(equipment))
         return equipment
+
+    def _translate_hydraulic_route(
+        self,
+        operation: SetHydraulicRoute,
+        context: TranslationContext,
+    ) -> TranslationResult:
+        suction = self._resolve_equipment(operation.suction_body_id, context, PentairBody)
+        return_body = self._resolve_equipment(operation.return_body_id, context, PentairBody)
+        group = self._resolve_route_group(suction, return_body, context)
+
+        parameters: dict[str, Any] = {
+            PentairCommandParameter.SUCTION_BODY_ID: suction.address.object_id,
+            PentairCommandParameter.SUCTION_BODY_KIND: suction.body_kind.value,
+            PentairCommandParameter.SUCTION_CIRCUIT_ID: suction.circuit_id,
+            PentairCommandParameter.RETURN_BODY_ID: return_body.address.object_id,
+            PentairCommandParameter.RETURN_BODY_KIND: return_body.body_kind.value,
+            PentairCommandParameter.RETURN_CIRCUIT_ID: return_body.circuit_id,
+        }
+        capability = PENTAIR_HYDRAULIC_ROUTING
+        target = operation.equipment_id
+        target_kind = "hydraulic_system"
+
+        if group is not None:
+            parameters[PentairCommandParameter.SHARED_EQUIPMENT_GROUP] = group.group_id
+            if group.intake_valve_id is not None:
+                parameters[PentairCommandParameter.INTAKE_VALVE_ID] = group.intake_valve_id
+            if group.return_valve_id is not None:
+                parameters[PentairCommandParameter.RETURN_VALVE_ID] = group.return_valve_id
+            capability = PENTAIR_SHARED_EQUIPMENT_ROUTING
+            target = group.group_id
+            target_kind = "shared_equipment"
+
+        command = VendorCommand(
+            vendor=self.vendor,
+            operation=PentairCommandOperation.SET_HYDRAULIC_ROUTE,
+            target=target,
+            parameters=parameters,
+            metadata=self._operation_metadata(operation, object_kind=target_kind),
+        )
+        return TranslationResult(
+            commands=(command,),
+            metadata={
+                "source_operation": type(operation).__name__,
+                "translation_capability": capability,
+                "hydraulic_route": {
+                    "suction": suction.address.object_id,
+                    "return": return_body.address.object_id,
+                },
+            },
+        )
+
+    @staticmethod
+    def _resolve_route_group(
+        suction: PentairBody,
+        return_body: PentairBody,
+        context: TranslationContext,
+    ) -> PentairSharedEquipment | None:
+        suction_group = suction.shared_equipment_group
+        return_group = return_body.shared_equipment_group
+
+        if suction.address.object_id != return_body.address.object_id:
+            if suction_group is None or return_group is None:
+                raise TranslationConfigurationError(
+                    "cross-body hydraulic routes require a shared equipment group"
+                )
+            if suction_group != return_group:
+                raise TranslationConfigurationError(
+                    "suction and return bodies must belong to the same shared equipment group"
+                )
+
+        group_id = suction_group or return_group
+        if group_id is None:
+            return None
+
+        groups = [
+            item
+            for item in context.equipment.values()
+            if isinstance(item, PentairSharedEquipment) and item.group_id == group_id
+        ]
+        if not groups:
+            raise TranslationConfigurationError(
+                f"hydraulic route references missing shared equipment group {group_id}"
+            )
+        if len(groups) > 1:
+            raise TranslationConfigurationError(
+                f"shared equipment group {group_id} is configured more than once"
+            )
+
+        group = groups[0]
+        requested = {suction.address.object_id, return_body.address.object_id}
+        if not requested <= group.body_ids:
+            raise TranslationConfigurationError(
+                f"hydraulic route bodies are not members of shared equipment group {group_id}"
+            )
+        return group
 
     def _translate_start(
         self,
@@ -74,11 +182,7 @@ class PentairTranslator:
         pump: PentairPump,
     ) -> TranslationResult:
         self._require_capability(pump, Capability.START_STOP, PENTAIR_START_STOP)
-        return self._single_command(
-            operation,
-            pump,
-            PentairCommandOperation.START_PUMP,
-        )
+        return self._single_command(operation, pump, PentairCommandOperation.START_PUMP)
 
     def _translate_stop(
         self,
@@ -86,11 +190,7 @@ class PentairTranslator:
         pump: PentairPump,
     ) -> TranslationResult:
         self._require_capability(pump, Capability.START_STOP, PENTAIR_START_STOP)
-        return self._single_command(
-            operation,
-            pump,
-            PentairCommandOperation.STOP_PUMP,
-        )
+        return self._single_command(operation, pump, PentairCommandOperation.STOP_PUMP)
 
     def _translate_set_speed(
         self,
@@ -127,32 +227,40 @@ class PentairTranslator:
     def _single_command(
         self,
         operation: PoolOperation,
-        pump: PentairPump,
+        equipment: PentairPump,
         command_operation: PentairCommandOperation,
         *,
         parameters: Mapping[str, Any] | None = None,
     ) -> TranslationResult:
-        command_metadata: dict[str, Any] = {
-            "operation_id": operation.operation_id,
-            "equipment_id": operation.equipment_id,
-            "object_kind": pump.address.kind.value,
-        }
-        if operation.correlation_id is not None:
-            command_metadata["correlation_id"] = operation.correlation_id
-        if pump.address.numeric_id is not None:
-            command_metadata["numeric_id"] = pump.address.numeric_id
-
+        command_metadata = self._operation_metadata(
+            operation,
+            object_kind=equipment.address.kind.value,
+        )
+        if equipment.address.numeric_id is not None:
+            command_metadata["numeric_id"] = equipment.address.numeric_id
         command = VendorCommand(
             vendor=self.vendor,
             operation=command_operation,
-            target=pump.address.object_id,
+            target=equipment.address.object_id,
             parameters=parameters or {},
             metadata=command_metadata,
         )
         return TranslationResult(
             commands=(command,),
-            metadata={
-                "translator": type(self).__name__,
-                "source_operation": type(operation).__name__,
-            },
+            metadata={"source_operation": type(operation).__name__},
         )
+
+    @staticmethod
+    def _operation_metadata(
+        operation: PoolOperation,
+        *,
+        object_kind: str,
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {
+            "operation_id": operation.operation_id,
+            "equipment_id": operation.equipment_id,
+            "object_kind": object_kind,
+        }
+        if operation.correlation_id is not None:
+            metadata["correlation_id"] = operation.correlation_id
+        return metadata

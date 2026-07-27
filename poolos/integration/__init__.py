@@ -9,11 +9,19 @@ from .exceptions import (
     IntegrationError,
     MissingCapabilityError,
     SetpointOutOfRangeError,
+    TranslationConfigurationError,
     TranslatorNotFoundError,
     UnsupportedOperationError,
     VendorMismatchError,
 )
-from .operations import PoolOperation, SetHeatMode, SetPumpSpeed, StartPump, StopPump
+from .operations import (
+    PoolOperation,
+    SetHeatMode,
+    SetHydraulicRoute,
+    SetPumpSpeed,
+    StartPump,
+    StopPump,
+)
 from .registry import TranslatorRegistry
 from .response import TranslationResult
 from .translator import Translator
@@ -26,10 +34,12 @@ __all__ = [
     "MissingCapabilityError",
     "PoolOperation",
     "SetHeatMode",
+    "SetHydraulicRoute",
     "SetPumpSpeed",
     "SetpointOutOfRangeError",
     "StartPump",
     "StopPump",
+    "TranslationConfigurationError",
     "TranslationContext",
     "TranslationResult",
     "Translator",

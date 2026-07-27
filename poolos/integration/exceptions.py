@@ -58,6 +58,10 @@ class MissingCapabilityError(IntegrationError):
         self.capability = capability
 
 
+class TranslationConfigurationError(IntegrationError):
+    """Raised when vendor configuration cannot safely satisfy an operation."""
+
+
 class SetpointOutOfRangeError(IntegrationError):
     def __init__(
         self,
