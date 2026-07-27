@@ -9,9 +9,13 @@ import pytest
 
 from poolos.integration import (
     DuplicateTranslatorError,
+    EquipmentNotFoundError,
+    EquipmentTypeError,
+    MissingCapabilityError,
     PoolOperation,
     SetHeatMode,
     SetPumpSpeed,
+    SetpointOutOfRangeError,
     StartPump,
     StopPump,
     TranslationContext,
@@ -22,7 +26,17 @@ from poolos.integration import (
     VendorCommand,
     VendorMismatchError,
 )
-from poolos.integration.pentair import PentairTranslator
+from poolos.integration.pentair import (
+    PentairCommandOperation,
+    PentairCommandParameter,
+    PentairTranslator,
+)
+from poolos.vendors.pentair import (
+    PentairObjectAddress,
+    PentairObjectKind,
+    PentairPump,
+    PentairPumpControlMode,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,20 +177,108 @@ def test_registry_rejects_duplicates_unknown_vendors_and_context_mismatch() -> N
         )
 
 
-def test_pentair_scaffold_recognizes_initial_operations_and_fails_closed() -> None:
-    translator = PentairTranslator()
-    context = TranslationContext(vendor="pentair")
-    operations = (
-        SetPumpSpeed(equipment_id="pump", rpm=2400),
-        StartPump(equipment_id="pump"),
-        StopPump(equipment_id="pump"),
-        SetHeatMode(equipment_id="spa", mode="heat"),
+def _pentair_pump(
+    *,
+    control_mode: PentairPumpControlMode = PentairPumpControlMode.VARIABLE_SPEED,
+    minimum_rpm: int | None = 450,
+    maximum_rpm: int | None = 3450,
+) -> PentairPump:
+    return PentairPump(
+        address=PentairObjectAddress(
+            object_id="pump-1",
+            kind=PentairObjectKind.PUMP,
+            numeric_id=7,
+            panel_name="Filter Pump",
+        ),
+        name="Filter Pump",
+        control_mode=control_mode,
+        minimum_rpm=minimum_rpm,
+        maximum_rpm=maximum_rpm,
     )
 
-    assert all(translator.supports(operation) for operation in operations)
-    for operation in operations:
-        with pytest.raises(UnsupportedOperationError):
-            translator.translate(operation, context)
+
+def test_pentair_pump_start_stop_and_speed_translate_to_logical_commands() -> None:
+    translator = PentairTranslator()
+    context = TranslationContext(vendor="pentair", equipment={"filter_pump": _pentair_pump()})
+
+    start = translator.translate(
+        StartPump(equipment_id="filter_pump", correlation_id="session-1"),
+        context,
+    )
+    stop = translator.translate(StopPump(equipment_id="filter_pump"), context)
+    speed = translator.translate(SetPumpSpeed(equipment_id="filter_pump", rpm=2400), context)
+
+    assert start.commands[0].operation == PentairCommandOperation.START_PUMP
+    assert start.commands[0].target == "pump-1"
+    assert start.commands[0].metadata["numeric_id"] == 7
+    assert start.commands[0].metadata["correlation_id"] == "session-1"
+    assert stop.commands[0].operation == PentairCommandOperation.STOP_PUMP
+    assert speed.commands[0].operation == PentairCommandOperation.SET_PUMP_SPEED
+    assert speed.commands[0].parameters[PentairCommandParameter.RPM] == 2400
+    assert speed.metadata["source_operation"] == "SetPumpSpeed"
+
+
+def test_pentair_supports_only_implemented_pump_operations() -> None:
+    translator = PentairTranslator()
+
+    assert translator.supports(StartPump(equipment_id="pump"))
+    assert translator.supports(StopPump(equipment_id="pump"))
+    assert translator.supports(SetPumpSpeed(equipment_id="pump", rpm=2400))
+    assert not translator.supports(SetHeatMode(equipment_id="spa", mode="heat"))
+
+    with pytest.raises(UnsupportedOperationError):
+        translator.translate(
+            SetHeatMode(equipment_id="spa", mode="heat"),
+            TranslationContext(vendor="pentair"),
+        )
+
+
+def test_pentair_translation_validates_equipment_and_capabilities() -> None:
+    translator = PentairTranslator()
+
+    with pytest.raises(EquipmentNotFoundError):
+        translator.translate(
+            StartPump(equipment_id="missing"),
+            TranslationContext(vendor="pentair"),
+        )
+    with pytest.raises(EquipmentTypeError):
+        translator.translate(
+            StartPump(equipment_id="pump"),
+            TranslationContext(vendor="pentair", equipment={"pump": object()}),
+        )
+
+    single_speed = _pentair_pump(
+        control_mode=PentairPumpControlMode.SINGLE_SPEED,
+        minimum_rpm=None,
+        maximum_rpm=None,
+    )
+    with pytest.raises(MissingCapabilityError, match="pentair.variable_speed"):
+        translator.translate(
+            SetPumpSpeed(equipment_id="pump", rpm=2400),
+            TranslationContext(vendor="pentair", equipment={"pump": single_speed}),
+        )
+
+
+def test_pentair_speed_translation_requires_bounds_and_enforces_them() -> None:
+    translator = PentairTranslator()
+    operation = SetPumpSpeed(equipment_id="pump", rpm=3500)
+
+    with pytest.raises(MissingCapabilityError, match="pentair.rpm_bounds"):
+        translator.translate(
+            operation,
+            TranslationContext(
+                vendor="pentair",
+                equipment={"pump": _pentair_pump(minimum_rpm=None, maximum_rpm=None)},
+            ),
+        )
+    with pytest.raises(SetpointOutOfRangeError) as exc_info:
+        translator.translate(
+            operation,
+            TranslationContext(vendor="pentair", equipment={"pump": _pentair_pump()}),
+        )
+
+    assert exc_info.value.minimum == 450
+    assert exc_info.value.maximum == 3450
 
 
 def test_pentair_scaffold_rejects_wrong_vendor_context() -> None:

@@ -4,7 +4,11 @@ from .command import VendorCommand
 from .context import TranslationContext
 from .exceptions import (
     DuplicateTranslatorError,
+    EquipmentNotFoundError,
+    EquipmentTypeError,
     IntegrationError,
+    MissingCapabilityError,
+    SetpointOutOfRangeError,
     TranslatorNotFoundError,
     UnsupportedOperationError,
     VendorMismatchError,
@@ -16,10 +20,14 @@ from .translator import Translator
 
 __all__ = [
     "DuplicateTranslatorError",
+    "EquipmentNotFoundError",
+    "EquipmentTypeError",
     "IntegrationError",
+    "MissingCapabilityError",
     "PoolOperation",
     "SetHeatMode",
     "SetPumpSpeed",
+    "SetpointOutOfRangeError",
     "StartPump",
     "StopPump",
     "TranslationContext",
