@@ -1,220 +1,111 @@
 # PoolOS
 
-> **A deterministic automation platform for intelligent aquatic systems.**
+> A vendor-independent automation platform for intelligent swimming pool and spa control.
 
-[![CI](https://github.com/davidabuch/poolos/actions/workflows/tests.yml/badge.svg)](https://github.com/davidabuch/poolos/actions/workflows/tests.yml)
+![CI](https://github.com/davidabuch/poolos/actions/workflows/tests.yml/badge.svg)
 
-PoolOS is a vendor-independent operating system for swimming pool and spa automation.
+PoolOS is a deterministic automation platform that separates automation logic from hardware. Applications define *what* should happen, while PoolOS determines *how* to execute those actions through vendor-specific adapters.
 
-Rather than embedding automation logic inside a specific controller, PoolOS separates **planning**, **decision making**, **execution**, and **hardware communication** into independent components. The result is a deterministic, testable, simulation-first automation platform capable of supporting multiple hardware vendors without changing application logic.
+## Features
 
----
-
-# Why PoolOS?
-
-Traditional pool controllers tightly couple automation logic to proprietary hardware.
-
-PoolOS takes a different approach.
-
-Applications express **what should happen**.
-
-PoolOS determines **how to accomplish it**.
-
-Hardware adapters perform **vendor-specific execution**.
-
-This architecture makes automation:
-
-- Vendor independent
-- Deterministic
-- Fully testable
-- Simulation capable
-- Extensible
-- Hardware agnostic
-
----
-
-# Core Design Principles
-
-✔ Hardware abstraction layer (HAL)
-
-✔ Event-driven runtime
-
-✔ Deterministic execution
-
-✔ Simulation before deployment
-
-✔ Strong domain model
-
-✔ Vendor independence
-
-✔ Test-first development
-
-✔ Modern Python architecture
-
----
-
-# Architecture
-
-```text
-                  Applications
-                        │
-                        ▼
-               Decision Engine
-                        │
-                        ▼
-              Execution Engine
-                        │
-                        ▼
-          Hardware Abstraction Layer
-        ┌─────────────┼─────────────┐
-        │             │             │
-    Pentair       Hayward      Simulation
-        │             │             │
-        └─────────────┼─────────────┘
-                      │
-                 Physical Equipment
-```
-
-PoolOS applications never communicate directly with vendor hardware.
-
-Instead they interact with a stable hardware abstraction layer that isolates vendor-specific protocols from application logic.
-
----
-
-# Current Capabilities
-
-Current implementation includes:
-
-- Runtime framework
-- Event bus
-- Scheduler
-- Decision engine
-- Execution engine
-- Hardware abstraction layer
-- Pentair domain model
-- Simulation framework
-- REST API foundation
-- Configuration system
+- Vendor-independent architecture
+- Hardware Abstraction Layer (HAL)
+- Deterministic execution engine
+- Simulation-first development
+- Event-driven runtime
 - Comprehensive automated testing
-- Continuous Integration
+- GitHub Actions CI
 
----
+## Architecture
 
-# Repository Layout
-
-```text
-poolos/
-    Core framework
-
-intellicenter/
-    Pentair IntelliCenter implementation
-
-tests/
-    Unit and integration tests
-
-docs/
-    Project documentation
-
-examples/
-    Example applications
+```
+Applications
+      │
+      ▼
+Decision Engine
+      │
+      ▼
+Execution Engine
+      │
+      ▼
+Hardware Abstraction Layer
+      │
+      ├── Pentair
+      ├── Future Vendors
+      └── Simulation
 ```
 
----
+## Repository Structure
 
-# Development
+```text
+poolos/           Core framework
+intellicenter/    Pentair implementation
+tests/            Automated tests
+docs/             Project documentation
+examples/         Example applications
+```
 
-Clone the repository
+## Development
+
+Clone the repository:
 
 ```bash
 git clone https://github.com/davidabuch/poolos.git
 cd poolos
 ```
 
-Create a virtual environment
+Create a virtual environment:
 
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install development dependencies
+Install dependencies:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-Run the validation suite
+Validate the project:
 
 ```bash
 python -m compileall poolos intellicenter
-
 python -m ruff check poolos intellicenter tests
-
 python -m pytest
 ```
 
----
-
-# Project Status
-
-Current development milestone
+## Current Status
 
 | Component | Status |
-|-----------|--------|
+|----------|:------:|
 | Runtime | ✅ |
 | Event Bus | ✅ |
 | Scheduler | ✅ |
 | Decision Engine | ✅ |
 | Execution Engine | ✅ |
-| HAL | ✅ |
-| Pentair Domain | ✅ |
-| CI/CD | ✅ |
+| Hardware Abstraction Layer | ✅ |
+| Pentair Domain Model | ✅ |
+| Continuous Integration | ✅ |
 | Pentair Translation Layer | 🚧 |
-| Home Assistant Transport | 🚧 |
-| First Production Controller | 🚧 |
+| Home Assistant Integration | 🚧 |
 
----
+## Roadmap
 
-# Roadmap
+Near-term priorities:
 
-Near-term objectives
+- Pentair translation layer
+- Home Assistant transport
+- Configuration engine
+- Production command center
 
-1. Pentair translation layer
-2. Home Assistant transport
-3. Configuration engine
-4. Production command center
-5. First complete hardware deployment
+## Philosophy
 
-Long-term vision
+PoolOS treats pool automation as an operating system problem rather than a controller problem. By separating planning, execution, and hardware communication, automation logic becomes portable, testable, and independent of any specific manufacturer.
 
-- Multiple controller vendors
-- Intelligent optimization engine
-- Digital twin simulation
-- Predictive equipment maintenance
-- Energy optimization
-- Water chemistry optimization
+## Contributing
 
----
-
-# Philosophy
-
-PoolOS treats swimming pool automation as an operating system problem rather than a controller problem.
-
-Applications define desired outcomes.
-
-The operating system plans execution.
-
-Hardware adapters translate those plans into vendor-specific commands.
-
-This separation enables sophisticated automation while remaining independent of any single manufacturer.
-
----
-
-# Contributing
-
-Contributions are welcome.
-
-Please ensure all changes satisfy:
+Before submitting changes, ensure the repository passes all validation checks:
 
 ```bash
 python -m compileall poolos intellicenter
@@ -222,10 +113,6 @@ python -m ruff check poolos intellicenter tests
 python -m pytest
 ```
 
-before submitting a pull request.
+## License
 
----
-
-# License
-
-See the LICENSE file for licensing information.
+See the `LICENSE` file for licensing information.
