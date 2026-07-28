@@ -1,6 +1,6 @@
 # ADR-008: Deliver Vendor Commands Through a Dedicated Gateway and Endpoint Port
 
-- **Status:** Proposed for review
+- **Status:** Accepted
 - **Date:** 2026-07-27
 - **Decision owners:** PoolOS architecture
 - **Supersedes:** None
@@ -66,8 +66,7 @@ The gateway sits between pure translation and vendor/transport implementation:
 PoolOperation
     -> OperationTranslationHandler
         -> TranslationResult
-            -> DeliveryRequest
-                -> VendorCommandGateway
+            -> VendorCommandGateway
                     -> VendorCommandEndpoint
                         -> Transport
                             -> Hardware
@@ -84,17 +83,20 @@ on concrete transports or vendor endpoint implementations.
 will not gain connection objects, transport instances, Home Assistant entity
 IDs, URLs, serial ports, credentials, retry state, or controller sessions.
 
-Runtime routing will be represented separately by a delivery envelope:
+Runtime routing is supplied explicitly to the gateway alongside the command:
 
 ```text
-DeliveryRequest
-    endpoint_id
-    command
-    correlation_id
-    timeout (optional)
-    metadata (optional)
+VendorCommandGateway.deliver(
+    endpoint_id,
+    command,
+    correlation_id,
+    timeout (optional),
+)
 ```
 
+A separate `DeliveryRequest` wrapper is intentionally deferred because the
+current inputs do not require independent request behavior or lifecycle. This
+avoids a pass-through abstraction while keeping routing typed and explicit.
 `endpoint_id` identifies one configured writable controller endpoint. It is
 separate from:
 
@@ -197,8 +199,8 @@ Its role will be limited to:
 
 1. resolve translation and delivery context;
 2. translate a `PoolOperation`;
-3. create ordered `DeliveryRequest` objects;
-4. submit them through `VendorCommandGateway`;
+3. submit translated commands with explicit endpoint and correlation context
+   through `VendorCommandGateway`;
 5. return a structured operation-execution result.
 
 This component must not replace the existing `ExecutionEngine`. During the
@@ -314,7 +316,7 @@ OperationTranslationHandler
 TranslatorRegistry
     -> OperationTranslationHandler: TranslationResult
 OperationExecutionHandler
-    -> VendorCommandGateway: DeliveryRequest
+    -> VendorCommandGateway: deliver(endpoint_id, command, correlation_id)
 VendorCommandGateway
     -> endpoint registry: get(endpoint_id)
 VendorCommandGateway
@@ -432,7 +434,7 @@ operation-native path is stable and its invariants are explicit.
 
 Add, without real hardware I/O:
 
-- `DeliveryRequest`;
+- `DeliveryReceipt`;
 - `VendorCommandEndpoint` protocol;
 - endpoint registry;
 - `VendorCommandGateway`;
