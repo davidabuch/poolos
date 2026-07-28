@@ -492,3 +492,23 @@ A future change violates this ADR if it:
 - reports transport acknowledgement as physical verification;
 - adds semantic retry, policy, or planning behavior to the gateway;
 - creates a second direct transport write path outside registered endpoints.
+
+## Implementation checkpoint: Milestone 10.4B.3C
+
+Milestone 10.4B.3C implements the operation-execution composition described in
+this ADR through `poolos.operation_execution`.
+
+The implementation adds:
+
+- `OperationDeliveryContext` for explicit endpoint, correlation, and timeout
+  routing facts;
+- `OperationExecutionHandler` for translate-then-deliver composition;
+- `OperationExecutionResult` for immutable partial-progress reporting.
+
+Multi-command translations are delivered sequentially. Delivery stops after the
+first rejected receipt or delivery error. Receipts from prior attempts are
+retained, the failed command is identified when no receipt was produced, and
+commands not attempted after the stop condition are reported explicitly.
+
+This milestone does not modify the current runtime, planner, scheduler,
+`ExecutionEngine`, HAL equipment API, or concrete transports.
