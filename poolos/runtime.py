@@ -24,6 +24,7 @@ from .reconciliation import ReconciliationEngine, ReconciliationEvaluation
 from .runtime_memory import RuntimeMemory
 from .runtime_context import RuntimeContext
 from .policies import PolicyEngine, PolicyEvaluation
+from .work_dispatch import WorkDispatcher, build_command_dispatcher
 from .scheduling import (
     ScheduledPlanStatus,
     Scheduler,
@@ -132,6 +133,7 @@ class PoolRuntime:
     scheduler: Scheduler = field(default_factory=Scheduler)
     policies: PolicyEngine = field(default_factory=PolicyEngine)
     execution: ExecutionEngine = field(default_factory=ExecutionEngine)
+    dispatcher: Optional[WorkDispatcher] = None
     authority: ControlAuthority = field(default_factory=ControlAuthority)
     constraints: ConstraintEngine = field(default_factory=ConstraintEngine)
     reconciliation: ReconciliationEngine = field(default_factory=ReconciliationEngine)
@@ -149,6 +151,8 @@ class PoolRuntime:
     def __post_init__(self) -> None:
         # Runtime and execution audit records must share the same clock.
         self.execution.clock = self.kernel.clock
+        if self.dispatcher is None:
+            self.dispatcher = build_command_dispatcher(self.execution)
         self.authority.clock = self.kernel.clock
         self.authority.events = self.kernel.events
         self.constraints.events = self.kernel.events
@@ -287,8 +291,10 @@ class PoolRuntime:
                 for evaluation in constraint_evaluations
                 if evaluation.executable and evaluation.effective_command is not None
             )
+            if self.dispatcher is None:
+                raise RuntimeError("runtime work dispatcher is not configured")
             submissions = tuple(
-                self.execution.submit(command) for command in executable_commands
+                self.dispatcher.dispatch(command) for command in executable_commands
             )
             self._update_submitted_steps(evaluations, submissions)
 
