@@ -14,6 +14,7 @@ from .exceptions import (
     UnsupportedOperationError,
     VendorMismatchError,
 )
+from .handler import OperationTranslationHandler, TranslationContextProvider
 from .operations import (
     PoolOperation,
     SetHeatMode,
@@ -32,6 +33,7 @@ __all__ = [
     "EquipmentTypeError",
     "IntegrationError",
     "MissingCapabilityError",
+    "OperationTranslationHandler",
     "PoolOperation",
     "SetHeatMode",
     "SetHydraulicRoute",
@@ -41,6 +43,7 @@ __all__ = [
     "StopPump",
     "TranslationConfigurationError",
     "TranslationContext",
+    "TranslationContextProvider",
     "TranslationResult",
     "Translator",
     "TranslatorNotFoundError",
