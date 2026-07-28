@@ -7,9 +7,11 @@ from typing import Any, Callable
 
 from .commands import Command
 from .execution import ExecutionEngine
+from .integration import PoolOperation
 
 
 WorkHandler = Callable[[Any], Any]
+PoolOperationHandler = Callable[[PoolOperation], Any]
 
 
 class UnsupportedWorkItemError(TypeError):
@@ -72,9 +74,27 @@ class WorkDispatcher:
         return None
 
 
-def build_command_dispatcher(execution: ExecutionEngine) -> WorkDispatcher:
-    """Build the current compatibility dispatcher for legacy Commands."""
+def build_work_dispatcher(
+    execution: ExecutionEngine,
+    *,
+    operation_handler: PoolOperationHandler | None = None,
+) -> WorkDispatcher:
+    """Build a dispatcher for legacy commands and optional PoolOperations.
+
+    Commands continue through the existing :class:`ExecutionEngine`. When an
+    operation handler is supplied, one base-type route accepts every canonical
+    ``PoolOperation`` subtype without teaching the dispatcher vendor or
+    transport details.
+    """
 
     dispatcher = WorkDispatcher()
     dispatcher.register(Command, execution.submit)
+    if operation_handler is not None:
+        dispatcher.register(PoolOperation, operation_handler)
     return dispatcher
+
+
+def build_command_dispatcher(execution: ExecutionEngine) -> WorkDispatcher:
+    """Build the legacy command-only dispatcher used by the current runtime."""
+
+    return build_work_dispatcher(execution)
