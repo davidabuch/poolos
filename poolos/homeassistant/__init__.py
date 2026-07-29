@@ -9,6 +9,7 @@ from .client import (
     PentairHomeAssistantCommandClient,
 )
 from .models import HomeAssistantServiceCall, HomeAssistantServiceResult
+from .rest import HomeAssistantRestServiceExecutor
 
 __all__ = [
     "HomeAssistantCommandClient",
@@ -18,5 +19,6 @@ __all__ = [
     "HomeAssistantServiceCall",
     "HomeAssistantServiceExecutor",
     "HomeAssistantServiceResult",
+    "HomeAssistantRestServiceExecutor",
     "PentairHomeAssistantCommandClient",
 ]

@@ -612,3 +612,35 @@ visible to callers.
 This milestone adds no live Home Assistant connection and does not alter the
 planner, translator, gateway, runtime, IntelliCenter firmware, or physical
 controller safety boundary.
+
+## Milestone 10.4B.3E.3 implementation checkpoint
+
+PoolOS now includes a generic synchronous REST implementation of the
+`HomeAssistantServiceExecutor` port:
+
+```text
+HomeAssistantServiceCall
+        ↓
+HomeAssistantRestServiceExecutor
+        ↓
+POST /api/services/{domain}/{service}
+        ↓
+Home Assistant
+```
+
+The executor owns only HTTP transport concerns: base URL normalization, bearer
+authentication, JSON request construction, timeout propagation, HTTP response
+parsing, and conversion of known network or protocol failures into the existing
+Home Assistant executor error contract. It merges the service call's target and
+data mappings into the JSON service payload and rejects duplicate keys rather
+than resolving them implicitly.
+
+The executor is independent of Pentair commands and entity mappings. It performs
+no retries, discovery, configuration-file loading, WebSocket subscriptions,
+state reconciliation, or physical-state verification. Access tokens are
+constructor inputs and are not stored in source code by this milestone.
+
+A completed 2xx REST response is treated as an accepted and acknowledged Home
+Assistant service invocation, not as proof that physical pool equipment reached
+the requested state. Existing downstream receipts therefore continue to require
+verification.
