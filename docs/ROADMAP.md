@@ -144,6 +144,7 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | ID | Work item | Status |
 |---|---|---|
 | 10.5A | Immutable simulation/shadow/live runtime safety boundary | DONE |
+| 10.5A.1 | Canonical `PoolObservation` type and compatibility alias | DONE |
 | 10.5B | Typed observations, provenance, quality, and freshness | READY |
 | 10.5C | Hybrid Home Assistant observation bridge | PLANNED |
 | 10.5D | Sim Pool state publication to Home Assistant | PLANNED |

@@ -341,3 +341,11 @@ writable endpoint classifications before the command gateway is constructed.
 Observation access is independent: simulation may read approved live sensors
 while remaining structurally unable to deliver physical commands. See
 [ADR-009](adr/ADR-009-runtime-environment-safety-boundary.md).
+
+## Canonical Observation Type
+
+PoolOS has one canonical observation model: `PoolObservation`, owned by the
+`poolos.observations` package. The historic `poolos.domain.Observation` symbol
+is retained temporarily as an exact compatibility alias, not as a second type
+or subclass. New code must import and use `PoolObservation`; existing callers
+may migrate incrementally without changing runtime type identity.

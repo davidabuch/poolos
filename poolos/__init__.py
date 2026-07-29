@@ -146,6 +146,7 @@ from .domain import (
     HydraulicRoute,
     Installation,
     Observation,
+    PoolObservation,
     PoolSystem,
     Resource,
     ResourceType,
