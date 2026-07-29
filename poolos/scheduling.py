@@ -159,7 +159,7 @@ class Scheduler:
         steps = dict(runtime.steps)
         changed: list[StepRuntime] = []
         ready: list[PlanStep] = []
-        plan_status = runtime.status
+        plan_status: ScheduledPlanStatus = runtime.status
         detail = runtime.detail
 
         for step in plan.steps:
@@ -302,17 +302,19 @@ class Scheduler:
                 raise ValueError("TIME_REACHED expected datetime must be timezone-aware")
             return now >= condition.expected
         if condition.kind is ConditionKind.EQUIPMENT_AVAILABLE:
-            state = kernel.state.get_equipment(condition.subject_id)
-            return (state.available if state else False) is bool(condition.expected)
-        state = kernel.state.get_body(condition.subject_id)
-        if state is None:
+            equipment_state = kernel.state.get_equipment(condition.subject_id)
+            return (equipment_state.available if equipment_state else False) is bool(
+                condition.expected
+            )
+        body_state = kernel.state.get_body(condition.subject_id)
+        if body_state is None:
             return False
         if condition.kind is ConditionKind.BODY_CIRCULATION_RUNNING:
-            return state.circulation_running is bool(condition.expected)
+            return body_state.circulation_running is bool(condition.expected)
         if condition.kind is ConditionKind.BODY_TEMPERATURE_AT_LEAST:
-            return state.temperature.current >= float(condition.expected)
+            return body_state.temperature.current >= float(condition.expected)
         if condition.kind is ConditionKind.BODY_TEMPERATURE_BELOW:
-            return state.temperature.current < float(condition.expected)
+            return body_state.temperature.current < float(condition.expected)
         raise ValueError(f"unsupported condition kind: {condition.kind.value}")
 
     def _dependencies_satisfied(self, step: PlanStep, plan: Plan, runtime: Mapping[str, StepRuntime]) -> bool:

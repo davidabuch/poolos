@@ -57,8 +57,13 @@ class PolicyEvaluation:
 class Policy(Protocol):
     """Contract implemented by all PoolOS policies."""
 
-    policy_id: str
-    priority: PolicyPriority
+    @property
+    def policy_id(self) -> str:
+        ...
+
+    @property
+    def priority(self) -> PolicyPriority:
+        ...
 
     def evaluate(self, context: PolicyContext) -> PolicyOutcome:
         ...

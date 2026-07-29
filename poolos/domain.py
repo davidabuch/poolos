@@ -15,7 +15,12 @@ from typing import FrozenSet, Mapping, Optional
 from .observations import (
     ConfidenceBand as ConfidenceBand,
     Evidence as Evidence,
+    FreshnessPolicy as FreshnessPolicy,
     Observation as Observation,
+    ObservationFreshness as ObservationFreshness,
+    ObservationQuality as ObservationQuality,
+    ObservationSourceKind as ObservationSourceKind,
+    ObservationStore as ObservationStore,
     PoolObservation as PoolObservation,
     TruthLevel as TruthLevel,
 )

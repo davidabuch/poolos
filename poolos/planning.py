@@ -262,7 +262,9 @@ class Plan:
 class PlanningStrategy(Protocol):
     """Contract implemented by hardware-independent planning strategies."""
 
-    objective_type: ObjectiveType
+    @property
+    def objective_type(self) -> ObjectiveType:
+        ...
 
     def build(
         self,

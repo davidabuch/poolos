@@ -9,6 +9,7 @@ from typing import Iterable, Mapping
 
 from .clock import Clock, SystemClock
 from .delivery import DeliveryEndpointKind, EndpointRegistry, VendorCommandEndpoint
+from .observations import ObservationSourceKind
 
 
 class RuntimeMode(str, Enum):
@@ -17,14 +18,6 @@ class RuntimeMode(str, Enum):
     SIMULATION = "simulation"
     SHADOW = "shadow"
     LIVE = "live"
-
-
-class ObservationSourceKind(str, Enum):
-    """Provenance categories admitted by a runtime environment."""
-
-    LIVE = "live"
-    SIMULATED = "simulated"
-    DERIVED = "derived"
 
 
 class RuntimeEnvironmentError(ValueError):

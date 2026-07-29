@@ -13,7 +13,7 @@ class SimulatorTransport(Transport):
         self._name = name
         self._state = TransportState.DISCONNECTED
         self._store: dict[str, object] = {}
-        self._last_contact = None
+        self._last_contact: Optional[datetime] = None
         self._errors = 0
 
     def connect(self) -> None:

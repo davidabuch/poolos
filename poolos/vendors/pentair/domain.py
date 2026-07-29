@@ -270,15 +270,14 @@ class PentairSystem:
         _required(self.panel_id, "panel_id")
         _required(self.panel_name, "panel_name")
         collections = {
-            "body": self.bodies,
-            "circuit": self.circuits,
-            "pump": self.pumps,
-            "heater": self.heaters,
-            "valve": self.valves,
+            "body": [item.address.object_id for item in self.bodies],
+            "circuit": [item.address.object_id for item in self.circuits],
+            "pump": [item.address.object_id for item in self.pumps],
+            "heater": [item.address.object_id for item in self.heaters],
+            "valve": [item.address.object_id for item in self.valves],
         }
         all_ids: set[str] = set()
-        for label, objects in collections.items():
-            ids = [item.address.object_id for item in objects]
+        for label, ids in collections.items():
             if len(ids) != len(set(ids)):
                 raise ValueError(f"{label} object ids must be unique")
             overlap = all_ids.intersection(ids)
