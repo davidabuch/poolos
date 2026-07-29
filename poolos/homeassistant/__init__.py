@@ -10,6 +10,15 @@ from .client import (
 )
 from .mapping import HomeAssistantMappingError, PentairHomeAssistantCommandMapper
 from .models import HomeAssistantServiceCall, HomeAssistantServiceResult
+from .observations import (
+    HomeAssistantObservationBinding,
+    HomeAssistantObservationBridge,
+    HomeAssistantObservationError,
+    HomeAssistantObservationMapper,
+    HomeAssistantObservationProfile,
+    HomeAssistantState,
+    HomeAssistantValueType,
+)
 from .profile import (
     EnergyObservationBindings,
     HomeAssistantBindingProfile,
@@ -31,10 +40,17 @@ __all__ = [
     "HomeAssistantExecutorError",
     "HomeAssistantExecutorTimeoutError",
     "HomeAssistantMappingError",
+    "HomeAssistantObservationBinding",
+    "HomeAssistantObservationBridge",
+    "HomeAssistantObservationError",
+    "HomeAssistantObservationMapper",
+    "HomeAssistantObservationProfile",
     "HomeAssistantRestServiceExecutor",
     "HomeAssistantServiceCall",
     "HomeAssistantServiceExecutor",
     "HomeAssistantServiceResult",
+    "HomeAssistantState",
+    "HomeAssistantValueType",
     "HydraulicRouteBinding",
     "InstallationProfileError",
     "PentairHomeAssistantCommandClient",
