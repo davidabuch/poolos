@@ -11,6 +11,7 @@ from .exceptions import (
 from .gateway import VendorCommandGateway
 from .receipt import DeliveryReceipt
 from .registry import EndpointRegistry
+from .simulator import SimulatorVendorCommandEndpoint
 
 __all__ = [
     "DeliveryError",
@@ -20,6 +21,7 @@ __all__ = [
     "EndpointNotFoundError",
     "EndpointRegistry",
     "EndpointVendorMismatchError",
+    "SimulatorVendorCommandEndpoint",
     "VendorCommandEndpoint",
     "VendorCommandGateway",
 ]

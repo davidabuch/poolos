@@ -512,3 +512,27 @@ commands not attempted after the stop condition are reported explicitly.
 
 This milestone does not modify the current runtime, planner, scheduler,
 `ExecutionEngine`, HAL equipment API, or concrete transports.
+
+## Implementation checkpoint: Milestone 10.4B.3D
+
+Milestone 10.4B.3D adds `SimulatorVendorCommandEndpoint`, the first concrete
+implementation of the vendor-command endpoint port. It is backed by the
+existing semantics-free `SimulatorTransport`.
+
+The endpoint:
+
+- preserves the configured vendor dialect rather than translating commands;
+- selects a deterministic simulator destination from prefix, vendor, and target;
+- serializes `VendorCommand` plus endpoint and correlation context into a plain
+  transport payload;
+- maps accepted, acknowledged, rejected, timed-out, and failed transport
+  outcomes into `CommandReceipt`;
+- never reports physical verification from a transport acknowledgement;
+- performs no retry, sequencing, planning, policy, or reconciliation.
+
+Known HAL transport errors are represented as failed or timed-out receipts so
+operation execution can retain structured partial progress. Unexpected endpoint
+errors remain exceptions and are wrapped by `VendorCommandGateway` as before.
+
+This milestone does not change runtime wiring, planner behavior, translators,
+Pentair delivery, or the legacy `ExecutionEngine`.
