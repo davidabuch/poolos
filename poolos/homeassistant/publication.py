@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Mapping, Protocol
+
+if TYPE_CHECKING:
+    from .catalog import HomeAssistantEntityCatalog
 
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
 
@@ -171,6 +174,16 @@ class HomeAssistantSimulationPublisher:
         init=False,
         repr=False,
     )
+
+    @classmethod
+    def from_catalog(
+        cls,
+        catalog: "HomeAssistantEntityCatalog",
+        executor: HomeAssistantStatePublicationExecutor,
+    ) -> "HomeAssistantSimulationPublisher":
+        """Create an outbound simulation publisher from the canonical catalog."""
+
+        return cls(profile=catalog.publication_profile(), executor=executor)
 
     def __post_init__(self) -> None:
         self._bindings_by_observation = {

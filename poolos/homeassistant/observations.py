@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Iterable, Mapping
+
+if TYPE_CHECKING:
+    from .catalog import HomeAssistantEntityCatalog
 
 from poolos.observations import (
     ObservationQuality,
@@ -200,6 +203,16 @@ class HomeAssistantObservationBridge:
         init=False,
         repr=False,
     )
+
+    @classmethod
+    def from_catalog(
+        cls,
+        catalog: "HomeAssistantEntityCatalog",
+        store: ObservationStore,
+    ) -> "HomeAssistantObservationBridge":
+        """Create an inbound bridge from the canonical entity catalog."""
+
+        return cls(profile=catalog.observation_profile(), store=store)
 
     def __post_init__(self) -> None:
         self._bindings_by_entity = {

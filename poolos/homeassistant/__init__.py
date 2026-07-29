@@ -1,5 +1,11 @@
 """Public API for Home Assistant-backed command execution."""
 
+from .catalog import (
+    HomeAssistantCatalogError,
+    HomeAssistantEntityCatalog,
+    HomeAssistantEntityClass,
+    HomeAssistantEntityDefinition,
+)
 from .client import (
     HomeAssistantCommandClient,
     HomeAssistantCommandMapper,
@@ -29,7 +35,6 @@ from .publication import (
     HomeAssistantStatePublicationExecutor,
     HomeAssistantStatePublicationResult,
 )
-from .state_rest import HomeAssistantRestStatePublicationExecutor
 from .profile import (
     EnergyObservationBindings,
     HomeAssistantBindingProfile,
@@ -42,9 +47,14 @@ from .profile import (
     load_site_profile,
 )
 from .rest import HomeAssistantRestServiceExecutor
+from .state_rest import HomeAssistantRestStatePublicationExecutor
 
 __all__ = [
     "EnergyObservationBindings",
+    "HomeAssistantCatalogError",
+    "HomeAssistantEntityCatalog",
+    "HomeAssistantEntityClass",
+    "HomeAssistantEntityDefinition",
     "HomeAssistantBindingProfile",
     "HomeAssistantCommandClient",
     "HomeAssistantCommandMapper",

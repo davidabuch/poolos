@@ -148,4 +148,5 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.5B | Typed observations, provenance, quality, and freshness | DONE |
 | 10.5C | Hybrid Home Assistant observation bridge | DONE |
 | 10.5D | Sim Pool state publication to Home Assistant | DONE |
-| 10.5E | Sim Pool dashboard and multi-day soak workflow | PLANNED |
+| 10.5E | Home Assistant entity catalog and publication registry | DONE |
+| 10.5F | Sim Pool dashboard and multi-day soak workflow | PLANNED |
