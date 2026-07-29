@@ -1,0 +1,27 @@
+schema_version: 1
+
+installation:
+  pumps:
+    filter-pump:
+      minimum_rpm: 450
+      maximum_rpm: 3450
+
+home_assistant:
+  pool:
+    pumps:
+      filter-pump:
+        running_entity: switch.pool_filter_pump
+        speed_command_entity: number.pool_filter_pump_speed
+        rpm_sensor_entity: sensor.buch_family_vs_rpm
+
+    hydraulic_routes:
+      shared-pool-spa:
+        route_entity: select.pool_hydraulic_route
+        options:
+          pool:pool: Pool
+          spa:spa: Spa
+
+  external_systems:
+    energy:
+      # Observation only. PoolOS does not control the Powerwall in this milestone.
+      grid_status_entity: binary_sensor.powerwall_grid_status

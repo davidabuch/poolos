@@ -6,7 +6,7 @@ import json
 import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, build_opener
@@ -56,7 +56,7 @@ class HomeAssistantRestServiceExecutor:
         self.access_token = self._require_text(self.access_token, "access_token")
         self.timeout = self._validate_timeout(self.timeout)
         if self.opener is None:
-            self.opener = build_opener()
+            self.opener = cast(HomeAssistantHttpOpener, build_opener())
 
     def call_service(
         self,

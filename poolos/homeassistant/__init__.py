@@ -8,17 +8,40 @@ from .client import (
     HomeAssistantServiceExecutor,
     PentairHomeAssistantCommandClient,
 )
+from .mapping import HomeAssistantMappingError, PentairHomeAssistantCommandMapper
 from .models import HomeAssistantServiceCall, HomeAssistantServiceResult
+from .profile import (
+    EnergyObservationBindings,
+    HomeAssistantBindingProfile,
+    HydraulicRouteBinding,
+    InstallationProfileError,
+    PoolInstallationProfile,
+    PumpHomeAssistantBinding,
+    PumpInstallation,
+    SiteProfile,
+    load_site_profile,
+)
 from .rest import HomeAssistantRestServiceExecutor
 
 __all__ = [
+    "EnergyObservationBindings",
+    "HomeAssistantBindingProfile",
     "HomeAssistantCommandClient",
     "HomeAssistantCommandMapper",
     "HomeAssistantExecutorError",
     "HomeAssistantExecutorTimeoutError",
+    "HomeAssistantMappingError",
+    "HomeAssistantRestServiceExecutor",
     "HomeAssistantServiceCall",
     "HomeAssistantServiceExecutor",
     "HomeAssistantServiceResult",
-    "HomeAssistantRestServiceExecutor",
+    "HydraulicRouteBinding",
+    "InstallationProfileError",
     "PentairHomeAssistantCommandClient",
+    "PentairHomeAssistantCommandMapper",
+    "PoolInstallationProfile",
+    "PumpHomeAssistantBinding",
+    "PumpInstallation",
+    "SiteProfile",
+    "load_site_profile",
 ]

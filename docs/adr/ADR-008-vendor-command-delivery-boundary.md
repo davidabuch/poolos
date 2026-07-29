@@ -644,3 +644,31 @@ A completed 2xx REST response is treated as an accepted and acknowledged Home
 Assistant service invocation, not as proof that physical pool equipment reached
 the requested state. Existing downstream receipts therefore continue to require
 verification.
+
+## Home Assistant installation mapping refinement
+
+PoolOS separates the physical pool installation from automation-platform bindings.
+The physical `PoolInstallationProfile` describes stable logical equipment roles and
+capabilities. `HomeAssistantBindingProfile` maps those roles to concrete Home
+Assistant command and observation entities. Both profiles are loaded from a
+versioned YAML site profile and validated into immutable typed models.
+
+```text
+PentairCommandRequest
+    -> PentairHomeAssistantCommandMapper
+        -> PoolInstallationProfile
+        -> HomeAssistantBindingProfile
+            -> HomeAssistantServiceCall
+```
+
+Entity IDs are never embedded in planning, translation, delivery, or REST transport
+code. Command entities and observation entities are distinct bindings. For example,
+the filter pump's writable speed entity may differ from its authoritative RPM sensor.
+The mapper performs no fuzzy discovery and fails explicitly for missing bindings,
+unsupported operations, incompatible domains, unknown routes, or out-of-range values.
+
+The site profile reserves typed external observation namespaces. Powerwall grid status
+is represented as an energy observation binding, but this milestone introduces no
+Powerwall control or outage policy. Existing Home Assistant outage automation remains
+authoritative until PoolOS has state ingestion, restart recovery, reconciliation, and
+validated fallback behavior.
