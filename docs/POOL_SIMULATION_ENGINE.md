@@ -34,3 +34,13 @@ result = sim.advance(timedelta(hours=2))
 ```
 
 The simulator is an execution adapter, not a policy bypass. Full operating-cycle tests should continue to route proposed commands through the Policy Engine and Execution Engine before the simulation adapter applies them.
+
+
+## Hybrid Simulation Safety
+
+The deterministic simulation engine is composed through a simulation-mode
+`PoolRuntimeEnvironment`. Only simulator-classified command endpoints are
+permitted. Approved real observations may still be read through the later
+observation layer. Actual water temperature and simulated water temperature
+remain separate: actual temperature can initialize or calibrate the model,
+while simulated temperature responds to simulated equipment commands.

@@ -331,3 +331,13 @@ The Command Center may later become a separate `pool_manager` integration when a
 - Separate versioning and deployment provide clear value
 
 Until then, physical separation is deferred while architectural separation is maintained.
+
+
+## Runtime Environment Safety Boundary
+
+PoolOS startup composition is represented by an immutable
+`PoolRuntimeEnvironment`. Simulation, shadow, and live modes admit different
+writable endpoint classifications before the command gateway is constructed.
+Observation access is independent: simulation may read approved live sensors
+while remaining structurally unable to deliver physical commands. See
+[ADR-009](adr/ADR-009-runtime-environment-safety-boundary.md).

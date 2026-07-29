@@ -1,6 +1,6 @@
 """Public API for vendor-command routing and endpoint delivery."""
 
-from .endpoint import VendorCommandEndpoint
+from .endpoint import DeliveryEndpointKind, VendorCommandEndpoint
 from .exceptions import (
     DeliveryError,
     DuplicateEndpointError,
@@ -22,6 +22,7 @@ from .registry import EndpointRegistry
 from .simulator import SimulatorVendorCommandEndpoint
 
 __all__ = [
+    "DeliveryEndpointKind",
     "DeliveryError",
     "DeliveryReceipt",
     "DuplicateEndpointError",

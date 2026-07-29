@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, ClassVar, Mapping
 
 from ..hal import (
     CommandReceipt,
@@ -16,6 +16,7 @@ from ..hal import (
     TransportResponse,
 )
 from ..integration import VendorCommand
+from .endpoint import DeliveryEndpointKind
 
 
 @dataclass(slots=True)
@@ -27,6 +28,8 @@ class SimulatorVendorCommandEndpoint:
     into a deterministic simulator payload and maps the transport response into
     a HAL ``CommandReceipt``.
     """
+
+    delivery_kind: ClassVar[DeliveryEndpointKind] = DeliveryEndpointKind.SIMULATOR
 
     endpoint_id: str
     vendor: str

@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol
+from typing import Any, ClassVar, Mapping, Protocol
 
 from ..hal import CommandReceipt, CommandStatus
 from ..integration import VendorCommand
 from ..integration.pentair import PentairCommandOperation
+from .endpoint import DeliveryEndpointKind
 
 
 class PentairCommandClientError(Exception):
@@ -93,6 +94,8 @@ class PentairCommandClient(Protocol):
 @dataclass(slots=True)
 class PentairVendorCommandEndpoint:
     """Adapt logical Pentair vendor commands to a Pentair command client."""
+
+    delivery_kind: ClassVar[DeliveryEndpointKind] = DeliveryEndpointKind.PHYSICAL
 
     endpoint_id: str
     client: PentairCommandClient
