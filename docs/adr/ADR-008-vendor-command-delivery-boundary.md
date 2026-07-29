@@ -579,3 +579,36 @@ acknowledged Home Assistant service call.
 
 This milestone does not add Home Assistant I/O, direct controller I/O, retries,
 planner changes, runtime wiring, or firmware replacement behavior.
+
+## Milestone 10.4B.3E.2 implementation checkpoint
+
+PoolOS now includes a generic Home Assistant command-execution package beneath
+vendor-specific command-client ports:
+
+```text
+PentairVendorCommandEndpoint
+        ↓
+PentairCommandClient
+        ↓
+HomeAssistantCommandClient
+        ↓
+HomeAssistantServiceExecutor
+```
+
+`HomeAssistantCommandClient` composes two injected responsibilities:
+
+- a command mapper that converts a provider request into a transport-neutral
+  Home Assistant service call;
+- a service executor that submits that call through a future REST, WebSocket,
+  or in-process Home Assistant adapter.
+
+The client contains no Pentair entity map, authentication logic, network I/O,
+or retry policy. This keeps Home Assistant reusable as an execution platform
+for future providers while preserving the Pentair command-client boundary.
+Known Home Assistant executor timeouts and failures are translated into the
+existing Pentair client error contract; unexpected programming errors remain
+visible to callers.
+
+This milestone adds no live Home Assistant connection and does not alter the
+planner, translator, gateway, runtime, IntelliCenter firmware, or physical
+controller safety boundary.
