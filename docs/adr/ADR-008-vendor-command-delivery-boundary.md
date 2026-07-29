@@ -536,3 +536,46 @@ errors remain exceptions and are wrapped by `VendorCommandGateway` as before.
 
 This milestone does not change runtime wiring, planner behavior, translators,
 Pentair delivery, or the legacy `ExecutionEngine`.
+
+## Implementation checkpoint: Milestone 10.4B.3E.1
+
+Milestone 10.4B.3E.1 adds the Pentair controller-facing port without selecting
+or implementing a concrete live transport.
+
+The delivery path is now:
+
+```text
+VendorCommandGateway
+        ↓
+PentairVendorCommandEndpoint
+        ↓
+PentairCommandClient
+        ↓
+concrete adapter supplied by a later milestone
+```
+
+The endpoint validates the Pentair vendor dialect and the stable logical
+operations defined by `PentairCommandOperation`. It then adapts each
+`VendorCommand` into an immutable `PentairCommandRequest` and maps the client's
+structured response or known client failure into a HAL `CommandReceipt`.
+
+`PentairCommandClient` is intentionally independent of Home Assistant and of
+raw IntelliCenter or RS-485 protocol details. The anticipated first production
+implementation is a Home Assistant adapter. A future direct IntelliCenter or
+RS-485 adapter may implement the same port without changing translation,
+delivery routing, or operation execution.
+
+PoolOS is initially a supervisory control and decision system. IntelliCenter
+remains the authoritative low-level equipment controller and safety boundary.
+PoolOS may decide schedules, hydraulic intent, energy behavior, and requested
+setpoints, while the existing IntelliCenter controller remains responsible for
+physical actuation, equipment interlocks, freeze protection, and controller
+fallback behavior.
+
+Transport acknowledgement remains distinct from physical-state verification.
+Every receipt produced by this endpoint therefore requires subsequent
+verification or reconciliation, including receipts produced from an
+acknowledged Home Assistant service call.
+
+This milestone does not add Home Assistant I/O, direct controller I/O, retries,
+planner changes, runtime wiring, or firmware replacement behavior.

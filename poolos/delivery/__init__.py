@@ -9,6 +9,14 @@ from .exceptions import (
     EndpointVendorMismatchError,
 )
 from .gateway import VendorCommandGateway
+from .pentair import (
+    PentairCommandClient,
+    PentairCommandClientError,
+    PentairCommandRequest,
+    PentairCommandResponse,
+    PentairCommandTimeoutError,
+    PentairVendorCommandEndpoint,
+)
 from .receipt import DeliveryReceipt
 from .registry import EndpointRegistry
 from .simulator import SimulatorVendorCommandEndpoint
@@ -21,6 +29,12 @@ __all__ = [
     "EndpointNotFoundError",
     "EndpointRegistry",
     "EndpointVendorMismatchError",
+    "PentairCommandClient",
+    "PentairCommandClientError",
+    "PentairCommandRequest",
+    "PentairCommandResponse",
+    "PentairCommandTimeoutError",
+    "PentairVendorCommandEndpoint",
     "SimulatorVendorCommandEndpoint",
     "VendorCommandEndpoint",
     "VendorCommandGateway",
