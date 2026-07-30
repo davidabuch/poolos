@@ -6,6 +6,12 @@ from .catalog import (
     HomeAssistantEntityClass,
     HomeAssistantEntityDefinition,
 )
+from .dashboard import (
+    DashboardComparison,
+    DashboardComparisonStatus,
+    DashboardDriftPolicy,
+    HomeAssistantSimulationDashboard,
+)
 from .client import (
     HomeAssistantCommandClient,
     HomeAssistantCommandMapper,
@@ -50,6 +56,9 @@ from .rest import HomeAssistantRestServiceExecutor
 from .state_rest import HomeAssistantRestStatePublicationExecutor
 
 __all__ = [
+    "DashboardComparison",
+    "DashboardComparisonStatus",
+    "DashboardDriftPolicy",
     "EnergyObservationBindings",
     "HomeAssistantCatalogError",
     "HomeAssistantEntityCatalog",
@@ -69,6 +78,7 @@ __all__ = [
     "HomeAssistantPublicationError",
     "HomeAssistantRestStatePublicationExecutor",
     "HomeAssistantSimulationBinding",
+    "HomeAssistantSimulationDashboard",
     "HomeAssistantSimulationPublicationProfile",
     "HomeAssistantSimulationPublisher",
     "HomeAssistantSimulationStateMapper",
