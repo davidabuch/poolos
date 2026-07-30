@@ -152,3 +152,4 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.5F | Sim Pool dashboard and multi-day soak workflow | DONE |
 | 10.6 | Decision validation and golden rule verification | DONE |
 | 10.7 | Policy library and deterministic operating profiles | DONE |
+| 10.8 | Goal-oriented planning facade | DONE |
