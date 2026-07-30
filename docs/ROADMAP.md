@@ -150,3 +150,4 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.5D | Sim Pool state publication to Home Assistant | DONE |
 | 10.5E | Home Assistant entity catalog and publication registry | DONE |
 | 10.5F | Sim Pool dashboard and multi-day soak workflow | DONE |
+| 10.6 | Decision validation and golden rule verification | DONE |
