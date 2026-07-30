@@ -154,3 +154,4 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.7 | Policy library and deterministic operating profiles | DONE |
 | 10.8 | Goal-oriented planning facade | DONE |
 | 10.9 | Deterministic energy and cost optimization | DONE |
+| 10.10 | Canonical forecast intelligence and predictive planning signals | DONE |
