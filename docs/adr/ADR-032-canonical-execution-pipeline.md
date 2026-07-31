@@ -247,3 +247,29 @@ This milestone is recording-only. It does not coordinate plan steps, translate
 operations, deliver simulator commands, verify observations, invoke Home
 Assistant or Pentair, perform physical actuation, or resume execution after a
 restart.
+
+## Epic 10.13I implementation
+
+Restart recovery for execution is a pure interpretation boundary above the
+append-only execution Flight Recorder. `ExecutionRestartRecoveryEngine`
+validates a recorded history snapshot, selects the requested or latest proposal
+lineage, classifies its interruption point, and returns immutable
+recommendations. It does not restore execution authority.
+
+The governing invariant is:
+
+```text
+execution history != execution authority
+```
+
+No assessment can permit resumption. Interrupted authorized work is marked for
+supersession and fresh reevaluation. Completed outcomes require no action;
+terminal failures recommend reevaluation. Deferred and rejected authorizations
+remain distinct. Invalid sequence, future records, missing proposal lineage,
+cross-plan or cross-session facts, and other causal inconsistencies are
+classified as corrupt and require corruption recording plus operator review.
+
+Recovery does not mutate history, reconstruct a coordinator cursor, resend an
+operation, contact a simulator or external system, invoke Home Assistant or
+Pentair, or perform physical actuation. Actual-state reconciliation and new
+proposal generation remain later runtime responsibilities.

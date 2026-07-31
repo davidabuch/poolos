@@ -493,3 +493,33 @@ It does not coordinate execution, translate operations, create or deliver
 vendor commands, contact simulator endpoints, evaluate observations, invoke
 Home Assistant or Pentair, advance lifecycle state, perform physical actuation,
 or resume incomplete work after restart.
+
+## Epic 10.13I — Execution restart recovery
+
+Execution restart recovery interprets append-only execution history without
+restoring execution authority. `ExecutionRestartRecoveryEngine` classifies one
+recorded execution lineage and emits immutable, deterministic recommendations.
+It never rebuilds a coordinator cursor, retries an operation, or resumes a
+partially completed plan.
+
+The recovery rule is:
+
+```text
+execution history != execution authority
+```
+
+Interrupted histories are classified as occurring before authorization, before
+plan creation, before execution, during execution, during verification, or
+after terminal verification without a final outcome. Completed histories need
+no execution action. Terminal failures recommend fresh reevaluation. Invalid,
+future-dated, noncontiguous, or causally inconsistent histories are classified
+as corrupt and require explicit corruption recording and operator review.
+
+Every interrupted executable lineage recommends that prior intent be treated as
+superseded and that PoolOS obtain fresh observations and reevaluate. Recovery
+never grants permission to resume. The wider runtime may later use the
+assessment to reconcile actual state and create new intent if still required.
+
+This milestone does not coordinate execution, translate operations, create or
+deliver vendor commands, contact simulator endpoints, invoke Home Assistant or
+Pentair, perform physical actuation, or mutate the recorded timeline.

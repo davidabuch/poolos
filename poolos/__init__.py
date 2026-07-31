@@ -234,3 +234,12 @@ from .execution_flight_recorder import (
     ExecutionTimeline,
     InMemoryExecutionFlightRecorder,
 )
+
+from .execution_restart_recovery import (
+    ExecutionRecoveryAssessment,
+    ExecutionRecoveryClassification,
+    ExecutionRecoveryDisposition,
+    ExecutionRecoveryRecommendation,
+    ExecutionRecoveryRequest,
+    ExecutionRestartRecoveryEngine,
+)
