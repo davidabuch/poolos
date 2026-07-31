@@ -162,3 +162,10 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.11E | Explainable planner integration | DONE |
 | 10.11F | Flight Recorder decision-intelligence integration | DONE |
 | 10.11G | Home Assistant explanation entities and dashboard | DONE |
+| 10.12A | Immutable decision evaluation context | DONE |
+| 10.12B | Deterministic command-free decision orchestrator | DONE |
+| 10.12C | Typed reevaluation trigger model | PLANNED |
+| 10.12D | Decision stability and churn control | PLANNED |
+| 10.12E | Restart recovery and deterministic replay | PLANNED |
+| 10.12F | Home Assistant orchestration diagnostics | PLANNED |
+| 10.12G | Integrated soak and golden scenarios | PLANNED |
