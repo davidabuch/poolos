@@ -225,3 +225,12 @@ from .execution_verification import (
     ExecutionVerificationResult,
     VerificationEvidenceDisposition,
 )
+
+from .execution_flight_recorder import (
+    ExecutionArtifact,
+    ExecutionFlightRecord,
+    ExecutionRecorder,
+    ExecutionRecordType,
+    ExecutionTimeline,
+    InMemoryExecutionFlightRecorder,
+)

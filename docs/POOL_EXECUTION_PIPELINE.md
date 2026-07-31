@@ -446,3 +446,50 @@ It does not translate operations, create vendor commands, contact simulator
 endpoints, invoke Home Assistant or Pentair, advance coordination, transition
 execution lifecycle state, perform physical actuation, or resume work after a
 restart.
+
+## Epic 10.13H execution-flight-recorder rules
+
+`InMemoryExecutionFlightRecorder` is the canonical append-only history boundary
+for supervisory execution. It preserves the existing immutable execution
+artifacts rather than translating them into a second domain model:
+
+```text
+ExecutionProposal
+ExecutionAuthorization
+ExecutionPlan
+ExecutionStateTransition
+ExecutionCoordinationEvent
+ExecutionVerificationResult
+ExecutionOutcome
+```
+
+Each `ExecutionFlightRecord` carries a contiguous sequence number, deterministic
+record ID, event time, artifact type and ID, and complete decision, context,
+proposal, authorization, plan, and session lineage where those identities
+exist. Proposal and authorization facts precede plan creation; plan-scoped
+facts share one stable execution-session identity.
+
+The recorder enforces causal and chronological history. A proposal must be
+recorded before its authorization, an authorization before its plan, and a plan
+before lifecycle, coordination, verification, or outcome facts. Duplicate
+artifacts, backdated appends, cross-lineage plans or outcomes, unknown plan-step
+references, and records appended after a completed outcome are rejected without
+mutating history.
+
+`ExecutionTimeline` provides an immutable validated view. The recorder exposes
+ordered history by plan, decision, and execution session, while `export_json()`
+produces a stable complete artifact snapshot for diagnostics and future durable
+persistence. The original immutable artifact is retained on every record so
+callers can recover the typed execution fact without reconstructing it from a
+lossy summary.
+
+## Epic 10.13H scope
+
+Epic 10.13H adds immutable execution flight records and timelines, stable
+session and record identities, append-order and lineage validation, complete
+artifact snapshots, deterministic JSON export, and execution-history queries.
+
+It does not coordinate execution, translate operations, create or deliver
+vendor commands, contact simulator endpoints, evaluate observations, invoke
+Home Assistant or Pentair, advance lifecycle state, perform physical actuation,
+or resume incomplete work after restart.

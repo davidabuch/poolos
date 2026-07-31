@@ -221,3 +221,29 @@ This milestone does not translate operations, create or deliver vendor
 commands, contact simulator endpoints, invoke Home Assistant or Pentair,
 perform physical actuation, advance lifecycle state, or resume incomplete work
 after restart.
+
+## Epic 10.13H implementation
+
+Execution history is persisted through one append-only supervisory recording
+boundary. `InMemoryExecutionFlightRecorder` records the immutable artifacts
+created by proposal generation, authorization, deterministic planning,
+lifecycle transition, coordination, verification, and outcome modeling. It
+does not replace those artifacts with a parallel logging model.
+
+Every `ExecutionFlightRecord` has a contiguous sequence, deterministic record
+identity, artifact identity, event timestamp, and complete available lineage.
+A stable execution-session identity begins when the plan is recorded and is
+shared by all later plan-scoped records. `ExecutionTimeline` validates unique
+records and artifacts, contiguous sequence, and chronological ordering.
+
+The recorder enforces causal append order and identity consistency. It rejects
+missing prerequisite artifacts, mismatched proposal, authorization, decision,
+or context identities, unknown step references, duplicate or backdated facts,
+and appends after a completed outcome. Complete typed artifacts remain directly
+recoverable, and deterministic JSON export preserves full snapshots for future
+durable storage, replay, diagnostics, restart reconciliation, and projection.
+
+This milestone is recording-only. It does not coordinate plan steps, translate
+operations, deliver simulator commands, verify observations, invoke Home
+Assistant or Pentair, perform physical actuation, or resume execution after a
+restart.
