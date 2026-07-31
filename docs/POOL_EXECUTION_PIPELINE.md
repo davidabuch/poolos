@@ -569,3 +569,15 @@ This milestone deliberately does not consume `ExecutionPlan` or
 `ExecutionStep` objects, translate `PoolOperation` objects, advance coordinator
 or lifecycle state, verify observations, call Home Assistant, contact physical
 Pentair equipment, or resume interrupted execution.
+
+## Simulator step delivery (10.14B-C)
+
+`SimulatorStepDeliveryEngine` connects exactly one `ExecutionStep` to the
+existing translation handler and simulator execution gateway. It validates that
+the step is an exact member of the plan and that the lifecycle is `EXECUTING`,
+then records deterministic execution-scoped receipt identities while preserving
+the underlying `DeliveryReceipt` objects.
+
+The boundary stops at `DELIVERED`, `FAILED`, or `TIMED_OUT`. It does not verify
+observations, advance the coordinator cursor, complete a plan, or permit any
+physical endpoint.

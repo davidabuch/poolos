@@ -185,3 +185,9 @@ Each deferred decision should receive an Architecture Decision Record before imp
 Epic 10.14 remains simulator-only. Home Assistant service calls, physical
 Pentair delivery, RS-485 delivery, and live equipment actuation remain outside
 this epic.
+
+### 10.14B-C - Execution delivery integration and receipts
+
+Status: implemented pending validation. Connects one canonical execution step
+to simulator-only translation and delivery, with immutable ordered receipts and
+explicit lifecycle outcomes. Closed-loop verification remains in 10.14D.

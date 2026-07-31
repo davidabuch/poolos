@@ -64,3 +64,11 @@ composition boundary first.
 Epic 10.14B may adapt one authorized execution step to this gateway. It must
 reuse this boundary and may not bypass the runtime environment or generic
 vendor-command gateway.
+
+## Follow-on integration (10.14B-C)
+
+The gateway is consumed by a separate execution-step delivery boundary. That
+boundary validates plan/step/lifecycle lineage, performs canonical operation
+translation, preserves ordered simulator receipts, and advances lifecycle only
+through `DELIVERING` to `DELIVERED`, `FAILED`, or `TIMED_OUT`. Verification and
+coordinator advancement remain separate responsibilities.

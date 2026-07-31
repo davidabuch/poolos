@@ -257,3 +257,11 @@ from .simulator_execution_gateway import (
     SimulatorExecutionGatewayError,
     SimulatorGatewayRoute,
 )
+
+from .execution_simulator_delivery import (
+    SimulatorExecutionReceipt,
+    SimulatorStepDeliveryDisposition,
+    SimulatorStepDeliveryEngine,
+    SimulatorStepDeliveryRequest,
+    SimulatorStepDeliveryResult,
+)
