@@ -150,3 +150,62 @@ Epic 10.13B adds:
 
 It does not add authorization, execution planning, translation, delivery,
 verification, Home Assistant service calls, or physical actuation.
+
+## Epic 10.13C authorization and safety-preflight rules
+
+`ExecutionAuthorizationEngine` evaluates an immutable proposal against the
+current decision record, its frozen evaluation context, the selected runtime
+environment, and active safety blockers. The result is an immutable
+`ExecutionAuthorization`; authorization does not create a plan or deliver an
+operation.
+
+Authorization has three dispositions:
+
+- `AUTHORIZED` — every identity and safety check passed and the proposal may
+  proceed to deterministic plan construction;
+- `DEFERRED` — a temporary condition requires reevaluation before planning,
+  such as a newer context, expired context, active context blocker, active
+  safety blocker, or shadow runtime; and
+- `REJECTED` — an invariant is broken or unsafe, such as a missing/current
+  decision mismatch, superseded decision, context identity mismatch, runtime
+  mismatch, live runtime, or a physical-delivery policy.
+
+Rejection takes precedence over deferral when both types of issue are present.
+Blocking reason codes are deterministic and preserved in the authorization
+artifact for recording and future publication.
+
+Throughout Epic 10.13, only simulation proposals can be authorized. Shadow
+proposals are deferred and live proposals are rejected. A runtime environment
+that allows physical delivery is rejected even if other checks pass. The
+preflight performs no endpoint delivery and cannot call Home Assistant or
+Pentair.
+
+Authorization also verifies that:
+
+- the proposal references the active Flight Recorder decision;
+- decision, objective, and evaluation-context identifiers agree;
+- the decision has not been explicitly superseded;
+- the proposal, context, and runtime environment use the same runtime mode;
+- proposal and decision timestamps are not in the future;
+- the context is still current and has not passed an explicit validity bound;
+  and
+- no temporary context or safety blockers are active.
+
+Authorization IDs are deterministic for the same proposal, evaluation time,
+disposition, and blocker set. Repeating the same preflight snapshot therefore
+produces the same auditable result.
+
+## Epic 10.13C scope
+
+Epic 10.13C adds:
+
+- immutable authorization-preflight requests;
+- simulator-only authorization policy;
+- authorized, deferred, and rejected dispositions;
+- current-decision, context, runtime, endpoint-class, and safety checks;
+- deterministic authorization identifiers; and
+- tests covering successful authorization and every major blocking class.
+
+It does not add execution-plan construction, operation translation, simulated
+delivery, verification, Home Assistant service calls, Pentair commands, or
+physical actuation.

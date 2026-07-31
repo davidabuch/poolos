@@ -41,6 +41,7 @@ class AuthorizationDisposition(str, Enum):
     """Whether a proposal may proceed to execution planning."""
 
     AUTHORIZED = "authorized"
+    DEFERRED = "deferred"
     REJECTED = "rejected"
 
 
@@ -158,8 +159,13 @@ class ExecutionAuthorization:
             raise ValueError("blocking reasons must not be empty")
         if self.disposition is AuthorizationDisposition.AUTHORIZED and blockers:
             raise ValueError("authorized disposition cannot contain blocking reasons")
-        if self.disposition is AuthorizationDisposition.REJECTED and not blockers:
-            raise ValueError("rejected disposition requires a blocking reason")
+        if self.disposition in {
+            AuthorizationDisposition.DEFERRED,
+            AuthorizationDisposition.REJECTED,
+        } and not blockers:
+            raise ValueError(
+                f"{self.disposition.value} disposition requires a blocking reason"
+            )
 
         object.__setattr__(self, "blocking_reasons", blockers)
         object.__setattr__(self, "metadata", _freeze_string_mapping(self.metadata))

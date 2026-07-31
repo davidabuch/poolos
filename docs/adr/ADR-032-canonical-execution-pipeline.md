@@ -90,3 +90,28 @@ Proposal generation is implemented as a command-free boundary above decision orc
 Canonical operations are supplied explicitly to proposal generation by domain logic. Decision ranking does not contain vendor commands or transport payloads. Proposal IDs are deterministic for an accepted decision, preventing repeated evaluation of the same result from creating distinct executable intent.
 
 This milestone does not authorize, plan, translate, deliver, verify, or resume execution.
+
+## Epic 10.13C implementation
+
+Authorization is implemented as a pure, command-free safety-preflight boundary.
+`ExecutionAuthorizationEngine` consumes an `ExecutionProposal` plus the current
+Flight Recorder decision, frozen evaluation context, runtime environment, and
+active safety blockers. It returns an immutable `ExecutionAuthorization` and
+performs no planning, translation, or delivery.
+
+Three authorization dispositions are supported:
+
+- `AUTHORIZED` for a current, recorded simulation proposal that passes every
+  preflight check;
+- `DEFERRED` for temporary conditions requiring fresh evaluation; and
+- `REJECTED` for identity, supersession, runtime, or physical-delivery safety
+  violations.
+
+Rejection has precedence over deferral. Epic 10.13 remains simulator-only:
+shadow runtime is deferred, live runtime is rejected, and any environment that
+allows physical delivery is rejected. Authorization identifiers are
+deterministic for an identical preflight snapshot, preserving replay and audit
+semantics.
+
+This milestone does not construct execution plans, translate operations,
+deliver commands, verify observations, or invoke Home Assistant or Pentair.

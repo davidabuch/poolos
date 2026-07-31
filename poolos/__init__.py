@@ -187,3 +187,8 @@ from .execution_proposals import (
     ProposalGenerationDisposition,
     ProposalGenerationResult,
 )
+
+from .execution_authorization import (
+    ExecutionAuthorizationEngine,
+    ExecutionAuthorizationRequest,
+)
