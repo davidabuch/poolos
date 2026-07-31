@@ -166,6 +166,6 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.12B | Deterministic command-free decision orchestrator | DONE |
 | 10.12C | Typed reevaluation trigger model | DONE |
 | 10.12D | Decision stability and churn control | DONE |
-| 10.12E | Restart recovery and deterministic replay | PLANNED |
+| 10.12E | Restart recovery and deterministic replay | DONE |
 | 10.12F | Home Assistant orchestration diagnostics | PLANNED |
 | 10.12G | Integrated soak and golden scenarios | PLANNED |
