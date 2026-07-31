@@ -5,7 +5,7 @@ utilities are optional and are not required to run PoolOS in production.
 
 ## Supported Python versions
 
-PoolOS currently targets Python 3.10 through Python 3.13.
+PoolOS currently requires Python 3.13 or newer, as declared in `pyproject.toml`.
 
 Check the active interpreter:
 
@@ -38,7 +38,7 @@ source .venv/bin/activate
 Compile all PoolOS modules:
 
 ```bash
-python3 -m compileall poolos
+python3 -m compileall poolos intellicenter
 ```
 
 Run the full test suite:
@@ -56,7 +56,7 @@ python3 -m pytest --cov=poolos --cov-report=term-missing
 Check for definite Python errors and unused imports:
 
 ```bash
-python3 -m ruff check poolos tests
+python3 -m ruff check poolos intellicenter tests
 ```
 
 Run type analysis:
@@ -65,9 +65,9 @@ Run type analysis:
 python3 -m mypy poolos
 ```
 
-Type analysis is initially advisory while older modules are progressively
-annotated. CI reports mypy findings without blocking merges. Compilation,
-pytest, and Ruff fatal-error checks are required.
+MyPy currently checks only the installable `poolos` package. This is an explicit
+tooling boundary: the IntelliCenter Home Assistant integration has separate runtime
+and typing dependencies. Compilation, Ruff, MyPy for PoolOS, and pytest are required.
 
 ## Updating development dependencies
 
@@ -82,15 +82,15 @@ python3 -m pip install -r requirements-dev.txt
 
 ## Continuous integration
 
-GitHub Actions runs on every pull request and every push to `main`.
+GitHub Actions runs on every pull request and every push.
 
 The workflow:
 
 1. Installs PoolOS in editable mode with development dependencies.
-2. Compiles the `poolos` package.
-3. Runs pytest on Python 3.10, 3.11, 3.12, and 3.13.
-4. Runs Ruff static checks.
-5. Runs advisory mypy analysis.
+2. Compiles `poolos` and `intellicenter`.
+3. Runs Ruff across `poolos`, `intellicenter`, and `tests`.
+4. Runs MyPy against `poolos`.
+5. Runs the complete pytest suite on Python 3.13.
 
 ## Troubleshooting: pytest is missing
 
@@ -111,9 +111,10 @@ python3 -m pip install -e ".[dev]"
 PoolOS treats compilation, tests, and Ruff as required quality gates:
 
 ```bash
-python -m compileall poolos
+python -m compileall poolos intellicenter
+python -m ruff check poolos intellicenter tests
+python -m mypy poolos
 python -m pytest
-python -m ruff check poolos tests
 ```
 
 Package initializer modules intentionally re-export convenience symbols. Ruff's F401 rule is

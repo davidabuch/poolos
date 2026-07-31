@@ -1,4 +1,4 @@
-# Buch IntelliCenter Development Guidelines
+# PoolOS and IntelliCenter Development Guidelines
 
 ## 1. Source of Truth
 
@@ -20,7 +20,7 @@ For each change set:
 6. Confirm GitHub Actions passes.
 7. Do not deploy partial files to Home Assistant unless explicitly designated as an emergency hotfix.
 
-Patch files and repository ZIP replacement are not the normal workflow.
+A verified full-repository ZIP may be used for a controlled repository replacement when it preserves Git history, is generated from a clean canonical snapshot, excludes local caches, and passes the complete validation suite before delivery.
 
 ## 3. Work Item Naming
 
@@ -48,13 +48,13 @@ The immutable API normalizes live-model state into stable, immutable models. It 
 
 Entities adapt immutable models to Home Assistant. They must not contain Command Center policy.
 
-### Command Center
+### PoolOS
 
-The Command Center decides desired behavior. It must not bypass the Execution Engine when sending controller commands.
+PoolOS owns vendor-independent observations, policy, planning, decisions, explanations, runtime behavior, and future automatic command delivery. It must not be duplicated inside the IntelliCenter integration.
 
-### Execution Engine
+### Command delivery
 
-The Execution Engine is the sole Command Center write path to the Pentair controller. New Command Center code must not call raw controller command methods directly.
+Future automatic commands must flow through the canonical PoolOS operation, validation, runtime-mode, safety, ownership, and vendor-delivery boundaries. Home Assistant entity code must not become a parallel automatic control engine.
 
 ## 5. Immutable Model Rules
 
@@ -132,7 +132,9 @@ Every change should use the strongest applicable checks.
 Minimum repository checks:
 
 ```bash
-python -m compileall intellicenter tests
+python -m compileall poolos intellicenter
+python -m ruff check poolos intellicenter tests
+python -m mypy poolos
 python -m pytest
 ```
 

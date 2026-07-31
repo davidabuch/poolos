@@ -1,41 +1,49 @@
 # ADR-002: Develop the Command Center Inside the Existing Integration
 
-- Status: Accepted
+- Status: Superseded by ADR-031
 - Date: 2026-07-24
+- Superseded: 2026-07-31
 
 ## Context
 
-The future Pool Manager requires a Decision Engine, Ownership Manager, Execution Engine, Safety Manager, scheduling, and diagnostics. A separate Home Assistant integration could enforce a strong package boundary, but the architecture and public contracts are not yet mature.
+The future Pool Manager required a Decision Engine, Ownership Manager, Execution Engine, Safety
+Manager, scheduling, and diagnostics. At the time, a separate package boundary appeared premature.
 
-## Decision
+## Original Decision
 
-Develop the Command Center under the existing `intellicenter` package, initially in an `intellicenter/command_center/` subpackage.
+Develop the Command Center under the existing `intellicenter` package, initially in an
+`intellicenter/command_center/` subpackage.
 
-Maintain logical separation between hardware integration and policy even though they share one package and release.
+Maintain logical separation between hardware integration and policy even though they share one
+package and release.
 
-Consider a later split into a separate `pool_manager` integration only after contracts are stable and the split provides clear operational value.
+## Supersession
 
-## Consequences
+Subsequent development established `poolos/` as the canonical vendor-independent package for
+policy, planning, decisions, runtime behavior, explanations, recovery, diagnostics, and future
+command delivery.
+
+The root `intellicenter/` directory now remains the Home Assistant hardware integration, while
+`intellicenter/api/` remains its internal immutable read-model package.
+
+ADR-031 records the replacement repository boundary. This ADR is retained as architectural
+history and must not guide new code placement.
+
+## Original Consequences
 
 ### Positive
 
-- Simpler development and deployment during rapid design
-- Direct access to typed internal contracts without premature public APIs
-- Easier coordinated testing
-- Avoids version skew between two immature integrations
+- Simpler early development and deployment
+- Direct access to immature internal contracts
+- Avoided premature versioning boundaries
 
 ### Negative
 
-- Architectural boundaries must be enforced by convention and tests
-- The package will temporarily contain both hardware and policy layers
-- A later split may require migration work
+- Hardware and policy responsibilities would have shared one package
+- Boundaries would have depended heavily on convention
+- A later split would require migration
 
-## Rejected alternatives
+## Rejected Alternative at the Time
 
-### Split immediately into a separate integration
-
-Rejected because it would create deployment and versioning complexity before the interfaces are stable.
-
-### Put policy directly into entity platforms
-
-Rejected because it would mix presentation, hardware access, and operational decisions.
+An immediate separate integration was rejected because it would have introduced deployment and
+versioning complexity before interfaces were stable.
