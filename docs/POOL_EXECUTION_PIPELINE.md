@@ -547,3 +547,25 @@ stable and the catalog is validated for uniqueness and completeness.
 These scenarios deliberately stop at the supervisory boundary. They do not
 translate operations, create vendor commands, contact a simulator endpoint,
 call Home Assistant, call Pentair, or permit interrupted execution to resume.
+
+## Epic 10.14A — Simulator execution gateway
+
+`SimulatorExecutionGateway` is the first simulator-delivery integration point
+for the supervisory execution architecture. It composes the existing validated
+runtime-environment, endpoint-registry, vendor-command gateway, and
+simulator-endpoint boundaries without duplicating any of them.
+
+Construction is permitted only from a `SIMULATION` runtime that prohibits
+physical delivery and contains at least one endpoint classified as
+`SIMULATOR`. The gateway exposes deterministic simulator routes and delivers a
+single already-translated `VendorCommand` through the existing
+`VendorCommandGateway` exactly once.
+
+Automatic routing by vendor is permitted only when one unambiguous simulator
+endpoint exists for that vendor. Installations with multiple simulator
+endpoints for the same vendor must select an explicit endpoint ID.
+
+This milestone deliberately does not consume `ExecutionPlan` or
+`ExecutionStep` objects, translate `PoolOperation` objects, advance coordinator
+or lifecycle state, verify observations, call Home Assistant, contact physical
+Pentair equipment, or resume interrupted execution.

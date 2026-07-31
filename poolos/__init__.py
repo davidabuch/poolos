@@ -251,3 +251,9 @@ from .execution_golden_scenarios import (
     ExecutionGoldenScenarioId,
     validate_execution_golden_catalog,
 )
+
+from .simulator_execution_gateway import (
+    SimulatorExecutionGateway,
+    SimulatorExecutionGatewayError,
+    SimulatorGatewayRoute,
+)

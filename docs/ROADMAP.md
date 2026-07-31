@@ -169,3 +169,19 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.12E | Restart recovery and deterministic replay | DONE |
 | 10.12F | Home Assistant orchestration diagnostics | DONE |
 | 10.12G | Integrated soak and golden scenarios | DONE |
+
+## PoolOS Simulator Execution Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 10.13A-J | Supervisory execution framework | DONE |
+| 10.14A | Simulator-only execution gateway composition | DONE PENDING LOCAL VALIDATION |
+| 10.14B | Execution-step to simulator-gateway integration | PLANNED |
+| 10.14C | Execution-level delivery receipts and lifecycle evidence | PLANNED |
+| 10.14D | Closed-loop simulator execution | PLANNED |
+| 10.14E | Simulator fault injection and recovery | PLANNED |
+| 10.14F | Golden simulator execution scenarios | PLANNED |
+
+Epic 10.14 remains simulator-only. Home Assistant service calls, physical
+Pentair delivery, RS-485 delivery, and live equipment actuation remain outside
+this epic.
