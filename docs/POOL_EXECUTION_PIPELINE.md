@@ -209,3 +209,58 @@ Epic 10.13C adds:
 It does not add execution-plan construction, operation translation, simulated
 delivery, verification, Home Assistant service calls, Pentair commands, or
 physical actuation.
+
+## Epic 10.13D deterministic execution-plan rules
+
+`DeterministicExecutionPlanBuilder` converts one authorized
+`ExecutionProposal` into one immutable `ExecutionPlan`. Plan construction is a
+pure data transformation. It does not translate or deliver operations and does
+not contact simulator, Home Assistant, Pentair, or any physical endpoint.
+
+A plan is built only when:
+
+- the authorization disposition is `AUTHORIZED`;
+- the authorization references the same proposal;
+- authorization did not precede proposal creation;
+- every proposal operation has exactly one step specification; and
+- no step specification refers to an unknown operation.
+
+Each `ExecutionStepSpecification` explicitly defines:
+
+- operation preconditions;
+- expected observations;
+- whether verification is required; and
+- step metadata.
+
+Verification-required steps must define at least one expected observation.
+Specifications accept JSON-serializable planning facts only so deterministic
+plan identifiers can include all planning annotations.
+
+The builder preserves the canonical operation order from the proposal. The
+order in which step specifications are supplied cannot reorder operations.
+Step sequences are contiguous from one, and step IDs are deterministically
+derived from the plan ID and sequence.
+
+Plan identifiers are deterministic for the same proposal, authorization,
+ordered operations, step specifications, and plan metadata. Repeating the same
+build request therefore produces the same immutable plan.
+
+Rejected build attempts return explicit reason codes, including unauthorized
+or mismatched authorization, missing or unknown specifications, duplicate
+specifications, and temporally invalid authorization.
+
+## Epic 10.13D scope
+
+Epic 10.13D adds:
+
+- immutable execution-step specifications;
+- deterministic execution-plan construction;
+- explicit built and rejected plan-build results;
+- operation-order preservation;
+- step preconditions and expected-observation requirements;
+- deterministic plan and step identifiers; and
+- tests proving plan construction does not translate or deliver operations.
+
+It does not add operation translation, simulator delivery, verification,
+execution coordination, Home Assistant service calls, Pentair commands,
+physical actuation, or restart resumption.

@@ -184,6 +184,7 @@ class ExecutionStep:
     step_id: str
     sequence: int
     operation: PoolOperation
+    preconditions: Mapping[str, Any] = field(default_factory=dict)
     expected_observations: Mapping[str, Any] = field(default_factory=dict)
     verification_required: bool = True
     metadata: Mapping[str, str] = field(default_factory=dict)
@@ -194,6 +195,11 @@ class ExecutionStep:
             raise ValueError("sequence must be at least 1")
         if not isinstance(self.operation, PoolOperation):
             raise TypeError("operation must be a PoolOperation")
+        object.__setattr__(
+            self,
+            "preconditions",
+            _freeze_mapping(self.preconditions),
+        )
         if self.verification_required and not self.expected_observations:
             raise ValueError(
                 "verification-required steps must define expected observations"

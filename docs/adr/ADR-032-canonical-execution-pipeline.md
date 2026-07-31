@@ -115,3 +115,28 @@ semantics.
 
 This milestone does not construct execution plans, translate operations,
 deliver commands, verify observations, or invoke Home Assistant or Pentair.
+
+## Epic 10.13D implementation
+
+Deterministic plan construction is implemented as a pure boundary between
+successful authorization and future execution coordination.
+`DeterministicExecutionPlanBuilder` consumes a matching authorized proposal and
+one explicit `ExecutionStepSpecification` for every canonical operation. It
+returns either an immutable `ExecutionPlan` or an explicit rejected build
+result.
+
+The proposal remains authoritative for operation order. Step specifications
+supply preconditions, expected observations, verification requirements, and
+metadata but cannot reorder or replace operations. Plans require contiguous
+step numbering, unique step and operation identifiers, and deterministic plan
+and step identifiers.
+
+Verification-required steps must state their expected observations. Planning
+facts used to derive deterministic identifiers must be JSON-serializable.
+Unauthorized or mismatched authorizations, missing, duplicate, or unknown step
+specifications, and authorization timestamps preceding proposal creation are
+rejected before a plan exists.
+
+This milestone is data-only. It does not translate `PoolOperation` objects,
+deliver simulator commands, verify observations, invoke Home Assistant or
+Pentair, or permit physical actuation.

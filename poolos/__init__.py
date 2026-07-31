@@ -192,3 +192,11 @@ from .execution_authorization import (
     ExecutionAuthorizationEngine,
     ExecutionAuthorizationRequest,
 )
+
+from .execution_plans import (
+    DeterministicExecutionPlanBuilder,
+    ExecutionPlanBuildRequest,
+    ExecutionPlanBuildResult,
+    ExecutionStepSpecification,
+    PlanBuildDisposition,
+)
