@@ -50,10 +50,13 @@ class ExecutionLifecycleStatus(str, Enum):
 
     PENDING = "pending"
     AUTHORIZED = "authorized"
+    PLANNED = "planned"
+    EXECUTING = "executing"
     DELIVERING = "delivering"
     DELIVERED = "delivered"
     VERIFYING = "verifying"
     VERIFIED = "verified"
+    COMPLETED = "completed"
     REJECTED = "rejected"
     FAILED = "failed"
     TIMED_OUT = "timed_out"

@@ -264,3 +264,89 @@ Epic 10.13D adds:
 It does not add operation translation, simulator delivery, verification,
 execution coordination, Home Assistant service calls, Pentair commands,
 physical actuation, or restart resumption.
+
+## Epic 10.13E execution state-machine rules
+
+`ExecutionStateMachine` is the single authoritative validator for supervisory
+execution lifecycle changes. It is a pure domain component: it does not
+coordinate steps, translate `PoolOperation` objects, deliver commands, inspect
+Home Assistant, contact Pentair, or perform physical actuation.
+
+The canonical successful lifecycle is explicit:
+
+```text
+AUTHORIZED
+  -> PLANNED
+  -> EXECUTING
+  -> DELIVERING
+  -> DELIVERED
+  -> VERIFYING (when verification is required)
+  -> VERIFIED
+  -> COMPLETED
+```
+
+A delivered step or plan that does not require observation verification may
+move directly from `DELIVERED` to `VERIFIED`, but it must still transition to
+`COMPLETED` before the lifecycle is finished.
+
+Exceptional terminal states are:
+
+```text
+REJECTED
+FAILED
+TIMED_OUT
+ABORTED
+SUPERSEDED
+```
+
+`COMPLETED` is also terminal. Terminal states cannot resume or transition to
+another status. Restart recovery must therefore reconcile and reevaluate
+rather than mutate an old terminal or incomplete lifecycle into a resumed
+execution.
+
+Every accepted transition produces an immutable `ExecutionStateTransition`
+containing:
+
+- deterministic transition identity;
+- plan identity;
+- prior and next lifecycle status;
+- timezone-aware occurrence time;
+- actor and reason; and
+- immutable metadata.
+
+`ExecutionLifecycle` stores the immutable current status and complete accepted
+transition history. The history must be chronologically ordered, status
+contiguous, plan consistent, and synchronized with the lifecycle's current
+status and update timestamp.
+
+Rejected transition requests do not mutate lifecycle state. They return an
+explicit reason such as:
+
+```text
+status_unchanged
+terminal_state_cannot_transition
+transition_time_precedes_current_state
+illegal_transition:authorized->delivered
+```
+
+Transition identifiers are deterministic for the same plan, source state,
+target state, timestamp, actor, reason, transition number, and metadata. This
+supports future replay and Flight Recorder comparison without introducing a
+runtime side effect.
+
+## Epic 10.13E scope
+
+Epic 10.13E adds:
+
+- canonical `PLANNED`, `EXECUTING`, and `COMPLETED` lifecycle states;
+- one authoritative legal-transition table;
+- immutable execution lifecycle and transition artifacts;
+- deterministic transition identifiers;
+- terminal-state lockout;
+- chronological and status-contiguous history validation; and
+- tests proving that the state machine has no delivery collaborator.
+
+It does not add execution coordination, operation translation, simulator
+command delivery, observation verification, Flight Recorder persistence,
+Home Assistant service calls, Pentair commands, physical actuation, or restart
+resumption.

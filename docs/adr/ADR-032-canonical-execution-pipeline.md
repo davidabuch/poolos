@@ -140,3 +140,35 @@ rejected before a plan exists.
 This milestone is data-only. It does not translate `PoolOperation` objects,
 deliver simulator commands, verify observations, invoke Home Assistant or
 Pentair, or permit physical actuation.
+
+## Epic 10.13E implementation
+
+The supervisory execution lifecycle is governed by one authoritative pure
+state machine. `ExecutionStateMachine` defines legal transitions and returns
+immutable transition results without coordinating execution or contacting any
+delivery system.
+
+The successful lifecycle is:
+
+```text
+AUTHORIZED -> PLANNED -> EXECUTING -> DELIVERING -> DELIVERED
+           -> VERIFYING -> VERIFIED -> COMPLETED
+```
+
+When verification is not required, `DELIVERED -> VERIFIED` is permitted. All
+successful lifecycles still end at `COMPLETED`.
+
+`REJECTED`, `FAILED`, `TIMED_OUT`, `ABORTED`, `SUPERSEDED`, and `COMPLETED` are
+terminal. A terminal lifecycle cannot resume. Illegal, duplicate, stale-time,
+and post-terminal transition requests are rejected without mutating state.
+
+Every accepted transition creates an immutable, deterministic
+`ExecutionStateTransition`. `ExecutionLifecycle` retains the accepted history
+and validates that it is plan-consistent, chronologically ordered, and status
+contiguous. These artifacts establish the audit boundary required by future
+execution coordination, Flight Recorder persistence, diagnostics, replay, and
+restart reconciliation.
+
+This milestone does not coordinate plan steps, translate operations, deliver
+simulator commands, verify observations, invoke Home Assistant or Pentair, or
+permit physical actuation.

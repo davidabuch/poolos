@@ -200,3 +200,11 @@ from .execution_plans import (
     ExecutionStepSpecification,
     PlanBuildDisposition,
 )
+
+from .execution_state_machine import (
+    ExecutionLifecycle,
+    ExecutionStateMachine,
+    ExecutionStateTransition,
+    ExecutionTransitionResult,
+    TransitionDisposition,
+)
