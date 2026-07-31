@@ -213,3 +213,56 @@ def test_orchestration_diagnostics_are_immutable():
     assert result.diagnostics["goal_count"] == "1"
     with pytest.raises(TypeError):
         result.diagnostics["goal_count"] = "2"  # type: ignore[index]
+
+
+def test_equivalent_evaluation_retains_active_record_without_new_append():
+    recorder = InMemoryDecisionFlightRecorder()
+    value = DecisionOrchestrator(
+        ExplainablePlanner(
+            planner=build_default_planner(),
+            ranking_engine=AlternativeRankingEngine(
+                (RankingCriterion("readiness", "Readiness", 1.0),)
+            ),
+            recorder=recorder,
+        )
+    )
+    first = value.evaluate(
+        DecisionOrchestrationRequest(context(), planning()),
+        kernel(),
+    )
+    assert first.active_record is not None
+    retained_context = DecisionEvaluationContext(
+        context_id="context-2",
+        evaluated_at=NOW + timedelta(minutes=5),
+        trigger=EvaluationTrigger.SCHEDULED,
+        runtime_mode=EvaluationRuntimeMode.SHADOW,
+        goals=(objective(),),
+        previous_decision_id=first.active_record.decision.decision_id,
+    )
+    second = value.evaluate(
+        DecisionOrchestrationRequest(
+            retained_context,
+            planning(),
+            active_record=first.active_record,
+        ),
+        kernel(),
+    )
+    assert second.status is OrchestrationStatus.RETAINED
+    assert second.stability is not None
+    assert not second.stability.decision_changed
+    assert second.active_record is first.active_record
+    assert len(recorder.records) == 1
+
+
+def test_request_rejects_mismatched_active_record():
+    first = orchestrator().evaluate(
+        DecisionOrchestrationRequest(context(), planning()),
+        kernel(),
+    )
+    assert first.active_record is not None
+    with pytest.raises(ValueError, match="active record"):
+        DecisionOrchestrationRequest(
+            context(),
+            planning(),
+            active_record=first.active_record,
+        )

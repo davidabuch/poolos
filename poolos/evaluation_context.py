@@ -22,6 +22,8 @@ class EvaluationTrigger(str, Enum):
     DECISION_EXPIRED = "decision_expired"
     EXPECTED_CHANGE_REACHED = "expected_change_reached"
     RESTART_RECOVERY = "restart_recovery"
+    SCHEDULED = "scheduled"
+    EXTERNAL_EVENT = "external_event"
 
 
 class EvaluationRuntimeMode(str, Enum):
