@@ -158,6 +158,6 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.11A | Immutable decision intelligence and explanation graph model | DONE |
 | 10.11B | Deterministic alternative ranking engine | DONE |
 | 10.11C | Human-readable explanation renderer | DONE |
-| 10.11D | Technical explanation renderer | PLANNED |
+| 10.11D | Technical explanation renderer | DONE |
 | 10.11E | Flight Recorder decision-intelligence integration | PLANNED |
 | 10.11F | Home Assistant explanation entities and dashboard | PLANNED |
