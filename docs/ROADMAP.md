@@ -155,3 +155,9 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.8 | Goal-oriented planning facade | DONE |
 | 10.9 | Deterministic energy and cost optimization | DONE |
 | 10.10 | Canonical forecast intelligence and predictive planning signals | DONE |
+| 10.11A | Immutable decision intelligence and explanation graph model | DONE |
+| 10.11B | Deterministic alternative ranking engine | READY |
+| 10.11C | Human-readable explanation renderer | PLANNED |
+| 10.11D | Technical explanation renderer | PLANNED |
+| 10.11E | Flight Recorder decision-intelligence integration | PLANNED |
+| 10.11F | Home Assistant explanation entities and dashboard | PLANNED |
