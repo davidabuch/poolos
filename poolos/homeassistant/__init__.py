@@ -6,6 +6,17 @@ from .catalog import (
     HomeAssistantEntityClass,
     HomeAssistantEntityDefinition,
 )
+from .decision_intelligence import (
+    HomeAssistantDecisionDashboard,
+    HomeAssistantDecisionEntityIds,
+    HomeAssistantDecisionProjection,
+    HomeAssistantDecisionProjector,
+    HomeAssistantDecisionPublicationError,
+    HomeAssistantDecisionPublicationResult,
+    HomeAssistantDecisionPublisher,
+    HomeAssistantDecisionStateExecutor,
+    HomeAssistantDecisionStatePublication,
+)
 from .dashboard import (
     DashboardComparison,
     DashboardComparisonStatus,
@@ -61,6 +72,15 @@ __all__ = [
     "DashboardDriftPolicy",
     "EnergyObservationBindings",
     "HomeAssistantCatalogError",
+    "HomeAssistantDecisionDashboard",
+    "HomeAssistantDecisionEntityIds",
+    "HomeAssistantDecisionProjection",
+    "HomeAssistantDecisionProjector",
+    "HomeAssistantDecisionPublicationError",
+    "HomeAssistantDecisionPublicationResult",
+    "HomeAssistantDecisionPublisher",
+    "HomeAssistantDecisionStateExecutor",
+    "HomeAssistantDecisionStatePublication",
     "HomeAssistantEntityCatalog",
     "HomeAssistantEntityClass",
     "HomeAssistantEntityDefinition",

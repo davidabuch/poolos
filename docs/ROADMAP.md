@@ -161,4 +161,4 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.11D | Technical explanation renderer | DONE |
 | 10.11E | Explainable planner integration | DONE |
 | 10.11F | Flight Recorder decision-intelligence integration | DONE |
-| 10.11G | Home Assistant explanation entities and dashboard | PLANNED |
+| 10.11G | Home Assistant explanation entities and dashboard | DONE |
