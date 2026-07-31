@@ -3,7 +3,8 @@
 ## Status
 
 Epic 10.13 establishes the execution architecture without enabling live
-actuation. Epic 10.13A defines immutable execution-domain models only.
+actuation. Epic 10.13A defines immutable execution-domain models. Epic 10.13B adds
+command-free proposal generation from current, changed, recorded decisions.
 
 PoolOS remains command-free at the decision boundary and continues to operate
 within this safety envelope:
@@ -91,6 +92,31 @@ responsibilities.
 
 The canonical future actuation unit is `PoolOperation`.
 
+## Epic 10.13B proposal-generation rules
+
+`ExecutionProposalGenerator` consumes a `DecisionOrchestrationResult` and
+canonical operations supplied explicitly by domain logic. Proposal generation
+is deterministic and does not authorize or execute anything.
+
+A proposal is generated only when all of the following are true:
+
+- orchestration completed successfully;
+- decision stability accepted a changed decision;
+- the decision outcome selected an alternative;
+- the accepted decision has a current Flight Recorder record;
+- the orchestration active record, decision record, and stability result
+  identify the same decision; and
+- at least one canonical `PoolOperation` is supplied.
+
+No proposal is generated for blocked contexts, retained decisions, no-action
+or deferred decisions, unrecorded decisions, or stale/superseded decisions.
+Repeating generation for the same accepted decision produces the same
+deterministic proposal identifier.
+
+Operation derivation remains outside decision ranking. The request boundary
+accepts canonical `PoolOperation` objects only; Home Assistant services,
+Pentair commands, and transport payloads remain prohibited.
+
 ## Epic 10.13A scope
 
 Epic 10.13A adds only:
@@ -110,3 +136,17 @@ It does not add:
 - Pentair network calls;
 - physical endpoint support;
 - restart resumption.
+
+## Epic 10.13B scope
+
+Epic 10.13B adds:
+
+- immutable proposal-generation requests and results;
+- deterministic proposal identifiers;
+- current-decision and recording checks;
+- explicit non-generation dispositions; and
+- tests proving blocked, retained, unrecorded, non-actionable, and stale
+  decisions do not produce proposals.
+
+It does not add authorization, execution planning, translation, delivery,
+verification, Home Assistant service calls, or physical actuation.

@@ -180,3 +180,10 @@ from .execution_models import (
     StepOutcome,
     VerificationStatus,
 )
+
+from .execution_proposals import (
+    ExecutionProposalGenerator,
+    ExecutionProposalRequest,
+    ProposalGenerationDisposition,
+    ProposalGenerationResult,
+)

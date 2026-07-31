@@ -82,3 +82,11 @@ The first milestone defines immutable models only:
 - authorization, lifecycle, and verification enums
 
 No delivery behavior changes in this milestone.
+
+## Epic 10.13B implementation
+
+Proposal generation is implemented as a command-free boundary above decision orchestration. Only a current, changed, selected, recorded decision may produce an `ExecutionProposal`. Blocked contexts, retained decisions, non-selected outcomes, unrecorded decisions, and stale or superseded decisions produce explicit non-generation results.
+
+Canonical operations are supplied explicitly to proposal generation by domain logic. Decision ranking does not contain vendor commands or transport payloads. Proposal IDs are deterministic for an accepted decision, preventing repeated evaluation of the same result from creating distinct executable intent.
+
+This milestone does not authorize, plan, translate, deliver, verify, or resume execution.
