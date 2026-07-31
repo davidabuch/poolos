@@ -195,3 +195,29 @@ through delivery, verification, and completion states.
 This milestone does not translate operations, create vendor commands, contact
 the simulator, verify observations, invoke Home Assistant or Pentair, perform
 physical actuation, or resume incomplete work after restart.
+
+## Epic 10.13G implementation
+
+Execution verification is implemented as a pure typed-observation evaluation
+boundary. `ExecutionVerificationEngine` consumes one immutable `ExecutionStep`,
+an `ObservationStore`, explicit timing and freshness policy, required source
+identity, accepted quality levels, and a minimum confidence threshold. It
+returns immutable per-observation evidence and one aggregate verification
+result.
+
+The engine reuses canonical `PoolObservation` freshness, provenance, quality,
+confidence, and store-selection semantics. It does not infer success from a
+delivery receipt and does not mutate the execution coordinator or state
+machine. In simulation, only matching simulated observations may satisfy the
+verification request.
+
+Aggregate results distinguish `VERIFIED`, `FAILED`, `PARTIAL`, `PENDING`,
+`TIMED_OUT`, and `NOT_REQUIRED`. Missing, stale, future-dated, unusable, and
+low-confidence evidence cannot be treated as success. Verification IDs are
+deterministic for the same plan, step, evaluation time, deadline, metadata, and
+evidence snapshot.
+
+This milestone does not translate operations, create or deliver vendor
+commands, contact simulator endpoints, invoke Home Assistant or Pentair,
+perform physical actuation, advance lifecycle state, or resume incomplete work
+after restart.

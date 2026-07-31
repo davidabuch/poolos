@@ -70,6 +70,7 @@ class VerificationStatus(str, Enum):
     NOT_REQUIRED = "not_required"
     PENDING = "pending"
     VERIFIED = "verified"
+    PARTIAL = "partial"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
 

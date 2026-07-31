@@ -217,3 +217,11 @@ from .execution_coordinator import (
     ExecutionCoordinationSession,
     ExecutionCoordinator,
 )
+
+from .execution_verification import (
+    ExecutionVerificationEngine,
+    ExecutionVerificationEvidence,
+    ExecutionVerificationRequest,
+    ExecutionVerificationResult,
+    VerificationEvidenceDisposition,
+)

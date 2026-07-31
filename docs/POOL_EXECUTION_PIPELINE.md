@@ -393,3 +393,56 @@ Epic 10.13F adds:
 It does not translate `PoolOperation` objects, create vendor commands, deliver
 to the simulator, verify observations, invoke Home Assistant or Pentair,
 perform physical actuation, or resume an incomplete session after restart.
+
+## Epic 10.13G execution-verification rules
+
+`ExecutionVerificationEngine` is a pure evidence-evaluation boundary. It
+compares one `ExecutionStep` with canonical typed observations already admitted
+to an `ObservationStore`. It does not deliver commands, advance the coordinator,
+or transition the lifecycle state machine.
+
+Verification evaluates only observations matching the request's required
+source identity. Epic 10.13 remains simulation-only, so verification defaults
+to `SIMULATED` observations. A live observation cannot silently satisfy a
+simulation verification request.
+
+Each expected observation produces immutable evidence classified as:
+
+```text
+MATCHED
+MISMATCHED
+MISSING
+STALE
+FUTURE
+UNUSABLE
+LOW_CONFIDENCE
+```
+
+The aggregate verification result is:
+
+- `VERIFIED` when every expected observation is fresh, usable, sufficiently
+  confident, and equal to its expected value;
+- `FAILED` when all expected observations are resolved with fresh usable
+  evidence and at least one value does not match;
+- `PARTIAL` when at least one expectation matches but other evidence remains
+  unresolved before the deadline;
+- `PENDING` when verification still lacks sufficient evidence before the
+  deadline;
+- `TIMED_OUT` when the deadline is reached without complete verification; or
+- `NOT_REQUIRED` when the plan step explicitly requires no verification.
+
+Delivery acceptance and verification remain separate facts. The verification
+engine consumes existing observation freshness, provenance, quality, and
+confidence semantics; it does not create a second observation model.
+Verification identifiers are deterministic for an identical evidence snapshot.
+
+## Epic 10.13G scope
+
+Epic 10.13G adds immutable verification requests, evidence, and results;
+source-aware observation lookup; freshness, quality, and confidence gates;
+partial and timeout semantics; and deterministic verification identities.
+
+It does not translate operations, create vendor commands, contact simulator
+endpoints, invoke Home Assistant or Pentair, advance coordination, transition
+execution lifecycle state, perform physical actuation, or resume work after a
+restart.
