@@ -523,3 +523,27 @@ assessment to reconcile actual state and create new intent if still required.
 This milestone does not coordinate execution, translate operations, create or
 deliver vendor commands, contact simulator endpoints, invoke Home Assistant or
 Pentair, perform physical actuation, or mutate the recorded timeline.
+
+## Epic 10.13J — Golden end-to-end execution scenarios
+
+PoolOS maintains a permanent golden scenario catalog for the supervisory
+execution pipeline. These scenarios validate behavior across immutable
+execution artifacts without introducing simulator delivery or hardware access.
+
+The required scenarios cover:
+
+- verified execution with a recorded terminal outcome;
+- verification-not-required behavior;
+- rejected and deferred authorization;
+- failed and timed-out verification;
+- restart during execution and verification;
+- completed restart recovery; and
+- corrupt execution history.
+
+The catalog lives in `poolos.execution_golden_scenarios`; executable regression
+coverage lives in `tests/test_execution_golden_scenarios.py`. Scenario IDs are
+stable and the catalog is validated for uniqueness and completeness.
+
+These scenarios deliberately stop at the supervisory boundary. They do not
+translate operations, create vendor commands, contact a simulator endpoint,
+call Home Assistant, call Pentair, or permit interrupted execution to resume.

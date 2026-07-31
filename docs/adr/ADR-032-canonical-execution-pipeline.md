@@ -273,3 +273,18 @@ Recovery does not mutate history, reconstruct a coordinator cursor, resend an
 operation, contact a simulator or external system, invoke Home Assistant or
 Pentair, or perform physical actuation. Actual-state reconciliation and new
 proposal generation remain later runtime responsibilities.
+
+## Epic 10.13J addendum: permanent golden scenarios
+
+The canonical execution pipeline SHALL maintain a stable catalog of permanent
+end-to-end supervisory scenarios. The catalog must cover success,
+authorization refusal, verification failure and timeout, interruption,
+completed recovery, and corrupt history.
+
+Golden scenarios assert externally observable execution facts rather than
+private implementation details. They must remain deterministic, must use only
+canonical execution and observation artifacts, and must not introduce command
+delivery or hardware collaborators.
+
+The permanent catalog is `poolos.execution_golden_scenarios`, with executable
+coverage in `tests/test_execution_golden_scenarios.py`.

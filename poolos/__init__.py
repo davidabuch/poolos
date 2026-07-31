@@ -243,3 +243,11 @@ from .execution_restart_recovery import (
     ExecutionRecoveryRequest,
     ExecutionRestartRecoveryEngine,
 )
+
+from .execution_golden_scenarios import (
+    EXECUTION_GOLDEN_SCENARIO_INDEX,
+    EXECUTION_GOLDEN_SCENARIOS,
+    ExecutionGoldenScenarioDefinition,
+    ExecutionGoldenScenarioId,
+    validate_execution_golden_catalog,
+)
