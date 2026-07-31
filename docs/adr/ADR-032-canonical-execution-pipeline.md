@@ -172,3 +172,26 @@ restart reconciliation.
 This milestone does not coordinate plan steps, translate operations, deliver
 simulator commands, verify observations, invoke Home Assistant or Pentair, or
 permit physical actuation.
+
+## Epic 10.13F implementation
+
+Execution coordination is implemented as a thin pure layer above
+`ExecutionPlan` and `ExecutionStateMachine`. `ExecutionCoordinator` admits an
+authorized plan, records the transition to `PLANNED`, starts coordination by
+recording the transition to `EXECUTING`, and selects exactly one current step.
+
+An immutable `ExecutionCoordinationSession` stores the lifecycle, current step
+cursor, completed step identifiers, stop state, and deterministic coordination
+events. A step cursor advances only after an explicit external completion signal
+for the currently selected step. Out-of-order, duplicate, cross-plan,
+backdated, terminal, and post-stop requests are rejected without mutation.
+
+A completion signal is not a delivery receipt or verification result. When all
+steps have received completion signals, the coordinator stops with
+`plan_steps_exhausted` while the lifecycle remains `EXECUTING`. Future delivery
+and verification milestones are solely responsible for advancing the lifecycle
+through delivery, verification, and completion states.
+
+This milestone does not translate operations, create vendor commands, contact
+the simulator, verify observations, invoke Home Assistant or Pentair, perform
+physical actuation, or resume incomplete work after restart.

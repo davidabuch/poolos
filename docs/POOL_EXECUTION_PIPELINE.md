@@ -350,3 +350,46 @@ It does not add execution coordination, operation translation, simulator
 command delivery, observation verification, Flight Recorder persistence,
 Home Assistant service calls, Pentair commands, physical actuation, or restart
 resumption.
+
+## Epic 10.13F execution-coordination rules
+
+`ExecutionCoordinator` is a thin, pure lifecycle consumer above the immutable
+`ExecutionPlan` and authoritative `ExecutionStateMachine`. It admits only an
+authorized plan, transitions it to `PLANNED`, starts coordination by
+transitioning it to `EXECUTING`, and exposes exactly one current step at a time.
+
+The coordinator maintains an immutable `ExecutionCoordinationSession` with:
+
+- the plan-specific lifecycle;
+- the current step sequence;
+- completed step identifiers;
+- explicit stop state and reason; and
+- immutable, deterministic coordination events.
+
+Step advancement requires an explicit completion signal for the currently
+selected step. Out-of-order, duplicate, stale-time, cross-plan, terminal, and
+post-stop requests are rejected without mutating the session. The completion
+signal is a coordination fact only: the coordinator does not determine whether
+delivery or verification succeeded.
+
+After the final step-completion signal, coordination stops with
+`plan_steps_exhausted`. The lifecycle intentionally remains `EXECUTING`; later
+milestones must provide real delivery and verification facts before advancing
+the lifecycle through `DELIVERING`, `DELIVERED`, `VERIFYING`, `VERIFIED`, and
+`COMPLETED`. The coordinator never fabricates those states.
+
+## Epic 10.13F scope
+
+Epic 10.13F adds:
+
+- immutable coordination sessions, events, and results;
+- authorized-plan admission;
+- deterministic lifecycle advancement to `PLANNED` and `EXECUTING`;
+- one-current-step selection;
+- ordered completion-signal handling;
+- explicit stop conditions; and
+- tests covering identity, ordering, time, terminal, and immutability rules.
+
+It does not translate `PoolOperation` objects, create vendor commands, deliver
+to the simulator, verify observations, invoke Home Assistant or Pentair,
+perform physical actuation, or resume an incomplete session after restart.
