@@ -228,6 +228,7 @@ Status: complete.
 |---|---|---|
 | 10.15A | Immutable operational disposition model | DONE |
 | 10.15B | Command-free operational disposition orchestrator | DONE |
+| 10.15C | Canonical operational context model | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -241,10 +242,21 @@ Status: complete.
 
 ### Epic 10.15B — Operational Disposition Orchestrator
 
-Status: implemented pending local validation.
+Status: complete.
 
 - converts each immutable operational disposition into one canonical next-action instruction;
 - maps wait, reevaluate, submit, keep, cancel, replace, and block to stable logical subsystem targets;
 - preserves decision, context, and plan identity without invoking any target;
 - enforces action-specific invariants and immutable diagnostics;
 - performs no scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
+
+### Epic 10.15C — Canonical Operational Context Model
+
+Status: implemented pending local validation.
+
+- introduces one immutable operational-state snapshot for each routing evaluation;
+- isolates active-plan identity and progress in a minimal `ActivePlanSummary`;
+- centralizes pending action, reevaluation, execution summary, operational mode, and safety posture;
+- provides one deterministic construction authority with explicit mode precedence;
+- preserves execution encapsulation and deterministic replay;
+- performs no routing side effects, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
