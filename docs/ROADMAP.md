@@ -231,6 +231,7 @@ Status: complete.
 | 10.15C | Canonical operational context model | DONE |
 | 10.15D | Canonical operational action pipeline | DONE |
 | 10.15E | Declarative operational action registry | DONE |
+| 10.15F | Deterministic operational action exchange | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -276,7 +277,7 @@ Status: complete.
 
 ### Epic 10.15E — Operational Action Registry
 
-Status: complete pending local validation.
+Status: complete.
 
 - introduces one immutable declarative registry for operational action routes;
 - validates duplicate and conflicting registrations at construction time;
@@ -284,3 +285,14 @@ Status: complete pending local validation.
 - makes the registry the route authority consumed by the operational action pipeline;
 - keeps registrations data-only and stores no callable handlers;
 - performs no dispatch, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
+
+### Epic 10.15F — Operational Action Exchange
+
+Status: complete pending local validation.
+
+- introduces one synchronous, deterministic exchange boundary for accepted operational actions;
+- requires accepted pipeline evidence and preserved action identity;
+- resolves exactly one logical destination through the canonical action registry;
+- verifies consistency among canonical action, pipeline route, and registry evidence;
+- emits immutable ready or rejected exchange results with deterministic IDs and diagnostics;
+- performs no destination invocation, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
