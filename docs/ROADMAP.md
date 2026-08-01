@@ -227,13 +227,24 @@ Status: complete.
 | ID | Work item | Status |
 |---|---|---|
 | 10.15A | Immutable operational disposition model | DONE |
+| 10.15B | Command-free operational disposition orchestrator | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
-Status: implemented pending local validation.
+Status: complete.
 
 - preserves the Decision Orchestrator as the single supervisory evaluation authority;
 - converts accepted decision intent and minimal active-plan state into one immutable recommendation;
 - supports wait, reevaluate, submit, keep, cancel, replace, and block dispositions;
 - emits stable reason codes and deterministic diagnostics;
 - performs no plan mutation, proposal generation, authorization, delivery, Home Assistant call, Pentair communication, or physical actuation.
+
+### Epic 10.15B — Operational Disposition Orchestrator
+
+Status: implemented pending local validation.
+
+- converts each immutable operational disposition into one canonical next-action instruction;
+- maps wait, reevaluate, submit, keep, cancel, replace, and block to stable logical subsystem targets;
+- preserves decision, context, and plan identity without invoking any target;
+- enforces action-specific invariants and immutable diagnostics;
+- performs no scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
