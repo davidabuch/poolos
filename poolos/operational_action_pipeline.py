@@ -16,6 +16,10 @@ import json
 from types import MappingProxyType
 from typing import Mapping
 
+from .operational_action_registry import (
+    OperationalActionRegistry,
+    OperationalActionRegistryStatus,
+)
 from .operational_disposition_orchestrator import (
     OperationalAction,
     OperationalOrchestrationInstruction,
@@ -36,29 +40,7 @@ class OperationalActionPipelineReason(str, Enum):
     ROUTE_ACCEPTED = "route_accepted"
     ACTION_TARGET_MISMATCH = "action_target_mismatch"
     DUPLICATE_ACTION_ID = "duplicate_action_id"
-
-
-_EXPECTED_TARGET_BY_ACTION: Mapping[OperationalAction, OperationalTarget] = (
-    MappingProxyType(
-        {
-            OperationalAction.NO_ACTION: OperationalTarget.NONE,
-            OperationalAction.REQUEST_REEVALUATION: (
-                OperationalTarget.REEVALUATION_SCHEDULER
-            ),
-            OperationalAction.REQUEST_PROPOSAL: (
-                OperationalTarget.EXECUTION_PROPOSAL_BOUNDARY
-            ),
-            OperationalAction.RETAIN_PLAN: OperationalTarget.EXECUTION_PLAN_BOUNDARY,
-            OperationalAction.REQUEST_PLAN_CANCELLATION: (
-                OperationalTarget.EXECUTION_PLAN_BOUNDARY
-            ),
-            OperationalAction.REQUEST_PLAN_REPLACEMENT: (
-                OperationalTarget.EXECUTION_PLAN_BOUNDARY
-            ),
-            OperationalAction.HALT: OperationalTarget.OPERATOR_REVIEW,
-        }
-    )
-)
+    UNSUPPORTED_ACTION = "unsupported_action"
 
 
 def _canonical_json(value: object) -> str:
@@ -176,6 +158,10 @@ class OperationalActionPipelineResult:
 class OperationalActionPipeline:
     """Validate and logically route canonical actions without invoking targets."""
 
+    registry: OperationalActionRegistry = field(
+        default_factory=OperationalActionRegistry.default
+    )
+
     def process(
         self,
         action: CanonicalOperationalAction,
@@ -194,14 +180,28 @@ class OperationalActionPipeline:
                 accepted_action_ids=prior_ids,
             )
 
-        expected_target = _EXPECTED_TARGET_BY_ACTION[action.action]
-        if action.target is not expected_target:
+        registry_result = self.registry.lookup(action.action)
+        if registry_result.status is OperationalActionRegistryStatus.UNSUPPORTED:
+            return self._result(
+                action=action,
+                status=OperationalActionPipelineStatus.REJECTED,
+                reason=OperationalActionPipelineReason.UNSUPPORTED_ACTION,
+                routed_target=OperationalTarget.NONE,
+                accepted_action_ids=prior_ids,
+                registry_diagnostics=registry_result.diagnostics,
+            )
+
+        registration = registry_result.registration
+        if registration is None:
+            raise RuntimeError("found registry result must contain a registration")
+        if action.target is not registration.target:
             return self._result(
                 action=action,
                 status=OperationalActionPipelineStatus.REJECTED,
                 reason=OperationalActionPipelineReason.ACTION_TARGET_MISMATCH,
                 routed_target=OperationalTarget.NONE,
                 accepted_action_ids=prior_ids,
+                registry_diagnostics=registry_result.diagnostics,
             )
 
         return self._result(
@@ -210,6 +210,7 @@ class OperationalActionPipeline:
             reason=OperationalActionPipelineReason.ROUTE_ACCEPTED,
             routed_target=action.target,
             accepted_action_ids=(*prior_ids, action.action_id),
+            registry_diagnostics=registry_result.diagnostics,
         )
 
     @staticmethod
@@ -220,9 +221,11 @@ class OperationalActionPipeline:
         reason: OperationalActionPipelineReason,
         routed_target: OperationalTarget,
         accepted_action_ids: tuple[str, ...],
+        registry_diagnostics: Mapping[str, str] | None = None,
     ) -> OperationalActionPipelineResult:
         diagnostics = {
             **dict(action.diagnostics),
+            **dict(registry_diagnostics or {}),
             "pipeline_status": status.value,
             "pipeline_reason": reason.value,
             "routed_target": routed_target.value,

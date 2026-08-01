@@ -230,6 +230,7 @@ Status: complete.
 | 10.15B | Command-free operational disposition orchestrator | DONE |
 | 10.15C | Canonical operational context model | DONE |
 | 10.15D | Canonical operational action pipeline | DONE |
+| 10.15E | Declarative operational action registry | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -264,7 +265,7 @@ Status: complete.
 
 ### Epic 10.15D — Canonical Operational Action Pipeline
 
-Status: implemented pending local validation.
+Status: complete.
 
 - converts one orchestration instruction into one immutable canonical action request;
 - assigns a deterministic action ID derived from stable instruction identity;
@@ -272,3 +273,14 @@ Status: implemented pending local validation.
 - returns immutable accepted or rejected pipeline evidence with stable reason codes;
 - preserves the orchestrator as the sole routing-decision authority;
 - performs no target invocation, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
+
+### Epic 10.15E — Operational Action Registry
+
+Status: complete pending local validation.
+
+- introduces one immutable declarative registry for operational action routes;
+- validates duplicate and conflicting registrations at construction time;
+- returns deterministic found or unsupported lookup evidence with stable reason codes;
+- makes the registry the route authority consumed by the operational action pipeline;
+- keeps registrations data-only and stores no callable handlers;
+- performs no dispatch, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
