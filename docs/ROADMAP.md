@@ -180,7 +180,7 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | 10.14C | Execution-level delivery receipts and lifecycle evidence | DONE |
 | 10.14D | Closed-loop simulator execution | DONE |
 | 10.14E | Simulator fault injection and recovery | DONE |
-| 10.14F | Golden simulator execution scenarios | DONE PENDING LOCAL VALIDATION |
+| 10.14F | Golden simulator execution scenarios | DONE |
 
 Epic 10.14 remains simulator-only. Home Assistant service calls, physical
 Pentair delivery, RS-485 delivery, and live equipment actuation remain outside
@@ -213,7 +213,7 @@ Status: complete pending local validation.
 
 ### Epic 10.14F — Golden Simulator Execution Scenarios
 
-Status: implemented pending local validation.
+Status: complete.
 
 - permanent single-step and multi-step closed-loop success scenarios;
 - deterministic delivery rejection, failure, and timeout scenarios;
@@ -221,3 +221,19 @@ Status: implemented pending local validation.
 - externally meaningful lifecycle, advancement, recovery, and command-count assertions;
 - deterministic replay equivalence through a stable outcome fingerprint;
 - reusable production scenario runner with simulator-only composition.
+
+## PoolOS Operational Intelligence Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 10.15A | Immutable operational disposition model | DONE |
+
+### Epic 10.15A — Operational Disposition Model
+
+Status: implemented pending local validation.
+
+- preserves the Decision Orchestrator as the single supervisory evaluation authority;
+- converts accepted decision intent and minimal active-plan state into one immutable recommendation;
+- supports wait, reevaluate, submit, keep, cancel, replace, and block dispositions;
+- emits stable reason codes and deterministic diagnostics;
+- performs no plan mutation, proposal generation, authorization, delivery, Home Assistant call, Pentair communication, or physical actuation.
