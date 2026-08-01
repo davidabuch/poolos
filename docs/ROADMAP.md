@@ -175,12 +175,12 @@ Each deferred decision should receive an Architecture Decision Record before imp
 | ID | Work item | Status |
 |---|---|---|
 | 10.13A-J | Supervisory execution framework | DONE |
-| 10.14A | Simulator-only execution gateway composition | DONE PENDING LOCAL VALIDATION |
-| 10.14B | Execution-step to simulator-gateway integration | PLANNED |
-| 10.14C | Execution-level delivery receipts and lifecycle evidence | PLANNED |
-| 10.14D | Closed-loop simulator execution | PLANNED |
-| 10.14E | Simulator fault injection and recovery | PLANNED |
-| 10.14F | Golden simulator execution scenarios | PLANNED |
+| 10.14A | Simulator-only execution gateway composition | DONE |
+| 10.14B | Execution-step to simulator-gateway integration | DONE |
+| 10.14C | Execution-level delivery receipts and lifecycle evidence | DONE |
+| 10.14D | Closed-loop simulator execution | DONE |
+| 10.14E | Simulator fault injection and recovery | DONE |
+| 10.14F | Golden simulator execution scenarios | DONE PENDING LOCAL VALIDATION |
 
 Epic 10.14 remains simulator-only. Home Assistant service calls, physical
 Pentair delivery, RS-485 delivery, and live equipment actuation remain outside
@@ -210,3 +210,14 @@ Status: complete pending local validation.
 - immutable fault records and recovery recommendations;
 - safe step and plan termination without coordinator advancement;
 - no automatic retry, restart continuation, Home Assistant call, or physical actuation.
+
+### Epic 10.14F — Golden Simulator Execution Scenarios
+
+Status: implemented pending local validation.
+
+- permanent single-step and multi-step closed-loop success scenarios;
+- deterministic delivery rejection, failure, and timeout scenarios;
+- missing, stale, mismatched, and timed-out verification scenarios;
+- externally meaningful lifecycle, advancement, recovery, and command-count assertions;
+- deterministic replay equivalence through a stable outcome fingerprint;
+- reusable production scenario runner with simulator-only composition.
