@@ -10,17 +10,17 @@ import pytest
 
 from poolos.delivery import DeliveryEndpointKind
 from poolos.environment import RuntimeMode, build_runtime_environment
-from poolos.execution_models import (
-    ExecutionLifecycleStatus,
-    ExecutionPlan,
-    ExecutionStep,
-)
+from poolos.execution_models import ExecutionPlan, ExecutionStep
 from poolos.execution_simulator_delivery import (
     SimulatorStepDeliveryDisposition,
     SimulatorStepDeliveryEngine,
     SimulatorStepDeliveryRequest,
 )
-from poolos.execution_state_machine import ExecutionLifecycle, ExecutionStateMachine
+from poolos.execution_step_state_machine import (
+    ExecutionStepLifecycle,
+    ExecutionStepStateMachine,
+    ExecutionStepStatus,
+)
 from poolos.hal import CommandReceipt, CommandStatus
 from poolos.integration import (
     OperationTranslationHandler,
@@ -84,7 +84,7 @@ class SequencedSimulatorEndpoint:
         return CommandReceipt(self.statuses[len(self.calls) - 1])
 
 
-def plan_and_lifecycle() -> tuple[ExecutionPlan, ExecutionStep, ExecutionLifecycle]:
+def plan_and_lifecycle() -> tuple[ExecutionPlan, ExecutionStep, ExecutionStepLifecycle]:
     operation = StartPump(equipment_id="filter-pump", operation_id="operation-1")
     step = ExecutionStep(
         step_id="plan-1:step:1",
@@ -101,21 +101,10 @@ def plan_and_lifecycle() -> tuple[ExecutionPlan, ExecutionStep, ExecutionLifecyc
         created_at=CREATED,
         steps=(step,),
     )
-    machine = ExecutionStateMachine()
-    lifecycle = machine.initialize(plan)
-    planned = machine.transition(
-        lifecycle,
-        to_status=ExecutionLifecycleStatus.PLANNED,
-        occurred_at=CREATED,
-        reason="plan admitted",
-    ).lifecycle
-    executing = machine.transition(
-        planned,
-        to_status=ExecutionLifecycleStatus.EXECUTING,
-        occurred_at=CREATED,
-        reason="execution started",
-    ).lifecycle
-    return plan, step, executing
+    lifecycle = ExecutionStepStateMachine().initialize(
+        plan_id=plan.plan_id, step_id=step.step_id, initialized_at=CREATED
+    )
+    return plan, step, lifecycle
 
 
 def engine(
@@ -144,7 +133,7 @@ def engine(
 def request(
     plan: ExecutionPlan,
     step: ExecutionStep,
-    lifecycle: ExecutionLifecycle,
+    lifecycle: ExecutionStepLifecycle,
     **kwargs: object,
 ) -> SimulatorStepDeliveryRequest:
     return SimulatorStepDeliveryRequest(
@@ -163,10 +152,10 @@ def test_delivers_translated_commands_in_order_and_preserves_receipts() -> None:
     result = engine(endpoint).deliver(request(plan, step, lifecycle, timeout=2.5))
 
     assert result.disposition is SimulatorStepDeliveryDisposition.DELIVERED
-    assert result.lifecycle.status is ExecutionLifecycleStatus.DELIVERED
+    assert result.lifecycle.status is ExecutionStepStatus.DELIVERED
     assert [item.to_status for item in result.transitions] == [
-        ExecutionLifecycleStatus.DELIVERING,
-        ExecutionLifecycleStatus.DELIVERED,
+        ExecutionStepStatus.DELIVERING,
+        ExecutionStepStatus.DELIVERED,
     ]
     assert [call[0].operation for call in endpoint.calls] == ["pump.step_1", "pump.step_2"]
     assert all(call[2] == 2.5 for call in endpoint.calls)
@@ -188,7 +177,7 @@ def test_rejected_receipt_stops_delivery_and_fails_lifecycle() -> None:
     result = engine(endpoint).deliver(request(plan, step, lifecycle))
 
     assert result.disposition is SimulatorStepDeliveryDisposition.REJECTED
-    assert result.lifecycle.status is ExecutionLifecycleStatus.FAILED
+    assert result.lifecycle.status is ExecutionStepStatus.FAILED
     assert len(endpoint.calls) == 1
     assert len(result.receipts) == 1
     assert len(result.unattempted_commands) == 1
@@ -198,14 +187,14 @@ def test_rejected_receipt_stops_delivery_and_fails_lifecycle() -> None:
 @pytest.mark.parametrize(
     ("status", "disposition", "lifecycle_status"),
     [
-        (CommandStatus.FAILED, SimulatorStepDeliveryDisposition.FAILED, ExecutionLifecycleStatus.FAILED),
-        (CommandStatus.TIMED_OUT, SimulatorStepDeliveryDisposition.TIMED_OUT, ExecutionLifecycleStatus.TIMED_OUT),
+        (CommandStatus.FAILED, SimulatorStepDeliveryDisposition.FAILED, ExecutionStepStatus.FAILED),
+        (CommandStatus.TIMED_OUT, SimulatorStepDeliveryDisposition.TIMED_OUT, ExecutionStepStatus.TIMED_OUT),
     ],
 )
 def test_failed_and_timed_out_receipts_map_to_terminal_lifecycle(
     status: CommandStatus,
     disposition: SimulatorStepDeliveryDisposition,
-    lifecycle_status: ExecutionLifecycleStatus,
+    lifecycle_status: ExecutionStepStatus,
 ) -> None:
     endpoint = SequencedSimulatorEndpoint(statuses=[status, CommandStatus.ACKNOWLEDGED])
     plan, step, lifecycle = plan_and_lifecycle()
@@ -227,7 +216,7 @@ def test_translation_failure_is_recorded_without_gateway_call() -> None:
     )
 
     assert result.disposition is SimulatorStepDeliveryDisposition.FAILED
-    assert result.lifecycle.status is ExecutionLifecycleStatus.FAILED
+    assert result.lifecycle.status is ExecutionStepStatus.FAILED
     assert result.translation is None
     assert result.receipts == ()
     assert endpoint.calls == []
@@ -244,7 +233,7 @@ def test_zero_command_translation_is_a_delivered_no_op() -> None:
     assert result.delivered
     assert result.receipts == ()
     assert endpoint.calls == []
-    assert result.lifecycle.status is ExecutionLifecycleStatus.DELIVERED
+    assert result.lifecycle.status is ExecutionStepStatus.DELIVERED
 
 
 def test_request_requires_exact_plan_step() -> None:
@@ -263,12 +252,18 @@ def test_request_requires_exact_plan_step() -> None:
     assert endpoint.calls == []
 
 
-def test_request_requires_executing_lifecycle_for_same_plan() -> None:
+def test_request_requires_pending_step_lifecycle() -> None:
     endpoint = SequencedSimulatorEndpoint()
-    plan, step, _ = plan_and_lifecycle()
-    lifecycle = ExecutionStateMachine().initialize(plan)
+    plan, step, lifecycle = plan_and_lifecycle()
+    lifecycle = ExecutionStepStateMachine().transition(
+        lifecycle,
+        to_status=ExecutionStepStatus.DELIVERING,
+        occurred_at=CREATED,
+        reason="already delivering",
+        actor="test",
+    ).lifecycle
 
-    with pytest.raises(ValueError, match="EXECUTING"):
+    with pytest.raises(ValueError, match="PENDING"):
         engine(endpoint).deliver(request(plan, step, lifecycle))
 
 
@@ -311,7 +306,7 @@ def test_result_does_not_advance_coordinator_or_verify_step() -> None:
     result = engine(endpoint).deliver(request(plan, step, lifecycle))
 
     public_names = set(dir(result))
-    assert result.lifecycle.status is ExecutionLifecycleStatus.DELIVERED
+    assert result.lifecycle.status is ExecutionStepStatus.DELIVERED
     assert "verification_result" not in public_names
     assert "coordination_session" not in public_names
     assert "completed" not in public_names

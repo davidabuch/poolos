@@ -57,6 +57,7 @@ class CoordinationEventKind(str, Enum):
     STEP_SELECTED = "step_selected"
     STEP_COMPLETED = "step_completed"
     PLAN_STEPS_EXHAUSTED = "plan_steps_exhausted"
+    PLAN_COMPLETED = "plan_completed"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -312,6 +313,63 @@ class ExecutionCoordinator:
             disposition=CoordinationDisposition.READY,
             session=updated,
             current_step=first_step,
+            event=event,
+            lifecycle_transition=transition_result.transition,
+        )
+
+    def complete_plan(
+        self,
+        plan: ExecutionPlan,
+        session: ExecutionCoordinationSession,
+        *,
+        occurred_at: datetime,
+        metadata: Mapping[str, str] | None = None,
+    ) -> ExecutionCoordinationResult:
+        """Complete a stopped plan only after every step was acknowledged."""
+
+        rejection = self._validate(plan, session, occurred_at)
+        if rejection is not None:
+            return self._rejected(session, rejection)
+        if not session.stopped or session.stop_reason != "plan_steps_exhausted":
+            return self._rejected(session, "plan_steps_not_exhausted")
+        if tuple(session.completed_step_ids) != tuple(step.step_id for step in plan.steps):
+            return self._rejected(session, "plan_steps_not_all_completed")
+        if session.lifecycle.status is not ExecutionLifecycleStatus.EXECUTING:
+            return self._rejected(session, "session_not_executing")
+        transition_result = self.state_machine.transition(
+            session.lifecycle,
+            to_status=ExecutionLifecycleStatus.COMPLETED,
+            occurred_at=occurred_at,
+            reason="All execution-plan steps completed after verification.",
+            actor=self.actor,
+            metadata={"coordination_action": "complete_plan"},
+        )
+        if not transition_result.applied or transition_result.transition is None:
+            return self._rejected(
+                session,
+                transition_result.rejection_reason or "plan_completion_rejected",
+            )
+        event = self._event(
+            plan_id=plan.plan_id,
+            kind=CoordinationEventKind.PLAN_COMPLETED,
+            occurred_at=occurred_at,
+            reason="Coordinator completed the fully verified execution plan.",
+            lifecycle_transition_id=transition_result.transition.transition_id,
+            metadata=metadata,
+        )
+        updated = self._updated_session(
+            session,
+            lifecycle=transition_result.lifecycle,
+            current_step_sequence=None,
+            completed_step_ids=session.completed_step_ids,
+            stopped=True,
+            stop_reason="plan_completed",
+            occurred_at=occurred_at,
+            event=event,
+        )
+        return ExecutionCoordinationResult(
+            disposition=CoordinationDisposition.STOPPED,
+            session=updated,
             event=event,
             lifecycle_transition=transition_result.transition,
         )

@@ -265,3 +265,19 @@ from .execution_simulator_delivery import (
     SimulatorStepDeliveryRequest,
     SimulatorStepDeliveryResult,
 )
+
+from .execution_step_state_machine import (
+    ExecutionStepLifecycle,
+    ExecutionStepStateMachine,
+    ExecutionStepStatus,
+    ExecutionStepTransition,
+    ExecutionStepTransitionResult,
+)
+
+from .closed_loop_simulator_execution import (
+    ClosedLoopExecutionDisposition,
+    ClosedLoopExecutionResult,
+    ClosedLoopSimulatorExecutionEngine,
+    ClosedLoopStepResult,
+    SimulatedEquipmentState,
+)

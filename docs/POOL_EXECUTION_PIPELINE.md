@@ -581,3 +581,26 @@ the underlying `DeliveryReceipt` objects.
 The boundary stops at `DELIVERED`, `FAILED`, or `TIMED_OUT`. It does not verify
 observations, advance the coordinator cursor, complete a plan, or permit any
 physical endpoint.
+
+## Epic 10.14D: Closed-loop simulator execution
+
+PoolOS separates the lifecycle of the whole execution plan from the lifecycle
+of each step. The plan remains `EXECUTING` while each selected step independently
+moves through delivery and verification:
+
+```text
+Plan: EXECUTING
+
+Step: PENDING -> DELIVERING -> DELIVERED -> VERIFYING -> VERIFIED
+                                                   |
+                                                   +-> FAILED / TIMED_OUT
+```
+
+After simulator delivery, the closed-loop engine applies the canonical
+`PoolOperation` to deterministic simulated equipment state, publishes typed
+`SIMULATED` observations, verifies those observations, and only then advances
+the coordinator. When all steps are verified, the coordinator transitions the
+plan from `EXECUTING` to `COMPLETED`.
+
+This milestone remains simulator-only. It does not call Home Assistant, route to
+physical Pentair equipment, retry failed work, or resume interrupted execution.

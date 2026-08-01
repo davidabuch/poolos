@@ -191,3 +191,12 @@ this epic.
 Status: implemented pending validation. Connects one canonical execution step
 to simulator-only translation and delivery, with immutable ordered receipts and
 explicit lifecycle outcomes. Closed-loop verification remains in 10.14D.
+
+### Epic 10.14D - Closed-loop simulator execution
+
+- Separate plan lifecycle from per-step delivery and verification lifecycle.
+- Mutate deterministic simulated equipment state after accepted delivery.
+- Publish canonical typed simulated observations.
+- Advance the coordinator only after successful verification.
+- Complete the plan only after every step is verified.
+- Keep fault injection and recovery deferred to Epic 10.14E.

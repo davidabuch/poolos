@@ -174,6 +174,7 @@ class ExecutionStateMachine:
             ),
             ExecutionLifecycleStatus.EXECUTING: frozenset(
                 {
+                    ExecutionLifecycleStatus.COMPLETED,
                     ExecutionLifecycleStatus.DELIVERING,
                     ExecutionLifecycleStatus.FAILED,
                     ExecutionLifecycleStatus.TIMED_OUT,

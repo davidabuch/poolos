@@ -288,3 +288,11 @@ delivery or hardware collaborators.
 
 The permanent catalog is `poolos.execution_golden_scenarios`, with executable
 coverage in `tests/test_execution_golden_scenarios.py`.
+
+## 10.14D lifecycle refinement
+
+The plan lifecycle and step lifecycle are distinct. Plan lifecycle expresses
+whole-plan authority and progress (`AUTHORIZED`, `PLANNED`, `EXECUTING`,
+`COMPLETED`). Delivery and verification statuses belong to an individual step.
+This prevents multi-step plans from requiring an invalid transition from
+`VERIFIED` back to `EXECUTING`.

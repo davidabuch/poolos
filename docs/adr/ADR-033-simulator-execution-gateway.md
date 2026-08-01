@@ -72,3 +72,10 @@ boundary validates plan/step/lifecycle lineage, performs canonical operation
 translation, preserves ordered simulator receipts, and advances lifecycle only
 through `DELIVERING` to `DELIVERED`, `FAILED`, or `TIMED_OUT`. Verification and
 coordinator advancement remain separate responsibilities.
+
+## 10.14D clarification
+
+Simulator delivery now advances a dedicated per-step lifecycle rather than the
+plan lifecycle. The simulator gateway remains unchanged: it admits and routes
+simulator commands only. The execution coordinator retains ownership of the
+plan lifecycle.

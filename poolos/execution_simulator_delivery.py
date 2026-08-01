@@ -18,11 +18,12 @@ from types import MappingProxyType
 from typing import Mapping
 
 from .delivery import DeliveryError, DeliveryReceipt
-from .execution_models import ExecutionLifecycleStatus, ExecutionPlan, ExecutionStep
-from .execution_state_machine import (
-    ExecutionLifecycle,
-    ExecutionStateMachine,
-    ExecutionStateTransition,
+from .execution_models import ExecutionPlan, ExecutionStep
+from .execution_step_state_machine import (
+    ExecutionStepLifecycle,
+    ExecutionStepStateMachine,
+    ExecutionStepStatus,
+    ExecutionStepTransition,
 )
 from .hal import CommandStatus
 from .integration import IntegrationError, OperationTranslationHandler, TranslationResult, VendorCommand
@@ -61,7 +62,7 @@ class SimulatorStepDeliveryRequest:
 
     plan: ExecutionPlan
     step: ExecutionStep
-    lifecycle: ExecutionLifecycle
+    lifecycle: ExecutionStepLifecycle
     occurred_at: datetime
     endpoint_id: str | None = None
     timeout: float | None = None
@@ -88,8 +89,8 @@ class SimulatorStepDeliveryResult:
     plan_id: str
     step_id: str
     disposition: SimulatorStepDeliveryDisposition
-    lifecycle: ExecutionLifecycle
-    transitions: tuple[ExecutionStateTransition, ...]
+    lifecycle: ExecutionStepLifecycle
+    transitions: tuple[ExecutionStepTransition, ...]
     translation: TranslationResult | None = None
     receipts: tuple[SimulatorExecutionReceipt, ...] = ()
     failed_command: VendorCommand | None = None
@@ -129,7 +130,7 @@ class SimulatorStepDeliveryEngine:
 
     translation_handler: OperationTranslationHandler
     gateway: SimulatorExecutionGateway
-    state_machine: ExecutionStateMachine = field(default_factory=ExecutionStateMachine)
+    state_machine: ExecutionStepStateMachine = field(default_factory=ExecutionStepStateMachine)
     actor: str = "simulator-step-delivery"
 
     def __post_init__(self) -> None:
@@ -141,7 +142,7 @@ class SimulatorStepDeliveryEngine:
         attempt_id = self._attempt_id(request)
         delivering = self.state_machine.transition(
             request.lifecycle,
-            to_status=ExecutionLifecycleStatus.DELIVERING,
+            to_status=ExecutionStepStatus.DELIVERING,
             occurred_at=request.occurred_at,
             reason="Simulator delivery started for execution step.",
             actor=self.actor,
@@ -150,7 +151,7 @@ class SimulatorStepDeliveryEngine:
         if not delivering.applied or delivering.transition is None:
             raise ValueError(delivering.rejection_reason or "delivery transition rejected")
 
-        transitions: list[ExecutionStateTransition] = [delivering.transition]
+        transitions: list[ExecutionStepTransition] = [delivering.transition]
         lifecycle = delivering.lifecycle
         try:
             translation = self.translation_handler(request.step.operation)
@@ -220,7 +221,7 @@ class SimulatorStepDeliveryEngine:
 
         delivered = self.state_machine.transition(
             lifecycle,
-            to_status=ExecutionLifecycleStatus.DELIVERED,
+            to_status=ExecutionStepStatus.DELIVERED,
             occurred_at=request.occurred_at,
             reason="All translated simulator commands were accepted.",
             actor=self.actor,
@@ -245,8 +246,8 @@ class SimulatorStepDeliveryEngine:
         self,
         request: SimulatorStepDeliveryRequest,
         attempt_id: str,
-        lifecycle: ExecutionLifecycle,
-        transitions: list[ExecutionStateTransition],
+        lifecycle: ExecutionStepLifecycle,
+        transitions: list[ExecutionStepTransition],
         disposition: SimulatorStepDeliveryDisposition,
         reason: str,
         *,
@@ -256,9 +257,9 @@ class SimulatorStepDeliveryEngine:
         unattempted_commands: tuple[VendorCommand, ...] = (),
     ) -> SimulatorStepDeliveryResult:
         target = (
-            ExecutionLifecycleStatus.TIMED_OUT
+            ExecutionStepStatus.TIMED_OUT
             if disposition is SimulatorStepDeliveryDisposition.TIMED_OUT
-            else ExecutionLifecycleStatus.FAILED
+            else ExecutionStepStatus.FAILED
         )
         finished = self.state_machine.transition(
             lifecycle,
@@ -289,9 +290,11 @@ class SimulatorStepDeliveryEngine:
     @staticmethod
     def _validate_request(request: SimulatorStepDeliveryRequest) -> None:
         if request.lifecycle.plan_id != request.plan.plan_id:
-            raise ValueError("lifecycle plan_id must match plan")
-        if request.lifecycle.status is not ExecutionLifecycleStatus.EXECUTING:
-            raise ValueError("lifecycle must be EXECUTING before delivery")
+            raise ValueError("step lifecycle plan_id must match plan")
+        if request.lifecycle.step_id != request.step.step_id:
+            raise ValueError("step lifecycle step_id must match step")
+        if request.lifecycle.status is not ExecutionStepStatus.PENDING:
+            raise ValueError("step lifecycle must be PENDING before delivery")
         if request.occurred_at < request.lifecycle.updated_at:
             raise ValueError("occurred_at cannot precede lifecycle updated_at")
         matching = tuple(step for step in request.plan.steps if step.step_id == request.step.step_id)
