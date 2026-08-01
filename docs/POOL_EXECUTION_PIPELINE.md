@@ -604,3 +604,31 @@ plan from `EXECUTING` to `COMPLETED`.
 
 This milestone remains simulator-only. It does not call Home Assistant, route to
 physical Pentair equipment, retry failed work, or resume interrupted execution.
+
+## Simulator fault injection and recovery (Epic 10.14E)
+
+The closed-loop simulator accepts an optional immutable `SimulatorFaultPlan`.
+Fault rules target an exact execution step and inject a deterministic failure at
+one of two boundaries:
+
+```text
+step delivery
+or
+simulated observation publication / verification
+```
+
+Supported faults include rejected, failed, and timed-out delivery; missing,
+stale, and mismatched observations; and verification timeout. Every injected
+fault creates a `SimulatorFaultRecord` containing deterministic identity,
+lineage, reason, and non-actuating recovery recommendations.
+
+Fault recovery is intentionally fail-safe:
+
+```text
+terminate affected step
+→ terminate the current plan attempt
+→ await operator or obtain fresh observations and reevaluate
+```
+
+The fault layer does not retry, advance the coordinator, resume a prior plan,
+call Home Assistant, or contact physical equipment.

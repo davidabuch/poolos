@@ -21,6 +21,7 @@ from .execution_coordinator import (
 )
 from .execution_models import ExecutionLifecycleStatus, ExecutionPlan, ExecutionStep, VerificationStatus
 from .execution_simulator_delivery import (
+    SimulatorStepDeliveryDisposition,
     SimulatorStepDeliveryEngine,
     SimulatorStepDeliveryRequest,
     SimulatorStepDeliveryResult,
@@ -36,6 +37,13 @@ from .execution_verification import (
     ExecutionVerificationResult,
 )
 from .integration import SetHeatMode, SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump
+from .simulator_faults import (
+    SimulatorFaultKind,
+    SimulatorFaultPlan,
+    SimulatorFaultRecord,
+    SimulatorFaultRule,
+    build_fault_record,
+)
 from .observations import (
     FreshnessPolicy,
     ObservationQuality,
@@ -101,11 +109,13 @@ class ClosedLoopExecutionResult:
     session: ExecutionCoordinationSession
     step_results: tuple[ClosedLoopStepResult, ...]
     observations: tuple[PoolObservation, ...]
+    fault_records: tuple[SimulatorFaultRecord, ...] = ()
     failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "step_results", tuple(self.step_results))
         object.__setattr__(self, "observations", tuple(self.observations))
+        object.__setattr__(self, "fault_records", tuple(self.fault_records))
         if self.disposition is ClosedLoopExecutionDisposition.COMPLETED:
             if self.failure_reason is not None:
                 raise ValueError("completed execution cannot contain failure_reason")
@@ -129,6 +139,7 @@ class ClosedLoopSimulatorExecutionEngine:
         default_factory=lambda: FreshnessPolicy(max_age=timedelta(minutes=1))
     )
     verification_timeout: timedelta = timedelta(seconds=30)
+    fault_plan: SimulatorFaultPlan = field(default_factory=SimulatorFaultPlan)
 
     def execute(
         self,
@@ -150,6 +161,7 @@ class ClosedLoopSimulatorExecutionEngine:
         current_session = session
         step_results: list[ClosedLoopStepResult] = []
         generated: list[PoolObservation] = []
+        faults: list[SimulatorFaultRecord] = []
         cursor = occurred_at
 
         while True:
@@ -162,9 +174,20 @@ class ClosedLoopSimulatorExecutionEngine:
                 step_id=step.step_id,
                 initialized_at=cursor,
             )
-            delivery = self.delivery_engine.deliver(
-                self._delivery_request(plan, step, step_lifecycle, cursor)
+            step_faults = self.fault_plan.for_step(step.step_id)
+            delivery_fault = self._delivery_fault(step_faults)
+            delivery = (
+                self._inject_delivery_fault(plan, step, step_lifecycle, cursor, delivery_fault)
+                if delivery_fault is not None
+                else self.delivery_engine.deliver(
+                    self._delivery_request(plan, step, step_lifecycle, cursor)
+                )
             )
+            if delivery_fault is not None:
+                faults.append(build_fault_record(
+                    delivery_fault, plan_id=plan.plan_id, occurred_at=cursor,
+                    reason=delivery.failure_reason or delivery.disposition.value,
+                ))
             if not delivery.delivered:
                 return self._failed(
                     plan,
@@ -172,6 +195,7 @@ class ClosedLoopSimulatorExecutionEngine:
                     step_results,
                     generated,
                     delivery.failure_reason or delivery.disposition.value,
+                    faults,
                 )
 
             changed = self.simulated_state.apply(step)
@@ -187,6 +211,10 @@ class ClosedLoopSimulatorExecutionEngine:
                 )
                 for observation_id, value in sorted(changed.items())
             )
+            step_observations, observation_fault_records = self._apply_observation_faults(
+                plan.plan_id, step, step_observations, step_faults, cursor
+            )
+            faults.extend(observation_fault_records)
             observations.extend(step_observations)
             generated.extend(step_observations)
 
@@ -201,13 +229,18 @@ class ClosedLoopSimulatorExecutionEngine:
             if not verifying.applied:
                 return self._failed(plan, current_session, step_results, generated, verifying.rejection_reason or "step_verifying_transition_rejected")
 
+            evaluated_at = (
+                cursor + self.verification_timeout
+                if any(rule.kind is SimulatorFaultKind.VERIFICATION_TIMEOUT for rule in step_faults)
+                else cursor
+            )
             verification = self.verification_engine.verify(
                 ExecutionVerificationRequest(
                     plan_id=plan.plan_id,
                     step=step,
                     observations=observations,
                     verification_started_at=cursor,
-                    evaluated_at=cursor,
+                    evaluated_at=evaluated_at,
                     timeout=self.verification_timeout,
                     freshness_policy=self.freshness_policy,
                     source_kind=ObservationSourceKind.SIMULATED,
@@ -239,7 +272,7 @@ class ClosedLoopSimulatorExecutionEngine:
                         observations=step_observations,
                     )
                 )
-                return self._failed(plan, current_session, step_results, generated, verification.reason)
+                return self._failed(plan, current_session, step_results, generated, verification.reason, faults)
 
             verified = self.step_state_machine.transition(
                 verifying.lifecycle,
@@ -288,8 +321,116 @@ class ClosedLoopSimulatorExecutionEngine:
                     session=completed.session,
                     step_results=tuple(step_results),
                     observations=tuple(generated),
+                    fault_records=tuple(faults),
                 )
             cursor += timedelta(microseconds=1)
+
+
+    @staticmethod
+    def _delivery_fault(rules: tuple[SimulatorFaultRule, ...]) -> SimulatorFaultRule | None:
+        delivery_kinds = {
+            SimulatorFaultKind.DELIVERY_REJECTED,
+            SimulatorFaultKind.DELIVERY_FAILED,
+            SimulatorFaultKind.DELIVERY_TIMED_OUT,
+        }
+        return next((rule for rule in rules if rule.kind in delivery_kinds), None)
+
+    def _inject_delivery_fault(
+        self,
+        plan: ExecutionPlan,
+        step: ExecutionStep,
+        lifecycle: ExecutionStepLifecycle,
+        occurred_at: datetime,
+        rule: SimulatorFaultRule,
+    ) -> SimulatorStepDeliveryResult:
+        delivering = self.step_state_machine.transition(
+            lifecycle,
+            to_status=ExecutionStepStatus.DELIVERING,
+            occurred_at=occurred_at,
+            reason=f"Injected simulator fault {rule.kind.value}.",
+            actor="simulator-fault-injector",
+            metadata={"rule_id": rule.rule_id},
+        )
+        if not delivering.applied or delivering.transition is None:
+            raise ValueError(delivering.rejection_reason or "fault delivering transition rejected")
+        disposition = {
+            SimulatorFaultKind.DELIVERY_REJECTED: SimulatorStepDeliveryDisposition.REJECTED,
+            SimulatorFaultKind.DELIVERY_FAILED: SimulatorStepDeliveryDisposition.FAILED,
+            SimulatorFaultKind.DELIVERY_TIMED_OUT: SimulatorStepDeliveryDisposition.TIMED_OUT,
+        }[rule.kind]
+        target = (
+            ExecutionStepStatus.TIMED_OUT
+            if disposition is SimulatorStepDeliveryDisposition.TIMED_OUT
+            else ExecutionStepStatus.FAILED
+        )
+        finished = self.step_state_machine.transition(
+            delivering.lifecycle,
+            to_status=target,
+            occurred_at=occurred_at,
+            reason=f"injected_{rule.kind.value}",
+            actor="simulator-fault-injector",
+            metadata={"rule_id": rule.rule_id},
+        )
+        if not finished.applied or finished.transition is None:
+            raise ValueError(finished.rejection_reason or "fault terminal transition rejected")
+        return SimulatorStepDeliveryResult(
+            attempt_id=f"simulator-fault-attempt:{plan.plan_id}:{step.step_id}:{rule.rule_id}",
+            plan_id=plan.plan_id,
+            step_id=step.step_id,
+            disposition=disposition,
+            lifecycle=finished.lifecycle,
+            transitions=(delivering.transition, finished.transition),
+            receipts=(),
+            failure_reason=f"injected_{rule.kind.value}",
+            metadata={"fault_rule_id": rule.rule_id},
+        )
+
+    @staticmethod
+    def _apply_observation_faults(
+        plan_id: str,
+        step: ExecutionStep,
+        observations: tuple[PoolObservation, ...],
+        rules: tuple[SimulatorFaultRule, ...],
+        occurred_at: datetime,
+    ) -> tuple[tuple[PoolObservation, ...], tuple[SimulatorFaultRecord, ...]]:
+        current = list(observations)
+        records: list[SimulatorFaultRecord] = []
+        for rule in rules:
+            if rule.kind is SimulatorFaultKind.OBSERVATION_MISSING:
+                target = rule.observation_id or next(iter(step.expected_observations), None)
+                current = [item for item in current if item.observation_id != target]
+            elif rule.kind is SimulatorFaultKind.OBSERVATION_STALE:
+                target = rule.observation_id or next(iter(step.expected_observations), None)
+                current = [
+                    PoolObservation(
+                        observation_id=item.observation_id, value=item.value,
+                        observed_at=item.observed_at - rule.stale_by if item.observed_at is not None else None if item.observation_id == target else item.observed_at,
+                        source_kind=item.source_kind, source_id=item.source_id,
+                        unit=item.unit, truth_level=item.truth_level, quality=item.quality, confidence=item.confidence, evidence=item.evidence,
+                    )
+                    for item in current
+                ]
+            elif rule.kind is SimulatorFaultKind.OBSERVATION_MISMATCH:
+                target = rule.observation_id or next(iter(step.expected_observations), None)
+                current = [
+                    PoolObservation(
+                        observation_id=item.observation_id,
+                        value=rule.replacement_value if item.observation_id == target else item.value,
+                        observed_at=item.observed_at, source_kind=item.source_kind,
+                        source_id=item.source_id, quality=item.quality,
+                        unit=item.unit, truth_level=item.truth_level, confidence=item.confidence, evidence=item.evidence,
+                    )
+                    for item in current
+                ]
+            elif rule.kind is SimulatorFaultKind.VERIFICATION_TIMEOUT:
+                target = rule.observation_id or next(iter(step.expected_observations), None)
+                current = [item for item in current if item.observation_id != target]
+            else:
+                continue
+            records.append(build_fault_record(
+                rule, plan_id=plan_id, occurred_at=occurred_at, reason=f"injected_{rule.kind.value}"
+            ))
+        return tuple(current), tuple(records)
 
     @staticmethod
     def _failed(
@@ -298,6 +439,7 @@ class ClosedLoopSimulatorExecutionEngine:
         step_results: list[ClosedLoopStepResult],
         observations: list[PoolObservation],
         reason: str,
+        fault_records: list[SimulatorFaultRecord] | None = None,
     ) -> ClosedLoopExecutionResult:
         return ClosedLoopExecutionResult(
             disposition=ClosedLoopExecutionDisposition.FAILED,
@@ -305,6 +447,7 @@ class ClosedLoopSimulatorExecutionEngine:
             session=session,
             step_results=tuple(step_results),
             observations=tuple(observations),
+            fault_records=tuple(fault_records or ()),
             failure_reason=reason,
         )
 

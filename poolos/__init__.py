@@ -89,6 +89,14 @@ from .state import EquipmentState, RuntimeState
 
 # Retain the enum-only list expected by the original Milestone 1 contract test.
 # Additional supported symbols remain directly importable from ``poolos``.
+from .simulator_faults import (
+    SimulatorFaultKind,
+    SimulatorFaultPlan,
+    SimulatorFaultRecord,
+    SimulatorFaultRecoveryAction,
+    SimulatorFaultRule,
+)
+
 __all__ = [
     "BodyType",
     "CommandPriority",

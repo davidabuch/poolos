@@ -200,3 +200,13 @@ explicit lifecycle outcomes. Closed-loop verification remains in 10.14D.
 - Advance the coordinator only after successful verification.
 - Complete the plan only after every step is verified.
 - Keep fault injection and recovery deferred to Epic 10.14E.
+
+### Epic 10.14E — Simulator Fault Injection and Recovery
+
+Status: complete pending local validation.
+
+- deterministic delivery rejection, failure, and timeout injection;
+- missing, stale, mismatched, and timed-out verification evidence;
+- immutable fault records and recovery recommendations;
+- safe step and plan termination without coordinator advancement;
+- no automatic retry, restart continuation, Home Assistant call, or physical actuation.
