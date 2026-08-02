@@ -157,6 +157,26 @@ operator-review item, generate or mutate an execution plan, import vendor integr
 command, or actuate equipment. Future downstream adapters require separate architectural and
 safety review.
 
+ADR-045 adds a dedicated consumer for deferred reevaluation receipts:
+
+```text
+Immutable deferred reevaluation receipt
+        |
+        v
+ReevaluationScheduleRequest + explicit supplied time
+        |
+        v
+DeterministicReevaluationScheduler
+        |
+        v
+Immutable scheduled / rejected / duplicate / cancelled record
+```
+
+This scheduler is an in-memory recorder, not the execution-plan scheduler. It does not parse the
+reevaluation hint, run a decision cycle, publish a runtime trigger, create a plan, or invoke any
+external system. Persistence, due-request selection, and typed evaluation-trigger integration are
+future reviewed boundaries.
+
 ## 5. Coordinator Responsibilities
 
 `IntelliCenterCoordinator` owns communication lifecycle concerns:

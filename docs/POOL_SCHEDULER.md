@@ -1,6 +1,10 @@
-# PoolOS Scheduler
+# PoolOS Execution-Plan Scheduler
 
-The Scheduler is the time and lifecycle coordinator for immutable Planner output. It does not create commands, evaluate policy, or touch hardware.
+The `Scheduler` is the time and lifecycle coordinator for immutable Planner output. It does not create commands, evaluate policy, or touch hardware.
+
+It is separate from `DeterministicReevaluationScheduler`, the ADR-045 supervisory reevaluation
+boundary. The reevaluation scheduler stores immutable deferred reevaluation records only; it does
+not activate plans or use plan-step lifecycle state.
 
 ## Responsibilities
 
@@ -20,3 +24,16 @@ The Scheduler is the time and lifecycle coordinator for immutable Planner output
 4. The host reports progress back to the Scheduler.
 
 The Scheduler never bypasses policy evaluation or execution.
+
+## Reevaluation scheduling boundary
+
+The deterministic reevaluation scheduler:
+
+- consumes a validated deferred downstream receipt;
+- requires explicit timezone-aware request, schedule, and processing times;
+- records immutable scheduled, rejected, duplicate, or cancelled results;
+- uses deterministic request and result identities;
+- performs no due-time polling or decision evaluation in Epic 10.15I;
+- remains in-memory and is not yet restart-safe.
+
+It never forwards work to the execution-plan `Scheduler` and never invokes hardware.
