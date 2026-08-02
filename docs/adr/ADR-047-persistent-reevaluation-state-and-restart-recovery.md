@@ -63,6 +63,10 @@ The restored schedule records and completion identities are passed directly to
 duplicates, cancelled requests remain cancelled, and future requests remain
 not due until a caller supplies a sufficiently late `as_of` value.
 
+When restored evidence produces an emitted trigger, ADR-048 can reconstruct the
+same deterministic runtime-submission request. Accepted submission identities
+remain separate explicit evidence and are not added to the version 1 snapshot.
+
 ## Determinism and replay
 
 Serialization uses sorted keys, compact separators, explicit enum values,
@@ -95,7 +99,8 @@ Future reviewed milestones may add:
   serialized snapshot;
 - transactional persistence coordination around schedule or completion
   updates;
-- runtime submission and acknowledgement for typed trigger requests; or
+- persistence of ADR-048 accepted submission identities;
+- runtime coalescing and acknowledgement for typed trigger requests; or
 - migrations from explicitly supported future schema versions.
 
 Runtime publication and storage I/O remain outside Epic 10.15K.

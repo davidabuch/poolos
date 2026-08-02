@@ -237,6 +237,7 @@ Status: complete.
 | 10.15I | Deterministic reevaluation scheduling boundary | DONE |
 | 10.15J | Due reevaluation trigger boundary | DONE |
 | 10.15K | Persistent reevaluation state and restart recovery | DONE |
+| 10.15L | Reevaluation runtime submission boundary | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -358,3 +359,15 @@ Status: complete.
 - preserves cancelled, future, and completed request behavior across restart;
 - provides a vendor-neutral persistence boundary without file, database, Home Assistant, runtime, or network I/O;
 - does not invoke the Decision Orchestrator, submit evaluation triggers, deliver commands, or actuate physical equipment.
+
+### Epic 10.15L — Reevaluation Runtime Submission Boundary
+
+Status: complete.
+
+- wraps emitted typed reevaluation triggers with immutable schedule, action, context, decision, correlation, and provenance evidence;
+- validates deterministic runtime-handoff suitability at an explicit timezone-aware submission time;
+- emits immutable accepted, rejected, or duplicate results with stable reason codes and identities;
+- carries explicit sorted accepted-submission identities for duplicate suppression and replay;
+- consumes equivalently restored ADR-047 evidence without changing submission results;
+- introduces no queue, bus, dispatcher, publisher, worker, runtime adapter, timer, clock polling, or hidden mutable state;
+- does not invoke the trigger coalescer, runtime, Decision Orchestrator, Home Assistant, vendor delivery, networking, or physical equipment.
