@@ -236,6 +236,7 @@ Status: complete.
 | 10.15H | Downstream operational action adapter contract | DONE |
 | 10.15I | Deterministic reevaluation scheduling boundary | DONE |
 | 10.15J | Due reevaluation trigger boundary | DONE |
+| 10.15K | Persistent reevaluation state and restart recovery | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -345,3 +346,15 @@ Status: complete.
 - carries explicit sorted completion identities so duplicate records emit at most one trigger;
 - preserves action, schedule, context, decision, correlation, hint, timing, and replay provenance;
 - does not invoke the runtime, Decision Orchestrator, Home Assistant, vendor delivery, networking, or physical equipment.
+
+### Epic 10.15K — Persistent Reevaluation State and Restart Recovery
+
+Status: complete.
+
+- captures immutable current scheduling records and completed trigger-request identities in one versioned snapshot;
+- serializes complete identity and provenance evidence as deterministic canonical JSON;
+- restores equivalent typed state in deterministic order after restart;
+- rejects malformed, unsupported, duplicate, future-dated, or inconsistent persisted evidence fail-closed;
+- preserves cancelled, future, and completed request behavior across restart;
+- provides a vendor-neutral persistence boundary without file, database, Home Assistant, runtime, or network I/O;
+- does not invoke the Decision Orchestrator, submit evaluation triggers, deliver commands, or actuate physical equipment.

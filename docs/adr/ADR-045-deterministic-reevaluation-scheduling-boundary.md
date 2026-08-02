@@ -68,8 +68,9 @@ used.
 - Cancellation never invokes evaluation or execution.
 
 Current records are held in memory and returned in deterministic request-ID
-order. Persistence, restart restoration, due-request polling, and runtime
-trigger publication remain outside this milestone.
+order. Due-request polling and runtime trigger publication remain outside this
+milestone. ADR-047 adds a separate immutable persistence and restart-recovery
+boundary for the current records without changing scheduler behavior.
 
 ## Safety constraints
 
@@ -98,7 +99,8 @@ Future milestones may add:
 None of those extensions may introduce vendor delivery or physical actuation.
 
 ADR-046 implements deterministic due-request selection and typed trigger
-conversion while leaving persistence and runtime submission deferred.
+conversion. ADR-047 implements persistent scheduling and completion evidence;
+runtime submission remains deferred.
 
 ## Consequences
 
@@ -106,4 +108,5 @@ conversion while leaving persistence and runtime submission deferred.
 - Request, result, timing, and cancellation evidence are deterministic.
 - Duplicate scheduling fails closed without overwriting the original record.
 - Execution-plan scheduling remains a separate architecture.
-- The current in-memory store is intentionally not restart-safe.
+- The scheduler itself remains in-memory; ADR-047 makes its immutable current
+  evidence restart-safe through a separate pure snapshot boundary.
