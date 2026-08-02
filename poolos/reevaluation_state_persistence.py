@@ -35,7 +35,7 @@ from .reevaluation_scheduling import (
 )
 
 
-REEVALUATION_STATE_SCHEMA_VERSION = 1
+REEVALUATION_STATE_SCHEMA_VERSION = 2
 
 
 class ReevaluationStatePersistenceError(ValueError):
@@ -128,12 +128,14 @@ def _state_payload(
     captured_at: datetime,
     schedule_results: tuple[ReevaluationScheduleResult, ...],
     completed_request_ids: tuple[str, ...],
+    accepted_submission_ids: tuple[str, ...],
 ) -> dict[str, object]:
     return {
         "schema_version": REEVALUATION_STATE_SCHEMA_VERSION,
         "captured_at": captured_at.isoformat(),
         "schedule_results": [_result_payload(result) for result in schedule_results],
         "completed_request_ids": list(completed_request_ids),
+        "accepted_submission_ids": list(accepted_submission_ids),
     }
 
 
@@ -144,6 +146,7 @@ class ReevaluationStateSnapshot:
     captured_at: datetime
     schedule_results: tuple[ReevaluationScheduleResult, ...]
     completed_request_ids: tuple[str, ...]
+    accepted_submission_ids: tuple[str, ...] = ()
     schema_version: int = REEVALUATION_STATE_SCHEMA_VERSION
     snapshot_id: str = field(init=False)
 
@@ -156,6 +159,7 @@ class ReevaluationStateSnapshot:
         _require_aware(self.captured_at, "captured_at")
         results = tuple(self.schedule_results)
         completed_ids = tuple(self.completed_request_ids)
+        accepted_ids = tuple(self.accepted_submission_ids)
         request_ids = tuple(result.request_id for result in results)
         if results != tuple(sorted(results, key=lambda item: item.request_id)):
             raise ReevaluationStatePersistenceError(
@@ -176,6 +180,26 @@ class ReevaluationStateSnapshot:
         if len(set(completed_ids)) != len(completed_ids):
             raise ReevaluationStatePersistenceError(
                 "completed request identities must be unique"
+            )
+        if any(not submission_id.strip() for submission_id in accepted_ids):
+            raise ReevaluationStatePersistenceError(
+                "accepted submission identities must not be empty"
+            )
+        if accepted_ids != tuple(sorted(accepted_ids)):
+            raise ReevaluationStatePersistenceError(
+                "accepted submission identities must be sorted"
+            )
+        if len(set(accepted_ids)) != len(accepted_ids):
+            raise ReevaluationStatePersistenceError(
+                "accepted submission identities must be unique"
+            )
+        if any(not self._valid_submission_id(value) for value in accepted_ids):
+            raise ReevaluationStatePersistenceError(
+                "accepted submission identities must use the canonical format"
+            )
+        if len(accepted_ids) > len(completed_ids):
+            raise ReevaluationStatePersistenceError(
+                "accepted submissions cannot exceed emitted reevaluation requests"
             )
         result_by_request = {result.request_id: result for result in results}
         unknown_completed = set(completed_ids) - set(result_by_request)
@@ -199,13 +223,25 @@ class ReevaluationStateSnapshot:
             captured_at=self.captured_at,
             schedule_results=results,
             completed_request_ids=completed_ids,
+            accepted_submission_ids=accepted_ids,
         )
         snapshot_id = "reevaluation-state-snapshot-" + sha256(
             _canonical_json(payload).encode("utf-8")
         ).hexdigest()[:24]
         object.__setattr__(self, "schedule_results", results)
         object.__setattr__(self, "completed_request_ids", completed_ids)
+        object.__setattr__(self, "accepted_submission_ids", accepted_ids)
         object.__setattr__(self, "snapshot_id", snapshot_id)
+
+    @staticmethod
+    def _valid_submission_id(value: str) -> bool:
+        prefix = "reevaluation-runtime-submission-"
+        digest = value.removeprefix(prefix)
+        return (
+            value.startswith(prefix)
+            and len(digest) == 24
+            and all(character in "0123456789abcdef" for character in digest)
+        )
 
     def _validate_result(self, result: ReevaluationScheduleResult) -> None:
         if result.outcome not in {
@@ -338,6 +374,7 @@ class ReevaluationStatePersistenceBoundary:
         schedule_results: tuple[ReevaluationScheduleResult, ...],
         *,
         completed_request_ids: tuple[str, ...] = (),
+        accepted_submission_ids: tuple[str, ...] = (),
         captured_at: datetime,
     ) -> ReevaluationStateSnapshot:
         """Normalize explicit evidence into one deterministic immutable snapshot."""
@@ -346,10 +383,12 @@ class ReevaluationStatePersistenceBoundary:
             sorted(schedule_results, key=lambda result: result.request_id)
         )
         ordered_completed = tuple(sorted(completed_request_ids))
+        ordered_accepted = tuple(sorted(accepted_submission_ids))
         return ReevaluationStateSnapshot(
             captured_at=captured_at,
             schedule_results=ordered_results,
             completed_request_ids=ordered_completed,
+            accepted_submission_ids=ordered_accepted,
             schema_version=self.schema_version,
         )
 
@@ -364,6 +403,7 @@ class ReevaluationStatePersistenceBoundary:
             captured_at=snapshot.captured_at,
             schedule_results=snapshot.schedule_results,
             completed_request_ids=snapshot.completed_request_ids,
+            accepted_submission_ids=snapshot.accepted_submission_ids,
         )
         payload["snapshot_id"] = snapshot.snapshot_id
         return _canonical_json(payload)
@@ -390,6 +430,9 @@ class ReevaluationStatePersistenceBoundary:
                 completed_request_ids=_require_string_tuple(
                     root, "completed_request_ids"
                 ),
+                accepted_submission_ids=_require_string_tuple(
+                    root, "accepted_submission_ids"
+                ),
                 schema_version=version,
             )
             persisted_snapshot_id = _require_string(root, "snapshot_id")
@@ -403,6 +446,7 @@ class ReevaluationStatePersistenceBoundary:
                 "captured_at",
                 "schedule_results",
                 "completed_request_ids",
+                "accepted_submission_ids",
             }
             if set(root) != expected_keys:
                 raise ReevaluationStatePersistenceError(

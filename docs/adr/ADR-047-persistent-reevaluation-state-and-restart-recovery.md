@@ -34,10 +34,12 @@ The boundary:
 6. restores equivalent immutable models after restart; and
 7. rejects malformed, unsupported, or inconsistent state fail-closed.
 
-The snapshot schema is explicitly versioned at version 1. A deterministic
+The snapshot schema was introduced at version 1. ADR-049 evolves it to version
+2 by adding accepted ADR-048 runtime-submission identities. A deterministic
 snapshot ID is derived from the canonical schema, capture time, complete
-scheduling evidence, provenance, and completion identities. Restore verifies
-that identity after reconstructing the typed models.
+scheduling evidence, provenance, completion identities, and accepted submission
+identities. Restore verifies that identity after reconstructing the typed
+models.
 
 The boundary performs no file, database, network, or platform I/O. A host may
 store the serialized value using an independently reviewed adapter. This keeps
@@ -48,7 +50,7 @@ snapshot, and recovery abstractions.
 
 Restore accepts only state that satisfies all of the following:
 
-- schema version 1 is present;
+- the current supported schema version is present;
 - all timestamps are explicit and timezone-aware;
 - schedule records have unique request identities and deterministic order;
 - only current scheduled or cancelled evidence is present;
@@ -65,7 +67,12 @@ not due until a caller supplies a sufficiently late `as_of` value.
 
 When restored evidence produces an emitted trigger, ADR-048 can reconstruct the
 same deterministic runtime-submission request. Accepted submission identities
-remain separate explicit evidence and are not added to the version 1 snapshot.
+remain separate explicit evidence. ADR-049 persists them in schema version 2
+without merging them with trigger-emission completion identities.
+
+Schema version 1 is rejected after ADR-049 because treating absent accepted
+submission evidence as an empty set could cause duplicate acceptance after
+restart.
 
 ## Determinism and replay
 
@@ -99,7 +106,6 @@ Future reviewed milestones may add:
   serialized snapshot;
 - transactional persistence coordination around schedule or completion
   updates;
-- persistence of ADR-048 accepted submission identities;
 - runtime coalescing and acknowledgement for typed trigger requests; or
 - migrations from explicitly supported future schema versions.
 

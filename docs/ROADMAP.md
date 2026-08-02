@@ -238,6 +238,7 @@ Status: complete.
 | 10.15J | Due reevaluation trigger boundary | DONE |
 | 10.15K | Persistent reevaluation state and restart recovery | DONE |
 | 10.15L | Reevaluation runtime submission boundary | DONE |
+| 10.15M | Persistent runtime-submission identities | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -371,3 +372,15 @@ Status: complete.
 - consumes equivalently restored ADR-047 evidence without changing submission results;
 - introduces no queue, bus, dispatcher, publisher, worker, runtime adapter, timer, clock polling, or hidden mutable state;
 - does not invoke the trigger coalescer, runtime, Decision Orchestrator, Home Assistant, vendor delivery, networking, or physical equipment.
+
+### Epic 10.15M — Persistent Runtime-Submission Identities
+
+Status: complete.
+
+- evolves the existing reevaluation snapshot from schema version 1 to version 2;
+- persists explicit sorted ADR-048 accepted-submission identities alongside scheduling and trigger-emission completion evidence;
+- includes accepted identities in deterministic canonical serialization and snapshot identity;
+- restores accepted identities for restart-safe submission duplicate suppression;
+- rejects version 1, missing, malformed, duplicate, noncanonical, or impossible acceptance evidence fail-closed;
+- keeps trigger-emission completion and runtime-submission acceptance as distinct lifecycle evidence;
+- does not connect to the trigger coalescer, runtime, Decision Orchestrator, Home Assistant, vendor delivery, networking, or physical equipment.
