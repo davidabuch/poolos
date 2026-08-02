@@ -97,6 +97,9 @@ Future milestones may add:
 
 None of those extensions may introduce vendor delivery or physical actuation.
 
+ADR-046 implements deterministic due-request selection and typed trigger
+conversion while leaving persistence and runtime submission deferred.
+
 ## Consequences
 
 - Deferred reevaluation gains an explicit, testable lifecycle.
