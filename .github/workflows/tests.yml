@@ -38,3 +38,6 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest
+
+      - name: Check patch whitespace
+        run: git diff --check
