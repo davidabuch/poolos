@@ -34,7 +34,7 @@ The deterministic reevaluation scheduler:
 - records immutable scheduled, rejected, duplicate, or cancelled results;
 - uses deterministic request and result identities;
 - performs no due-time polling or decision evaluation in Epic 10.15I;
-- remains in-memory and is not yet restart-safe.
+- remains an in-memory scheduling authority.
 
 It never forwards work to the execution-plan `Scheduler` and never invokes hardware.
 
@@ -47,3 +47,15 @@ due record into an `EXPECTED_CHANGE_REACHED` `EvaluationTriggerRequest`.
 The boundary returns explicit completion identities so replay and duplicate suppression do not
 depend on hidden mutable state. It does not modify either scheduler, poll time, submit the trigger
 to a runtime, construct an evaluation context, or invoke the Decision Orchestrator.
+
+## Persistent reevaluation state and restart recovery
+
+ADR-047 adds one pure `ReevaluationStatePersistenceBoundary`. It captures the current scheduled or
+cancelled records together with completed request identities at an explicit timezone-aware
+`captured_at`, serializes them as versioned canonical JSON, and restores equivalent immutable
+evidence after restart.
+
+Restored evidence feeds the due trigger boundary directly. Completed requests remain suppressed,
+cancelled requests remain cancelled, and future requests remain not due until an explicit `as_of`
+reaches them. The boundary performs no file, database, network, runtime, Home Assistant, vendor,
+delivery, or hardware operation.

@@ -71,7 +71,8 @@ not-due, rejected, and duplicate records never emit a trigger and never add a
 completion identity.
 
 Completion evidence is explicit input and output rather than hidden mutable
-state. Persistence and restart restoration remain separate concerns.
+state. ADR-047 persists that evidence together with current scheduling records
+and restores both as equivalent immutable inputs after restart.
 
 ## Deterministic identity and provenance
 
@@ -101,7 +102,6 @@ The due trigger boundary:
 
 Future milestones may add:
 
-- persistent completion and scheduling evidence with restart recovery;
 - a runtime-facing publisher that submits typed requests to the existing
   trigger coalescer;
 - acknowledgement that an emitted trigger was accepted into an evaluation
@@ -111,6 +111,9 @@ Future milestones may add:
 Runtime submission must remain separate from due selection and must preserve
 trigger coalescing, evaluation-context construction, and Decision Orchestrator
 authority.
+
+ADR-047 implements persistent completion and scheduling evidence without
+submitting the typed requests or introducing storage I/O in the PoolOS core.
 
 ## Consequences
 

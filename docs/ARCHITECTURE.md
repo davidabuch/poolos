@@ -193,8 +193,28 @@ DueReevaluationTriggerBoundary + prior completion evidence
 ```
 
 The boundary does not submit the typed request to the runtime. Trigger coalescing, evaluation
-context construction, Decision Orchestrator invocation, persistence, and restart recovery remain
-separate reviewed responsibilities.
+context construction, and Decision Orchestrator invocation remain separate reviewed
+responsibilities.
+
+ADR-047 makes the explicit scheduling and completion inputs restart-safe:
+
+```text
+Current schedule records + completed request identities + explicit captured_at
+        |
+        v
+ReevaluationStatePersistenceBoundary
+        |
+        +-- capture/serialize --> versioned canonical JSON snapshot
+        +-- restore -----------> equivalent immutable typed evidence
+        |
+        v
+DueReevaluationTriggerBoundary + explicit as_of
+```
+
+The persistence boundary performs no storage I/O and restores no command,
+equipment state, runtime request, or actuator intent. Malformed, incompatible,
+duplicate, future-dated, or inconsistent evidence is rejected before it can be
+used for due evaluation.
 
 ## 5. Coordinator Responsibilities
 
