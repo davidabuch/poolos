@@ -52,7 +52,8 @@ it as the scheduling time.
 
 The typed request is evidence for the existing trigger-coalescing boundary. It
 is not submitted to a runtime and does not invoke the Decision Orchestrator in
-Epic 10.15J.
+Epic 10.15J. ADR-048 adds a separate side-effect-free submission-validation
+handoff without changing due-selection behavior.
 
 ## Outcomes and completion
 
@@ -102,8 +103,6 @@ The due trigger boundary:
 
 Future milestones may add:
 
-- a runtime-facing publisher that submits typed requests to the existing
-  trigger coalescer;
 - acknowledgement that an emitted trigger was accepted into an evaluation
   cycle;
 - completion or supersession evidence tied to the resulting decision record.
@@ -114,6 +113,8 @@ authority.
 
 ADR-047 implements persistent completion and scheduling evidence without
 submitting the typed requests or introducing storage I/O in the PoolOS core.
+ADR-048 implements deterministic submission acceptance evidence without
+calling the trigger coalescer or runtime.
 
 ## Consequences
 
@@ -122,4 +123,5 @@ submitting the typed requests or introducing storage I/O in the PoolOS core.
 - Duplicate records cannot emit duplicate triggers within the same completion
   evidence chain.
 - Replay requires no hidden clock or mutable boundary state.
-- Actual runtime submission and decision evaluation remain future work.
+- ADR-048 provides the reviewed logical submission boundary; actual coalescer
+  integration, runtime submission, and decision evaluation remain future work.

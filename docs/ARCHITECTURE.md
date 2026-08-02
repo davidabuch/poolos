@@ -216,6 +216,25 @@ equipment state, runtime request, or actuator intent. Malformed, incompatible,
 duplicate, future-dated, or inconsistent evidence is rejected before it can be
 used for due evaluation.
 
+ADR-048 adds the logical handoff after typed trigger emission:
+
+```text
+Emitted ReevaluationTriggerResult + explicit submitted_at
+        + prior accepted submission identities
+        |
+        v
+ReevaluationRuntimeSubmissionBoundary
+        |
+        +-- valid/new ------> immutable accepted evidence + typed request
+        +-- prior accepted -> immutable duplicate evidence
+        +-- invalid/future -> immutable rejected evidence
+```
+
+The boundary validates and preserves the request but does not call the ADR-028
+coalescer, construct an evaluation context, invoke `PoolRuntime` or the Decision
+Orchestrator, enqueue work, publish events, or perform I/O. Accepted submission
+identity is explicit replay evidence, not proof that a decision cycle ran.
+
 ## 5. Coordinator Responsibilities
 
 `IntelliCenterCoordinator` owns communication lifecycle concerns:
