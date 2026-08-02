@@ -79,6 +79,7 @@ def test_pipeline_accepts_valid_route_without_invoking_target() -> None:
     assert result.status is OperationalActionPipelineStatus.ACCEPTED
     assert result.reason is OperationalActionPipelineReason.ROUTE_ACCEPTED
     assert result.routed_target is OperationalTarget.EXECUTION_PROPOSAL_BOUNDARY
+    assert result.boundary_name == "execution_proposal_boundary"
     assert result.accepted_action_ids == (action.action_id,)
 
 
@@ -138,6 +139,7 @@ def test_no_action_is_validly_routed_to_none() -> None:
 
     assert result.status is OperationalActionPipelineStatus.ACCEPTED
     assert result.routed_target is OperationalTarget.NONE
+    assert result.boundary_name == "none"
 
 
 def test_pipeline_rejects_action_target_mismatch() -> None:
@@ -158,6 +160,7 @@ def test_pipeline_rejects_action_target_mismatch() -> None:
     assert result.status is OperationalActionPipelineStatus.REJECTED
     assert result.reason is OperationalActionPipelineReason.ACTION_TARGET_MISMATCH
     assert result.routed_target is OperationalTarget.NONE
+    assert result.boundary_name is None
     assert result.accepted_action_ids == ()
 
 
@@ -211,7 +214,47 @@ def test_result_rejects_duplicate_accepted_ids() -> None:
             reason=OperationalActionPipelineReason.ROUTE_ACCEPTED,
             action=action,
             routed_target=action.target,
+            boundary_name="execution_proposal_boundary",
             accepted_action_ids=(action.action_id, action.action_id),
+        )
+
+
+def test_pipeline_result_preserves_registry_boundary_evidence() -> None:
+    action = CanonicalOperationalAction.from_instruction(_instruction())
+
+    result = OperationalActionPipeline().process(action)
+
+    assert result.boundary_name == "execution_proposal_boundary"
+    assert result.diagnostics["boundary_name"] == "execution_proposal_boundary"
+    assert result.diagnostics["registry_status"] == "found"
+    assert result.diagnostics["registry_reason"] == "route_found"
+
+
+def test_accepted_result_requires_boundary_name() -> None:
+    action = CanonicalOperationalAction.from_instruction(_instruction())
+
+    with pytest.raises(ValueError, match="requires a boundary name"):
+        OperationalActionPipelineResult(
+            status=OperationalActionPipelineStatus.ACCEPTED,
+            reason=OperationalActionPipelineReason.ROUTE_ACCEPTED,
+            action=action,
+            routed_target=action.target,
+            boundary_name=None,
+            accepted_action_ids=(action.action_id,),
+        )
+
+
+def test_rejected_result_cannot_identify_boundary() -> None:
+    action = CanonicalOperationalAction.from_instruction(_instruction())
+
+    with pytest.raises(ValueError, match="must not identify a boundary name"):
+        OperationalActionPipelineResult(
+            status=OperationalActionPipelineStatus.REJECTED,
+            reason=OperationalActionPipelineReason.UNSUPPORTED_ACTION,
+            action=action,
+            routed_target=OperationalTarget.NONE,
+            boundary_name="execution_proposal_boundary",
+            accepted_action_ids=(),
         )
 
 

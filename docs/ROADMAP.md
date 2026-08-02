@@ -231,7 +231,8 @@ Status: complete.
 | 10.15C | Canonical operational context model | DONE |
 | 10.15D | Canonical operational action pipeline | DONE |
 | 10.15E | Declarative operational action registry | DONE |
-| 10.15F | Deterministic operational action exchange | DONE |
+| 10.15F | Deterministic operational action exchange | SUPERSEDED |
+| 10.15G | Operational action architecture consolidation | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -288,7 +289,7 @@ Status: complete.
 
 ### Epic 10.15F — Operational Action Exchange
 
-Status: complete pending local validation.
+Status: superseded by Epic 10.15G and ADR-043.
 
 - introduces one synchronous, deterministic exchange boundary for accepted operational actions;
 - requires accepted pipeline evidence and preserved action identity;
@@ -296,3 +297,15 @@ Status: complete pending local validation.
 - verifies consistency among canonical action, pipeline route, and registry evidence;
 - emits immutable ready or rejected exchange results with deterministic IDs and diagnostics;
 - performs no destination invocation, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
+
+
+### Epic 10.15G — Operational Action Architecture Consolidation
+
+Status: complete pending local validation.
+
+- removes the redundant operational action exchange runtime layer;
+- resolves each operational route exactly once through the canonical registry;
+- adds canonical `boundary_name` evidence to accepted pipeline results;
+- enforces that rejected pipeline results expose no target or boundary;
+- preserves immutable diagnostics, duplicate suppression, deterministic replay, and simulator-only safety;
+- performs no downstream invocation, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.

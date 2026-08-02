@@ -129,6 +129,7 @@ class OperationalActionPipelineResult:
     reason: OperationalActionPipelineReason
     action: CanonicalOperationalAction
     routed_target: OperationalTarget
+    boundary_name: str | None
     accepted_action_ids: tuple[str, ...]
     diagnostics: Mapping[str, str] = field(default_factory=dict)
 
@@ -143,6 +144,8 @@ class OperationalActionPipelineResult:
                 raise ValueError("accepted result must record its action ID")
             if self.routed_target is not self.action.target:
                 raise ValueError("accepted result must preserve the action target")
+            if self.boundary_name is None or not self.boundary_name.strip():
+                raise ValueError("accepted result requires a boundary name")
         elif (
             self.reason is not OperationalActionPipelineReason.DUPLICATE_ACTION_ID
             and self.action.action_id in accepted_ids
@@ -150,6 +153,11 @@ class OperationalActionPipelineResult:
             raise ValueError(
                 "non-duplicate rejection cannot record its action ID as accepted"
             )
+        if self.status is OperationalActionPipelineStatus.REJECTED:
+            if self.routed_target is not OperationalTarget.NONE:
+                raise ValueError("rejected result must not identify a routed target")
+            if self.boundary_name is not None:
+                raise ValueError("rejected result must not identify a boundary name")
         object.__setattr__(self, "accepted_action_ids", accepted_ids)
         object.__setattr__(self, "diagnostics", MappingProxyType(dict(self.diagnostics)))
 
@@ -177,6 +185,7 @@ class OperationalActionPipeline:
                 status=OperationalActionPipelineStatus.REJECTED,
                 reason=OperationalActionPipelineReason.DUPLICATE_ACTION_ID,
                 routed_target=OperationalTarget.NONE,
+                boundary_name=None,
                 accepted_action_ids=prior_ids,
             )
 
@@ -187,6 +196,7 @@ class OperationalActionPipeline:
                 status=OperationalActionPipelineStatus.REJECTED,
                 reason=OperationalActionPipelineReason.UNSUPPORTED_ACTION,
                 routed_target=OperationalTarget.NONE,
+                boundary_name=None,
                 accepted_action_ids=prior_ids,
                 registry_diagnostics=registry_result.diagnostics,
             )
@@ -200,6 +210,7 @@ class OperationalActionPipeline:
                 status=OperationalActionPipelineStatus.REJECTED,
                 reason=OperationalActionPipelineReason.ACTION_TARGET_MISMATCH,
                 routed_target=OperationalTarget.NONE,
+                boundary_name=None,
                 accepted_action_ids=prior_ids,
                 registry_diagnostics=registry_result.diagnostics,
             )
@@ -209,6 +220,7 @@ class OperationalActionPipeline:
             status=OperationalActionPipelineStatus.ACCEPTED,
             reason=OperationalActionPipelineReason.ROUTE_ACCEPTED,
             routed_target=action.target,
+            boundary_name=registration.boundary_name,
             accepted_action_ids=(*prior_ids, action.action_id),
             registry_diagnostics=registry_result.diagnostics,
         )
@@ -220,6 +232,7 @@ class OperationalActionPipeline:
         status: OperationalActionPipelineStatus,
         reason: OperationalActionPipelineReason,
         routed_target: OperationalTarget,
+        boundary_name: str | None,
         accepted_action_ids: tuple[str, ...],
         registry_diagnostics: Mapping[str, str] | None = None,
     ) -> OperationalActionPipelineResult:
@@ -229,12 +242,14 @@ class OperationalActionPipeline:
             "pipeline_status": status.value,
             "pipeline_reason": reason.value,
             "routed_target": routed_target.value,
+            "boundary_name": boundary_name or "",
         }
         return OperationalActionPipelineResult(
             status=status,
             reason=reason,
             action=action,
             routed_target=routed_target,
+            boundary_name=boundary_name,
             accepted_action_ids=accepted_action_ids,
             diagnostics=diagnostics,
         )
