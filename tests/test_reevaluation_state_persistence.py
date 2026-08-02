@@ -24,6 +24,11 @@ from poolos.operational_disposition import (
 from poolos.operational_disposition_orchestrator import (
     OperationalDispositionOrchestrator,
 )
+from poolos.reevaluation_runtime_submission import (
+    ReevaluationRuntimeSubmissionBoundary,
+    ReevaluationRuntimeSubmissionOutcome,
+    ReevaluationRuntimeSubmissionRequest,
+)
 from poolos.reevaluation_scheduling import (
     DeterministicReevaluationScheduler,
     ReevaluationScheduleOutcome,
@@ -89,16 +94,38 @@ def _round_trip(
     results: tuple[ReevaluationScheduleResult, ...],
     *,
     completed_request_ids: tuple[str, ...] = (),
+    accepted_submission_ids: tuple[str, ...] = (),
     captured_at: datetime = SCHEDULED_FOR,
 ):
     boundary = ReevaluationStatePersistenceBoundary()
     snapshot = boundary.capture(
         results,
         completed_request_ids=completed_request_ids,
+        accepted_submission_ids=accepted_submission_ids,
         captured_at=captured_at,
     )
     return snapshot, boundary.serialize(snapshot), boundary.restore(
         boundary.serialize(snapshot)
+    )
+
+
+def _accepted_submission_evidence(
+    scheduled: ReevaluationScheduleResult,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    trigger_batch = DueReevaluationTriggerBoundary().evaluate(
+        (scheduled,),
+        as_of=scheduled.scheduled_for,
+    )
+    request = ReevaluationRuntimeSubmissionRequest.from_trigger_result(
+        trigger_batch.results[0]
+    )
+    submission_batch = ReevaluationRuntimeSubmissionBoundary().submit(
+        (request,),
+        submitted_at=scheduled.scheduled_for,
+    )
+    return (
+        trigger_batch.completed_request_ids,
+        submission_batch.accepted_submission_ids,
     )
 
 
@@ -108,7 +135,8 @@ def test_empty_state_snapshot_and_restore() -> None:
     assert restored == snapshot
     assert restored.schedule_results == ()
     assert restored.completed_request_ids == ()
-    assert json.loads(serialized)["schema_version"] == 1
+    assert restored.accepted_submission_ids == ()
+    assert json.loads(serialized)["schema_version"] == 2
 
 
 def test_scheduled_record_round_trip_preserves_typed_evidence() -> None:
@@ -143,6 +171,82 @@ def test_completed_request_identity_round_trip() -> None:
     )
 
     assert restored.completed_request_ids == (scheduled.request_id,)
+
+
+def test_accepted_submission_identity_round_trip_and_restart_suppression() -> None:
+    scheduled = _schedule_result()
+    completed_ids, accepted_ids = _accepted_submission_evidence(scheduled)
+
+    snapshot, serialized, restored = _round_trip(
+        (scheduled,),
+        completed_request_ids=completed_ids,
+        accepted_submission_ids=accepted_ids,
+    )
+
+    assert restored == snapshot
+    assert restored.accepted_submission_ids == accepted_ids
+    assert json.loads(serialized)["accepted_submission_ids"] == list(accepted_ids)
+
+    trigger_batch = DueReevaluationTriggerBoundary().evaluate(
+        restored.schedule_results,
+        as_of=SCHEDULED_FOR,
+    )
+    request = ReevaluationRuntimeSubmissionRequest.from_trigger_result(
+        trigger_batch.results[0]
+    )
+    replay = ReevaluationRuntimeSubmissionBoundary().submit(
+        (request,),
+        submitted_at=SCHEDULED_FOR,
+        accepted_submission_ids=restored.accepted_submission_ids,
+    )
+    assert (
+        replay.results[0].outcome
+        is ReevaluationRuntimeSubmissionOutcome.DUPLICATE
+    )
+
+
+def test_accepted_submission_serialization_is_input_order_independent() -> None:
+    first = _schedule_result(context_id="first")
+    second = _schedule_result(context_id="second")
+    first_completed, first_accepted = _accepted_submission_evidence(first)
+    second_completed, second_accepted = _accepted_submission_evidence(second)
+    boundary = ReevaluationStatePersistenceBoundary()
+
+    forward = boundary.capture(
+        (first, second),
+        completed_request_ids=(*first_completed, *second_completed),
+        accepted_submission_ids=(*first_accepted, *second_accepted),
+        captured_at=SCHEDULED_FOR,
+    )
+    reverse = boundary.capture(
+        (second, first),
+        completed_request_ids=(*second_completed, *first_completed),
+        accepted_submission_ids=(*second_accepted, *first_accepted),
+        captured_at=SCHEDULED_FOR,
+    )
+
+    assert forward == reverse
+    assert boundary.serialize(forward) == boundary.serialize(reverse)
+
+
+def test_accepted_submission_evidence_changes_snapshot_identity() -> None:
+    scheduled = _schedule_result()
+    completed_ids, accepted_ids = _accepted_submission_evidence(scheduled)
+    boundary = ReevaluationStatePersistenceBoundary()
+
+    emitted_only = boundary.capture(
+        (scheduled,),
+        completed_request_ids=completed_ids,
+        captured_at=SCHEDULED_FOR,
+    )
+    accepted = boundary.capture(
+        (scheduled,),
+        completed_request_ids=completed_ids,
+        accepted_submission_ids=accepted_ids,
+        captured_at=SCHEDULED_FOR,
+    )
+
+    assert emitted_only.snapshot_id != accepted.snapshot_id
 
 
 def test_serialization_is_deterministic() -> None:
@@ -237,10 +341,13 @@ def test_malformed_persisted_state_is_rejected(serialized: str) -> None:
         ReevaluationStatePersistenceBoundary().restore(serialized)
 
 
-def test_unsupported_schema_version_is_rejected() -> None:
+@pytest.mark.parametrize("unsupported_version", (1, 3))
+def test_unsupported_schema_version_is_rejected(
+    unsupported_version: int,
+) -> None:
     _, serialized, _ = _round_trip(())
     payload = json.loads(serialized)
-    payload["schema_version"] = 2
+    payload["schema_version"] = unsupported_version
 
     with pytest.raises(ReevaluationStatePersistenceError, match="unsupported"):
         ReevaluationStatePersistenceBoundary().restore(json.dumps(payload))
@@ -280,6 +387,46 @@ def test_duplicate_and_inconsistent_evidence_is_rejected() -> None:
             (replace(scheduled, result_id="tampered-result-id"),),
             captured_at=SCHEDULED_FOR,
         )
+
+
+def test_invalid_accepted_submission_evidence_is_rejected() -> None:
+    scheduled = _schedule_result()
+    completed_ids, accepted_ids = _accepted_submission_evidence(scheduled)
+    boundary = ReevaluationStatePersistenceBoundary()
+
+    with pytest.raises(ReevaluationStatePersistenceError, match="canonical format"):
+        boundary.capture(
+            (scheduled,),
+            completed_request_ids=completed_ids,
+            accepted_submission_ids=("not-a-submission-id",),
+            captured_at=SCHEDULED_FOR,
+        )
+    with pytest.raises(ReevaluationStatePersistenceError, match="unique"):
+        boundary.capture(
+            (scheduled,),
+            completed_request_ids=completed_ids,
+            accepted_submission_ids=(*accepted_ids, *accepted_ids),
+            captured_at=SCHEDULED_FOR,
+        )
+    with pytest.raises(ReevaluationStatePersistenceError, match="cannot exceed"):
+        boundary.capture(
+            (scheduled,),
+            completed_request_ids=completed_ids,
+            accepted_submission_ids=(
+                *accepted_ids,
+                "reevaluation-runtime-submission-aaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+            captured_at=SCHEDULED_FOR,
+        )
+
+
+def test_missing_schema_v2_submission_evidence_is_rejected() -> None:
+    _, serialized, _ = _round_trip(())
+    payload = json.loads(serialized)
+    del payload["accepted_submission_ids"]
+
+    with pytest.raises(ReevaluationStatePersistenceError):
+        ReevaluationStatePersistenceBoundary().restore(json.dumps(payload))
 
 
 def test_deterministic_replay_is_equivalent_before_and_after_restart() -> None:

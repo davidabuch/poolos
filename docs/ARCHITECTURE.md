@@ -199,12 +199,13 @@ responsibilities.
 ADR-047 makes the explicit scheduling and completion inputs restart-safe:
 
 ```text
-Current schedule records + completed request identities + explicit captured_at
+Current schedule records + completed request identities
+        + accepted submission identities + explicit captured_at
         |
         v
 ReevaluationStatePersistenceBoundary
         |
-        +-- capture/serialize --> versioned canonical JSON snapshot
+        +-- capture/serialize --> schema-v2 canonical JSON snapshot
         +-- restore -----------> equivalent immutable typed evidence
         |
         v
@@ -215,6 +216,12 @@ The persistence boundary performs no storage I/O and restores no command,
 equipment state, runtime request, or actuator intent. Malformed, incompatible,
 duplicate, future-dated, or inconsistent evidence is rejected before it can be
 used for due evaluation.
+
+ADR-049 adds accepted ADR-048 submission identities to snapshot schema version
+2. This makes submission duplicate suppression restart-safe while keeping
+trigger-emission completion and submission acceptance distinct. Version 1
+snapshots fail closed because they cannot prove whether a submission was
+already accepted.
 
 ADR-048 adds the logical handoff after typed trigger emission:
 

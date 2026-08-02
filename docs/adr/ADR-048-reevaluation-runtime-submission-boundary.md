@@ -63,6 +63,7 @@ Each request returns exactly one outcome:
 Duplicate inputs in one batch are accepted at most once. Accepted submission
 identities are sorted immutable output and must be supplied explicitly on a
 later replay. The boundary owns no acceptance store or mutable duplicate set.
+ADR-049 persists those identities in reevaluation snapshot schema version 2.
 
 ## Identity and replay
 
@@ -110,7 +111,6 @@ The runtime-submission boundary:
 
 Future reviewed milestones may add:
 
-- persistence of accepted submission identities;
 - an integration that passes accepted requests to the ADR-028 coalescer;
 - acknowledgement that a coalesced request entered a runtime evaluation cycle;
   or
@@ -126,5 +126,5 @@ collapse submission acceptance into decision completion.
 - Restart replay can reproduce submission behavior without hidden state.
 - The existing scheduler, due selector, persistence snapshot, coalescer,
   runtime, and orchestrator retain separate responsibilities.
-- Actual runtime submission and persistence of accepted identities remain
-  future work.
+- Actual runtime submission remains future work. ADR-049 makes accepted
+  identities restart-safe without adding runtime integration.
