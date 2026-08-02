@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Epic 10.15F.
+Superseded by ADR-043 and Epic 10.15G. Retained as architectural history.
 
 ## Context
 

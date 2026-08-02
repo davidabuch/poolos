@@ -38,7 +38,7 @@ Milestone exit condition: immutable read models exist and their current unit tes
 | M1-009 | Migrate cover platform | PLANNED |
 | M1-010 | Migrate select platform | PLANNED |
 | M1-011 | Add entity import and contract tests | PLANNED |
-| M1-012 | Add repository-wide compile and test checks | PLANNED |
+| M1-012 | Add repository-wide compile and test checks | DONE |
 | M1-013 | Verify entity identity and compatibility | PLANNED |
 | M1-014 | Build complete deployment package | BLOCKED |
 | M1-015 | Deploy complete integration to Home Assistant | BLOCKED |
@@ -233,6 +233,7 @@ Status: complete.
 | 10.15E | Declarative operational action registry | DONE |
 | 10.15F | Deterministic operational action exchange | SUPERSEDED |
 | 10.15G | Operational action architecture consolidation | DONE |
+| 10.15H | Downstream operational action adapter contract | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -301,7 +302,7 @@ Status: superseded by Epic 10.15G and ADR-043.
 
 ### Epic 10.15G — Operational Action Architecture Consolidation
 
-Status: complete pending local validation.
+Status: complete.
 
 - removes the redundant operational action exchange runtime layer;
 - resolves each operational route exactly once through the canonical registry;
@@ -309,3 +310,14 @@ Status: complete pending local validation.
 - enforces that rejected pipeline results expose no target or boundary;
 - preserves immutable diagnostics, duplicate suppression, deterministic replay, and simulator-only safety;
 - performs no downstream invocation, scheduling, proposal generation, authorization, plan mutation, delivery, Home Assistant call, Pentair communication, or physical actuation.
+
+### Epic 10.15H — Downstream Operational Action Adapter Contract
+
+Status: complete.
+
+- introduces one vendor-neutral adapter contract that consumes only validated operational action pipeline results;
+- adds a deterministic non-hardware adapter for no-op, reevaluation, and operator-review routes;
+- emits immutable accepted, rejected, deferred, or no-op receipts with stable identity and provenance;
+- rejects unvalidated evidence and unsupported execution proposal or execution plan targets;
+- invokes no scheduler, operator-review service, execution subsystem, Home Assistant integration, vendor transport, or physical equipment;
+- preserves simulation-first safety and leaves reviewed execution adapters to future milestones.

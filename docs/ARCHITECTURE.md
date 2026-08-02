@@ -129,6 +129,34 @@ The immutable IntelliCenter API reports equipment facts. PoolOS decides what sho
 future execution path will translate validated canonical operations into vendor commands without
 allowing Home Assistant entities or policy code to bypass the delivery boundary.
 
+### 4.1 Downstream operational-action boundary
+
+Operational intelligence ends at one validated, immutable pipeline result. ADR-044 defines the
+first downstream consumer as a vendor-neutral adapter contract:
+
+```text
+Operational Disposition
+        |
+        v
+Operational Action Pipeline <-> Operational Action Registry
+        |
+        v
+Validated OperationalActionPipelineResult
+        |
+        v
+NonHardwareOperationalActionAdapter
+        |
+        +-- no action ----------> immutable no-op receipt
+        +-- reevaluation -------> immutable deferred receipt
+        +-- operator review ----> immutable accepted receipt
+        +-- execution targets --> immutable rejected receipt
+```
+
+This first adapter emits deterministic evidence only. It does not invoke a scheduler, publish an
+operator-review item, generate or mutate an execution plan, import vendor integrations, deliver a
+command, or actuate equipment. Future downstream adapters require separate architectural and
+safety review.
+
 ## 5. Coordinator Responsibilities
 
 `IntelliCenterCoordinator` owns communication lifecycle concerns:
