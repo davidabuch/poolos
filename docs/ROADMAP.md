@@ -234,6 +234,7 @@ Status: complete.
 | 10.15F | Deterministic operational action exchange | SUPERSEDED |
 | 10.15G | Operational action architecture consolidation | DONE |
 | 10.15H | Downstream operational action adapter contract | DONE |
+| 10.15I | Deterministic reevaluation scheduling boundary | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -321,3 +322,14 @@ Status: complete.
 - rejects unvalidated evidence and unsupported execution proposal or execution plan targets;
 - invokes no scheduler, operator-review service, execution subsystem, Home Assistant integration, vendor transport, or physical equipment;
 - preserves simulation-first safety and leaves reviewed execution adapters to future milestones.
+
+### Epic 10.15I — Deterministic Reevaluation Scheduling Boundary
+
+Status: complete.
+
+- consumes only immutable deferred reevaluation receipts from the downstream adapter boundary;
+- creates deterministic scheduling requests from explicit caller-supplied timezone-aware times;
+- emits immutable scheduled, rejected, duplicate, or cancelled results with stable provenance;
+- stores current scheduling records in memory without invoking the decision runtime;
+- keeps supervisory reevaluation separate from execution-plan scheduling;
+- performs no Home Assistant call, vendor communication, command delivery, network operation, or physical actuation.
