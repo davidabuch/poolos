@@ -37,3 +37,13 @@ The deterministic reevaluation scheduler:
 - remains in-memory and is not yet restart-safe.
 
 It never forwards work to the execution-plan `Scheduler` and never invokes hardware.
+
+## Due reevaluation trigger boundary
+
+ADR-046 adds a pure consumer of immutable reevaluation scheduling records. At an explicit `as_of`
+time, `DueReevaluationTriggerBoundary` sorts the records deterministically and converts each valid
+due record into an `EXPECTED_CHANGE_REACHED` `EvaluationTriggerRequest`.
+
+The boundary returns explicit completion identities so replay and duplicate suppression do not
+depend on hidden mutable state. It does not modify either scheduler, poll time, submit the trigger
+to a runtime, construct an evaluation context, or invoke the Decision Orchestrator.

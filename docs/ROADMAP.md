@@ -235,6 +235,7 @@ Status: complete.
 | 10.15G | Operational action architecture consolidation | DONE |
 | 10.15H | Downstream operational action adapter contract | DONE |
 | 10.15I | Deterministic reevaluation scheduling boundary | DONE |
+| 10.15J | Due reevaluation trigger boundary | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -333,3 +334,14 @@ Status: complete.
 - stores current scheduling records in memory without invoking the decision runtime;
 - keeps supervisory reevaluation separate from execution-plan scheduling;
 - performs no Home Assistant call, vendor communication, command delivery, network operation, or physical actuation.
+
+### Epic 10.15J — Due Reevaluation Trigger Boundary
+
+Status: complete.
+
+- deterministically sorts and evaluates immutable reevaluation schedule records at an explicit `as_of` time;
+- converts valid due records into typed `EXPECTED_CHANGE_REACHED` evaluation-trigger requests;
+- emits immutable emitted, not-due, rejected, duplicate, or cancelled evidence;
+- carries explicit sorted completion identities so duplicate records emit at most one trigger;
+- preserves action, schedule, context, decision, correlation, hint, timing, and replay provenance;
+- does not invoke the runtime, Decision Orchestrator, Home Assistant, vendor delivery, networking, or physical equipment.

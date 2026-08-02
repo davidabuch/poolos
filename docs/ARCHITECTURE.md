@@ -177,6 +177,25 @@ reevaluation hint, run a decision cycle, publish a runtime trigger, create a pla
 external system. Persistence, due-request selection, and typed evaluation-trigger integration are
 future reviewed boundaries.
 
+ADR-046 adds pure due selection and typed trigger conversion:
+
+```text
+Immutable reevaluation schedule records + explicit as_of
+        |
+        v
+DueReevaluationTriggerBoundary + prior completion evidence
+        |
+        +-- due ----------> EXPECTED_CHANGE_REACHED trigger request + completion ID
+        +-- future -------> immutable not-due evidence
+        +-- cancelled ----> immutable cancelled evidence
+        +-- completed ----> immutable duplicate evidence
+        +-- invalid ------> immutable rejected evidence
+```
+
+The boundary does not submit the typed request to the runtime. Trigger coalescing, evaluation
+context construction, Decision Orchestrator invocation, persistence, and restart recovery remain
+separate reviewed responsibilities.
+
 ## 5. Coordinator Responsibilities
 
 `IntelliCenterCoordinator` owns communication lifecycle concerns:
