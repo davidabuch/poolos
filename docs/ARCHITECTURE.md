@@ -232,6 +232,24 @@ provenance evidence. It does not construct a `DecisionEvaluationContext`, invoke
 `DecisionOrchestrator`, enqueue work, persist data, poll time, communicate with vendors, or actuate
 equipment.
 
+### 4.2 Supervisory evaluation input assembly
+
+ADR-051 adds the deterministic handoff from successful runtime-trigger coalescing evidence into the existing supervisory evaluation models:
+
+```text
+RuntimeTriggerCoalescingBatch
+        + explicit current goals, observations, forecast, policies, blockers,
+          runtime mode, planning request, and prior-decision evidence
+        |
+        v
+SupervisoryEvaluationInputAssembler
+        |
+        +--> existing DecisionEvaluationContext
+        +--> existing DecisionOrchestrationRequest
+```
+
+The assembler derives stable identities, normalizes order-insensitive evidence, and preserves complete coalescing traceability. It does not invoke the `DecisionOrchestrator`, call `PoolRuntime`, evaluate plans, enqueue work, perform I/O, or actuate equipment.
+
 ## 5. Coordinator Responsibilities
 
 `IntelliCenterCoordinator` owns communication lifecycle concerns:

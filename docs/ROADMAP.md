@@ -240,6 +240,7 @@ Status: complete.
 | 10.15L | Reevaluation runtime submission boundary | DONE |
 | 10.15M | Persistent runtime-submission identities | DONE |
 | 10.15N | Runtime trigger coalescing boundary | DONE |
+| 10.15O | Supervisory evaluation input assembly | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -398,3 +399,15 @@ Status: complete.
 - rejects non-accepted, inconsistent, future-dated, duplicate, or previously consumed evidence fail-closed;
 - does not construct evaluation contexts or invoke the Decision Orchestrator;
 - performs no persistence I/O, scheduling, background work, networking, vendor communication, or physical actuation.
+
+### Epic 10.15O — Supervisory Evaluation Input Assembly
+
+Status: complete pending local validation.
+
+- consumes successful immutable runtime-trigger coalescing evidence plus explicit current planning facts;
+- reuses the existing `DecisionEvaluationContext` and `DecisionOrchestrationRequest` models;
+- derives deterministic context and assembly identities from canonical evidence;
+- normalizes order-insensitive goals, policies, and blockers;
+- preserves coalescing, submission, context, planning, and prior-decision traceability;
+- rejects missing, future-dated, inconsistent, or noncanonical evidence fail-closed;
+- does not invoke the Decision Orchestrator, PoolRuntime, planning evaluation, persistence I/O, networking, vendor communication, or physical actuation.
