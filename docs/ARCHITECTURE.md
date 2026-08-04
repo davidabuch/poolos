@@ -1,66 +1,43 @@
 # PoolOS Architecture Manual
 
-This file is the entry point to the canonical PoolOS architecture documentation.
+The PoolOS Architecture Manual is the canonical conceptual reference for the project. It explains why the system exists, how responsibilities are divided, and which architectural rules future changes must preserve.
 
-The manual explains the enduring system design. Architecture Decision Records in `docs/adr/` explain why individual decisions were made. Module and API documentation explain implementation details.
+## Start here
 
-## Start Here
+1. [Executive Overview](architecture/00-executive-overview.md)
+2. [Design Philosophy](architecture/01-design-philosophy.md)
+3. [Guiding Principles](architecture/02-guiding-principles.md)
+4. [Capability Map](architecture/03-capability-map.md)
 
-1. [00 — Executive Overview](architecture/00-executive-overview.md)
-2. 01 — Design Philosophy *(planned)*
-3. 02 — Guiding Principles *(planned)*
-4. 03 — Capability Map *(planned)*
-5. 04 — Layered Architecture *(planned)*
-6. 05 — Dependency Rules *(planned)*
-7. 06 — Data Flow *(planned)*
-8. 07 — Identity Model *(planned)*
-9. 08 — Safety Model *(planned)*
-10. 09 — Observation Layer *(planned)*
-11. 10 — Cognitive System *(planned)*
-12. 11 — Supervisory Runtime *(planned)*
-13. 12 — Execution System *(planned)*
-14. 13 — Integration Layer *(planned)*
-15. 14 — Package Guide *(planned)*
-16. 15 — Public API — see [PUBLIC_API.md](PUBLIC_API.md)
-17. 16 — ADR Index *(planned)*
-18. 17 — Development Workflow *(planned)*
+## Planned chapters
 
-## Current Architectural Summary
+- System layers and dependency rules
+- Data flow
+- Identity model
+- Safety model
+- Observation layer
+- Cognitive system
+- Supervisory runtime
+- Execution system
+- Integration layer
+- Package guide
+- Terminology
+- How PoolOS thinks
 
-PoolOS separates:
-
-```text
-Observation
-    |
-    v
-Cognitive decision-making
-    |
-    v
-Supervisory composition
-    |
-    v
-Execution
-    |
-    v
-Home Assistant and vendor integration
-```
-
-The cognitive system determines what should happen. The execution system determines how accepted intent may be carried out safely. Integration adapters translate vendor-independent operations into platform-specific communication.
-
-Live automatic actuation remains disabled and must not bypass the explicit execution, safety, ownership, runtime-mode, and delivery boundaries.
-
-## Related Documentation
+## Related references
 
 - [Public API Policy](PUBLIC_API.md)
 - [Development Roadmap](ROADMAP.md)
-- [IntelliCenter Deployment Boundary](INTELLICENTER_DEPLOYMENT.md)
 - [Architecture Decision Records](adr/)
 
-## Documentation Authority
+## Document roles
 
-When documents disagree:
+- The Architecture Manual explains the enduring conceptual design.
+- ADRs record specific decisions and their consequences.
+- The roadmap records sequencing and implementation status.
+- The public API policy defines supported import behavior.
+- Source code and tests implement and enforce the design.
 
-1. Accepted ADRs govern the specific decision they address.
-2. The Architecture Manual governs the current conceptual model.
-3. Public API policy governs supported import behavior.
-4. The roadmap describes planned work and status, not architectural authority.
+## Change policy
+
+Material architecture changes should update the relevant manual chapter and add or amend an ADR when a concrete design decision changes.
