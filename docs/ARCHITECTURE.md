@@ -1,375 +1,66 @@
-# PoolOS Repository Architecture
+# PoolOS Architecture Manual
 
-## 1. Purpose
+This file is the entry point to the canonical PoolOS architecture documentation.
 
-PoolOS is a vendor-independent platform for observing, evaluating, deciding, explaining,
-recording, and publishing intelligent pool and spa operations.
+The manual explains the enduring system design. Architecture Decision Records in `docs/adr/` explain why individual decisions were made. Module and API documentation explain implementation details.
 
-The repository also contains the source of a future Home Assistant custom integration for
-Pentair IntelliCenter equipment. These are related components with separate responsibilities and
-distribution boundaries.
+## Start Here
 
-## 2. Canonical Repository Boundaries
+1. [00 — Executive Overview](architecture/00-executive-overview.md)
+2. 01 — Design Philosophy *(planned)*
+3. 02 — Guiding Principles *(planned)*
+4. 03 — Capability Map *(planned)*
+5. 04 — Layered Architecture *(planned)*
+6. 05 — Dependency Rules *(planned)*
+7. 06 — Data Flow *(planned)*
+8. 07 — Identity Model *(planned)*
+9. 08 — Safety Model *(planned)*
+10. 09 — Observation Layer *(planned)*
+11. 10 — Cognitive System *(planned)*
+12. 11 — Supervisory Runtime *(planned)*
+13. 12 — Execution System *(planned)*
+14. 13 — Integration Layer *(planned)*
+15. 14 — Package Guide *(planned)*
+16. 15 — Public API — see [PUBLIC_API.md](PUBLIC_API.md)
+17. 16 — ADR Index *(planned)*
+18. 17 — Development Workflow *(planned)*
 
-```text
-poolos repository root
-├── poolos/              Installable vendor-independent Python package
-├── intellicenter/       Home Assistant custom integration source
-│   └── api/             Immutable internal IntelliCenter read models
-├── tests/               Shared automated validation
-├── docs/                Architecture and engineering records
-└── config/              Example installation configuration
-```
+## Current Architectural Summary
 
-The repository root and the nested `poolos/` package intentionally use the same name.
-
-### 2.1 PoolOS package
-
-The `poolos/` package owns:
-
-- Canonical operations and domain models
-- Typed observations
-- Evaluation contexts and triggers
-- Policies, goals, planning, and alternative ranking
-- Decision intelligence and stability
-- Human and technical explanations
-- Flight-recorder decisions
-- Restart recovery and deterministic replay
-- Runtime diagnostics and golden scenarios
-- Vendor-independent Home Assistant observation and publication boundaries
-- Hardware and vendor command-delivery abstractions
-
-PoolOS does not currently perform live automatic actuation.
-
-### 2.2 IntelliCenter Home Assistant integration
-
-The root `intellicenter/` directory is the source of one Home Assistant custom integration.
-It owns:
-
-- Home Assistant setup and configuration flow
-- Connection lifecycle and coordination with `pyintellicenter`
-- Home Assistant entity platforms
-- Integration diagnostics and translations
-- Translation of the live Pentair model into immutable read snapshots
-
-The complete directory is the deployable unit. When installation begins, it will be copied or
-released as:
+PoolOS separates:
 
 ```text
-/config/custom_components/intellicenter/
+Observation
+    |
+    v
+Cognitive decision-making
+    |
+    v
+Supervisory composition
+    |
+    v
+Execution
+    |
+    v
+Home Assistant and vendor integration
 ```
 
-It is intentionally excluded from the PoolOS wheel.
+The cognitive system determines what should happen. The execution system determines how accepted intent may be carried out safely. Integration adapters translate vendor-independent operations into platform-specific communication.
 
-### 2.3 IntelliCenter immutable API
+Live automatic actuation remains disabled and must not bypass the explicit execution, safety, ownership, runtime-mode, and delivery boundaries.
 
-`intellicenter/api/` is an internal, read-only package. It contains only immutable normalization
-models and the snapshot facade used by the root integration.
+## Related Documentation
 
-Its canonical contents are:
+- [Public API Policy](PUBLIC_API.md)
+- [Development Roadmap](ROADMAP.md)
+- [IntelliCenter Deployment Boundary](INTELLICENTER_DEPLOYMENT.md)
+- [Architecture Decision Records](adr/)
 
-```text
-__init__.py
-body.py
-chemistry.py
-circuit.py
-cover.py
-models.py
-panel.py
-pump.py
-system.py
-temperature.py
-```
+## Documentation Authority
 
-Home Assistant platform modules, manifests, translations, configuration flows, coordinators, and
-project configuration files must not be duplicated beneath `intellicenter/api/`.
+When documents disagree:
 
-## 3. Runtime Safety Boundary
-
-PoolOS currently performs:
-
-```text
-OBSERVE -> EVALUATE -> DECIDE -> EXPLAIN -> RECORD -> PUBLISH
-```
-
-Repository cleanup, integration preparation, and documentation changes must not silently cross
-into live actuation.
-
-Future command delivery must continue through explicit operation, validation, ownership, runtime
-mode, safety, and vendor-delivery boundaries.
-
-## 4. Layered Architecture
-
-```text
-Pentair IntelliCenter controller
-            |
-            v
-      pyintellicenter
-            |
-            v
-IntelliCenterCoordinator
-            |
-            v
-Immutable IntelliCenter API
-            |
-            v
-Home Assistant entity and observation layer
-            |
-            v
-          PoolOS
-  observe / evaluate / decide
-  explain / record / publish
-            |
-            v
-Vendor command-delivery boundary
-      (actuation disabled)
-```
-
-The immutable IntelliCenter API reports equipment facts. PoolOS decides what should happen. The
-future execution path will translate validated canonical operations into vendor commands without
-allowing Home Assistant entities or policy code to bypass the delivery boundary.
-
-
-### 4.1 Downstream operational-action and reevaluation boundaries
-
-Operational intelligence ends at one validated, immutable pipeline result. ADR-044 defines the
-first downstream consumer as a vendor-neutral adapter contract:
-
-```text
-Operational Disposition
-        |
-        v
-Operational Action Pipeline <-> Operational Action Registry
-        |
-        v
-Validated OperationalActionPipelineResult
-        |
-        v
-NonHardwareOperationalActionAdapter
-        |
-        +-- no action ----------> immutable no-op receipt
-        +-- reevaluation -------> immutable deferred receipt
-        +-- operator review ----> immutable accepted receipt
-        +-- execution targets --> immutable rejected receipt
-```
-
-This first adapter emits deterministic evidence only. It does not invoke a scheduler, publish an
-operator-review item, generate or mutate an execution plan, import vendor integrations, deliver a
-command, or actuate equipment.
-
-ADR-045 adds a dedicated consumer for deferred reevaluation receipts:
-
-```text
-Immutable deferred reevaluation receipt
-        |
-        v
-ReevaluationScheduleRequest + explicit supplied time
-        |
-        v
-DeterministicReevaluationScheduler
-        |
-        v
-Immutable scheduled / rejected / duplicate / cancelled record
-```
-
-ADR-046 adds pure due selection and typed trigger conversion:
-
-```text
-Immutable reevaluation schedule records + explicit as_of
-        |
-        v
-DueReevaluationTriggerBoundary + prior completion evidence
-        |
-        +-- due ----------> EXPECTED_CHANGE_REACHED trigger request + completion ID
-        +-- future -------> immutable not-due evidence
-        +-- cancelled ----> immutable cancelled evidence
-        +-- completed ----> immutable duplicate evidence
-        +-- invalid ------> immutable rejected evidence
-```
-
-ADR-047 and ADR-049 make scheduling, trigger completion, and accepted runtime-submission evidence
-restart-safe through a deterministic schema-version-2 snapshot. The persistence boundary performs
-no storage I/O and restores no command, equipment state, runtime request, or actuator intent.
-
-ADR-048 adds the logical handoff after typed trigger emission:
-
-```text
-Emitted ReevaluationTriggerResult + explicit submitted_at
-        + prior accepted submission identities
-        |
-        v
-ReevaluationRuntimeSubmissionBoundary
-        |
-        +-- valid/new ------> immutable accepted evidence + typed request
-        +-- prior accepted -> immutable duplicate evidence
-        +-- invalid/future -> immutable rejected evidence
-```
-
-Accepted submission identity is explicit replay evidence, not proof that a decision cycle ran.
-
-ADR-050 connects accepted runtime-submission evidence to the existing deterministic trigger
-coalescer:
-
-```text
-Accepted ReevaluationRuntimeSubmissionResult evidence
-        + explicit coalesced_at
-        + prior consumed submission identities
-        |
-        v
-RuntimeTriggerCoalescingBoundary
-        |
-        v
-EvaluationTriggerCoalescer
-        |
-        v
-Immutable coalescing batch
-+ CoalescedEvaluationTrigger
-+ explicit consumed submission identities
-```
-
-The boundary preserves submission, trigger, schedule, action, context, decision, correlation, and
-provenance evidence. It does not construct a `DecisionEvaluationContext`, invoke the
-`DecisionOrchestrator`, enqueue work, persist data, poll time, communicate with vendors, or actuate
-equipment.
-
-### 4.2 Supervisory evaluation input assembly
-
-ADR-051 adds the deterministic handoff from successful runtime-trigger coalescing evidence into the existing supervisory evaluation models:
-
-```text
-RuntimeTriggerCoalescingBatch
-        + explicit current goals, observations, forecast, policies, blockers,
-          runtime mode, planning request, and prior-decision evidence
-        |
-        v
-SupervisoryEvaluationInputAssembler
-        |
-        +--> existing DecisionEvaluationContext
-        +--> existing DecisionOrchestrationRequest
-```
-
-The assembler derives stable identities, normalizes order-insensitive evidence, and preserves complete coalescing traceability. It does not invoke the `DecisionOrchestrator`, call `PoolRuntime`, evaluate plans, enqueue work, perform I/O, or actuate equipment.
-
-## 5. Coordinator Responsibilities
-
-`IntelliCenterCoordinator` owns communication lifecycle concerns:
-
-- Controller connection and reconnection
-- Live Pentair model synchronization
-- Push-update processing
-- Discovery of equipment objects
-- Scheduling Home Assistant refreshes
-- Exposing the authoritative controller and model to integration consumers
-
-The coordinator must not contain PoolOS scheduling, ownership, safety, or operating policy.
-
-## 6. Immutable Read Model
-
-The immutable API must:
-
-- Read from the coordinator's authoritative live model
-- Return immutable snapshots instead of raw mutable controller objects
-- Normalize Pentair-specific attributes and values
-- Preserve unknown, unavailable, and unsupported states explicitly
-- Expose stable identifiers independent of Home Assistant entity IDs
-- Remain free of scheduling and operational policy
-- Remain command-free
-
-## 7. Home Assistant Entity Layer
-
-Home Assistant entities are presentation and interaction adapters. They should:
-
-- Read through immutable models where available
-- Translate immutable models into Home Assistant entity properties
-- Avoid embedding PoolOS policy
-- Avoid restoring stale state snapshots
-- Preserve stable entity identifiers and behavior when practical
-
-User-initiated entity commands may remain part of the hardware integration, but automatic PoolOS
-commands must eventually pass through the canonical command-delivery path.
-
-## 8. Packaging and Distribution
-
-The root `pyproject.toml` packages only `poolos*`.
-
-This is intentional:
-
-- `pip install poolos` installs the vendor-independent Python package.
-- It does not install the Home Assistant custom integration.
-- IntelliCenter deployment will use a complete custom-component directory or a future HACS
-  release package.
-
-The repository must document both installation paths before public release.
-
-## 9. Static Analysis Boundary
-
-Required repository checks are:
-
-```text
-compileall: poolos and intellicenter
-Ruff:      poolos, intellicenter, and tests
-MyPy:      poolos
-pytest:    complete test suite
-```
-
-MyPy is currently limited to the installable PoolOS package because the Home Assistant integration
-has separate external runtime and typing dependencies. This boundary is intentional but must stay
-visible in documentation and CI.
-
-A future integration milestone may add a Home Assistant-aware MyPy or import-validation job.
-
-## 10. Restart Safety
-
-After a future Home Assistant or integration restart:
-
-- The coordinator reconnects and rebuilds authoritative equipment state.
-- The immutable API exposes a new snapshot.
-- PoolOS rebuilds an evaluation context from current observations.
-- Safety and ownership are reevaluated from current facts.
-- No stale pre-restart command or equipment snapshot is blindly restored.
-
-## 11. Observability
-
-The combined system should expose diagnostic information for:
-
-- Current observations and freshness
-- Current operating mode
-- Active safety reason
-- Current owner by equipment function
-- Decision alternatives and selected plan
-- Last evaluation time and trigger
-- Last proposed or delivered command and result
-- Suppressed duplicate or unsafe commands
-- Controller and publication availability
-
-Diagnostics must not expose secrets or authentication material.
-
-## 12. Testing Strategy
-
-Testing remains layered:
-
-1. IntelliCenter immutable read-model unit tests
-2. IntelliCenter repository-structure and contract tests
-3. PoolOS domain and observation tests
-4. Policy, planning, and decision tests
-5. Runtime, recovery, and replay tests
-6. Golden end-to-end scenarios
-7. Home Assistant runtime validation before integration release
-8. Staged command-delivery tests before any live automatic actuation
-
-A green unit-test suite does not by itself establish that a Home Assistant package is deployment
-ready.
-
-## 13. Deployment Strategy
-
-Git is the development source of truth. Home Assistant is a deployment target.
-
-The IntelliCenter integration is not installed in Home Assistant yet. Until its installation
-milestone:
-
-- Changes are made and validated in this repository.
-- Complete coherent changes are committed and pushed to the private GitHub repository.
-- The root IntelliCenter directory remains one future deployable custom component.
-- No partial integration files are copied into Home Assistant.
-- Public GitHub or HACS distribution is deferred until licensing, metadata, installation,
-  upgrade, and runtime validation are complete.
+1. Accepted ADRs govern the specific decision they address.
+2. The Architecture Manual governs the current conceptual model.
+3. Public API policy governs supported import behavior.
+4. The roadmap describes planned work and status, not architectural authority.
