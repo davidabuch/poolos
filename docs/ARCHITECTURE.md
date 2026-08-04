@@ -129,7 +129,8 @@ The immutable IntelliCenter API reports equipment facts. PoolOS decides what sho
 future execution path will translate validated canonical operations into vendor commands without
 allowing Home Assistant entities or policy code to bypass the delivery boundary.
 
-### 4.1 Downstream operational-action boundary
+
+### 4.1 Downstream operational-action and reevaluation boundaries
 
 Operational intelligence ends at one validated, immutable pipeline result. ADR-044 defines the
 first downstream consumer as a vendor-neutral adapter contract:
@@ -154,8 +155,7 @@ NonHardwareOperationalActionAdapter
 
 This first adapter emits deterministic evidence only. It does not invoke a scheduler, publish an
 operator-review item, generate or mutate an execution plan, import vendor integrations, deliver a
-command, or actuate equipment. Future downstream adapters require separate architectural and
-safety review.
+command, or actuate equipment.
 
 ADR-045 adds a dedicated consumer for deferred reevaluation receipts:
 
@@ -172,11 +172,6 @@ DeterministicReevaluationScheduler
 Immutable scheduled / rejected / duplicate / cancelled record
 ```
 
-This scheduler is an in-memory recorder, not the execution-plan scheduler. It does not parse the
-reevaluation hint, run a decision cycle, publish a runtime trigger, create a plan, or invoke any
-external system. Persistence, due-request selection, and typed evaluation-trigger integration are
-future reviewed boundaries.
-
 ADR-046 adds pure due selection and typed trigger conversion:
 
 ```text
@@ -192,36 +187,9 @@ DueReevaluationTriggerBoundary + prior completion evidence
         +-- invalid ------> immutable rejected evidence
 ```
 
-The boundary does not submit the typed request to the runtime. Trigger coalescing, evaluation
-context construction, and Decision Orchestrator invocation remain separate reviewed
-responsibilities.
-
-ADR-047 makes the explicit scheduling and completion inputs restart-safe:
-
-```text
-Current schedule records + completed request identities
-        + accepted submission identities + explicit captured_at
-        |
-        v
-ReevaluationStatePersistenceBoundary
-        |
-        +-- capture/serialize --> schema-v2 canonical JSON snapshot
-        +-- restore -----------> equivalent immutable typed evidence
-        |
-        v
-DueReevaluationTriggerBoundary + explicit as_of
-```
-
-The persistence boundary performs no storage I/O and restores no command,
-equipment state, runtime request, or actuator intent. Malformed, incompatible,
-duplicate, future-dated, or inconsistent evidence is rejected before it can be
-used for due evaluation.
-
-ADR-049 adds accepted ADR-048 submission identities to snapshot schema version
-2. This makes submission duplicate suppression restart-safe while keeping
-trigger-emission completion and submission acceptance distinct. Version 1
-snapshots fail closed because they cannot prove whether a submission was
-already accepted.
+ADR-047 and ADR-049 make scheduling, trigger completion, and accepted runtime-submission evidence
+restart-safe through a deterministic schema-version-2 snapshot. The persistence boundary performs
+no storage I/O and restores no command, equipment state, runtime request, or actuator intent.
 
 ADR-048 adds the logical handoff after typed trigger emission:
 
@@ -237,10 +205,32 @@ ReevaluationRuntimeSubmissionBoundary
         +-- invalid/future -> immutable rejected evidence
 ```
 
-The boundary validates and preserves the request but does not call the ADR-028
-coalescer, construct an evaluation context, invoke `PoolRuntime` or the Decision
-Orchestrator, enqueue work, publish events, or perform I/O. Accepted submission
-identity is explicit replay evidence, not proof that a decision cycle ran.
+Accepted submission identity is explicit replay evidence, not proof that a decision cycle ran.
+
+ADR-050 connects accepted runtime-submission evidence to the existing deterministic trigger
+coalescer:
+
+```text
+Accepted ReevaluationRuntimeSubmissionResult evidence
+        + explicit coalesced_at
+        + prior consumed submission identities
+        |
+        v
+RuntimeTriggerCoalescingBoundary
+        |
+        v
+EvaluationTriggerCoalescer
+        |
+        v
+Immutable coalescing batch
++ CoalescedEvaluationTrigger
++ explicit consumed submission identities
+```
+
+The boundary preserves submission, trigger, schedule, action, context, decision, correlation, and
+provenance evidence. It does not construct a `DecisionEvaluationContext`, invoke the
+`DecisionOrchestrator`, enqueue work, persist data, poll time, communicate with vendors, or actuate
+equipment.
 
 ## 5. Coordinator Responsibilities
 
