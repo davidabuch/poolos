@@ -38,7 +38,7 @@ Milestone exit condition: immutable read models exist and their current unit tes
 | M1-009 | Migrate cover platform | PLANNED |
 | M1-010 | Migrate select platform | PLANNED |
 | M1-011 | Add entity import and contract tests | PLANNED |
-| M1-012 | Add repository-wide compile and test checks | DONE |
+| M1-012 | Add repository-wide compile and test checks | PLANNED |
 | M1-013 | Verify entity identity and compatibility | PLANNED |
 | M1-014 | Build complete deployment package | BLOCKED |
 | M1-015 | Deploy complete integration to Home Assistant | BLOCKED |
@@ -239,6 +239,7 @@ Status: complete.
 | 10.15K | Persistent reevaluation state and restart recovery | DONE |
 | 10.15L | Reevaluation runtime submission boundary | DONE |
 | 10.15M | Persistent runtime-submission identities | DONE |
+| 10.15N | Runtime trigger coalescing boundary | DONE |
 
 ### Epic 10.15A — Operational Disposition Model
 
@@ -384,3 +385,16 @@ Status: complete.
 - rejects version 1, missing, malformed, duplicate, noncanonical, or impossible acceptance evidence fail-closed;
 - keeps trigger-emission completion and runtime-submission acceptance as distinct lifecycle evidence;
 - does not connect to the trigger coalescer, runtime, Decision Orchestrator, Home Assistant, vendor delivery, networking, or physical equipment.
+
+### Epic 10.15N — Runtime Trigger Coalescing Boundary
+
+Status: complete.
+
+- consumes only accepted reevaluation runtime-submission evidence;
+- validates submission identity, trigger evidence, provenance, timing, and prior-consumption state;
+- invokes the existing deterministic `EvaluationTriggerCoalescer` rather than creating a second queue, bus, or coalescer;
+- emits one immutable coalescing batch with stable result and batch identities;
+- carries explicit sorted consumed-submission identities for replay and duplicate suppression;
+- rejects non-accepted, inconsistent, future-dated, duplicate, or previously consumed evidence fail-closed;
+- does not construct evaluation contexts or invoke the Decision Orchestrator;
+- performs no persistence I/O, scheduling, background work, networking, vendor communication, or physical actuation.
