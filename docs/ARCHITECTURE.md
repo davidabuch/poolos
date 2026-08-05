@@ -15,16 +15,10 @@ The PoolOS Architecture Manual is the canonical conceptual reference for the pro
 9. [Safety Model](architecture/08-safety-model.md)
 10. [Repository and Module Guide](architecture/09-repository-and-module-guide.md)
 11. [Public API Integration](architecture/10-public-api-integration.md)
-
-## Planned chapters
-
-- Observation layer
-- Cognitive system
-- Supervisory runtime
-- Execution system
-- Integration layer
-- Terminology
-- How PoolOS thinks
+12. [How PoolOS Thinks](architecture/11-how-poolos-thinks.md)
+13. [Glossary and Terminology](architecture/12-glossary-and-terminology.md)
+14. [Architectural Patterns](architecture/13-architectural-patterns.md)
+15. [Future Evolution](architecture/14-future-evolution.md)
 
 ## Related references
 
