@@ -1,5 +1,7 @@
 # How PoolOS Thinks
 
+> **Architecture Manual v1.0** · Chapter 12 of 15
+
 ## Purpose
 
 PoolOS is not a collection of independent automations. It is a deterministic decision system that separates understanding, choosing, acting, and verifying.
@@ -180,3 +182,7 @@ It does not define individual algorithms, package locations, vendor protocols, o
 ## Future evolution
 
 New cognitive, execution, or integration capabilities should extend this sequence without collapsing its boundaries.
+
+---
+
+[Previous: Public API Integration](10-public-api-integration.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Glossary and Terminology](12-glossary-and-terminology.md)

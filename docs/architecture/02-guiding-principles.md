@@ -1,5 +1,7 @@
 # Guiding Principles
 
+> **Architecture Manual v1.0** · Chapter 3 of 15
+
 These principles are the architectural constitution of PoolOS. New ADRs and major changes should align with them or explicitly explain why an exception is justified.
 
 ## 1. Determinism over convenience
@@ -196,3 +198,7 @@ They do not replace ADRs. A principle provides direction; an ADR records a concr
 ## Future evolution
 
 The principle set should remain small. New principles should be added only when they express a durable architectural rule rather than a temporary implementation preference.
+
+---
+
+[Previous: Design Philosophy](01-design-philosophy.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Capability Map](03-capability-map.md)

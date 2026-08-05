@@ -1,5 +1,7 @@
 # Architectural Patterns
 
+> **Architecture Manual v1.0** · Chapter 14 of 15
+
 ## Purpose
 
 PoolOS repeatedly uses a small set of patterns to preserve determinism, safety, explainability, and maintainability. Contributors should recognize these patterns before introducing new abstractions.
@@ -163,3 +165,7 @@ It does not mandate one class structure or prohibit justified exceptions approve
 ## Future evolution
 
 Patterns may be refined as the system matures, but exceptions to core safety and determinism patterns require explicit architectural review.
+
+---
+
+[Previous: Glossary and Terminology](12-glossary-and-terminology.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Future Evolution](14-future-evolution.md)

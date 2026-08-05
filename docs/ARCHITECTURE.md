@@ -1,8 +1,17 @@
 # PoolOS Architecture Manual
 
-The PoolOS Architecture Manual is the canonical conceptual reference for the project. It explains why the system exists, how responsibilities are divided, and which architectural rules future changes must preserve.
+> **Version 1.0** · Canonical conceptual reference for PoolOS
 
-## Start here
+The manual explains why PoolOS exists, how responsibilities are divided, how evidence moves through the system, and which architectural rules future changes must preserve.
+
+## Reading paths
+
+- **New contributors:** read Chapters 1–4, then Chapters 9–13.
+- **Architecture reviewers:** read Chapters 5–10 and the related ADRs.
+- **Implementation work:** use Chapter 10 with the public API policy and defining-module imports.
+- **Future design:** read Chapters 12–15 before proposing new terminology or architectural patterns.
+
+## Chapters
 
 1. [Executive Overview](architecture/00-executive-overview.md)
 2. [Design Philosophy](architecture/01-design-philosophy.md)
@@ -34,6 +43,16 @@ The PoolOS Architecture Manual is the canonical conceptual reference for the pro
 - The public API policy defines supported import behavior.
 - Source code and tests implement and enforce the design.
 
+## Editorial conventions
+
+- **PoolOS** refers to the complete system.
+- **Layer** describes an architectural responsibility boundary; **module** describes a source-code unit.
+- **Decision** is command-free cognitive evidence; **execution** is authorized operational work.
+- **Adapter** is the only boundary permitted to translate approved operations into platform-specific interaction.
+- Terms defined in the glossary are canonical throughout project documentation and ADRs.
+
 ## Change policy
 
-Material architecture changes should update the relevant manual chapter and add or amend an ADR when a concrete design decision changes.
+Material architecture changes should update the relevant chapter and add or amend an ADR when a concrete design decision changes. Editorial corrections may update the manual directly when they do not change architectural meaning.
+
+Architecture Manual Version 1.0 was completed through AR-2A–AR-2E.

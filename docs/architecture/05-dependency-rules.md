@@ -1,5 +1,7 @@
 # Dependency Rules
 
+> **Architecture Manual v1.0** · Chapter 6 of 15
+
 ## Purpose
 
 This chapter defines which architectural dependencies are allowed. The goal is not to prevent all coupling; it is to keep coupling directional, explicit, and reviewable.
@@ -216,3 +218,7 @@ It does not list every current module import or require an immediate repository-
 ## Future evolution
 
 AR-3 may identify legacy runtime names or imports that do not fit the intended layering. Corrections should be incremental and compatibility-aware.
+
+---
+
+[Previous: System Layers](04-system-layers.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Data Flow](06-data-flow.md)

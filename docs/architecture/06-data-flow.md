@@ -1,5 +1,7 @@
 # Data Flow
 
+> **Architecture Manual v1.0** · Chapter 7 of 15
+
 ## Purpose
 
 This chapter follows information through PoolOS from external reality to verified outcome. It explains the meaning of each transformation and where authority changes.
@@ -207,3 +209,7 @@ It does not specify transport protocols, retry timing, or vendor commissioning p
 ## Future evolution
 
 Later chapters will describe safety, subsystem internals, and integration-specific degraded operation in greater detail.
+
+---
+
+[Previous: Dependency Rules](05-dependency-rules.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Canonical Identity Model](07-canonical-identity-model.md)
