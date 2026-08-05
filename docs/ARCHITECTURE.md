@@ -12,16 +12,17 @@ The PoolOS Architecture Manual is the canonical conceptual reference for the pro
 6. [Dependency Rules](architecture/05-dependency-rules.md)
 7. [Data Flow](architecture/06-data-flow.md)
 8. [Canonical Identity Model](architecture/07-canonical-identity-model.md)
+9. [Safety Model](architecture/08-safety-model.md)
+10. [Repository and Module Guide](architecture/09-repository-and-module-guide.md)
+11. [Public API Integration](architecture/10-public-api-integration.md)
 
 ## Planned chapters
 
-- Safety model
 - Observation layer
 - Cognitive system
 - Supervisory runtime
 - Execution system
 - Integration layer
-- Package guide
 - Terminology
 - How PoolOS thinks
 
