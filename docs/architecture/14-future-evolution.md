@@ -1,5 +1,7 @@
 # Future Evolution
 
+> **Architecture Manual v1.0** · Chapter 15 of 15
+
 ## Purpose
 
 This chapter describes architectural direction, not committed product scope. It identifies how PoolOS can evolve without weakening its core contracts.
@@ -160,3 +162,7 @@ It is not a product roadmap, release plan, or promise to implement speculative s
 ## Future evolution
 
 The preferred future is not the architecture with the most layers or abstractions. It is the smallest architecture that continues to make safe, explainable, replayable automation possible as scope grows.
+
+---
+
+[Previous: Architectural Patterns](13-architectural-patterns.md) · [Architecture Manual Index](../ARCHITECTURE.md)

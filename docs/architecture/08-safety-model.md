@@ -1,5 +1,7 @@
 # Safety Model
 
+> **Architecture Manual v1.0** · Chapter 9 of 15
+
 ## Purpose
 
 PoolOS reasons about equipment that can move water, create suction, heat bodies of water, consume substantial electrical power, and interact with external automation systems. Safety therefore cannot be an afterthought attached to command delivery. It is an architectural property that constrains observation, decision-making, execution, integration, and recovery.
@@ -274,3 +276,7 @@ It does not specify installation-specific limits, electrical codes, hydraulic en
 ## Future evolution
 
 Future work may formalize safety policy facades, richer authority scopes, adapter commissioning manifests, and automated architecture tests. Any path that expands live actuation must preserve the invariants in this chapter and be accompanied by an ADR.
+
+---
+
+[Previous: Canonical Identity Model](07-canonical-identity-model.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Repository and Module Guide](09-repository-and-module-guide.md)

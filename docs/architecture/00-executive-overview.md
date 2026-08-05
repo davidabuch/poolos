@@ -1,6 +1,6 @@
-# PoolOS Architecture Manual
+# Executive Overview
 
-## 00 — Executive Overview
+> **Architecture Manual v1.0** · Chapter 1 of 15
 
 PoolOS is a deterministic automation operating system for swimming pools and spas. It separates observation, reasoning, supervision, execution, and hardware integration into independent architectural layers so that automation decisions remain explainable, replayable, and independent of any specific vendor.
 
@@ -152,3 +152,7 @@ This chapter does not:
 ## Future Evolution
 
 Future versions of PoolOS may add reviewed Home Assistant execution, Pentair command delivery, and additional vendor adapters. Those capabilities must preserve the separation between observation, reasoning, execution, and integration described here.
+
+---
+
+[Architecture Manual Index](../ARCHITECTURE.md) · [Next: Design Philosophy](01-design-philosophy.md)

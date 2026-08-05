@@ -1,5 +1,7 @@
 # Repository and Module Guide
 
+> **Architecture Manual v1.0** · Chapter 10 of 15
+
 ## Purpose
 
 This chapter helps contributors find the correct implementation boundary without requiring them to infer architecture from filenames alone.
@@ -359,3 +361,7 @@ It does not freeze the filesystem layout, declare every module public, or author
 ## Future evolution
 
 A later architecture review may introduce subsystem facades or physical subpackages. Such changes should reduce ambiguity without breaking compatibility imports silently or creating circular dependencies.
+
+---
+
+[Previous: Safety Model](08-safety-model.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Public API Integration](10-public-api-integration.md)

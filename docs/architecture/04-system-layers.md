@@ -1,5 +1,7 @@
 # System Layers
 
+> **Architecture Manual v1.0** · Chapter 5 of 15
+
 ## Purpose
 
 This chapter defines the major architectural layers of PoolOS and explains where each responsibility belongs. The layers are conceptual boundaries. They guide package design, dependency review, testing, and future integration work even when several layers currently share the same Python package.
@@ -232,3 +234,7 @@ It does not prescribe a final directory reorganization or require one package pe
 ## Future evolution
 
 Later cleanup may align package structure more closely with these layers. Such moves should preserve behavior and follow the public API policy.
+
+---
+
+[Previous: Capability Map](03-capability-map.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Dependency Rules](05-dependency-rules.md)

@@ -1,5 +1,7 @@
 # Design Philosophy
 
+> **Architecture Manual v1.0** · Chapter 2 of 15
+
 ## Why PoolOS exists
 
 Traditional pool automation usually begins with a controller, a set of relays, and a collection of schedules. That approach can operate equipment, but it does not provide a durable model for reasoning about goals, safety, energy, uncertainty, or changing conditions.
@@ -146,3 +148,7 @@ This chapter does not define concrete APIs, class names, deployment steps, or ha
 ## Future evolution
 
 Future architectural changes should preserve these principles or document an explicit reason for departing from them.
+
+---
+
+[Previous: Executive Overview](00-executive-overview.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Guiding Principles](02-guiding-principles.md)

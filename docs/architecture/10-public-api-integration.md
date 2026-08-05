@@ -1,5 +1,7 @@
 # Public API Integration
 
+> **Architecture Manual v1.0** · Chapter 11 of 15
+
 ## Purpose
 
 Architecture boundaries are useful only when callers can identify which interfaces are intended for reuse and which are implementation details. This chapter connects the conceptual architecture to the existing PoolOS public API policy.
@@ -322,3 +324,7 @@ It does not promote new stable symbols, remove compatibility exports, create sub
 ## Future evolution
 
 A later API-classification milestone may inventory every compatibility export and introduce reviewed subsystem facades. Until then, defining-module imports remain the preferred pattern for new code.
+
+---
+
+[Previous: Repository and Module Guide](09-repository-and-module-guide.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: How PoolOS Thinks](11-how-poolos-thinks.md)

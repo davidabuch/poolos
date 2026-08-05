@@ -1,5 +1,7 @@
 # Capability Map
 
+> **Architecture Manual v1.0** · Chapter 4 of 15
+
 ## Purpose
 
 This chapter describes PoolOS by capability rather than by class or file. It is the fastest way to understand what the system does and how responsibilities are divided.
@@ -328,3 +330,7 @@ It does not define detailed dependencies, package locations, identity derivation
 ## Future evolution
 
 As new capabilities are added, they should fit within an existing layer whenever possible. A new layer should require a compelling architectural reason and an ADR.
+
+---
+
+[Previous: Guiding Principles](02-guiding-principles.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: System Layers](04-system-layers.md)

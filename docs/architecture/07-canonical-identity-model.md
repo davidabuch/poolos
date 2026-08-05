@@ -1,5 +1,7 @@
 # Canonical Identity Model
 
+> **Architecture Manual v1.0** · Chapter 8 of 15
+
 ## Purpose
 
 PoolOS uses deterministic identity to make evidence traceable, replayable, and comparable across subsystem boundaries. Identity answers: "Is this logically the same thing?" It is distinct from display names, database row numbers, object memory addresses, and timestamps added only for audit.
@@ -241,3 +243,7 @@ It does not freeze every current prefix or require all legacy models to be refac
 ## Future evolution
 
 A later identity inventory may document every concrete prefix and add repository-wide consistency tests once naming review is complete.
+
+---
+
+[Previous: Data Flow](06-data-flow.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Safety Model](08-safety-model.md)

@@ -1,5 +1,7 @@
 # Glossary and Terminology
 
+> **Architecture Manual v1.0** · Chapter 13 of 15
+
 ## Purpose
 
 This chapter defines the canonical vocabulary used throughout PoolOS. Documentation, ADRs, APIs, and tests should prefer these terms and avoid creating near-synonyms without a clear need.
@@ -224,3 +226,7 @@ It does not replace detailed type documentation or define every implementation-s
 ## Future evolution
 
 New terms should be added only when they represent a durable architectural concept rather than a temporary implementation detail.
+
+---
+
+[Previous: How PoolOS Thinks](11-how-poolos-thinks.md) · [Architecture Manual Index](../ARCHITECTURE.md) · [Next: Architectural Patterns](13-architectural-patterns.md)
