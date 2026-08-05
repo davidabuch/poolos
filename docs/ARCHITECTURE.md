@@ -8,12 +8,13 @@ The PoolOS Architecture Manual is the canonical conceptual reference for the pro
 2. [Design Philosophy](architecture/01-design-philosophy.md)
 3. [Guiding Principles](architecture/02-guiding-principles.md)
 4. [Capability Map](architecture/03-capability-map.md)
+5. [System Layers](architecture/04-system-layers.md)
+6. [Dependency Rules](architecture/05-dependency-rules.md)
+7. [Data Flow](architecture/06-data-flow.md)
+8. [Canonical Identity Model](architecture/07-canonical-identity-model.md)
 
 ## Planned chapters
 
-- System layers and dependency rules
-- Data flow
-- Identity model
 - Safety model
 - Observation layer
 - Cognitive system
