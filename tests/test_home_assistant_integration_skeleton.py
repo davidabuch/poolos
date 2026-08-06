@@ -24,6 +24,7 @@ def test_required_integration_files_exist() -> None:
         "manifest.json",
         "observation.py",
         "shadow.py",
+        "sensor.py",
         "strings.json",
         "system_health.py",
         "translations/en.json",
@@ -38,7 +39,7 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == []
-    assert manifest["version"] == "0.3.0"
+    assert manifest["version"] == "0.4.0"
 
 
 def test_strings_and_english_translation_are_identical() -> None:
@@ -85,9 +86,8 @@ def test_diagnostics_redact_future_connection_secrets() -> None:
     assert "async_redact_data" in source
 
 
-def test_no_entity_platform_or_service_files_are_present() -> None:
+def test_no_actuating_platform_or_service_files_are_present() -> None:
     prohibited = {
-        "sensor.py",
         "binary_sensor.py",
         "switch.py",
         "number.py",

@@ -1,0 +1,51 @@
+title: PoolOS Control Center
+views:
+  - title: Commissioning
+    path: poolos-commissioning
+    icon: mdi:pool
+    type: sections
+    sections:
+      - type: grid
+        title: Authority and Safety
+        cards:
+          - type: entities
+            title: PoolOS Authority
+            show_header_toggle: false
+            entities:
+              - entity: sensor.poolos_operating_mode
+                name: Operating Mode
+              - entity: sensor.poolos_commissioning_stage
+                name: Commissioning Stage
+              - type: section
+                label: PoolOS is read-only. Command delivery is disabled.
+      - type: grid
+        title: Observation
+        cards:
+          - type: tile
+            entity: sensor.poolos_observation_health
+            name: Observation Health
+          - type: tile
+            entity: sensor.poolos_last_evaluation
+            name: Last Evaluation
+      - type: grid
+        title: Shadow Runtime
+        cards:
+          - type: tile
+            entity: sensor.poolos_shadow_runtime_status
+            name: Shadow Status
+          - type: tile
+            entity: sensor.poolos_current_objective
+            name: Current Objective
+          - type: tile
+            entity: sensor.poolos_last_plan
+            name: Last Plan
+      - type: grid
+        title: Explanation
+        cards:
+          - type: entity
+            entity: sensor.poolos_last_explanation
+            name: Why PoolOS reached this result
+          - type: markdown
+            content: >-
+              PoolOS is operating without authority. Shadow plans and explanations
+              are commissioning evidence only and cannot control equipment.
