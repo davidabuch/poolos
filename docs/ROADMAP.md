@@ -473,3 +473,25 @@ Status: complete pending local validation.
   coordinator advancement, and supervisory reevaluation submission;
 - performs no polling, Home Assistant communication, background work, state
   mutation, command delivery, or physical actuation.
+
+## PoolOS Recovery Coordination Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 10.20A | Recovery Coordinator | DONE |
+
+### Epic 10.20A — Recovery Coordinator
+
+Status: complete pending local validation.
+
+- consumes immutable execution reconciliation recommendations and explicit
+  recovery policy;
+- emits no-action, reevaluation-request, retry-request, or
+  operator-intervention directives with deterministic identity and provenance;
+- requires explicit policy permission before producing reevaluation or retry
+  directives;
+- escalates blocked recovery paths to operator review when policy permits;
+- allows a fully restrictive policy to fail closed to no action;
+- performs no reevaluation submission, retry queueing, operator notification,
+  command generation, execution-state mutation, Home Assistant communication,
+  background work, or physical actuation.
