@@ -422,6 +422,7 @@ Status: complete pending local validation.
 | 10.18A | Execution receipt and Flight Recorder integration | DONE |
 | 10.18B | End-to-end execution validation | DONE |
 | 10.19A | Home Assistant REST executor | DONE |
+| 10.19B | Post-delivery observation verification | DONE |
 
 ### Epic 10.19A — Home Assistant REST Executor
 
@@ -439,3 +440,18 @@ Status: complete pending local validation.
   between delivery and physical-state verification;
 - adds no retry, backoff, WebSocket lifecycle, background task, reconciliation,
   commissioning, or automatic live actuation.
+
+### Epic 10.19B — Post-Delivery Observation Verification
+
+Status: complete pending local validation.
+
+- gates observation verification on a completed execution receipt;
+- validates available execution plan and step identity provenance;
+- translates explicit Home Assistant state snapshots through the existing
+  canonical observation bridge;
+- reuses the existing execution verification engine for value comparison,
+  freshness, timeout, and deterministic evidence;
+- classifies verified, pending, mismatched, unavailable, stale, timed-out, and
+  rejected outcomes;
+- performs no polling, event subscription, retry, reconciliation, recovery,
+  background work, or physical actuation.
