@@ -479,6 +479,7 @@ Status: complete pending local validation.
 | ID | Work item | Status |
 |---|---|---|
 | 10.20A | Recovery Coordinator | DONE |
+| 10.20B | Execution and recovery architecture hardening | DONE |
 
 ### Epic 10.20A — Recovery Coordinator
 
@@ -495,3 +496,21 @@ Status: complete pending local validation.
 - performs no reevaluation submission, retry queueing, operator notification,
   command generation, execution-state mutation, Home Assistant communication,
   background work, or physical actuation.
+
+
+### Epic 10.20B — Execution and Recovery Architecture Hardening
+
+Status: complete pending local validation.
+
+- adds permanent cross-boundary golden scenarios from delivery receipt through
+  observation verification, reconciliation planning, and recovery coordination;
+- verifies success, timeout, retry authorization, policy blocking, persistent
+  mismatch, changed assumptions, failed delivery, and contradictory provenance;
+- preserves receipt, plan, step, correlation, operational-action, verification,
+  reconciliation, and policy identity across the complete evidence path;
+- proves deterministic replay and downstream-only identity changes when policy
+  changes;
+- confirms a fully restrictive policy fails closed without hidden action;
+- adds no production runtime layer, retry execution, reevaluation submission,
+  operator notification, Home Assistant communication, background work, or
+  physical actuation.
