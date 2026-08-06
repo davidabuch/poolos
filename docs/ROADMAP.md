@@ -411,3 +411,31 @@ Status: complete pending local validation.
 - preserves coalescing, submission, context, planning, and prior-decision traceability;
 - rejects missing, future-dated, inconsistent, or noncanonical evidence fail-closed;
 - does not invoke the Decision Orchestrator, PoolRuntime, planning evaluation, persistence I/O, networking, vendor communication, or physical actuation.
+
+## PoolOS Execution Delivery Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 10.16A-I | Execution preparation pipeline | DONE |
+| 10.17A | Home Assistant transport adapter | DONE |
+| 10.17B | Home Assistant delivery acknowledgement | DONE |
+| 10.18A | Execution receipt and Flight Recorder integration | DONE |
+| 10.18B | End-to-end execution validation | DONE |
+| 10.19A | Home Assistant REST executor | DONE |
+
+### Epic 10.19A — Home Assistant REST Executor
+
+Status: complete pending local validation.
+
+- adds an immutable URL, credential, and timeout configuration model with
+  secret-safe representations;
+- provides one synchronous callable compatible with the existing Home Assistant
+  transport-adapter executor contract;
+- performs one authenticated REST service request through an injectable HTTP
+  sender;
+- normalizes authentication, authorization, service rejection, server failure,
+  timeout, connection failure, and malformed-response outcomes;
+- returns transport acknowledgement evidence while preserving the distinction
+  between delivery and physical-state verification;
+- adds no retry, backoff, WebSocket lifecycle, background task, reconciliation,
+  commissioning, or automatic live actuation.
