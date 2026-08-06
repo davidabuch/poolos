@@ -19,13 +19,17 @@ def async_register(
 
 
 async def _async_system_health_info(hass: HomeAssistant) -> dict[str, Any]:
-    """Return commissioning-safe system health information."""
+    """Return read-only commissioning health information."""
     entries = hass.config_entries.async_entries(DOMAIN)
-    loaded_entries = sum(1 for entry in entries if getattr(entry, "runtime_data", None))
+    loaded = [entry for entry in entries if getattr(entry, "runtime_data", None)]
+    snapshots = [entry.runtime_data.coordinator.data for entry in loaded]
     return {
         "integration_version": INTEGRATION_VERSION,
         "configured_entries": len(entries),
-        "loaded_entries": loaded_entries,
-        "observation_enabled": False,
+        "loaded_entries": len(loaded),
+        "observation_enabled": bool(loaded),
+        "observation_healthy": bool(snapshots) and all(
+            snapshot is not None and snapshot.healthy for snapshot in snapshots
+        ),
         "command_delivery_enabled": False,
     }

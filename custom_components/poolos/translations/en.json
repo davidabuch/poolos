@@ -3,8 +3,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Install PoolOS",
-        "description": "Create the PoolOS commissioning entry in OBSERVE mode. This skeleton does not read entities or send commands."
+        "title": "Install PoolOS observation bridge",
+        "description": "Map existing Home Assistant entities to PoolOS canonical observations. PoolOS remains in OBSERVE mode and cannot send commands.",
+        "data": {
+          "pool_active_entity": "Pool active entity",
+          "spa_active_entity": "Spa active entity",
+          "pump_rpm_entity": "Pump RPM entity",
+          "pool_temperature_entity": "Pool temperature entity",
+          "spa_temperature_entity": "Spa temperature entity",
+          "heater_active_entity": "Heater active entity (optional)",
+          "solar_active_entity": "Solar active entity (optional)",
+          "pump_power_entity": "Pump power entity (optional)",
+          "diagnostics_enabled": "Enable diagnostics"
+        }
       }
     },
     "abort": {
@@ -14,9 +25,17 @@
   "options": {
     "step": {
       "init": {
-        "title": "PoolOS options",
-        "description": "Configure diagnostic collection. Authority-changing options are intentionally unavailable.",
+        "title": "PoolOS observation mappings",
+        "description": "Update read-only entity mappings. Authority-changing options are intentionally unavailable.",
         "data": {
+          "pool_active_entity": "Pool active entity",
+          "spa_active_entity": "Spa active entity",
+          "pump_rpm_entity": "Pump RPM entity",
+          "pool_temperature_entity": "Pool temperature entity",
+          "spa_temperature_entity": "Spa temperature entity",
+          "heater_active_entity": "Heater active entity (optional)",
+          "solar_active_entity": "Solar active entity (optional)",
+          "pump_power_entity": "Pump power entity (optional)",
           "diagnostics_enabled": "Enable diagnostics"
         }
       }
@@ -28,6 +47,7 @@
       "configured_entries": "Configured entries",
       "loaded_entries": "Loaded entries",
       "observation_enabled": "Observation enabled",
+      "observation_healthy": "Observation healthy",
       "command_delivery_enabled": "Command delivery enabled"
     }
   }

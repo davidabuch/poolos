@@ -22,6 +22,7 @@ def test_required_integration_files_exist() -> None:
         "coordinator.py",
         "diagnostics.py",
         "manifest.json",
+        "observation.py",
         "strings.json",
         "system_health.py",
         "translations/en.json",
@@ -36,7 +37,7 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == []
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.2.0"
 
 
 def test_strings_and_english_translation_are_identical() -> None:
@@ -68,8 +69,9 @@ def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
 
 def test_coordinator_performs_no_external_io_and_disables_actuation() -> None:
     source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
-    assert "update_interval=None" in source
-    assert '"observation_enabled": False' in source
+    assert "update_interval=OBSERVATION_UPDATE_INTERVAL" in source
+    assert "self.hass.states.get" in source
+    assert '"observation_enabled": True' in source
     assert '"command_delivery_enabled": False' in source
     forbidden = ("aiohttp", "requests", "websocket", "async_track", "service_call")
     assert all(token not in source for token in forbidden)

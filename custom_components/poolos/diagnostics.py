@@ -1,4 +1,4 @@
-"""Diagnostics for the PoolOS integration skeleton."""
+"""Diagnostics for the PoolOS read-only observation bridge."""
 
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ _TO_REDACT = {"access_token", "token", "api_key", "host", "url"}
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: PoolOSConfigEntry
 ) -> dict[str, Any]:
-    """Return secret-safe lifecycle diagnostics."""
+    """Return secret-safe observation and lifecycle diagnostics."""
     runtime = getattr(entry, "runtime_data", None)
-    coordinator_data = None if runtime is None else runtime.coordinator.data
+    coordinator = None if runtime is None else runtime.coordinator
+    snapshot = None if coordinator is None else coordinator.data
     payload: dict[str, Any] = {
         "integration_version": INTEGRATION_VERSION,
         "entry": {
@@ -32,11 +33,12 @@ async def async_get_config_entry_diagnostics(
         else {
             "loaded_at": runtime.loaded_at,
             "operating_mode": runtime.operating_mode,
-            "coordinator_data": coordinator_data,
+            "lifecycle": coordinator.lifecycle_diagnostics(),
+            "observation": None if snapshot is None else snapshot.diagnostics(),
         },
         "diagnostics_enabled": entry.options.get(CONF_DIAGNOSTICS_ENABLED, True),
         "safety": {
-            "observation_enabled": False,
+            "observation_enabled": runtime is not None,
             "command_delivery_enabled": False,
         },
     }
