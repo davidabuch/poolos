@@ -31,5 +31,6 @@ async def _async_system_health_info(hass: HomeAssistant) -> dict[str, Any]:
         "observation_healthy": bool(snapshots) and all(
             snapshot is not None and snapshot.healthy for snapshot in snapshots
         ),
+        "shadow_runtime_enabled": bool(loaded),
         "command_delivery_enabled": False,
     }
