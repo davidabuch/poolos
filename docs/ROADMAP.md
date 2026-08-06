@@ -521,7 +521,7 @@ Status: complete pending local validation.
 |---|---|---|
 | 11.1A | Operational commissioning philosophy | DONE |
 | 11.1B | Home Assistant integration skeleton | DONE |
-| 11.1C | Live observation bridge commissioning | PLANNED |
+| 11.1C | Live observation bridge commissioning | DONE |
 | 11.1D | Deterministic learning runtime | PLANNED |
 | 11.1E | Advisory and shadow runtime | PLANNED |
 | 11.1F | Operator commissioning experience | PLANNED |
@@ -559,3 +559,23 @@ Status: complete pending local validation.
   reporting that observation and command delivery remain disabled;
 - adds no IntelliCenter discovery, entity observation, polling, subscriptions,
   decisions, learning, services, command delivery, or physical actuation.
+
+### Epic 11.1C — Live Observation Bridge Commissioning
+
+Status: complete pending local validation.
+
+- adds configurable Home Assistant entity mappings for canonical pool, spa,
+  pump, temperature, heater, solar, and power observations;
+- requires the core pool-active, spa-active, pump-RPM, pool-temperature, and
+  spa-temperature mappings while keeping heater, solar, and pump power optional;
+- reuses the existing canonical Home Assistant observation mapper and
+  `PoolObservation` model rather than introducing a parallel observation type;
+- reads only from the Home Assistant state machine on a bounded coordinator
+  interval and performs no external network I/O;
+- detects missing required mappings, unavailable or invalid entities, and stale
+  observations with explicit health diagnostics;
+- preserves Home Assistant entity provenance while omitting observed values from
+  diagnostics;
+- remains fixed in `OBSERVE` mode and makes no Home Assistant service call,
+  decision, recommendation, learning update, command delivery, or physical
+  actuation.

@@ -1,4 +1,4 @@
-"""PoolOS Home Assistant integration skeleton."""
+"""PoolOS Home Assistant integration."""
 
 from __future__ import annotations
 
@@ -25,7 +25,8 @@ type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
-    """Set up PoolOS from a config entry without external observation or control."""
+    """Set up read-only PoolOS observation from a config entry."""
+
     coordinator = PoolOSCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = PoolOSRuntimeData(
@@ -33,9 +34,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
     )
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
 
+async def _async_options_updated(hass: HomeAssistant, entry: PoolOSConfigEntry) -> None:
+    """Reload the entry after entity mappings change."""
+
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
-    """Unload the inert PoolOS config entry."""
+    """Unload the read-only PoolOS config entry."""
+
     return True
