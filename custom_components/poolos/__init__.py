@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DEFAULT_OPERATING_MODE
+from .const import DEFAULT_OPERATING_MODE, PLATFORMS
 from .coordinator import PoolOSCoordinator
 
 
@@ -34,6 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
     )
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
@@ -47,4 +48,4 @@ async def _async_options_updated(hass: HomeAssistant, entry: PoolOSConfigEntry) 
 async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
     """Unload the read-only PoolOS config entry."""
 
-    return True
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

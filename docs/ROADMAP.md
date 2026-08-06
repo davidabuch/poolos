@@ -523,7 +523,7 @@ Status: complete pending local validation.
 | 11.1B | Home Assistant integration skeleton | DONE |
 | 11.1C | Live observation bridge commissioning | DONE |
 | 11.1D | Read-only shadow runtime | DONE |
-| 11.1E | Operator shadow diagnostics and dashboard | PLANNED |
+| 11.1E | Operator shadow diagnostics and dashboard | DONE |
 | 11.1F | Operator commissioning experience | PLANNED |
 | 11.1G | Assisted capability commissioning | PLANNED |
 | 11.1H | Controlled authority commissioning | PLANNED |
@@ -599,3 +599,21 @@ Status: complete pending local validation.
   service, entity-control platform, or physical actuation;
 - remains externally commissioned in `OBSERVE` mode while the internal planner
   evaluates only in non-authoritative `SHADOW` mode.
+
+### Epic 11.1E — PoolOS Control Center
+
+Status: complete pending local validation.
+
+- publishes eight read-only Home Assistant diagnostic sensors for operating mode,
+  commissioning stage, observation health, shadow status, last evaluation, last
+  plan, current objective, and the latest explanation;
+- groups all sensors under one PoolOS Control Center diagnostic device;
+- derives state only from the existing coordinator, canonical observation snapshot,
+  and shadow runtime without duplicating decision logic;
+- provides a read-only Lovelace dashboard definition for commissioning;
+- exposes identities, counts, status, and explanations while omitting raw mapped
+  pool values;
+- adds no switch, button, select, number, climate entity, service, command path,
+  recovery action, or physical actuation;
+- keeps external authority fixed in `OBSERVE` and reports command delivery as
+  disabled.
