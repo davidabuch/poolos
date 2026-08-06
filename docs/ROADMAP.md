@@ -514,3 +514,33 @@ Status: complete pending local validation.
 - adds no production runtime layer, retry execution, reevaluation submission,
   operator notification, Home Assistant communication, background work, or
   physical actuation.
+
+## Epic 11 — Operational Commissioning
+
+| ID | Work item | Status |
+|---|---|---|
+| 11.1A | Operational commissioning philosophy | DONE |
+| 11.1B | Home Assistant integration skeleton | READY |
+| 11.1C | Live observation bridge commissioning | PLANNED |
+| 11.1D | Deterministic learning runtime | PLANNED |
+| 11.1E | Advisory and shadow runtime | PLANNED |
+| 11.1F | Operator commissioning experience | PLANNED |
+| 11.1G | Assisted capability commissioning | PLANNED |
+| 11.1H | Controlled authority commissioning | PLANNED |
+
+### Epic 11.1A — Operational Commissioning Philosophy
+
+Status: complete pending local validation.
+
+- establishes evidence before action and observation before authority;
+- defines explicit `OBSERVE`, `LEARN`, `ADVISE`, `SHADOW`, `ASSIST`, and
+  `CONTROL` operating modes;
+- requires explicit operator approval for every increase in authority;
+- permits automatic authority reduction when safety, health, or evidence fails;
+- requires immediate rollback to observation-only operation;
+- defines deterministic, inspectable learning rather than opaque behavior;
+- preserves human override, explainability, verification, and visible ownership;
+- adds the Operational Commissioning Guide, Operator Handbook, and Commissioning
+  Safety Checklist;
+- changes no production code, tests, runtime behavior, Home Assistant state, or
+  physical equipment control.
