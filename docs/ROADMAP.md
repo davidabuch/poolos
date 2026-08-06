@@ -522,8 +522,8 @@ Status: complete pending local validation.
 | 11.1A | Operational commissioning philosophy | DONE |
 | 11.1B | Home Assistant integration skeleton | DONE |
 | 11.1C | Live observation bridge commissioning | DONE |
-| 11.1D | Deterministic learning runtime | PLANNED |
-| 11.1E | Advisory and shadow runtime | PLANNED |
+| 11.1D | Read-only shadow runtime | DONE |
+| 11.1E | Operator shadow diagnostics and dashboard | PLANNED |
 | 11.1F | Operator commissioning experience | PLANNED |
 | 11.1G | Assisted capability commissioning | PLANNED |
 | 11.1H | Controlled authority commissioning | PLANNED |
@@ -579,3 +579,23 @@ Status: complete pending local validation.
 - remains fixed in `OBSERVE` mode and makes no Home Assistant service call,
   decision, recommendation, learning update, command delivery, or physical
   actuation.
+
+
+### Epic 11.1D — Read-Only Shadow Runtime
+
+Status: complete pending local validation.
+
+- consumes each healthy or unhealthy canonical observation snapshot from the
+  Home Assistant observation bridge;
+- invokes the existing `DecisionOrchestrator` in `SHADOW` runtime mode through
+  a commissioning-only adapter;
+- creates a baseline objective that maintains the currently observed pool state,
+  proving orchestration and explanation generation without requesting a change;
+- records immutable in-memory decision evidence and exposes stable shadow
+  diagnostics including evaluation, context, plan, objective, and observation
+  identities;
+- blocks planning when observation health is not acceptable;
+- invokes no execution proposal, dispatch, transport, recovery, Home Assistant
+  service, entity-control platform, or physical actuation;
+- remains externally commissioned in `OBSERVE` mode while the internal planner
+  evaluates only in non-authoritative `SHADOW` mode.

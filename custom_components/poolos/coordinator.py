@@ -13,6 +13,7 @@ from poolos.homeassistant.observations import HomeAssistantState
 
 from .const import DOMAIN, INTEGRATION_VERSION, OBSERVATION_UPDATE_INTERVAL
 from .observation import ObservationSnapshot, build_snapshot, configured_entity_mapping
+from .shadow import HomeAssistantShadowRuntime
 
 
 class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
@@ -27,6 +28,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             update_interval=OBSERVATION_UPDATE_INTERVAL,
         )
         self.config_entry = entry
+        self.shadow_runtime = HomeAssistantShadowRuntime.create()
 
     async def _async_update_data(self) -> ObservationSnapshot:
         """Build a canonical snapshot from the current Home Assistant state machine."""
@@ -44,11 +46,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 last_updated=state.last_updated,
                 attributes=state.attributes,
             )
-        return build_snapshot(
+        snapshot = build_snapshot(
             options=configured,
             states=states,
             now=datetime.now(UTC),
         )
+        self.shadow_runtime.evaluate(snapshot)
+        return snapshot
 
     def lifecycle_diagnostics(self) -> dict[str, object]:
         """Return stable integration lifecycle data for diagnostics and health."""
@@ -61,4 +65,6 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "command_delivery_enabled": False,
             "observation_healthy": None if snapshot is None else snapshot.healthy,
             "refreshed_at": None if snapshot is None else snapshot.generated_at.isoformat(),
+            "shadow_runtime_enabled": True,
+            "shadow_runtime": self.shadow_runtime.diagnostics(),
         }

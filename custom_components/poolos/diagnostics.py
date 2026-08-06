@@ -35,11 +35,13 @@ async def async_get_config_entry_diagnostics(
             "operating_mode": runtime.operating_mode,
             "lifecycle": coordinator.lifecycle_diagnostics(),
             "observation": None if snapshot is None else snapshot.diagnostics(),
+            "shadow_runtime": coordinator.shadow_runtime.diagnostics(),
         },
         "diagnostics_enabled": entry.options.get(CONF_DIAGNOSTICS_ENABLED, True),
         "safety": {
             "observation_enabled": runtime is not None,
             "command_delivery_enabled": False,
+            "shadow_runtime_enabled": runtime is not None,
         },
     }
     return dict(async_redact_data(payload, _TO_REDACT))
