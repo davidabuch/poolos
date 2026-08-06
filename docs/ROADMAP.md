@@ -423,6 +423,7 @@ Status: complete pending local validation.
 | 10.18B | End-to-end execution validation | DONE |
 | 10.19A | Home Assistant REST executor | DONE |
 | 10.19B | Post-delivery observation verification | DONE |
+| 10.19C | Execution reconciliation and recovery planning | DONE |
 
 ### Epic 10.19A — Home Assistant REST Executor
 
@@ -455,3 +456,20 @@ Status: complete pending local validation.
   rejected outcomes;
 - performs no polling, event subscription, retry, reconciliation, recovery,
   background work, or physical actuation.
+
+
+### Epic 10.19C — Execution Reconciliation and Recovery Planning
+
+Status: complete pending local validation.
+
+- consumes immutable post-delivery verification results plus explicit current
+  assumptions and retry-policy facts;
+- recommends satisfied, reevaluate, retry-recommended, operator-intervention,
+  or abort outcomes with deterministic identity and provenance;
+- treats rejected evidence as fail-closed and verified evidence as satisfied;
+- requires explicit caller evidence before classifying a mismatch as persistent
+  or a retry as policy-permitted;
+- keeps recommendations separate from command generation, retry execution,
+  coordinator advancement, and supervisory reevaluation submission;
+- performs no polling, Home Assistant communication, background work, state
+  mutation, command delivery, or physical actuation.
