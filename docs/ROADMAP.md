@@ -617,25 +617,3 @@ Status: complete pending local validation.
   recovery action, or physical actuation;
 - keeps external authority fixed in `OBSERVE` and reports command delivery as
   disabled.
-
-## PoolOS Operational Intelligence Milestones
-
-| ID | Work item | Status |
-|---|---|---|
-| 11.2A | Canonical operational intent model | DONE |
-| 11.2B | Operational intent arbitration | PLANNED |
-| 11.2C | Pump-operation optimization | PLANNED |
-| 11.2D | Operator recommendations | PLANNED |
-
-### Epic 11.2A — Canonical Operational Intent Model
-
-Status: complete pending local validation.
-
-- introduces one immutable, platform-independent operational intent model;
-- defines canonical intent types, sources, priorities, lifecycle states, and safety classifications;
-- preserves declarative preconditions, constraints, success criteria, failure criteria, expiry, provenance, and explanation templates;
-- derives deterministic intent identity from canonical content while preserving identity across lifecycle transitions;
-- provides deterministic priority ordering without performing arbitration;
-- requires safety-originated intents to use safety priority and safety-critical classification;
-- supports canonical serialization, replay, validation, and human-readable explanation rendering;
-- performs no arbitration, optimization, planning, recommendation publication, Home Assistant communication, command delivery, or physical actuation.
