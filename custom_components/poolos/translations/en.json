@@ -1,0 +1,34 @@
+{
+  "title": "PoolOS",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Install PoolOS",
+        "description": "Create the PoolOS commissioning entry in OBSERVE mode. This skeleton does not read entities or send commands."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one PoolOS integration entry is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PoolOS options",
+        "description": "Configure diagnostic collection. Authority-changing options are intentionally unavailable.",
+        "data": {
+          "diagnostics_enabled": "Enable diagnostics"
+        }
+      }
+    }
+  },
+  "system_health": {
+    "info": {
+      "integration_version": "Integration version",
+      "configured_entries": "Configured entries",
+      "loaded_entries": "Loaded entries",
+      "observation_enabled": "Observation enabled",
+      "command_delivery_enabled": "Command delivery enabled"
+    }
+  }
+}

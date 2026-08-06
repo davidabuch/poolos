@@ -1,0 +1,12 @@
+{
+  "domain": "poolos",
+  "name": "PoolOS",
+  "codeowners": ["@davidabuch"],
+  "config_flow": true,
+  "documentation": "https://github.com/davidabuch/poolos",
+  "integration_type": "service",
+  "issue_tracker": "https://github.com/davidabuch/poolos/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

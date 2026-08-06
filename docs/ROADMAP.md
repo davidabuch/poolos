@@ -520,7 +520,7 @@ Status: complete pending local validation.
 | ID | Work item | Status |
 |---|---|---|
 | 11.1A | Operational commissioning philosophy | DONE |
-| 11.1B | Home Assistant integration skeleton | READY |
+| 11.1B | Home Assistant integration skeleton | DONE |
 | 11.1C | Live observation bridge commissioning | PLANNED |
 | 11.1D | Deterministic learning runtime | PLANNED |
 | 11.1E | Advisory and shadow runtime | PLANNED |
@@ -544,3 +544,18 @@ Status: complete pending local validation.
   Safety Checklist;
 - changes no production code, tests, runtime behavior, Home Assistant state, or
   physical equipment control.
+
+### Epic 11.1B — Home Assistant Integration Skeleton
+
+Status: complete pending local validation.
+
+- creates an installable `custom_components/poolos` integration with a single
+  UI-created config entry;
+- adds an idle `DataUpdateCoordinator` and typed `ConfigEntry.runtime_data`
+  lifecycle without external I/O;
+- adds secret-safe diagnostics, system health, options, strings, and English
+  translations;
+- records `OBSERVE` as the declared commissioning mode while explicitly
+  reporting that observation and command delivery remain disabled;
+- adds no IntelliCenter discovery, entity observation, polling, subscriptions,
+  decisions, learning, services, command delivery, or physical actuation.
