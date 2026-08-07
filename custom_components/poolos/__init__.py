@@ -4,12 +4,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+import sys
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DEFAULT_OPERATING_MODE, PLATFORMS
-from .coordinator import PoolOSCoordinator
+
+def _enable_local_vendored_core() -> None:
+    """Prefer the bundled PoolOS core when using a local commissioning package."""
+
+    vendor_root = Path(__file__).resolve().parent / "_vendor"
+    if not (vendor_root / "poolos" / "__init__.py").is_file():
+        return
+    vendor_path = str(vendor_root)
+    if vendor_path not in sys.path:
+        sys.path.insert(0, vendor_path)
+
+
+_enable_local_vendored_core()
+
+from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
+from .coordinator import PoolOSCoordinator  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)

@@ -781,6 +781,7 @@ Status: complete pending local validation.
 | ID | Work item | Status |
 |---|---|---|
 | 11.4A | High-fidelity observation coverage + event-driven ingestion | DONE |
+| 11.4B | Local Home Assistant commissioning package | DONE |
 
 ### Epic 11.4A — High-Fidelity Observation Coverage + Event-Driven Ingestion
 
@@ -806,3 +807,15 @@ Status: complete pending local validation.
 - advances the Home Assistant integration to `0.10.0` with matching future tag `v0.10.0`;
 - preserves OBSERVE/SHADOW mode, authority NONE, disabled command delivery, no equipment-control
   entities, and no Home Assistant service-call or physical-actuation path.
+
+
+### Epic 11.4B — Local Home Assistant Commissioning Package
+
+Status: complete pending local validation.
+
+- adds a deterministic builder for a self-contained local Home Assistant deployment artifact while the GitHub repository remains private;
+- bundles the exact vendor-independent `poolos` Python package under `custom_components/poolos/_vendor/poolos`;
+- removes the GitHub package requirement only from the generated local artifact, leaving the source release/HACS manifest contract intact;
+- bootstraps the local vendored core before importing coordinator modules, avoiding GitHub credentials and runtime network installation;
+- documents install, update, verification, and rollback steps for direct `/config/custom_components/poolos` commissioning;
+- preserves OBSERVE/SHADOW mode, authority NONE, disabled command delivery, no control entities, and no Home Assistant equipment service calls from the commissioning integration.
