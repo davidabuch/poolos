@@ -331,3 +331,11 @@ from .intent_arbitration import (
     IntentDisposition,
     OperationalIntentArbitrator,
 )
+
+from .pump_optimization import (
+    PumpCandidateEvaluation,
+    PumpOperationOptimizer,
+    PumpOptimizationDisposition,
+    PumpOptimizationPolicy,
+    PumpOptimizationResult,
+)
