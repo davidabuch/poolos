@@ -53,6 +53,20 @@ views:
               Behavioral inference is derived from recorded observations. It is not
               an asserted IntelliCenter rule and does not provide control authority.
       - type: grid
+        title: Daily Retrospective
+        cards:
+          - type: entity
+            entity: sensor.poolos_daily_operational_retrospective
+            name: Daily Actual Operation
+          - type: entity
+            entity: sensor.poolos_daily_counterfactual_report
+            name: PoolOS Counterfactual
+          - type: markdown
+            content: >-
+              The retrospective compares durable observed evidence with available
+              PoolOS advisory evidence. Missing runtime or timing targets are reported
+              as unavailable rather than inferred. No actuation occurs.
+      - type: grid
         title: Operator Recommendation
         cards:
           - type: entity

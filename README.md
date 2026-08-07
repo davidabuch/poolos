@@ -20,6 +20,7 @@ OBSERVE -> EVALUATE -> DECIDE -> EXPLAIN -> RECORD -> PUBLISH
 - Canonical typed observation framework
 - Durable transition/checkpoint observation history for behavioral analysis
 - Behavioral inference with explicit confidence and raw-evidence provenance
+- Daily actual-operation retrospectives with evidence-bounded counterfactual comparison
 - Deterministic decision and planning layers
 - Runtime-mode safety boundary
 - Simulation-first development
@@ -118,6 +119,7 @@ Home Assistant-aware typing boundary may be added when integration deployment wo
 | Runtime diagnostics and golden scenarios | Complete |
 | Home Assistant observation/publication | Complete |
 | Persistent observation/event history | Complete |
+| Behavioral inference and daily retrospective | Complete |
 | IntelliCenter immutable read model | In development |
 | IntelliCenter Home Assistant deployment | Not yet installed |
 | Live automatic actuation | Disabled |

@@ -350,3 +350,16 @@ from .operational_intelligence import (
     OperationalIntelligencePipeline,
     OperationalIntelligenceResult,
 )
+
+
+from .daily_retrospective import (
+    ActualOperationalMetrics,
+    CounterfactualDifference,
+    CounterfactualReport,
+    CounterfactualStatus,
+    DailyOperationalRetrospective,
+    DailyOperationalRetrospectiveEngine,
+    PersistentRecommendationRecorder,
+    RecordedRecommendationEvent,
+    TemperatureSummary,
+)

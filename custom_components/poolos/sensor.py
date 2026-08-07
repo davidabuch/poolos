@@ -69,6 +69,46 @@ def _solar_inference_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSR
         return {"available": False}
     return {"available": True, **report.to_dict()["solar"]}
 
+
+
+def _retrospective_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+    report = coordinator.current_daily_retrospective
+    if report is None:
+        return {"available": False, "authority": "none", "command_delivery_enabled": False}
+    data = report.to_dict()
+    actual = data["actual"]
+    completed = coordinator.latest_completed_daily_retrospective
+    return {
+        "available": True,
+        "report_id": data["report_id"],
+        "report_date": data["report_date"],
+        "complete_day": data["complete_day"],
+        "coverage_ratio": actual["coverage_ratio"],
+        "pump_runtime_seconds": actual["pump_runtime_seconds"],
+        "runtime_by_mode_seconds": actual["runtime_by_mode_seconds"],
+        "priming_count": actual["priming_count"],
+        "inferred_priming_duration_seconds": actual["inferred_priming_duration_seconds"],
+        "spa_runtime_seconds": actual["spa_runtime_seconds"],
+        "solar_runtime_seconds": actual["solar_runtime_seconds"],
+        "heater_runtime_seconds": actual["heater_runtime_seconds"],
+        "filtration_interruptions": actual["filtration_interruptions"],
+        "average_running_rpm": actual["average_running_rpm"],
+        "pump_energy_kwh": actual["pump_energy_kwh"],
+        "temperatures": actual["temperatures"],
+        "latest_completed_report_id": None if completed is None else completed.report_id,
+        "latest_completed_report_date": None if completed is None else completed.report_date,
+        "authority": "none",
+        "command_delivery_enabled": False,
+    }
+
+
+def _counterfactual_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+    report = coordinator.current_daily_retrospective
+    if report is None:
+        return {"available": False, "authority": "none", "command_delivery_enabled": False}
+    data = report.counterfactual.to_dict()
+    return {"available": True, "report_id": report.report_id, "report_date": report.report_date, **data}
+
 def _recommendation_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     recommendation = coordinator.operator_recommendation
     if recommendation is None:
@@ -108,14 +148,14 @@ SENSORS = (
     PoolOSControlCenterSensorDescription(
         "commissioning_stage",
         "Commissioning Stage",
-        lambda coordinator, runtime: "SHADOW_VALIDATION",
+        lambda coordinator, runtime: "PRE_INSTALL_READY",
         lambda coordinator, runtime: {
             "completed_milestones": [
                 "11.1A", "11.1B", "11.1C", "11.1D", "11.1E",
                 "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
-                "11.3A", "11.3B", "11.3C",
+                "11.3A", "11.3B", "11.3C", "11.3D",
             ],
-            "next_stage": "DAILY_RETROSPECTIVE",
+            "next_stage": "HA_COMMISSIONING_DECISION",
             "authority_increase_requires_approval": True,
         },
         "mdi:progress-check",
@@ -185,6 +225,28 @@ SENSORS = (
         ),
         _solar_inference_attributes,
         "mdi:solar-power-variant-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "daily_operational_retrospective",
+        "Daily Operational Retrospective",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.current_daily_retrospective is None
+            else coordinator.current_daily_retrospective.report_date
+        ),
+        _retrospective_attributes,
+        "mdi:calendar-search",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "daily_counterfactual_report",
+        "Daily Counterfactual Report",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.current_daily_retrospective is None
+            else coordinator.current_daily_retrospective.counterfactual.status.value
+        ),
+        _counterfactual_attributes,
+        "mdi:compare-horizontal",
     ),
     PoolOSControlCenterSensorDescription(
         "operator_recommendation",

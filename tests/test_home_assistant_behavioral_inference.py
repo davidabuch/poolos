@@ -18,9 +18,9 @@ def test_113c_core_and_adr_exist() -> None:
 
 def test_manifest_advances_to_080_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.8.0"
+    assert manifest["version"] == "0.9.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
     ]
     assert manifest["iot_class"] == "calculated"
 
@@ -29,7 +29,7 @@ def test_inference_runs_from_durable_history_off_event_loop() -> None:
     source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
     assert "BehavioralInferenceEngine" in source
     assert "behavioral_inference_report" in source
-    assert "self._record_and_infer" in source
+    assert "self._record_infer_and_retro" in source
     assert "async_add_executor_job" in source
     assert "timedelta(days=7)" in source
     assert "self.observation_recorder.query" in source
@@ -87,5 +87,5 @@ def test_component_python_still_parses() -> None:
 def test_roadmap_marks_113c_done_and_113d_next() -> None:
     roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
     assert "| 11.3C | Behavioral inference engine | DONE |" in roadmap
-    assert "| 11.3D | Daily operational retrospective + counterfactual report | PLANNED |" in roadmap
+    assert "| 11.3D | Daily operational retrospective + counterfactual report | DONE |" in roadmap
     assert "provisional activation/deactivation differential" in roadmap

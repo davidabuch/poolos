@@ -703,7 +703,7 @@ Status: complete pending local validation.
 | 11.3A | HACS packaging + safe HA commissioning readiness | DONE |
 | 11.3B | Persistent observation + event recorder | DONE |
 | 11.3C | Behavioral inference engine | DONE |
-| 11.3D | Daily operational retrospective + counterfactual report | PLANNED |
+| 11.3D | Daily operational retrospective + counterfactual report | DONE |
 
 ### Epic 11.3A — HACS Packaging + Safe HA Commissioning Readiness
 
@@ -758,3 +758,20 @@ Status: complete pending local validation.
 - exposes read-only inferred operating state and solar behavior assessment in the PoolOS Control Center;
 - promotes HACS validation to automatic pull-request and `main` push validation while preserving manual dispatch;
 - keeps repository publication as a separate commissioning decision and preserves OBSERVE/SHADOW mode, authority NONE, and disabled command delivery.
+
+
+### Epic 11.3D — Daily Operational Retrospective + Counterfactual Report
+
+Status: complete pending local validation.
+
+- adds a vendor-independent deterministic daily retrospective over durable 11.3B observation evidence;
+- reports pump runtime, runtime by inferred mode, inferred priming count/duration, spa/solar/heater runtime, completed filtration interruptions, time-weighted running RPM, optional pump energy, and water/environment temperature summaries;
+- defines daily reporting windows in the configured Home Assistant timezone and uses bounded pre-window evidence to seed state active at local midnight;
+- caps unsupported evidence gaps rather than extrapolating stale state across long recorder outages;
+- persists canonical 11.2 recommendation changes and explicit clears as bounded advisory-state evidence so counterfactual provenance survives restarts;
+- consumes canonical 11.2 operator-recommendation evidence for counterfactual comparison while preserving advisory/recommendation identity, selected intents, rationale, constraints, expected effect, and confidence;
+- emits exact RPM differences when supported and explicitly refuses to invent missing runtime, scheduling, or interruption-recovery targets;
+- exposes current-day retrospective and counterfactual status through read-only PoolOS Control Center diagnostics while retaining a regenerated latest completed-day report;
+- advances the Home Assistant integration to `0.9.0` with matching future release tag `v0.9.0`;
+- completes the 11.3A-D pre-installation commissioning-development sequence while leaving repository publication and live Home Assistant installation as explicit operator decisions;
+- preserves OBSERVE/SHADOW mode, authority NONE, disabled command delivery, and no Home Assistant service-call or physical-actuation path.

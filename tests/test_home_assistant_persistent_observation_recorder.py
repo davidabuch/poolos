@@ -18,9 +18,9 @@ def test_113b_files_and_adr_exist() -> None:
 
 def test_manifest_advances_to_070_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.8.0"
+    assert manifest["version"] == "0.9.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
     ]
     assert manifest["iot_class"] == "calculated"
 
@@ -46,7 +46,8 @@ def test_solar_learning_inputs_are_available_as_optional_mappings() -> None:
 def test_coordinator_persists_off_event_loop_and_fails_open() -> None:
     source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
     assert "PersistentObservationRecorder" in source
-    assert 'hass.config.path(".storage", DOMAIN, entry.entry_id, "observations")' in source
+    assert 'hass.config.path(".storage", DOMAIN, entry.entry_id)' in source
+    assert 'PersistentObservationRecorder(storage_root / "observations")' in source
     assert "async_add_executor_job" in source
     assert "partial(" in source
     assert "except (OSError, TypeError, ValueError)" in source
