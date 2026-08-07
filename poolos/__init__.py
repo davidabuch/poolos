@@ -345,3 +345,8 @@ from .operator_recommendation import (
     OperatorRecommendationBuilder,
     OperatorRecommendationStatus,
 )
+
+from .operational_intelligence import (
+    OperationalIntelligencePipeline,
+    OperationalIntelligenceResult,
+)
