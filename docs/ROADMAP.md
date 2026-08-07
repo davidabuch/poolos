@@ -623,7 +623,7 @@ Status: complete pending local validation.
 | ID | Work item | Status |
 |---|---|---|
 | 11.2A | Canonical operational intent model | DONE |
-| 11.2B | Operational intent arbitration | PLANNED |
+| 11.2B | Operational intent arbitration | DONE |
 | 11.2C | Pump-operation optimization | PLANNED |
 | 11.2D | Operator recommendations | PLANNED |
 
@@ -639,3 +639,17 @@ Status: complete pending local validation.
 - requires safety-originated intents to use safety priority and safety-critical classification;
 - supports canonical serialization, replay, validation, and human-readable explanation rendering;
 - performs no arbitration, optimization, planning, recommendation publication, Home Assistant communication, command delivery, or physical actuation.
+
+### Epic 11.2B — Operational Intent Arbitration
+
+Status: complete pending local validation.
+
+- evaluates canonical intents at an explicit timezone-aware arbitration time;
+- selects only requested or active intents that are current and unexpired;
+- resolves explicit supersession before conflict arbitration;
+- applies deterministic priority, request-time, and identity ordering from 11.2A;
+- supports declarative mutually exclusive groups and directional suppression rules;
+- encodes conservative default conflicts for pool-versus-spa heating, maintenance/commissioning modes, freeze protection, and equipment protection;
+- preserves compatible simultaneous intents instead of forcing one global winner;
+- records a deterministic disposition, reason, and winning intent identity for every input intent;
+- performs no optimization, objective synthesis, planning, recommendation publication, Home Assistant communication, command delivery, or physical actuation.
