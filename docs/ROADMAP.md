@@ -625,7 +625,7 @@ Status: complete pending local validation.
 | 11.2A | Canonical operational intent model | DONE |
 | 11.2B | Operational intent arbitration | DONE |
 | 11.2C | Pump-operation optimization | DONE |
-| 11.2D | Operator recommendations | PLANNED |
+| 11.2D | Operator recommendations | DONE |
 
 ### Epic 11.2A — Canonical Operational Intent Model
 
@@ -668,3 +668,15 @@ Status: complete pending local validation.
 - fails closed with `infeasible` and no fallback RPM when requirements cannot be satisfied;
 - preserves selected-intent provenance and human-readable rationale in the optimization result;
 - performs no command generation, execution planning, recommendation publication, Home Assistant communication, vendor request, or physical actuation.
+
+
+### Epic 11.2D — Operator Recommendations
+
+Status: complete pending local validation.
+
+- converts already-selected operational intents and completed pump optimization into canonical operator-facing advisory evidence;
+- preserves deterministic recommendation identity, selected-intent provenance, optimization rationale, effective constraints, confidence, and expected effect;
+- distinguishes recommended operation, no-action, and blocked/infeasible outcomes without inventing fallback behavior;
+- publishes the latest available recommendation through one read-only Home Assistant diagnostic sensor and reports `NOT_AVAILABLE` when no recommendation exists;
+- labels recommendation evidence with `authority: none` and `command_delivery_enabled: false`;
+- performs no execution proposal, planning, Home Assistant service call, control entity creation, vendor request, or physical actuation.
