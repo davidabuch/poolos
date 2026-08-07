@@ -25,7 +25,6 @@ def test_required_integration_files_exist() -> None:
         "observation.py",
         "shadow.py",
         "sensor.py",
-        "strings.json",
         "system_health.py",
         "translations/en.json",
     }
@@ -38,14 +37,16 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["name"] == "PoolOS"
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
-    assert manifest["requirements"] == []
-    assert manifest["version"] == "0.5.0"
+    assert manifest["requirements"] == [
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0"
+    ]
+    assert manifest["version"] == "0.6.0"
 
 
-def test_strings_and_english_translation_are_identical() -> None:
-    assert _read_json(COMPONENT / "strings.json") == _read_json(
-        COMPONENT / "translations" / "en.json"
-    )
+def test_custom_integration_uses_runtime_english_translation() -> None:
+    assert not (COMPONENT / "strings.json").exists()
+    translation = _read_json(COMPONENT / "translations" / "en.json")
+    assert "config" in translation
 
 
 def test_all_python_modules_parse() -> None:

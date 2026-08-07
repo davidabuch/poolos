@@ -22,8 +22,10 @@ def test_all_component_python_modules_parse() -> None:
 
 def test_manifest_advances_observation_bridge_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.5.0"
-    assert manifest["requirements"] == []
+    assert manifest["version"] == "0.6.0"
+    assert manifest["requirements"] == [
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0"
+    ]
     assert manifest["single_config_entry"] is True
 
 
@@ -83,13 +85,13 @@ def test_diagnostics_report_mapping_health_without_state_values() -> None:
     assert '"value"' not in observation.split("def diagnostics", 1)[1].split("def configured_entity_mapping", 1)[0]
 
 
-def test_strings_and_translation_match() -> None:
-    strings = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
+def test_runtime_translation_is_present_without_core_build_strings() -> None:
+    assert not (COMPONENT / "strings.json").exists()
     translation = json.loads(
         (COMPONENT / "translations" / "en.json").read_text(encoding="utf-8")
     )
-    assert strings == translation
-    description = strings["config"]["step"]["user"]["description"]
+    assert "config" in translation
+    description = translation["config"]["step"]["user"]["description"]
     assert "OBSERVE" in description
     assert "cannot send commands" in description
 

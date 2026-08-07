@@ -39,8 +39,10 @@ def test_integration_forwards_only_sensor_platform() -> None:
 
 def test_manifest_advances_control_center_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.5.0"
-    assert manifest["requirements"] == []
+    assert manifest["version"] == "0.6.0"
+    assert manifest["requirements"] == [
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0"
+    ]
 
 
 def test_dashboard_is_valid_and_read_only() -> None:
