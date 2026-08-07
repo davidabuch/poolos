@@ -311,3 +311,14 @@ from .recovery_coordinator import (
     RecoveryDirectiveDisposition,
     RecoveryPolicy,
 )
+
+from .operational_intent import (
+    IntentCriterion,
+    OperationalIntent,
+    OperationalIntentLifecycle,
+    OperationalIntentPriority,
+    OperationalIntentSafetyClass,
+    OperationalIntentSource,
+    OperationalIntentType,
+    canonical_intent_order,
+)
