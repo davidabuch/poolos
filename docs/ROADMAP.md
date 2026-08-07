@@ -624,7 +624,7 @@ Status: complete pending local validation.
 |---|---|---|
 | 11.2A | Canonical operational intent model | DONE |
 | 11.2B | Operational intent arbitration | DONE |
-| 11.2C | Pump-operation optimization | PLANNED |
+| 11.2C | Pump-operation optimization | DONE |
 | 11.2D | Operator recommendations | PLANNED |
 
 ### Epic 11.2A — Canonical Operational Intent Model
@@ -653,3 +653,18 @@ Status: complete pending local validation.
 - preserves compatible simultaneous intents instead of forcing one global winner;
 - records a deterministic disposition, reason, and winning intent identity for every input intent;
 - performs no optimization, objective synthesis, planning, recommendation publication, Home Assistant communication, command delivery, or physical actuation.
+
+
+### Epic 11.2C — Pump-operation Optimization
+
+Status: complete pending local validation.
+
+- consumes only already-arbitrated operational intents and explicit installation pump policy;
+- defines a configurable minimum/maximum RPM envelope, candidate step, and per-intent minimum RPM requirements;
+- combines compatible intent requirements conservatively using the strictest effective minimum and maximum;
+- honors canonical `minimum_pump_rpm` and `maximum_pump_rpm` intent constraints;
+- deterministically recommends the lowest-energy feasible configured RPM using RPM cubed only as a monotonic ranking proxy;
+- returns `no_operation_required` when selected intents do not require pump operation;
+- fails closed with `infeasible` and no fallback RPM when requirements cannot be satisfied;
+- preserves selected-intent provenance and human-readable rationale in the optimization result;
+- performs no command generation, execution planning, recommendation publication, Home Assistant communication, vendor request, or physical actuation.
