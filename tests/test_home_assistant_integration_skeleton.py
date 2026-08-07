@@ -39,7 +39,7 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == []
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.5.0"
 
 
 def test_strings_and_english_translation_are_identical() -> None:

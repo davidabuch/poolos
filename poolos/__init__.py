@@ -339,3 +339,9 @@ from .pump_optimization import (
     PumpOptimizationPolicy,
     PumpOptimizationResult,
 )
+
+from .operator_recommendation import (
+    OperatorRecommendation,
+    OperatorRecommendationBuilder,
+    OperatorRecommendationStatus,
+)

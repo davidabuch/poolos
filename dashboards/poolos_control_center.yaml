@@ -40,6 +40,16 @@ views:
             entity: sensor.poolos_last_plan
             name: Last Plan
       - type: grid
+        title: Operator Recommendation
+        cards:
+          - type: entity
+            entity: sensor.poolos_operator_recommendation
+            name: Current Recommendation
+          - type: markdown
+            content: >-
+              Recommendations are advisory commissioning evidence only. PoolOS has
+              no command authority and cannot actuate equipment.
+      - type: grid
         title: Explanation
         cards:
           - type: entity

@@ -22,7 +22,7 @@ def test_all_component_python_modules_parse() -> None:
 
 def test_manifest_advances_observation_bridge_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.5.0"
     assert manifest["requirements"] == []
     assert manifest["single_config_entry"] is True
 

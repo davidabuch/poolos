@@ -46,6 +46,14 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
     }
 
 
+
+def _recommendation_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+    recommendation = coordinator.operator_recommendation
+    if recommendation is None:
+        return {"available": False, "authority": "none", "command_delivery_enabled": False}
+    return recommendation.to_dict()
+
+
 def _shadow_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     data = _shadow(coordinator)
     return {
@@ -129,6 +137,17 @@ SENSORS = (
         lambda coordinator, runtime: _shadow(coordinator).get("objective_id") or "NO_OBJECTIVE",
         lambda coordinator, runtime: {"authority": "none", "baseline": "maintain_observed_state"},
         "mdi:target",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "operator_recommendation",
+        "Operator Recommendation",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.operator_recommendation is None
+            else coordinator.operator_recommendation.summary
+        ),
+        _recommendation_attributes,
+        "mdi:account-eye-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "last_explanation",
