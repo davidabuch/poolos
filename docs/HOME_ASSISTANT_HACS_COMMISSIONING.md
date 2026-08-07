@@ -58,10 +58,10 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0
+poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0
 ```
 
-This means the `v0.6.0` Git tag must exist before version 0.6.0 can be installed in Home Assistant.
+This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
 Future Home Assistant integration releases must update both the manifest version and the pinned
 PoolOS Git tag together.
 
@@ -77,7 +77,8 @@ For each installable Home Assistant integration release:
 
 Milestone 11.3A uses integration version `0.6.0` and tag `v0.6.0`.
 Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
-Milestone 11.3C advances the integration to `0.8.0`; after 11.3C is merged and green, create matching tag and release `v0.8.0` before any installation attempt.
+Milestone 11.3C uses integration version `0.8.0` and tag `v0.8.0`.
+Milestone 11.3D advances the integration to `0.9.0`; after 11.3D is merged and green, create matching tag and release `v0.9.0` before any installation attempt.
 
 ## Validation
 
@@ -89,7 +90,7 @@ The repository provides three complementary validation layers:
   validation job is intentionally skipped while the repository is private. Repository publication remains
   an explicit commissioning decision.
 
-As of 11.3C the HACS workflow is ready to run automatically on pull requests and pushes to `main` in
+As of 11.3D the HACS workflow is ready to run automatically on pull requests and pushes to `main` in
 addition to manual dispatch. Because HACS cannot validate this private repository with the workflow
 token, the job is guarded by `github.event.repository.private == false`. A skipped HACS job while PoolOS
 is private must not be interpreted as successful HACS validation. Once the repository is made public for
@@ -98,7 +99,7 @@ commissioning, the same workflow will execute `hacs/action` automatically.
 ## Installation sequence after 11.3D
 
 Do not install PoolOS into the live Home Assistant instance after 11.3A alone. Complete and merge
-11.3A through 11.3D first.
+11.3A through 11.3D first. Milestone 11.3D completes this pre-installation development sequence, but live installation still requires explicit operator approval and the repository-publication decision.
 
 When live observation commissioning is approved:
 

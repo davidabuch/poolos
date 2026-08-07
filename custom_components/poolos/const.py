@@ -6,7 +6,7 @@ from datetime import timedelta
 
 DOMAIN = "poolos"
 NAME = "PoolOS"
-INTEGRATION_VERSION = "0.8.0"
+INTEGRATION_VERSION = "0.9.0"
 
 CONF_DIAGNOSTICS_ENABLED = "diagnostics_enabled"
 DEFAULT_DIAGNOSTICS_ENABLED = True

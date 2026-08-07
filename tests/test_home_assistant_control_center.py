@@ -23,6 +23,7 @@ def test_sensor_module_parses_and_declares_read_only_diagnostics() -> None:
         "operating_mode", "commissioning_stage", "observation_health",
         "shadow_runtime_status", "last_evaluation", "last_plan",
         "current_objective", "inferred_operating_state", "solar_behavior_inference",
+        "daily_operational_retrospective", "daily_counterfactual_report",
         "operator_recommendation", "last_explanation",
     ):
         assert f'"{key}"' in source
@@ -40,9 +41,9 @@ def test_integration_forwards_only_sensor_platform() -> None:
 
 def test_manifest_advances_control_center_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.8.0"
+    assert manifest["version"] == "0.9.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
     ]
 
 
@@ -55,8 +56,10 @@ def test_dashboard_is_valid_and_read_only() -> None:
         "sensor.poolos_observation_health", "sensor.poolos_shadow_runtime_status",
         "sensor.poolos_last_evaluation", "sensor.poolos_current_objective",
         "sensor.poolos_last_plan", "sensor.poolos_inferred_operating_state",
-        "sensor.poolos_solar_behavior_inference", "sensor.poolos_operator_recommendation",
-        "sensor.poolos_last_explanation",
+        "sensor.poolos_solar_behavior_inference",
+        "sensor.poolos_daily_operational_retrospective",
+        "sensor.poolos_daily_counterfactual_report",
+        "sensor.poolos_operator_recommendation", "sensor.poolos_last_explanation",
     ):
         assert entity in text
     for prohibited in ("button.", "switch.", "service:", "tap_action:"):
