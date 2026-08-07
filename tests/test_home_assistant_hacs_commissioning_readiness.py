@@ -93,6 +93,7 @@ def test_hacs_validation_workflow_runs_automatically_and_manually() -> None:
     assert "- main" in workflow
     assert "category: integration" in workflow
     assert "hacs/action@main" in workflow
+    assert "github.event.repository.private == false" in workflow
 
 
 def test_hassfest_validation_runs_on_repository_changes() -> None:

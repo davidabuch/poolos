@@ -85,12 +85,15 @@ The repository provides three complementary validation layers:
 
 - existing PoolOS CI for Python tests, Ruff, MyPy, and source compilation;
 - Hassfest validation for current Home Assistant custom-integration metadata and structure;
-- HACS validation on pull requests, pushes to `main`, and manual dispatch. Repository publication
-  remains an explicit commissioning decision.
+- HACS validation is triggered by pull requests, pushes to `main`, and manual dispatch, but the HACS
+  validation job is intentionally skipped while the repository is private. Repository publication remains
+  an explicit commissioning decision.
 
-As of 11.3C the HACS workflow runs automatically on pull requests and pushes to `main` in addition
-to manual dispatch. The repository remains private during development; successful workflow execution
-does not change the separate requirement to make the repository public before actual HACS installation.
+As of 11.3C the HACS workflow is ready to run automatically on pull requests and pushes to `main` in
+addition to manual dispatch. Because HACS cannot validate this private repository with the workflow
+token, the job is guarded by `github.event.repository.private == false`. A skipped HACS job while PoolOS
+is private must not be interpreted as successful HACS validation. Once the repository is made public for
+commissioning, the same workflow will execute `hacs/action` automatically.
 
 ## Installation sequence after 11.3D
 
