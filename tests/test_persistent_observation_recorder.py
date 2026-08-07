@@ -120,3 +120,24 @@ def test_jsonl_preserves_raw_observation_provenance(tmp_path: Path) -> None:
     assert stored["source_id"] == "sensor.solar_active"
     assert stored["quality"] == "good"
     assert stored["observed_at"] == now.isoformat()
+
+
+def test_gpm_noise_is_bounded_but_meaningful_flow_transition_is_immediate(tmp_path: Path) -> None:
+    recorder = PersistentObservationRecorder(tmp_path)
+    now = datetime(2026, 8, 7, 16, 0, tzinfo=UTC)
+    recorder.record_snapshot(recorded_at=now, observations=(obs("pump.gpm", 40.0, now),), health=health())
+    quiet = now + timedelta(seconds=1)
+    assert not recorder.record_snapshot(
+        recorded_at=quiet,
+        observations=(obs("pump.gpm", 40.4, quiet),),
+        health=health(),
+    )
+    changed = now + timedelta(seconds=2)
+    assert recorder.record_snapshot(
+        recorded_at=changed,
+        observations=(obs("pump.gpm", 42.0, changed),),
+        health=health(),
+    )
+    events = recorder.query(start=now, end=changed + timedelta(seconds=1))
+    assert [event.kind for event in events] == ["baseline", "transition"]
+    assert events[-1].changed_observation_ids == ("pump.gpm",)

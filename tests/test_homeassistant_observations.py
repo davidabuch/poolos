@@ -189,3 +189,48 @@ def test_mapper_rejects_state_binding_mismatch() -> None:
             state("sensor.other", "86"),
             binding(),
         )
+
+
+def test_attribute_value_map_translates_hvac_action_without_relabeling_mode() -> None:
+    observation = HomeAssistantObservationMapper().map_state(
+        state("climate.pool", "heat", hvac_action="idle"),
+        binding(
+            entity_id="climate.pool",
+            observation_id="pool.heating_demand_active",
+            value_type=HomeAssistantValueType.BOOLEAN,
+            unit=None,
+            attribute="hvac_action",
+            value_map={"heating": True, "idle": False, "off": False},
+        ),
+    )
+
+    assert observation.value is False
+    assert observation.source_id == "home_assistant:climate.pool"
+
+
+def test_attribute_value_map_preserves_explicit_source_provenance() -> None:
+    observation = HomeAssistantObservationMapper().map_state(
+        state("climate.pool", "heat", temperature=90),
+        binding(
+            entity_id="climate.pool",
+            observation_id="pool.target_temperature",
+            attribute="temperature",
+            source_id="home_assistant:climate.pool#temperature",
+        ),
+    )
+
+    assert observation.value == 90.0
+    assert observation.source_id == "home_assistant:climate.pool#temperature"
+
+
+def test_mapper_prefers_last_reported_for_freshness_timestamp() -> None:
+    reported = NOW.replace(second=30)
+    ha_state = HomeAssistantState(
+        entity_id="sensor.buch_family_pool_temperature",
+        state="86.5",
+        last_changed=NOW,
+        last_updated=NOW,
+        last_reported=reported,
+    )
+    observation = HomeAssistantObservationMapper().map_state(ha_state, binding())
+    assert observation.observed_at == reported

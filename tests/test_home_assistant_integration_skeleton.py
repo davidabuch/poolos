@@ -38,9 +38,9 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
     ]
-    assert manifest["version"] == "0.9.0"
+    assert manifest["version"] == "0.10.0"
 
 
 def test_custom_integration_uses_runtime_english_translation() -> None:
@@ -60,7 +60,8 @@ def test_config_flow_is_single_instance_and_observe_only() -> None:
     assert '"operating_mode": DEFAULT_OPERATING_MODE' in source
     assert "single_instance_allowed" in source
     assert "CONF_DIAGNOSTICS_ENABLED" in source
-    assert "command" not in source.lower()
+    assert "services.async_call" not in source
+    assert "async_register" not in source
 
 
 def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
@@ -76,7 +77,7 @@ def test_coordinator_performs_no_external_io_and_disables_actuation() -> None:
     assert "self.hass.states.get" in source
     assert '"observation_enabled": True' in source
     assert '"command_delivery_enabled": False' in source
-    forbidden = ("aiohttp", "requests", "websocket", "async_track", "service_call")
+    forbidden = ("aiohttp", "requests", "websocket", "services.async_call", "service_call")
     assert all(token not in source for token in forbidden)
 
 

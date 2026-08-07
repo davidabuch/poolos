@@ -17,9 +17,9 @@ def test_113d_core_tests_and_adr_exist() -> None:
 
 def test_manifest_advances_to_090_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.9.0"
+    assert manifest["version"] == "0.10.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
     ]
     assert manifest["iot_class"] == "calculated"
 
@@ -100,5 +100,5 @@ def test_roadmap_marks_113d_done_and_commissioning_is_next_decision() -> None:
     assert "### Epic 11.3D — Daily Operational Retrospective + Counterfactual Report" in roadmap
     sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
     assert '"11.3A", "11.3B", "11.3C", "11.3D"' in sensor
-    assert 'lambda coordinator, runtime: "PRE_INSTALL_READY"' in sensor
-    assert '"next_stage": "HA_COMMISSIONING_DECISION"' in sensor
+    assert 'lambda coordinator, runtime: "HIGH_FIDELITY_OBSERVATION_READY"' in sensor
+    assert '"next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT"' in sensor

@@ -29,6 +29,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
 
     coordinator = PoolOSCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
+    coordinator.async_start_event_observation()
+    entry.async_on_unload(coordinator.async_stop_event_observation)
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),

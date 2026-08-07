@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from functools import partial
 import logging
@@ -9,7 +11,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from poolos.behavioral_inference import BehavioralInferenceEngine, BehavioralInferenceReport
@@ -23,7 +26,12 @@ from poolos.operator_recommendation import OperatorRecommendation
 from poolos.observations import PersistentObservationRecorder, PoolObservation
 
 from .const import DOMAIN, INTEGRATION_VERSION, OBSERVATION_UPDATE_INTERVAL
-from .observation import ObservationSnapshot, build_snapshot, configured_entity_mapping
+from .observation import (
+    ObservationSnapshot,
+    build_snapshot,
+    configured_entity_ids,
+    configured_entity_mapping,
+)
 from .shadow import HomeAssistantShadowRuntime
 
 LOGGER = logging.getLogger(__name__)
@@ -53,9 +61,64 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         storage_root = Path(hass.config.path(".storage", DOMAIN, entry.entry_id))
         self.observation_recorder = PersistentObservationRecorder(storage_root / "observations")
         self.recommendation_recorder = PersistentRecommendationRecorder(storage_root / "recommendations")
+        self._observation_lock = asyncio.Lock()
+        self._remove_state_listener: Callable[[], None] | None = None
+        self._event_refresh_count = 0
+        self._reconciliation_refresh_count = 0
+        self._last_observation_trigger = "not_started"
 
     async def _async_update_data(self) -> ObservationSnapshot:
-        """Build a canonical snapshot from the current Home Assistant state machine."""
+        """Run the periodic reconciliation/backstop observation refresh."""
+
+        async with self._observation_lock:
+            self._reconciliation_refresh_count += 1
+            return await self._async_observe(
+                observed_at=datetime.now(UTC),
+                trigger="periodic_reconciliation",
+            )
+
+    def async_start_event_observation(self) -> None:
+        """Subscribe to mapped HA state changes for immediate observation."""
+
+        if self._remove_state_listener is not None:
+            return
+        configured = {**dict(self.config_entry.data), **dict(self.config_entry.options)}
+        entity_ids = configured_entity_ids(configured)
+        if not entity_ids:
+            return
+        self._remove_state_listener = async_track_state_change_event(
+            self.hass,
+            entity_ids,
+            self._async_mapped_state_changed,
+        )
+
+    def async_stop_event_observation(self) -> None:
+        """Remove the mapped-state subscription if it is active."""
+
+        if self._remove_state_listener is None:
+            return
+        self._remove_state_listener()
+        self._remove_state_listener = None
+
+    async def _async_mapped_state_changed(self, event: Event) -> None:
+        """Capture a mapped HA state/attribute change without waiting for polling."""
+
+        async with self._observation_lock:
+            self._event_refresh_count += 1
+            timestamp = event.time_fired.astimezone(UTC)
+            snapshot = await self._async_observe(
+                observed_at=timestamp,
+                trigger="state_change_event",
+            )
+            self.async_set_updated_data(snapshot)
+
+    async def _async_observe(
+        self,
+        *,
+        observed_at: datetime,
+        trigger: str,
+    ) -> ObservationSnapshot:
+        """Build, evaluate, and durably record one read-only HA observation."""
 
         configured = {**dict(self.config_entry.data), **dict(self.config_entry.options)}
         states: dict[str, HomeAssistantState] = {}
@@ -68,13 +131,15 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 state=state.state,
                 last_changed=state.last_changed,
                 last_updated=state.last_updated,
+                last_reported=getattr(state, "last_reported", state.last_updated),
                 attributes=state.attributes,
             )
         snapshot = build_snapshot(
             options=configured,
             states=states,
-            now=datetime.now(UTC),
+            now=observed_at,
         )
+        self._last_observation_trigger = trigger
         self.shadow_runtime.evaluate(snapshot)
         health = {
             "healthy": snapshot.healthy,
@@ -209,6 +274,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "integration_version": INTEGRATION_VERSION,
             "lifecycle": "loaded",
             "observation_enabled": True,
+            "event_driven_observation_enabled": self._remove_state_listener is not None,
+            "periodic_reconciliation_enabled": True,
+            "event_refresh_count": self._event_refresh_count,
+            "reconciliation_refresh_count": self._reconciliation_refresh_count,
+            "last_observation_trigger": self._last_observation_trigger,
             "command_delivery_enabled": False,
             "observation_healthy": None if snapshot is None else snapshot.healthy,
             "refreshed_at": None if snapshot is None else snapshot.generated_at.isoformat(),

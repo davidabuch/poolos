@@ -14,14 +14,20 @@ from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_HEATER_ACTIVE_ENTITY,
-    CONF_POOL_ACTIVE_ENTITY,
-    CONF_POOL_TEMPERATURE_ENTITY,
+    CONF_JETS_ACTIVE_ENTITY,
+    CONF_POOL_COMMAND_ENTITY,
+    CONF_POOL_THERMOSTAT_ENTITY,
+    CONF_PUMP_GPM_ENTITY,
     CONF_PUMP_POWER_ENTITY,
     CONF_PUMP_RPM_ENTITY,
+    CONF_SLIDE_ACTIVE_ENTITY,
     CONF_SOLAR_ACTIVE_ENTITY,
+    CONF_SOLAR_PREFERRED_ENTITY,
     CONF_SOLAR_TEMPERATURE_ENTITY,
-    CONF_SPA_ACTIVE_ENTITY,
-    CONF_SPA_TEMPERATURE_ENTITY,
+    CONF_SPA_COMMAND_ENTITY,
+    CONF_SPA_THERMOSTAT_ENTITY,
+    CONF_WATERFALL_ACTIVE_ENTITY,
+    CONF_WATER_TEMPERATURE_ENTITY,
     DEFAULT_DIAGNOSTICS_ENABLED,
     DEFAULT_OPERATING_MODE,
     DOMAIN,
@@ -32,8 +38,8 @@ from .const import (
 class PoolOSConfigFlow(ConfigFlow, domain=DOMAIN):
     """Create the single PoolOS commissioning entry."""
 
-    VERSION = 1
-    MINOR_VERSION = 2
+    VERSION = 2
+    MINOR_VERSION = 0
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -74,28 +80,34 @@ class PoolOSOptionsFlow(OptionsFlow):
         )
 
 
-def _entity_selector(domains: list[str] | None = None) -> selector.EntitySelector:
+def _entity_selector(domains: list[str]) -> selector.EntitySelector:
     return selector.EntitySelector(
         selector.EntitySelectorConfig(domain=domains, multiple=False)
     )
 
 
 def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
-    """Build the configurable read-only entity mapping schema."""
+    """Build the high-fidelity read-only observation mapping schema."""
 
     required = {
-        CONF_POOL_ACTIVE_ENTITY: ["binary_sensor", "climate", "switch"],
-        CONF_SPA_ACTIVE_ENTITY: ["binary_sensor", "climate", "switch"],
+        CONF_POOL_THERMOSTAT_ENTITY: ["climate"],
+        CONF_SPA_THERMOSTAT_ENTITY: ["climate"],
         CONF_PUMP_RPM_ENTITY: ["sensor", "number"],
-        CONF_POOL_TEMPERATURE_ENTITY: ["sensor", "climate"],
-        CONF_SPA_TEMPERATURE_ENTITY: ["sensor", "climate"],
-    }
-    optional = {
-        CONF_HEATER_ACTIVE_ENTITY: ["binary_sensor", "climate", "switch"],
-        CONF_SOLAR_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_PUMP_GPM_ENTITY: ["sensor"],
+        CONF_PUMP_POWER_ENTITY: ["sensor"],
+        CONF_WATER_TEMPERATURE_ENTITY: ["sensor"],
         CONF_SOLAR_TEMPERATURE_ENTITY: ["sensor"],
         CONF_AIR_TEMPERATURE_ENTITY: ["sensor"],
-        CONF_PUMP_POWER_ENTITY: ["sensor"],
+        CONF_SOLAR_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_HEATER_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_POOL_COMMAND_ENTITY: ["binary_sensor", "switch"],
+        CONF_SPA_COMMAND_ENTITY: ["binary_sensor", "switch"],
+    }
+    optional = {
+        CONF_SOLAR_PREFERRED_ENTITY: ["binary_sensor", "switch"],
+        CONF_WATERFALL_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_JETS_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_SLIDE_ACTIVE_ENTITY: ["binary_sensor", "switch"],
     }
     fields: dict[vol.Marker, object] = {}
     for key, domains in required.items():
@@ -108,5 +120,5 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
             default=current.get(CONF_DIAGNOSTICS_ENABLED, DEFAULT_DIAGNOSTICS_ENABLED),
         )
     ] = bool
-    assert set(ALL_ENTITY_OPTIONS).issubset(required.keys() | optional.keys())
+    assert set(ALL_ENTITY_OPTIONS) == required.keys() | optional.keys()
     return vol.Schema(fields)

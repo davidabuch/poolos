@@ -10,7 +10,7 @@ it does not increase PoolOS authority.
 
 ## Commissioning safety boundary
 
-The Home Assistant integration is fixed to the following boundary during 11.3:
+The Home Assistant integration is fixed to the following boundary through 11.4A:
 
 ```text
 Operating mode: OBSERVE
@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0
+poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0
 ```
 
 This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
@@ -78,7 +78,26 @@ For each installable Home Assistant integration release:
 Milestone 11.3A uses integration version `0.6.0` and tag `v0.6.0`.
 Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
 Milestone 11.3C uses integration version `0.8.0` and tag `v0.8.0`.
-Milestone 11.3D advances the integration to `0.9.0`; after 11.3D is merged and green, create matching tag and release `v0.9.0` before any installation attempt.
+Milestone 11.3D uses integration version `0.9.0` and tag `v0.9.0`.
+Milestone 11.4A advances the integration to `0.10.0`; after 11.4A is merged and green, create matching tag and release `v0.10.0` before any installation attempt.
+
+
+## 11.4A high-fidelity observation boundary
+
+PoolOS observes mapped HA entities immediately on state/attribute changes and retains the 30-second
+coordinator refresh only as periodic reconciliation. Event processing and reconciliation are serialized
+through one read-only coordinator path. The persistent recorder continues to suppress insignificant
+numeric noise while retaining meaningful transitions and five-minute checkpoints.
+
+The pool/spa climate entities are interpreted according to their commissioning semantics: HA mode
+`heat` means body/pump enabled, not heater firing. PoolOS derives body enabled from thermostat `Status`,
+active heating demand from `hvac_action`, and observes gas-heater/solar outcomes separately. Current and
+target temperatures plus raw `HEATER` and `HTMODE` attributes are recorded with attribute-level
+provenance.
+
+Pentair schedules and configured pool/solar/heat RPM presets are intentionally excluded from the
+learning contract. Solar Preferred is optional explanatory context only. Freeze behavior remains under
+Pentair protection and is deferred from locally learned control logic.
 
 ## Validation
 
@@ -90,16 +109,16 @@ The repository provides three complementary validation layers:
   validation job is intentionally skipped while the repository is private. Repository publication remains
   an explicit commissioning decision.
 
-As of 11.3D the HACS workflow is ready to run automatically on pull requests and pushes to `main` in
+As of 11.4A the HACS workflow is ready to run automatically on pull requests and pushes to `main` in
 addition to manual dispatch. Because HACS cannot validate this private repository with the workflow
 token, the job is guarded by `github.event.repository.private == false`. A skipped HACS job while PoolOS
 is private must not be interpreted as successful HACS validation. Once the repository is made public for
 commissioning, the same workflow will execute `hacs/action` automatically.
 
-## Installation sequence after 11.3D
+## Installation sequence after 11.4A
 
 Do not install PoolOS into the live Home Assistant instance after 11.3A alone. Complete and merge
-11.3A through 11.3D first. Milestone 11.3D completes this pre-installation development sequence, but live installation still requires explicit operator approval and the repository-publication decision.
+11.3A through 11.4A first. Milestone 11.4A adds the high-fidelity event-driven observation boundary required before live learning, but live installation still requires explicit operator approval and the repository-publication decision.
 
 When live observation commissioning is approved:
 
@@ -121,6 +140,6 @@ If PoolOS fails to load or observation health is unacceptable:
 1. Remove or disable the PoolOS config entry.
 2. Do not change the existing IntelliCenter integration or its control schedules.
 3. Remove the HACS PoolOS integration if needed and restart Home Assistant.
-4. Existing IntelliCenter control remains authoritative throughout 11.3 commissioning.
+4. Existing IntelliCenter control remains authoritative throughout observation commissioning.
 
 No PoolOS rollback step should issue a pool-equipment command.

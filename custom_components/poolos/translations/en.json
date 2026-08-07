@@ -3,19 +3,25 @@
   "config": {
     "step": {
       "user": {
-        "title": "Install PoolOS observation bridge",
-        "description": "Map existing Home Assistant entities to PoolOS canonical observations. PoolOS remains in OBSERVE mode and cannot send commands.",
+        "title": "Install PoolOS high-fidelity observation bridge",
+        "description": "Map existing Home Assistant entities to PoolOS canonical observations. PoolOS uses event-driven observation plus periodic reconciliation, remains in OBSERVE mode, and cannot send commands.",
         "data": {
-          "pool_active_entity": "Pool active entity",
-          "spa_active_entity": "Spa active entity",
-          "pump_rpm_entity": "Pump RPM entity",
-          "pool_temperature_entity": "Pool temperature entity",
-          "spa_temperature_entity": "Spa temperature entity",
-          "heater_active_entity": "Heater active entity (optional)",
-          "solar_active_entity": "Solar active entity (optional)",
-          "solar_temperature_entity": "Solar/roof temperature entity (optional)",
-          "air_temperature_entity": "Air temperature entity (optional)",
-          "pump_power_entity": "Pump power entity (optional)",
+          "pool_thermostat_entity": "Pool thermostat entity",
+          "spa_thermostat_entity": "Spa thermostat entity",
+          "pump_rpm_entity": "Actual pump RPM entity",
+          "pump_gpm_entity": "Actual pump flow (GPM) entity",
+          "pump_power_entity": "Pump power entity",
+          "water_temperature_entity": "Pentair water temperature entity",
+          "solar_temperature_entity": "Solar/roof temperature entity",
+          "air_temperature_entity": "Air temperature entity",
+          "solar_active_entity": "Solar engaged entity",
+          "heater_active_entity": "Gas heater active entity",
+          "pool_command_entity": "Pool command/circuit entity",
+          "spa_command_entity": "Spa command/circuit entity",
+          "solar_preferred_entity": "Pentair Solar Preferred entity (optional explanatory context)",
+          "waterfall_active_entity": "Waterfall/spillway entity (optional hydraulic context)",
+          "jets_active_entity": "Jets entity (optional hydraulic context)",
+          "slide_active_entity": "Slide entity (optional hydraulic context)",
           "diagnostics_enabled": "Enable diagnostics"
         }
       }
@@ -27,19 +33,25 @@
   "options": {
     "step": {
       "init": {
-        "title": "PoolOS observation mappings",
-        "description": "Update read-only entity mappings. Authority-changing options are intentionally unavailable.",
+        "title": "PoolOS high-fidelity observation mappings",
+        "description": "Update read-only observation sources. Thermostat attributes are observed directly; no template sensors are required. Authority-changing options are intentionally unavailable.",
         "data": {
-          "pool_active_entity": "Pool active entity",
-          "spa_active_entity": "Spa active entity",
-          "pump_rpm_entity": "Pump RPM entity",
-          "pool_temperature_entity": "Pool temperature entity",
-          "spa_temperature_entity": "Spa temperature entity",
-          "heater_active_entity": "Heater active entity (optional)",
-          "solar_active_entity": "Solar active entity (optional)",
-          "solar_temperature_entity": "Solar/roof temperature entity (optional)",
-          "air_temperature_entity": "Air temperature entity (optional)",
-          "pump_power_entity": "Pump power entity (optional)",
+          "pool_thermostat_entity": "Pool thermostat entity",
+          "spa_thermostat_entity": "Spa thermostat entity",
+          "pump_rpm_entity": "Actual pump RPM entity",
+          "pump_gpm_entity": "Actual pump flow (GPM) entity",
+          "pump_power_entity": "Pump power entity",
+          "water_temperature_entity": "Pentair water temperature entity",
+          "solar_temperature_entity": "Solar/roof temperature entity",
+          "air_temperature_entity": "Air temperature entity",
+          "solar_active_entity": "Solar engaged entity",
+          "heater_active_entity": "Gas heater active entity",
+          "pool_command_entity": "Pool command/circuit entity",
+          "spa_command_entity": "Spa command/circuit entity",
+          "solar_preferred_entity": "Pentair Solar Preferred entity (optional explanatory context)",
+          "waterfall_active_entity": "Waterfall/spillway entity (optional hydraulic context)",
+          "jets_active_entity": "Jets entity (optional hydraulic context)",
+          "slide_active_entity": "Slide entity (optional hydraulic context)",
           "diagnostics_enabled": "Enable diagnostics"
         }
       }
