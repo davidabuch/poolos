@@ -47,6 +47,28 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
 
 
 
+
+def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+    report = coordinator.behavioral_inference_report
+    if report is None:
+        return {"available": False, "source_event_count": 0}
+    data = report.to_dict()
+    return {
+        "available": True,
+        "confidence": data["current_state_confidence"],
+        "source_event_count": data["source_event_count"],
+        "generated_from_start": data["generated_from_start"],
+        "generated_from_end": data["generated_from_end"],
+        "recent_events": data["events"][-10:],
+    }
+
+
+def _solar_inference_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+    report = coordinator.behavioral_inference_report
+    if report is None:
+        return {"available": False}
+    return {"available": True, **report.to_dict()["solar"]}
+
 def _recommendation_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     recommendation = coordinator.operator_recommendation
     if recommendation is None:
@@ -88,8 +110,12 @@ SENSORS = (
         "Commissioning Stage",
         lambda coordinator, runtime: "SHADOW_VALIDATION",
         lambda coordinator, runtime: {
-            "completed_milestones": ["11.1A", "11.1B", "11.1C", "11.1D", "11.1E"],
-            "next_stage": "OPERATOR_COMMISSIONING",
+            "completed_milestones": [
+                "11.1A", "11.1B", "11.1C", "11.1D", "11.1E",
+                "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
+                "11.3A", "11.3B", "11.3C",
+            ],
+            "next_stage": "DAILY_RETROSPECTIVE",
             "authority_increase_requires_approval": True,
         },
         "mdi:progress-check",
@@ -137,6 +163,28 @@ SENSORS = (
         lambda coordinator, runtime: _shadow(coordinator).get("objective_id") or "NO_OBJECTIVE",
         lambda coordinator, runtime: {"authority": "none", "baseline": "maintain_observed_state"},
         "mdi:target",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "inferred_operating_state",
+        "Inferred Operating State",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.behavioral_inference_report is None
+            else coordinator.behavioral_inference_report.current_state.value
+        ),
+        _behavioral_attributes,
+        "mdi:state-machine",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "solar_behavior_inference",
+        "Solar Behavior Inference",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.behavioral_inference_report is None
+            else coordinator.behavioral_inference_report.solar.assessment
+        ),
+        _solar_inference_attributes,
+        "mdi:solar-power-variant-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "operator_recommendation",

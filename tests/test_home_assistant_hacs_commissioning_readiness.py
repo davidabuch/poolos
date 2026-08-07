@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
-EXPECTED_VERSION = "0.7.0"
-EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.7.0"
+EXPECTED_VERSION = "0.8.0"
+EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0"
 
 
 def _json(path: Path) -> dict[str, object]:
@@ -85,12 +85,15 @@ def test_all_component_python_modules_parse_after_packaging_changes() -> None:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_hacs_validation_workflow_is_manual_during_private_commissioning() -> None:
+def test_hacs_validation_workflow_runs_automatically_and_manually() -> None:
     workflow = (ROOT / ".github" / "workflows" / "hacs.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
-    assert "pull_request:" not in workflow
+    assert "pull_request:" in workflow
+    assert "push:" in workflow
+    assert "- main" in workflow
     assert "category: integration" in workflow
     assert "hacs/action@main" in workflow
+    assert "github.event.repository.private == false" in workflow
 
 
 def test_hassfest_validation_runs_on_repository_changes() -> None:

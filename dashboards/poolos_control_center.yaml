@@ -40,6 +40,19 @@ views:
             entity: sensor.poolos_last_plan
             name: Last Plan
       - type: grid
+        title: Behavioral Inference
+        cards:
+          - type: tile
+            entity: sensor.poolos_inferred_operating_state
+            name: Inferred Operating State
+          - type: entity
+            entity: sensor.poolos_solar_behavior_inference
+            name: Solar Behavior Inference
+          - type: markdown
+            content: >-
+              Behavioral inference is derived from recorded observations. It is not
+              an asserted IntelliCenter rule and does not provide control authority.
+      - type: grid
         title: Operator Recommendation
         cards:
           - type: entity

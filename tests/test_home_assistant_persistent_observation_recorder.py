@@ -18,9 +18,9 @@ def test_113b_files_and_adr_exist() -> None:
 
 def test_manifest_advances_to_070_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.7.0"
+    assert manifest["version"] == "0.8.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.7.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0"
     ]
     assert manifest["iot_class"] == "calculated"
 
@@ -80,5 +80,5 @@ def test_component_python_still_parses() -> None:
 def test_roadmap_marks_113b_done_and_113c_next() -> None:
     roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
     assert "| 11.3B | Persistent observation + event recorder | DONE |" in roadmap
-    assert "| 11.3C | Behavioral inference engine | PLANNED |" in roadmap
+    assert "| 11.3C | Behavioral inference engine | DONE |" in roadmap
     assert "unchanged 30-second polls" in roadmap

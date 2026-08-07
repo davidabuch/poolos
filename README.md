@@ -19,6 +19,7 @@ OBSERVE -> EVALUATE -> DECIDE -> EXPLAIN -> RECORD -> PUBLISH
 - Vendor-independent architecture
 - Canonical typed observation framework
 - Durable transition/checkpoint observation history for behavioral analysis
+- Behavioral inference with explicit confidence and raw-evidence provenance
 - Deterministic decision and planning layers
 - Runtime-mode safety boundary
 - Simulation-first development

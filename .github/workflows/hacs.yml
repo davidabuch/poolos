@@ -1,12 +1,17 @@
 name: HACS validation
 
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
   validate-hacs:
+    if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     steps:
       - name: HACS validation
