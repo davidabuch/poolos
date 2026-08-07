@@ -626,6 +626,7 @@ Status: complete pending local validation.
 | 11.2B | Operational intent arbitration | DONE |
 | 11.2C | Pump-operation optimization | DONE |
 | 11.2D | Operator recommendations | DONE |
+| 11.2E | End-to-end operational intelligence validation | DONE |
 
 ### Epic 11.2A — Canonical Operational Intent Model
 
@@ -680,3 +681,16 @@ Status: complete pending local validation.
 - publishes the latest available recommendation through one read-only Home Assistant diagnostic sensor and reports `NOT_AVAILABLE` when no recommendation exists;
 - labels recommendation evidence with `authority: none` and `command_delivery_enabled: false`;
 - performs no execution proposal, planning, Home Assistant service call, control entity creation, vendor request, or physical actuation.
+
+### Epic 11.2E — End-to-End Operational Intelligence Validation
+
+Status: complete pending local validation.
+
+- composes canonical intent arbitration, pump-operation optimization, and operator recommendation generation behind one deterministic read-only evaluation boundary;
+- preserves selected-intent identity from arbitration through optimization and recommendation;
+- preserves arbitration explanation, optimization rationale, recommendation rationale, and effective constraints as inspectable evidence;
+- validates recommended, no-action, conflict-suppressed, safety-priority, and infeasible/blocked outcomes across the full 11.2 chain;
+- serializes advisory evidence with `authority: none` and `command_delivery_enabled: false`;
+- relies on the existing 11.2D Home Assistant diagnostic exposure rather than creating a second publication path;
+- creates no command, execution proposal, execution plan, dispatch request, vendor translation, Home Assistant service call, or physical actuation path;
+- establishes the validation boundary required before live Home Assistant observation/shadow commissioning.
