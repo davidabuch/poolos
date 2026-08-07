@@ -41,6 +41,7 @@ class HomeAssistantState:
     state: str
     last_changed: datetime
     last_updated: datetime
+    last_reported: datetime | None = None
     attributes: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -49,6 +50,8 @@ class HomeAssistantState:
             raise HomeAssistantObservationError(
                 "Home Assistant timestamps must be timezone-aware"
             )
+        if self.last_reported is not None and self.last_reported.tzinfo is None:
+            raise HomeAssistantObservationError("last_reported must be timezone-aware")
         object.__setattr__(self, "entity_id", entity_id)
         object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
 
@@ -75,6 +78,11 @@ class HomeAssistantState:
             state=state,
             last_changed=_timestamp(last_changed, "last_changed"),
             last_updated=_timestamp(last_updated, "last_updated"),
+            last_reported=(
+                _timestamp(payload["last_reported"], "last_reported")
+                if payload.get("last_reported") is not None
+                else None
+            ),
             attributes=attributes,
         )
 
@@ -92,6 +100,7 @@ class HomeAssistantObservationBinding:
     source_id: str | None = None
     truth_level: TruthLevel = TruthLevel.MEASURED
     confidence: float = 1.0
+    value_map: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "entity_id", _entity_id(self.entity_id))
@@ -106,6 +115,11 @@ class HomeAssistantObservationBinding:
             object.__setattr__(self, "attribute", attribute)
         if self.source_id is not None and not self.source_id.strip():
             raise HomeAssistantObservationError("source_id must not be empty")
+        if self.value_map is not None:
+            normalized = {str(key).strip().lower(): value for key, value in self.value_map.items()}
+            if any(not key for key in normalized):
+                raise HomeAssistantObservationError("value_map keys must not be empty")
+            object.__setattr__(self, "value_map", MappingProxyType(normalized))
         if not 0.0 <= self.confidence <= 1.0:
             raise HomeAssistantObservationError("confidence must be between 0 and 1")
 
@@ -165,6 +179,10 @@ class HomeAssistantObservationMapper:
             if binding.attribute is not None
             else state.state
         )
+        if binding.value_map is not None and isinstance(raw_value, str):
+            mapped = binding.value_map.get(raw_value.strip().lower())
+            if mapped is not None:
+                raw_value = mapped
         quality = _quality(state.state, raw_value)
         value: Any = raw_value
         confidence = binding.confidence
@@ -182,7 +200,7 @@ class HomeAssistantObservationMapper:
             value=value,
             unit=binding.unit,
             truth_level=binding.truth_level,
-            observed_at=state.last_updated,
+            observed_at=state.last_reported or state.last_updated,
             source_kind=binding.source_kind,
             source_id=binding.resolved_source_id,
             quality=quality,

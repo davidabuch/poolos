@@ -775,3 +775,34 @@ Status: complete pending local validation.
 - advances the Home Assistant integration to `0.9.0` with matching future release tag `v0.9.0`;
 - completes the 11.3A-D pre-installation commissioning-development sequence while leaving repository publication and live Home Assistant installation as explicit operator decisions;
 - preserves OBSERVE/SHADOW mode, authority NONE, disabled command delivery, and no Home Assistant service-call or physical-actuation path.
+
+## PoolOS Live Observation Commissioning Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 11.4A | High-fidelity observation coverage + event-driven ingestion | DONE |
+
+### Epic 11.4A — High-Fidelity Observation Coverage + Event-Driven Ingestion
+
+Status: complete pending local validation.
+
+- expands commissioning evidence from the original ten concepts to physical, thermal, hydraulic,
+  electrical, equipment-outcome, command-context, and raw thermostat-controller observations;
+- derives pool/spa body-enabled state from thermostat `Status` and keeps that distinct from active
+  heating demand derived from `hvac_action`;
+- directly observes thermostat attributes including current temperature, target temperature,
+  `hvac_action`, `HEATER`, and `HTMODE` without requiring Home Assistant template sensors;
+- records actual pump RPM, GPM, watts, generic Pentair water temperature, roof/solar temperature,
+  ambient air temperature, solar engagement, and gas-heater activity as learning-critical evidence;
+- records pool/spa command state and optional Solar Preferred, waterfall/spillway, jets, and slide
+  context while deliberately excluding Pentair schedules and configured speed presets from the
+  learning contract;
+- subscribes to mapped Home Assistant state-change events for immediate observation and retains the
+  30-second coordinator interval solely as periodic reconciliation/recovery protection;
+- serializes event-triggered and reconciliation-triggered observation processing through one async
+  lock so disk recording and inference cannot race;
+- retains significance thresholds and five-minute checkpoints so high-frequency RPM/GPM/power
+  telemetry does not create unbounded recorder noise;
+- advances the Home Assistant integration to `0.10.0` with matching future tag `v0.10.0`;
+- preserves OBSERVE/SHADOW mode, authority NONE, disabled command delivery, no equipment-control
+  entities, and no Home Assistant service-call or physical-actuation path.

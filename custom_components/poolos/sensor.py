@@ -148,14 +148,14 @@ SENSORS = (
     PoolOSControlCenterSensorDescription(
         "commissioning_stage",
         "Commissioning Stage",
-        lambda coordinator, runtime: "PRE_INSTALL_READY",
+        lambda coordinator, runtime: "HIGH_FIDELITY_OBSERVATION_READY",
         lambda coordinator, runtime: {
             "completed_milestones": [
                 "11.1A", "11.1B", "11.1C", "11.1D", "11.1E",
                 "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
-                "11.3A", "11.3B", "11.3C", "11.3D",
+                "11.3A", "11.3B", "11.3C", "11.3D", "11.4A",
             ],
-            "next_stage": "HA_COMMISSIONING_DECISION",
+            "next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT",
             "authority_increase_requires_approval": True,
         },
         "mdi:progress-check",

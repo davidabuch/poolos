@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
-EXPECTED_VERSION = "0.9.0"
-EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
+EXPECTED_VERSION = "0.10.0"
+EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
 
 
 def _json(path: Path) -> dict[str, object]:
@@ -109,7 +109,7 @@ def test_commissioning_documentation_records_public_repo_and_no_actuation_bounda
     assert "repository to be public" in lowered
     assert "command delivery: disabled" in lowered
     assert "home assistant service calls: none" in lowered
-    assert "complete and merge\n11.3a through 11.3d first" in lowered
+    assert "complete and merge\n11.3a through 11.4a first" in lowered
 
 
 def test_adr_records_single_source_core_and_pinned_release_strategy() -> None:

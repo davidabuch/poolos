@@ -21,6 +21,7 @@ OBSERVE -> EVALUATE -> DECIDE -> EXPLAIN -> RECORD -> PUBLISH
 - Durable transition/checkpoint observation history for behavioral analysis
 - Behavioral inference with explicit confidence and raw-evidence provenance
 - Daily actual-operation retrospectives with evidence-bounded counterfactual comparison
+- High-fidelity event-driven Home Assistant observation with periodic reconciliation
 - Deterministic decision and planning layers
 - Runtime-mode safety boundary
 - Simulation-first development
@@ -120,6 +121,7 @@ Home Assistant-aware typing boundary may be added when integration deployment wo
 | Home Assistant observation/publication | Complete |
 | Persistent observation/event history | Complete |
 | Behavioral inference and daily retrospective | Complete |
+| High-fidelity event-driven HA observation | Complete |
 | IntelliCenter immutable read model | In development |
 | IntelliCenter Home Assistant deployment | Not yet installed |
 | Live automatic actuation | Disabled |

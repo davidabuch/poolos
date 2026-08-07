@@ -38,8 +38,12 @@ class ObservationSignificancePolicy:
     numeric_thresholds: Mapping[str, float] = field(
         default_factory=lambda: {
             "pump.rpm": 25.0,
+            "pump.gpm": 1.0,
             "pool.temperature": 0.1,
             "spa.temperature": 0.1,
+            "water.temperature": 0.1,
+            "pool.target_temperature": 0.1,
+            "spa.target_temperature": 0.1,
             "solar.temperature": 0.1,
             "air.temperature": 0.1,
             "pump.power": 50.0,

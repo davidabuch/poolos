@@ -22,9 +22,9 @@ def test_all_component_python_modules_parse() -> None:
 
 def test_manifest_advances_observation_bridge_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.9.0"
+    assert manifest["version"] == "0.10.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
     ]
     assert manifest["single_config_entry"] is True
 
@@ -32,16 +32,18 @@ def test_manifest_advances_observation_bridge_version() -> None:
 def test_config_flow_exposes_required_and_optional_entity_mappings() -> None:
     source = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
     for key in (
-        "CONF_POOL_ACTIVE_ENTITY",
-        "CONF_SPA_ACTIVE_ENTITY",
+        "CONF_POOL_THERMOSTAT_ENTITY",
+        "CONF_SPA_THERMOSTAT_ENTITY",
         "CONF_PUMP_RPM_ENTITY",
-        "CONF_POOL_TEMPERATURE_ENTITY",
-        "CONF_SPA_TEMPERATURE_ENTITY",
+        "CONF_PUMP_GPM_ENTITY",
+        "CONF_PUMP_POWER_ENTITY",
+        "CONF_WATER_TEMPERATURE_ENTITY",
         "CONF_HEATER_ACTIVE_ENTITY",
         "CONF_SOLAR_ACTIVE_ENTITY",
         "CONF_SOLAR_TEMPERATURE_ENTITY",
         "CONF_AIR_TEMPERATURE_ENTITY",
-        "CONF_PUMP_POWER_ENTITY",
+        "CONF_POOL_COMMAND_ENTITY",
+        "CONF_SPA_COMMAND_ENTITY",
     ):
         assert key in source
     assert "EntitySelector" in source

@@ -18,9 +18,9 @@ def test_113b_files_and_adr_exist() -> None:
 
 def test_manifest_advances_to_070_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.9.0"
+    assert manifest["version"] == "0.10.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.9.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
     ]
     assert manifest["iot_class"] == "calculated"
 
@@ -39,7 +39,7 @@ def test_solar_learning_inputs_are_available_as_optional_mappings() -> None:
     config_data = translation["config"]["step"]["user"]["data"]
     assert "solar_temperature_entity" in config_data
     assert "air_temperature_entity" in config_data
-    assert 'MINOR_VERSION = 2' in flow
+    assert 'VERSION = 2' in flow
     assert 'vol.Required(\n            CONF_DIAGNOSTICS_ENABLED,' in flow
 
 
