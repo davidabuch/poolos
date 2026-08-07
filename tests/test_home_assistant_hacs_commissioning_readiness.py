@@ -30,10 +30,11 @@ def test_repository_contains_exactly_one_hacs_integration() -> None:
 
 def test_manifest_is_hacs_complete_and_release_pinned() -> None:
     manifest = _json(COMPONENT / "manifest.json")
-    for key in ("domain", "documentation", "issue_tracker", "codeowners", "name", "version"):
+    for key in ("domain", "documentation", "issue_tracker", "codeowners", "name", "version", "iot_class"):
         assert key in manifest
     assert manifest["domain"] == "poolos"
     assert manifest["version"] == EXPECTED_VERSION
+    assert manifest["iot_class"] == "calculated"
     assert manifest["requirements"] == [EXPECTED_CORE_REQUIREMENT]
     assert "@main" not in EXPECTED_CORE_REQUIREMENT
 
