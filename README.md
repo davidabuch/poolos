@@ -18,6 +18,7 @@ OBSERVE -> EVALUATE -> DECIDE -> EXPLAIN -> RECORD -> PUBLISH
 
 - Vendor-independent architecture
 - Canonical typed observation framework
+- Durable transition/checkpoint observation history for behavioral analysis
 - Deterministic decision and planning layers
 - Runtime-mode safety boundary
 - Simulation-first development
@@ -115,6 +116,7 @@ Home Assistant-aware typing boundary may be added when integration deployment wo
 | Restart recovery and replay | Complete |
 | Runtime diagnostics and golden scenarios | Complete |
 | Home Assistant observation/publication | Complete |
+| Persistent observation/event history | Complete |
 | IntelliCenter immutable read model | In development |
 | IntelliCenter Home Assistant deployment | Not yet installed |
 | Live automatic actuation | Disabled |

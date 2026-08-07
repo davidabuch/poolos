@@ -8,8 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
-EXPECTED_VERSION = "0.6.0"
-EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0"
+EXPECTED_VERSION = "0.7.0"
+EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.7.0"
 
 
 def _json(path: Path) -> dict[str, object]:
@@ -113,6 +113,6 @@ def test_adr_records_single_source_core_and_pinned_release_strategy() -> None:
     adr = (ROOT / "docs" / "adr" / "ADR-083-hacs-packaging-and-safe-ha-commissioning.md").read_text(encoding="utf-8")
     lowered = adr.lower()
     assert "single-sourced" in lowered
-    assert EXPECTED_CORE_REQUIREMENT in adr
+    assert "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0" in adr
     assert "authority `none`" in lowered
     assert "command delivery disabled" in lowered

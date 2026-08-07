@@ -11,6 +11,12 @@ from .model import (
     PoolObservation,
     TruthLevel,
 )
+from .persistent import (
+    ObservationRetentionPolicy,
+    ObservationSignificancePolicy,
+    PersistentObservationRecorder,
+    RecordedObservationEvent,
+)
 from .store import (
     ObservationOutOfOrderError,
     ObservationSourceKey,
@@ -26,12 +32,16 @@ __all__ = [
     "Observation",
     "ObservationFreshness",
     "ObservationOutOfOrderError",
+    "ObservationRetentionPolicy",
+    "ObservationSignificancePolicy",
     "ObservationQuality",
     "ObservationSourceKey",
     "ObservationSourceKind",
     "ObservationStore",
     "ObservationStoreError",
     "ObservationTimestampConflictError",
+    "PersistentObservationRecorder",
     "PoolObservation",
+    "RecordedObservationEvent",
     "TruthLevel",
 ]

@@ -701,7 +701,7 @@ Status: complete pending local validation.
 | ID | Work item | Status |
 |---|---|---|
 | 11.3A | HACS packaging + safe HA commissioning readiness | DONE |
-| 11.3B | Persistent observation + event recorder | PLANNED |
+| 11.3B | Persistent observation + event recorder | DONE |
 | 11.3C | Behavioral inference engine | PLANNED |
 | 11.3D | Daily operational retrospective + counterfactual report | PLANNED |
 
@@ -726,3 +726,19 @@ Status: complete pending local validation.
   Home Assistant installation until 11.3A through 11.3D are complete;
 - adds no persistent observation recorder, behavioral inference, daily retrospective, command,
   execution proposal, execution plan, Home Assistant service call, or physical actuation path.
+
+
+### Epic 11.3B — Persistent Observation + Event Recorder
+
+Status: complete pending local validation.
+
+- adds a vendor-independent append-only persistent observation recorder with deterministic event identity and deterministic time-window querying;
+- writes an explicit baseline after recorder startup/restart, immediate significant transitions, observation-health transitions, and five-minute checkpoints;
+- suppresses unchanged 30-second polls rather than duplicating identical state to disk;
+- preserves raw canonical observation values together with units, timestamps, truth level, provenance, quality, confidence, and evidence for later inference;
+- adds optional `solar.temperature` and `air.temperature` Home Assistant mappings so solar/roof and ambient evidence can be learned without installation-specific hard-coding;
+- uses conservative numeric significance thresholds while periodic checkpoints preserve lower-amplitude trends and pump-power evidence;
+- stores UTC-day JSONL evidence with a default 35-day retention policy and prunes expired daily files during successful writes;
+- performs Home Assistant disk I/O through the executor and treats recorder write failures as non-fatal to observation/shadow evaluation;
+- exposes recorder health/counters through diagnostics without publishing raw historical values as Home Assistant entities;
+- preserves `OBSERVE`, authority `NONE`, command delivery disabled, and introduces no Home Assistant service call or physical actuation path.

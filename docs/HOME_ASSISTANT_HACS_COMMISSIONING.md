@@ -76,6 +76,7 @@ For each installable Home Assistant integration release:
 5. Never point the Home Assistant requirement at an unpinned branch such as `main`.
 
 Milestone 11.3A uses integration version `0.6.0` and tag `v0.6.0`.
+Milestone 11.3B advances the integration to `0.7.0`; after 11.3B is merged and green, create matching tag and release `v0.7.0` before any installation attempt.
 
 ## Validation
 

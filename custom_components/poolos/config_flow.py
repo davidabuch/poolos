@@ -11,6 +11,7 @@ import voluptuous as vol
 
 from .const import (
     ALL_ENTITY_OPTIONS,
+    CONF_AIR_TEMPERATURE_ENTITY,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_HEATER_ACTIVE_ENTITY,
     CONF_POOL_ACTIVE_ENTITY,
@@ -18,6 +19,7 @@ from .const import (
     CONF_PUMP_POWER_ENTITY,
     CONF_PUMP_RPM_ENTITY,
     CONF_SOLAR_ACTIVE_ENTITY,
+    CONF_SOLAR_TEMPERATURE_ENTITY,
     CONF_SPA_ACTIVE_ENTITY,
     CONF_SPA_TEMPERATURE_ENTITY,
     DEFAULT_DIAGNOSTICS_ENABLED,
@@ -91,6 +93,8 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
     optional = {
         CONF_HEATER_ACTIVE_ENTITY: ["binary_sensor", "climate", "switch"],
         CONF_SOLAR_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_SOLAR_TEMPERATURE_ENTITY: ["sensor"],
+        CONF_AIR_TEMPERATURE_ENTITY: ["sensor"],
         CONF_PUMP_POWER_ENTITY: ["sensor"],
     }
     fields: dict[vol.Marker, object] = {}
