@@ -19,12 +19,14 @@ from poolos.clock import FixedClock
 from poolos.observations import FreshnessPolicy
 
 from .const import (
+    CONF_AIR_TEMPERATURE_ENTITY,
     CONF_HEATER_ACTIVE_ENTITY,
     CONF_POOL_ACTIVE_ENTITY,
     CONF_POOL_TEMPERATURE_ENTITY,
     CONF_PUMP_POWER_ENTITY,
     CONF_PUMP_RPM_ENTITY,
     CONF_SOLAR_ACTIVE_ENTITY,
+    CONF_SOLAR_TEMPERATURE_ENTITY,
     CONF_SPA_ACTIVE_ENTITY,
     CONF_SPA_TEMPERATURE_ENTITY,
     OBSERVATION_STALE_AFTER,
@@ -42,6 +44,8 @@ class ObservationConcept(str, Enum):
     SPA_TEMPERATURE = "spa.temperature"
     HEATER_ACTIVE = "heater.active"
     SOLAR_ACTIVE = "solar.active"
+    SOLAR_TEMPERATURE = "solar.temperature"
+    AIR_TEMPERATURE = "air.temperature"
     PUMP_POWER = "pump.power"
 
 
@@ -64,6 +68,8 @@ MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
     EntityMappingSpec(CONF_SPA_TEMPERATURE_ENTITY, ObservationConcept.SPA_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True),
     EntityMappingSpec(CONF_HEATER_ACTIVE_ENTITY, ObservationConcept.HEATER_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
     EntityMappingSpec(CONF_SOLAR_ACTIVE_ENTITY, ObservationConcept.SOLAR_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
+    EntityMappingSpec(CONF_SOLAR_TEMPERATURE_ENTITY, ObservationConcept.SOLAR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", False),
+    EntityMappingSpec(CONF_AIR_TEMPERATURE_ENTITY, ObservationConcept.AIR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", False),
     EntityMappingSpec(CONF_PUMP_POWER_ENTITY, ObservationConcept.PUMP_POWER, HomeAssistantValueType.FLOAT, "W", False),
 )
 

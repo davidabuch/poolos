@@ -10,8 +10,8 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/davidabuch/poolos/issues",
   "requirements": [
-    "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0"
+    "poolos@git+https://github.com/davidabuch/poolos.git@v0.7.0"
   ],
   "single_config_entry": true,
-  "version": "0.6.0"
+  "version": "0.7.0"
 }

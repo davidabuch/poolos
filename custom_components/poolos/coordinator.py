@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from functools import partial
 import logging
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -11,10 +13,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from poolos.homeassistant.observations import HomeAssistantState
 from poolos.operator_recommendation import OperatorRecommendation
+from poolos.observations import PersistentObservationRecorder
 
 from .const import DOMAIN, INTEGRATION_VERSION, OBSERVATION_UPDATE_INTERVAL
 from .observation import ObservationSnapshot, build_snapshot, configured_entity_mapping
 from .shadow import HomeAssistantShadowRuntime
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
@@ -24,13 +29,15 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         """Initialize the read-only commissioning coordinator."""
         super().__init__(
             hass,
-            logger=logging.getLogger(__name__),
+            logger=LOGGER,
             name=f"{DOMAIN}_{entry.entry_id}",
             update_interval=OBSERVATION_UPDATE_INTERVAL,
         )
         self.config_entry = entry
         self.shadow_runtime = HomeAssistantShadowRuntime.create()
         self.operator_recommendation: OperatorRecommendation | None = None
+        history_root = Path(hass.config.path(".storage", DOMAIN, entry.entry_id, "observations"))
+        self.observation_recorder = PersistentObservationRecorder(history_root)
 
     async def _async_update_data(self) -> ObservationSnapshot:
         """Build a canonical snapshot from the current Home Assistant state machine."""
@@ -54,6 +61,23 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             now=datetime.now(UTC),
         )
         self.shadow_runtime.evaluate(snapshot)
+        health = {
+            "healthy": snapshot.healthy,
+            "missing_required": list(snapshot.missing_required),
+            "unavailable_entities": list(snapshot.unavailable_entities),
+            "stale_entities": list(snapshot.stale_entities),
+        }
+        try:
+            await self.hass.async_add_executor_job(
+                partial(
+                    self.observation_recorder.record_snapshot,
+                    recorded_at=snapshot.generated_at,
+                    observations=snapshot.observations,
+                    health=health,
+                )
+            )
+        except (OSError, TypeError, ValueError):
+            LOGGER.exception("PoolOS persistent observation recorder write failed")
         return snapshot
 
     def publish_operator_recommendation(self, recommendation: OperatorRecommendation | None) -> None:
@@ -72,6 +96,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "observation_healthy": None if snapshot is None else snapshot.healthy,
             "refreshed_at": None if snapshot is None else snapshot.generated_at.isoformat(),
             "shadow_runtime_enabled": True,
+            "persistent_observation_recorder": self.observation_recorder.diagnostics(),
             "shadow_runtime": self.shadow_runtime.diagnostics(),
             "operator_recommendation": (
                 None if self.operator_recommendation is None else self.operator_recommendation.to_dict()

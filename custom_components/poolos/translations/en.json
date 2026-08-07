@@ -13,6 +13,8 @@
           "spa_temperature_entity": "Spa temperature entity",
           "heater_active_entity": "Heater active entity (optional)",
           "solar_active_entity": "Solar active entity (optional)",
+          "solar_temperature_entity": "Solar/roof temperature entity (optional)",
+          "air_temperature_entity": "Air temperature entity (optional)",
           "pump_power_entity": "Pump power entity (optional)",
           "diagnostics_enabled": "Enable diagnostics"
         }
@@ -35,6 +37,8 @@
           "spa_temperature_entity": "Spa temperature entity",
           "heater_active_entity": "Heater active entity (optional)",
           "solar_active_entity": "Solar active entity (optional)",
+          "solar_temperature_entity": "Solar/roof temperature entity (optional)",
+          "air_temperature_entity": "Air temperature entity (optional)",
           "pump_power_entity": "Pump power entity (optional)",
           "diagnostics_enabled": "Enable diagnostics"
         }
