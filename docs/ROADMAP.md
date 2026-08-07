@@ -694,3 +694,35 @@ Status: complete pending local validation.
 - relies on the existing 11.2D Home Assistant diagnostic exposure rather than creating a second publication path;
 - creates no command, execution proposal, execution plan, dispatch request, vendor translation, Home Assistant service call, or physical actuation path;
 - establishes the validation boundary required before live Home Assistant observation/shadow commissioning.
+
+
+## PoolOS Historical Observation and HACS Commissioning Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 11.3A | HACS packaging + safe HA commissioning readiness | DONE |
+| 11.3B | Persistent observation + event recorder | PLANNED |
+| 11.3C | Behavioral inference engine | PLANNED |
+| 11.3D | Daily operational retrospective + counterfactual report | PLANNED |
+
+### Epic 11.3A — HACS Packaging + Safe HA Commissioning Readiness
+
+Status: complete pending local validation.
+
+- adds root-level HACS metadata and a repository brand icon using the standard single-integration
+  `custom_components/poolos` layout;
+- advances the Home Assistant integration to version `0.6.0`;
+- makes the HACS installation boundary explicit by pinning the vendor-independent PoolOS core
+  package to the matching immutable `v0.6.0` Git tag rather than assuming the repository checkout
+  exists on the Home Assistant host;
+- adds Hassfest validation and a manual HACS validation workflow while repository publication
+  remains an explicit commissioning decision;
+- documents the public-repository, release-tag, installation, verification, and rollback
+  requirements for eventual HACS commissioning;
+- adds structural safety tests that prohibit Home Assistant equipment service calls, control
+  platforms, service registration, authority increase, or command delivery in the commissioning
+  integration;
+- preserves the existing IntelliCenter integration as authoritative and explicitly defers live
+  Home Assistant installation until 11.3A through 11.3D are complete;
+- adds no persistent observation recorder, behavioral inference, daily retrospective, command,
+  execution proposal, execution plan, Home Assistant service call, or physical actuation path.

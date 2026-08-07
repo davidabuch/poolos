@@ -23,8 +23,10 @@ def test_component_modules_parse() -> None:
 
 def test_manifest_advances_shadow_runtime_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.5.0"
-    assert manifest["requirements"] == []
+    assert manifest["version"] == "0.6.0"
+    assert manifest["requirements"] == [
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0"
+    ]
 
 
 def test_coordinator_evaluates_shadow_after_snapshot() -> None:

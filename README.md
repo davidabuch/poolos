@@ -67,6 +67,18 @@ be installed as:
 
 See `docs/INTELLICENTER_DEPLOYMENT.md` for the planned deployment boundary.
 
+
+## Home Assistant / HACS commissioning
+
+PoolOS now has HACS-ready repository packaging for its read-only Home Assistant integration.
+This does **not** enable live control. The integration remains `OBSERVE` / `SHADOW`, authority is
+`NONE`, and command delivery is disabled.
+
+HACS installation requires this GitHub repository to be public and requires a matching release
+tag for the pinned PoolOS core dependency. Live Home Assistant installation is intentionally
+deferred until milestones 11.3A through 11.3D are complete. See
+`docs/HOME_ASSISTANT_HACS_COMMISSIONING.md` for the commissioning sequence and rollback boundary.
+
 ## Development
 
 Clone the repository:
@@ -148,5 +160,5 @@ Review `git diff` and confirm GitHub Actions is green before merging or deployin
 ## License
 
 PoolOS is currently marked proprietary while private development continues. No public-use license
-has been granted yet. Licensing must be selected and documented before the repository is made
-public or distributed through HACS.
+has been granted yet. Licensing remains proprietary during private development. Repository publication is an explicit
+release decision required before HACS installation; publication does not grant a public-use license.
