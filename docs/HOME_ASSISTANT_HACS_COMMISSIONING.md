@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.6.0
+poolos@git+https://github.com/davidabuch/poolos.git@v0.8.0
 ```
 
 This means the `v0.6.0` Git tag must exist before version 0.6.0 can be installed in Home Assistant.
@@ -76,7 +76,8 @@ For each installable Home Assistant integration release:
 5. Never point the Home Assistant requirement at an unpinned branch such as `main`.
 
 Milestone 11.3A uses integration version `0.6.0` and tag `v0.6.0`.
-Milestone 11.3B advances the integration to `0.7.0`; after 11.3B is merged and green, create matching tag and release `v0.7.0` before any installation attempt.
+Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
+Milestone 11.3C advances the integration to `0.8.0`; after 11.3C is merged and green, create matching tag and release `v0.8.0` before any installation attempt.
 
 ## Validation
 
@@ -84,12 +85,12 @@ The repository provides three complementary validation layers:
 
 - existing PoolOS CI for Python tests, Ruff, MyPy, and source compilation;
 - Hassfest validation for current Home Assistant custom-integration metadata and structure;
-- HACS validation, available as a manual GitHub workflow while repository publication remains an
-  explicit commissioning decision.
+- HACS validation on pull requests, pushes to `main`, and manual dispatch. Repository publication
+  remains an explicit commissioning decision.
 
-The HACS workflow is intentionally `workflow_dispatch` only during private development. Once the
-repository is public and HACS commissioning begins, it can be promoted to normal push/pull-request
-validation in a later commissioning milestone.
+As of 11.3C the HACS workflow runs automatically on pull requests and pushes to `main` in addition
+to manual dispatch. The repository remains private during development; successful workflow execution
+does not change the separate requirement to make the repository public before actual HACS installation.
 
 ## Installation sequence after 11.3D
 

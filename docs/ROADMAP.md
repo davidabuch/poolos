@@ -702,7 +702,7 @@ Status: complete pending local validation.
 |---|---|---|
 | 11.3A | HACS packaging + safe HA commissioning readiness | DONE |
 | 11.3B | Persistent observation + event recorder | DONE |
-| 11.3C | Behavioral inference engine | PLANNED |
+| 11.3C | Behavioral inference engine | DONE |
 | 11.3D | Daily operational retrospective + counterfactual report | PLANNED |
 
 ### Epic 11.3A — HACS Packaging + Safe HA Commissioning Readiness
@@ -742,3 +742,19 @@ Status: complete pending local validation.
 - performs Home Assistant disk I/O through the executor and treats recorder write failures as non-fatal to observation/shadow evaluation;
 - exposes recorder health/counters through diagnostics without publishing raw historical values as Home Assistant entities;
 - preserves `OBSERVE`, authority `NONE`, command delivery disabled, and introduces no Home Assistant service call or physical actuation path.
+
+
+### Epic 11.3C — Behavioral Inference Engine
+
+Status: complete pending local validation.
+
+- adds a vendor-independent behavioral inference engine over durable 11.3B observation events;
+- keeps measured observations separate from inferred operating state and inferred transition events;
+- preserves exact durable-event provenance and deterministic inference identity;
+- identifies pump start behavior and infers priming only when startup evidence shows a meaningful RPM peak followed by a bounded settling transition;
+- classifies current operation as stopped, starting, filtering, solar assist, heating, spa, idle, or unknown without issuing commands;
+- captures solar activation/deactivation context including roof temperature, pool temperature, differential, and observed pump RPM when available;
+- aggregates repeated solar cycles into provisional activation/deactivation differential and hysteresis evidence with explicit confidence;
+- exposes read-only inferred operating state and solar behavior assessment in the PoolOS Control Center;
+- promotes HACS validation to automatic pull-request and `main` push validation while preserving manual dispatch;
+- keeps repository publication as a separate commissioning decision and preserves OBSERVE/SHADOW mode, authority NONE, and disabled command delivery.

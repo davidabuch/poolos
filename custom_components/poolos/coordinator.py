@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 import logging
 from pathlib import Path
@@ -11,9 +11,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from poolos.behavioral_inference import BehavioralInferenceEngine, BehavioralInferenceReport
 from poolos.homeassistant.observations import HomeAssistantState
 from poolos.operator_recommendation import OperatorRecommendation
-from poolos.observations import PersistentObservationRecorder
+from poolos.observations import PersistentObservationRecorder, PoolObservation
 
 from .const import DOMAIN, INTEGRATION_VERSION, OBSERVATION_UPDATE_INTERVAL
 from .observation import ObservationSnapshot, build_snapshot, configured_entity_mapping
@@ -36,6 +37,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.config_entry = entry
         self.shadow_runtime = HomeAssistantShadowRuntime.create()
         self.operator_recommendation: OperatorRecommendation | None = None
+        self.behavioral_inference_engine = BehavioralInferenceEngine()
+        self.behavioral_inference_report: BehavioralInferenceReport | None = None
         history_root = Path(hass.config.path(".storage", DOMAIN, entry.entry_id, "observations"))
         self.observation_recorder = PersistentObservationRecorder(history_root)
 
@@ -68,17 +71,39 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "stale_entities": list(snapshot.stale_entities),
         }
         try:
-            await self.hass.async_add_executor_job(
+            report = await self.hass.async_add_executor_job(
                 partial(
-                    self.observation_recorder.record_snapshot,
+                    self._record_and_infer,
                     recorded_at=snapshot.generated_at,
                     observations=snapshot.observations,
                     health=health,
                 )
             )
+            if report is not None:
+                self.behavioral_inference_report = report
         except (OSError, TypeError, ValueError):
-            LOGGER.exception("PoolOS persistent observation recorder write failed")
+            LOGGER.exception("PoolOS persistent observation/inference update failed")
         return snapshot
+
+    def _record_and_infer(
+        self,
+        *,
+        recorded_at: datetime,
+        observations: tuple[PoolObservation, ...],
+        health: dict[str, object],
+    ) -> BehavioralInferenceReport | None:
+        """Persist evidence and refresh inference only when durable history changes."""
+
+        wrote = self.observation_recorder.record_snapshot(
+            recorded_at=recorded_at,
+            observations=observations,
+            health=health,
+        )
+        if not wrote:
+            return None
+        start = recorded_at - timedelta(days=7)
+        records = self.observation_recorder.query(start=start, end=recorded_at + timedelta(microseconds=1))
+        return self.behavioral_inference_engine.infer(records)
 
     def publish_operator_recommendation(self, recommendation: OperatorRecommendation | None) -> None:
         """Publish read-only recommendation evidence for diagnostic presentation."""
@@ -97,6 +122,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "refreshed_at": None if snapshot is None else snapshot.generated_at.isoformat(),
             "shadow_runtime_enabled": True,
             "persistent_observation_recorder": self.observation_recorder.diagnostics(),
+            "behavioral_inference": (
+                None if self.behavioral_inference_report is None else self.behavioral_inference_report.to_dict()
+            ),
             "shadow_runtime": self.shadow_runtime.diagnostics(),
             "operator_recommendation": (
                 None if self.operator_recommendation is None else self.operator_recommendation.to_dict()
