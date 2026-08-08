@@ -31,7 +31,6 @@ def test_sensor_module_parses_and_declares_read_only_diagnostics() -> None:
     assert "command_delivery_enabled" in source
 
 
-
 def test_observation_health_exposes_actionable_snapshot_diagnostics() -> None:
     source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
     for field in (
@@ -43,6 +42,7 @@ def test_observation_health_exposes_actionable_snapshot_diagnostics() -> None:
     ):
         assert field in source
     assert 'diagnostics.get("issues", [])' not in source
+
 
 def test_integration_forwards_only_sensor_platform() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")

@@ -122,3 +122,43 @@ def test_114a_component_python_parses_and_roadmap_records_milestone() -> None:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
     assert "| 11.4A | High-fidelity observation coverage + event-driven ingestion | DONE |" in roadmap
+
+
+def test_freshness_is_state_aware_for_idle_circulation_telemetry() -> None:
+    source = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    assert "def _freshness_required_now(" in source
+    assert "circulation_expected = any(" in source
+    assert "ObservationConcept.POOL_COMMAND_ACTIVE" in source
+    assert "ObservationConcept.SPA_COMMAND_ACTIVE" in source
+    assert "ObservationConcept.WATERFALL_ACTIVE" in source
+    assert "ObservationConcept.JETS_ACTIVE" in source
+    assert "ObservationConcept.SLIDE_ACTIVE" in source
+    assert "if concept is ObservationConcept.POOL_TEMPERATURE:" in source
+    assert "return pool_active" in source
+    assert "if concept is ObservationConcept.SPA_TEMPERATURE:" in source
+    assert "return spa_active" in source
+    for concept in (
+        "ObservationConcept.PUMP_RPM",
+        "ObservationConcept.PUMP_GPM",
+        "ObservationConcept.PUMP_POWER",
+        "ObservationConcept.WATER_TEMPERATURE",
+    ):
+        assert concept in source
+    assert "return circulation_expected" in source
+
+
+def test_idle_retained_values_are_not_globally_declared_stale_by_static_policy() -> None:
+    source = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    assert "freshness_candidates" in source
+    assert "_freshness_required_now(spec.concept, observation_values)" in source
+    assert "if not _freshness_required_now" in source
+
+
+def test_environmental_probe_age_does_not_fail_global_health() -> None:
+    source = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    solar_line = next(line for line in source.splitlines() if "CONF_SOLAR_TEMPERATURE_ENTITY" in line and "EntityMappingSpec" in line)
+    air_line = next(line for line in source.splitlines() if "CONF_AIR_TEMPERATURE_ENTITY" in line and "EntityMappingSpec" in line)
+    assert "freshness_required=True" not in solar_line
+    assert "freshness_required=True" not in air_line
+    assert 'ObservationConcept.SOLAR_TEMPERATURE' in solar_line
+    assert 'ObservationConcept.AIR_TEMPERATURE' in air_line
