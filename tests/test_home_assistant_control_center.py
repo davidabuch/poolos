@@ -24,7 +24,7 @@ def test_sensor_module_parses_and_declares_read_only_diagnostics() -> None:
         "shadow_runtime_status", "last_evaluation", "last_plan",
         "current_objective", "inferred_operating_state", "solar_behavior_inference",
         "daily_operational_retrospective", "daily_counterfactual_report",
-        "operator_recommendation", "last_explanation",
+        "operator_recommendation", "recorder_status", "last_explanation",
     ):
         assert f'"{key}"' in source
     assert "EntityCategory.DIAGNOSTIC" in source
@@ -62,21 +62,23 @@ def test_manifest_advances_control_center_version() -> None:
 
 def test_dashboard_is_valid_and_read_only() -> None:
     dashboard = yaml.safe_load(DASHBOARD.read_text(encoding="utf-8"))
-    assert dashboard["title"] == "PoolOS Control Center"
+    assert dashboard["title"] == "PoolOS Operations Center"
     text = DASHBOARD.read_text(encoding="utf-8")
     for entity in (
-        "sensor.poolos_operating_mode", "sensor.poolos_commissioning_stage",
-        "sensor.poolos_observation_health", "sensor.poolos_shadow_runtime_status",
-        "sensor.poolos_last_evaluation", "sensor.poolos_current_objective",
-        "sensor.poolos_last_plan", "sensor.poolos_inferred_operating_state",
-        "sensor.poolos_solar_behavior_inference",
-        "sensor.poolos_daily_operational_retrospective",
-        "sensor.poolos_daily_counterfactual_report",
-        "sensor.poolos_operator_recommendation", "sensor.poolos_last_explanation",
+        "sensor.poolos_control_center_operating_mode", "sensor.poolos_control_center_commissioning_stage",
+        "sensor.poolos_control_center_observation_health", "sensor.poolos_control_center_shadow_runtime_status",
+        "sensor.poolos_control_center_last_evaluation", "sensor.poolos_control_center_current_shadow_objective",
+        "sensor.poolos_control_center_last_shadow_plan", "sensor.poolos_control_center_inferred_operating_state",
+        "sensor.poolos_control_center_solar_behavior_inference",
+        "sensor.poolos_control_center_daily_operational_retrospective",
+        "sensor.poolos_control_center_daily_counterfactual_report",
+        "sensor.poolos_control_center_operator_recommendation", "sensor.poolos_control_center_last_shadow_explanation",
     ):
         assert entity in text
     for prohibited in ("button.", "switch.", "service:", "tap_action:"):
         assert prohibited not in text
+    assert "sensor.poolos_observation_health" not in text
+    assert "sensor.poolos_pump_rpm" not in text
 
 
 def test_control_center_adds_no_actuating_platform() -> None:

@@ -57,8 +57,8 @@ def test_control_center_exposes_daily_actual_and_counterfactual_read_only() -> N
     assert "pump_energy_kwh" in source
     assert "exact_differences" not in source or "counterfactual.to_dict" in source
     dashboard = (ROOT / "dashboards" / "poolos_control_center.yaml").read_text(encoding="utf-8")
-    assert "sensor.poolos_daily_operational_retrospective" in dashboard
-    assert "sensor.poolos_daily_counterfactual_report" in dashboard
+    assert "sensor.poolos_control_center_daily_operational_retrospective" in dashboard
+    assert "sensor.poolos_control_center_daily_counterfactual_report" in dashboard
     assert "No actuation occurs" in dashboard
 
 

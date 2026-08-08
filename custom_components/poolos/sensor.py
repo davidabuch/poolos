@@ -144,6 +144,51 @@ def _shadow_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeDat
     }
 
 
+def _observation_value(coordinator: PoolOSCoordinator, observation_id: str) -> Any:
+    snapshot = coordinator.data
+    if snapshot is None:
+        return None
+    for observation in snapshot.observations:
+        if observation.observation_id == observation_id:
+            return observation.value
+    return None
+
+
+def _recorder_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+    return {
+        **coordinator.observation_recorder.diagnostics(),
+        **coordinator.evidence_exporter.diagnostics(),
+        "authority": "none",
+        "command_delivery_enabled": False,
+    }
+
+
+TELEMETRY = (
+    ("pool_active", "Pool Active", "pool.active", "mdi:pool"),
+    ("spa_active", "Spa Active", "spa.active", "mdi:hot-tub"),
+    ("pool_command_active", "Pool Command Active", "pool.command_active", "mdi:toggle-switch-outline"),
+    ("spa_command_active", "Spa Command Active", "spa.command_active", "mdi:toggle-switch-outline"),
+    ("pump_rpm", "Pump RPM", "pump.rpm", "mdi:pump"),
+    ("pump_gpm", "Pump GPM", "pump.gpm", "mdi:waves-arrow-right"),
+    ("pump_power", "Pump Power", "pump.power", "mdi:flash"),
+    ("pool_temperature", "Pool Temperature", "pool.temperature", "mdi:thermometer-water"),
+    ("pool_target_temperature", "Pool Target Temperature", "pool.target_temperature", "mdi:thermometer-check"),
+    ("spa_temperature", "Spa Temperature", "spa.temperature", "mdi:thermometer-water"),
+    ("spa_target_temperature", "Spa Target Temperature", "spa.target_temperature", "mdi:thermometer-check"),
+    ("water_temperature", "Water Temperature", "water.temperature", "mdi:coolant-temperature"),
+    ("solar_temperature", "Solar Roof Temperature", "solar.temperature", "mdi:solar-power"),
+    ("air_temperature", "Air Temperature", "air.temperature", "mdi:thermometer"),
+    ("solar_active", "Solar Active", "solar.active", "mdi:solar-panel-large"),
+    ("heater_active", "Gas Heater Active", "heater.active", "mdi:fire"),
+    ("pool_heating_demand", "Pool Heating Demand", "pool.heating_demand_active", "mdi:heat-wave"),
+    ("spa_heating_demand", "Spa Heating Demand", "spa.heating_demand_active", "mdi:heat-wave"),
+    ("solar_preferred_active", "Solar Preferred", "solar_preferred.active", "mdi:sun-compass"),
+    ("waterfall_active", "Waterfall Active", "waterfall.active", "mdi:waterfall"),
+    ("jets_active", "Jets Active", "jets.active", "mdi:weather-windy"),
+    ("slide_active", "Slide Active", "slide.active", "mdi:slide"),
+)
+
+
 SENSORS = (
     PoolOSControlCenterSensorDescription(
         "operating_mode",
@@ -271,6 +316,13 @@ SENSORS = (
         "mdi:account-eye-outline",
     ),
     PoolOSControlCenterSensorDescription(
+        "recorder_status",
+        "Recorder Status",
+        lambda coordinator, runtime: "ERROR" if coordinator.evidence_exporter.last_error else "RECORDING",
+        _recorder_attributes,
+        "mdi:file-chart-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
         "last_explanation",
         "Last Shadow Explanation",
         lambda coordinator, runtime: _shadow(coordinator).get("summary") or "No evaluation available",
@@ -280,6 +332,11 @@ SENSORS = (
         },
         "mdi:text-box-search-outline",
     ),
+) + tuple(
+    PoolOSControlCenterSensorDescription(
+        key, name, lambda coordinator, runtime, observation_id=observation_id: _observation_value(coordinator, observation_id), icon=icon
+    )
+    for key, name, observation_id, icon in TELEMETRY
 )
 
 
