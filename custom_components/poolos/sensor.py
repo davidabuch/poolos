@@ -60,6 +60,14 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
 
 
 
+def _health_incident_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    """Expose the current-session health incident latch."""
+
+    return coordinator.health_incident_diagnostics()
+
+
 def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     report = coordinator.behavioral_inference_report
     if report is None:
@@ -247,6 +255,17 @@ SENSORS = (
         ),
         _snapshot_attributes,
         "mdi:heart-pulse",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "health_incident_since_restart",
+        "Health Incident Since Restart",
+        lambda coordinator, runtime: (
+            "UNHEALTHY SEEN"
+            if coordinator.health_incident_diagnostics()["unhealthy_seen_since_start"]
+            else "OK"
+        ),
+        _health_incident_attributes,
+        "mdi:alert-circle-check-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "shadow_runtime_status",

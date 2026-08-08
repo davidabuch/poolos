@@ -21,6 +21,7 @@ def test_sensor_module_parses_and_declares_read_only_diagnostics() -> None:
     ast.parse(source)
     for key in (
         "operating_mode", "commissioning_stage", "observation_health",
+        "health_incident_since_restart",
         "shadow_runtime_status", "last_evaluation", "last_plan",
         "current_objective", "inferred_operating_state", "solar_behavior_inference",
         "daily_operational_retrospective", "daily_counterfactual_report",
@@ -66,7 +67,8 @@ def test_dashboard_is_valid_and_read_only() -> None:
     text = DASHBOARD.read_text(encoding="utf-8")
     for entity in (
         "sensor.poolos_control_center_operating_mode", "sensor.poolos_control_center_commissioning_stage",
-        "sensor.poolos_control_center_observation_health", "sensor.poolos_control_center_shadow_runtime_status",
+        "sensor.poolos_control_center_observation_health", "sensor.poolos_control_center_health_incident_since_restart",
+        "sensor.poolos_control_center_shadow_runtime_status",
         "sensor.poolos_control_center_last_evaluation", "sensor.poolos_control_center_current_shadow_objective",
         "sensor.poolos_control_center_last_shadow_plan", "sensor.poolos_control_center_inferred_operating_state",
         "sensor.poolos_control_center_solar_behavior_inference",
@@ -110,3 +112,21 @@ def test_control_center_normalizes_boolean_and_pool_light_display_values() -> No
     assert 'if light_active is False:' in source
     assert 'return "OFF"' in source
     assert '_display_observation_value(coordinator, observation_id)' in source
+
+
+def test_health_incident_since_restart_is_latched_and_diagnostic() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+    sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+    dashboard = DASHBOARD.read_text(encoding="utf-8")
+
+    assert 'self._unhealthy_seen_since_start = False' in coordinator
+    assert 'if not snapshot.healthy:' in coordinator
+    assert 'self._unhealthy_seen_since_start = True' in coordinator
+    assert 'def health_incident_diagnostics' in coordinator
+    assert '"last_unhealthy_at"' in coordinator
+    assert '"last_unhealthy_missing_required"' in coordinator
+    assert '"last_unhealthy_unavailable_entities"' in coordinator
+    assert '"health_incident_since_restart"' in sensor
+    assert '"UNHEALTHY SEEN"' in sensor
+    assert 'else "OK"' in sensor
+    assert "sensor.poolos_control_center_health_incident_since_restart" in dashboard

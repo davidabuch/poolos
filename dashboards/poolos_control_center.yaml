@@ -19,6 +19,9 @@ views:
             entity: sensor.poolos_control_center_observation_health
             name: Observation Health
           - type: tile
+            entity: sensor.poolos_control_center_health_incident_since_restart
+            name: Health Incident Since Restart
+          - type: tile
             entity: sensor.poolos_control_center_inferred_operating_state
             name: Inferred State
           - type: tile
