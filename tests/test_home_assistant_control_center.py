@@ -12,6 +12,7 @@ DASHBOARD = ROOT / "dashboards" / "poolos_control_center.yaml"
 
 def test_control_center_files_exist() -> None:
     assert (COMPONENT / "sensor.py").is_file()
+    assert (COMPONENT / "button.py").is_file()
     assert DASHBOARD.is_file()
     assert (ROOT / "docs" / "adr" / "ADR-077-poolos-control-center.md").is_file()
 
@@ -45,10 +46,10 @@ def test_observation_health_exposes_actionable_snapshot_diagnostics() -> None:
     assert 'diagnostics.get("issues", [])' not in source
 
 
-def test_integration_forwards_only_sensor_platform() -> None:
+def test_integration_forwards_only_control_center_platforms() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")
     init = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("sensor",)' in const
+    assert 'PLATFORMS = ("sensor", "button")' in const
     assert "async_forward_entry_setups(entry, PLATFORMS)" in init
     assert "async_unload_platforms(entry, PLATFORMS)" in init
 
@@ -80,14 +81,16 @@ def test_dashboard_is_valid_and_read_only() -> None:
         "sensor.poolos_control_center_pool_light_scene_effect",
     ):
         assert entity in text
-    for prohibited in ("button.", "switch.", "service:", "tap_action:"):
+    assert "button.poolos_control_center_reset_health_incident" in text
+    assert "perform_action: button.press" in text
+    for prohibited in ("switch.", "service:"):
         assert prohibited not in text
     assert "sensor.poolos_observation_health" not in text
     assert "sensor.poolos_pump_rpm" not in text
 
 
-def test_control_center_adds_no_actuating_platform() -> None:
-    prohibited = {"switch.py", "button.py", "number.py", "select.py", "climate.py", "services.yaml"}
+def test_control_center_adds_no_equipment_actuating_platform() -> None:
+    prohibited = {"switch.py", "number.py", "select.py", "climate.py", "services.yaml"}
     assert not any((COMPONENT / name).exists() for name in prohibited)
 
 
@@ -120,7 +123,7 @@ def test_health_incident_since_restart_is_latched_and_diagnostic() -> None:
     dashboard = DASHBOARD.read_text(encoding="utf-8")
 
     assert 'self._unhealthy_seen_since_start = False' in coordinator
-    assert 'if not snapshot.healthy:' in coordinator
+    assert 'if not snapshot.healthy and not self.in_startup_health_grace(observed_at):' in coordinator
     assert 'self._unhealthy_seen_since_start = True' in coordinator
     assert 'def health_incident_diagnostics' in coordinator
     assert '"last_unhealthy_at"' in coordinator
@@ -128,5 +131,35 @@ def test_health_incident_since_restart_is_latched_and_diagnostic() -> None:
     assert '"last_unhealthy_unavailable_entities"' in coordinator
     assert '"health_incident_since_restart"' in sensor
     assert '"UNHEALTHY SEEN"' in sensor
-    assert 'else "OK"' in sensor
+    assert 'else "NO INCIDENTS"' in sensor
     assert "sensor.poolos_control_center_health_incident_since_restart" in dashboard
+
+
+def test_startup_health_grace_suppresses_transient_incident_latching() -> None:
+    const = (COMPONENT / "const.py").read_text(encoding="utf-8")
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+    sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+
+    assert "STARTUP_HEALTH_GRACE = timedelta(seconds=60)" in const
+    assert "self._startup_health_grace_until" in coordinator
+    assert "def in_startup_health_grace" in coordinator
+    assert "def observation_health_state" in coordinator
+    assert 'return "INITIALIZING"' in coordinator
+    assert "not self.in_startup_health_grace(observed_at)" in coordinator
+    assert "startup_grace_active" in sensor
+
+
+def test_health_incident_latch_has_non_actuating_manual_reset() -> None:
+    button = (COMPONENT / "button.py").read_text(encoding="utf-8")
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+    dashboard = DASHBOARD.read_text(encoding="utf-8")
+
+    assert "def reset_health_incident_latch" in coordinator
+    assert 'self.observation_health_state() != "HEALTHY"' in coordinator
+    assert "self._unhealthy_seen_since_start = False" in coordinator
+    assert '"tracking_since"' in coordinator
+    assert "PoolOSResetHealthIncidentButton" in button
+    assert "self.coordinator.reset_health_incident_latch()" in button
+    assert "services.async_call" not in button
+    assert "button.poolos_control_center_reset_health_incident" in dashboard
+    assert "Health Incident Since Reset" in dashboard

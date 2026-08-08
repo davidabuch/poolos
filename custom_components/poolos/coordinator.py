@@ -25,7 +25,12 @@ from poolos.homeassistant.observations import HomeAssistantState
 from poolos.operator_recommendation import OperatorRecommendation
 from poolos.observations import PersistentObservationRecorder, PoolObservation
 
-from .const import DOMAIN, INTEGRATION_VERSION, OBSERVATION_UPDATE_INTERVAL
+from .const import (
+    DOMAIN,
+    INTEGRATION_VERSION,
+    OBSERVATION_UPDATE_INTERVAL,
+    STARTUP_HEALTH_GRACE,
+)
 from poolos.evidence_export import DailyEvidenceExporter
 from .observation import (
     ObservationSnapshot,
@@ -68,6 +73,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._event_refresh_count = 0
         self._reconciliation_refresh_count = 0
         self._last_observation_trigger = "not_started"
+        self._started_at = datetime.now(UTC)
+        self._startup_health_grace_until = self._started_at + STARTUP_HEALTH_GRACE
+        self._health_incident_tracking_since = self._started_at
         self._unhealthy_seen_since_start = False
         self._last_unhealthy_at: datetime | None = None
         self._last_unhealthy_missing_required: tuple[str, ...] = ()
@@ -146,7 +154,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             now=observed_at,
         )
         self._last_observation_trigger = trigger
-        if not snapshot.healthy:
+        if not snapshot.healthy and not self.in_startup_health_grace(observed_at):
             self._unhealthy_seen_since_start = True
             self._last_unhealthy_at = snapshot.generated_at
             self._last_unhealthy_missing_required = snapshot.missing_required
@@ -283,11 +291,46 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.operator_recommendation = recommendation
         self.operator_recommendation_published_at = (published_at or datetime.now(UTC)).astimezone(UTC)
 
+    def in_startup_health_grace(self, at: datetime | None = None) -> bool:
+        """Return whether PoolOS is still allowing HA integrations to initialize."""
+
+        current = (at or datetime.now(UTC)).astimezone(UTC)
+        return current < self._startup_health_grace_until
+
+    def observation_health_state(self) -> str:
+        """Return operator-facing health with startup initialization semantics."""
+
+        snapshot = self.data
+        if snapshot is None:
+            return "INITIALIZING"
+        if snapshot.healthy:
+            return "HEALTHY"
+        if self.in_startup_health_grace():
+            return "INITIALIZING"
+        return "UNHEALTHY"
+
+    def reset_health_incident_latch(self) -> bool:
+        """Clear acknowledged health-incident history without affecting equipment."""
+
+        if self.observation_health_state() != "HEALTHY":
+            return False
+        reset_at = datetime.now(UTC)
+        self._health_incident_tracking_since = reset_at
+        self._unhealthy_seen_since_start = False
+        self._last_unhealthy_at = None
+        self._last_unhealthy_missing_required = ()
+        self._last_unhealthy_unavailable_entities = ()
+        self.async_update_listeners()
+        return True
+
     def health_incident_diagnostics(self) -> dict[str, object]:
         """Return latched unhealthy-state history for the current integration session."""
 
         return {
             "unhealthy_seen_since_start": self._unhealthy_seen_since_start,
+            "tracking_since": self._health_incident_tracking_since.isoformat(),
+            "startup_grace_active": self.in_startup_health_grace(),
+            "startup_grace_until": self._startup_health_grace_until.isoformat(),
             "last_unhealthy_at": (
                 None if self._last_unhealthy_at is None else self._last_unhealthy_at.isoformat()
             ),
@@ -312,6 +355,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "last_observation_trigger": self._last_observation_trigger,
             "command_delivery_enabled": False,
             "observation_healthy": None if snapshot is None else snapshot.healthy,
+            "observation_health_state": self.observation_health_state(),
+            "startup_health_grace_active": self.in_startup_health_grace(),
+            "startup_health_grace_until": self._startup_health_grace_until.isoformat(),
             "refreshed_at": None if snapshot is None else snapshot.generated_at.isoformat(),
             "shadow_runtime_enabled": True,
             "persistent_observation_recorder": self.observation_recorder.diagnostics(),
