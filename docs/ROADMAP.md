@@ -783,6 +783,7 @@ Status: complete pending local validation.
 | 11.4A | High-fidelity observation coverage + event-driven ingestion | DONE |
 | 11.4B | Local Home Assistant commissioning package | DONE |
 | 11.4C | Operations Center dashboard + daily evidence export | DONE |
+| 11.4D | Powerwall grid observation + outage evidence | DONE |
 
 ### Epic 11.4A — High-Fidelity Observation Coverage + Event-Driven Ingestion
 
@@ -829,3 +830,23 @@ Status: complete pending local validation.
 - Exports each local calendar day automatically to `/config/poolos_logs/` as JSONL and flattened CSV.
 - Keeps the append-only recorder under `.storage` as canonical durable evidence.
 - Exposes recorder/export health without increasing authority or enabling command delivery.
+
+### Epic 11.4D — Powerwall Grid Observation + Outage Evidence
+
+Status: complete.
+
+- maps `binary_sensor.1_powerwall_grid_status` through the existing read-only entity-selection flow;
+- records canonical `grid.available` and inverse `grid.outage_active` observations from the same source of truth;
+- exposes both grid states in the PoolOS Operations Center;
+- includes both grid fields in daily JSONL/CSV evidence for outage timeline analysis;
+- establishes the observation input for a future 1800 RPM outage circulation ceiling and nonessential-load shedding;
+- adds no command authority, Home Assistant service call, or physical equipment actuation.
+
+
+### 11.4D commissioning follow-on — Pool light observation
+
+- Observe the configured Home Assistant pool light entity without actuation.
+- Record canonical `pool_light.active`, `pool_light.color_mode`, and `pool_light.effect` evidence.
+- Expose pool-light state and mode/scene in the Operations Center and daily JSONL/CSV exports.
+- Missing optional light metadata must not make observation health unhealthy; light entity availability remains required.
+- Future Home Assistant-mediated light control remains outside the current OBSERVE-only authority boundary.

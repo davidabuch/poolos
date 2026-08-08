@@ -73,6 +73,9 @@ def test_dashboard_is_valid_and_read_only() -> None:
         "sensor.poolos_control_center_daily_operational_retrospective",
         "sensor.poolos_control_center_daily_counterfactual_report",
         "sensor.poolos_control_center_operator_recommendation", "sensor.poolos_control_center_last_shadow_explanation",
+        "sensor.poolos_control_center_grid_available", "sensor.poolos_control_center_grid_outage_active",
+        "sensor.poolos_control_center_pool_light_active", "sensor.poolos_control_center_pool_light_color_mode",
+        "sensor.poolos_control_center_pool_light_scene_effect",
     ):
         assert entity in text
     for prohibited in ("button.", "switch.", "service:", "tap_action:"):
@@ -90,3 +93,10 @@ def test_roadmap_records_11_1e_done() -> None:
     roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
     assert "| 11.1E | Operator shadow diagnostics and dashboard | DONE |" in roadmap
     assert "### Epic 11.1E — PoolOS Control Center" in roadmap
+
+
+def test_dashboard_explains_future_powerwall_conservation_without_actuation() -> None:
+    text = DASHBOARD.read_text(encoding="utf-8")
+    assert "Grid & Resilience" in text
+    assert "1800 RPM" in text
+    assert "observation-only" in text

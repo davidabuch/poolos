@@ -16,6 +16,8 @@ CSV_FIELDS = (
     "spa.temperature", "spa.target_temperature", "water.temperature", "solar.temperature",
     "air.temperature", "solar.active", "heater.active", "pool.heating_demand_active",
     "spa.heating_demand_active", "solar_preferred.active", "waterfall.active", "jets.active", "slide.active",
+    "grid.available", "grid.outage_active", "pool_light.active", "pool_light.color_mode",
+    "pool_light.effect",
 )
 
 class DailyEvidenceExporter:

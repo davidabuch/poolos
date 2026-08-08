@@ -14,8 +14,10 @@ from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_HEATER_ACTIVE_ENTITY,
+    CONF_GRID_STATUS_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
+    CONF_POOL_LIGHT_ENTITY,
     CONF_POOL_THERMOSTAT_ENTITY,
     CONF_PUMP_GPM_ENTITY,
     CONF_PUMP_POWER_ENTITY,
@@ -102,6 +104,8 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         CONF_HEATER_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_POOL_COMMAND_ENTITY: ["binary_sensor", "switch"],
         CONF_SPA_COMMAND_ENTITY: ["binary_sensor", "switch"],
+        CONF_GRID_STATUS_ENTITY: ["binary_sensor"],
+        CONF_POOL_LIGHT_ENTITY: ["light"],
     }
     optional = {
         CONF_SOLAR_PREFERRED_ENTITY: ["binary_sensor", "switch"],

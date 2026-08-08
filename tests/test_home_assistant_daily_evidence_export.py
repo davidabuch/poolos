@@ -24,6 +24,11 @@ def test_daily_export_writes_easy_jsonl_and_csv(tmp_path: Path) -> None:
     header = csv_path.read_text().splitlines()[0].split(",")
     assert header == list(CSV_FIELDS)
     assert "1500" in csv_path.read_text()
+    assert "grid.available" in header
+    assert "grid.outage_active" in header
+    assert "pool_light.active" in header
+    assert "pool_light.color_mode" in header
+    assert "pool_light.effect" in header
 
 
 def test_export_diagnostics_expose_operator_path(tmp_path: Path) -> None:

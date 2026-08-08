@@ -162,3 +162,58 @@ def test_environmental_probe_age_does_not_fail_global_health() -> None:
     assert "freshness_required=True" not in air_line
     assert 'ObservationConcept.SOLAR_TEMPERATURE' in solar_line
     assert 'ObservationConcept.AIR_TEMPERATURE' in air_line
+
+
+def test_powerwall_grid_status_is_required_read_only_observation() -> None:
+    const = (COMPONENT / "const.py").read_text(encoding="utf-8")
+    flow = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
+    observation = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    translations = (COMPONENT / "translations" / "en.json").read_text(encoding="utf-8")
+    assert 'CONF_GRID_STATUS_ENTITY = "grid_status_entity"' in const
+    assert 'CONF_GRID_STATUS_ENTITY: ["binary_sensor"]' in flow
+    assert 'GRID_AVAILABLE = "grid.available"' in observation
+    assert 'GRID_OUTAGE_ACTIVE = "grid.outage_active"' in observation
+    assert 'GRID_AVAILABLE_MAP = MappingProxyType({"on": True, "off": False})' in observation
+    assert 'GRID_OUTAGE_MAP = MappingProxyType({"on": False, "off": True})' in observation
+    assert "Powerwall grid status entity (1_Powerwall)" in translations
+
+
+def test_grid_observation_adds_no_outage_actuation() -> None:
+    component_source = "\n".join(
+        path.read_text(encoding="utf-8").lower() for path in COMPONENT.glob("*.py")
+    )
+    assert "1800" not in component_source
+    assert "hass.services.async_call" not in component_source
+    assert "switch.turn_off" not in component_source
+
+
+def test_pool_light_observation_contract() -> None:
+    const = (COMPONENT / "const.py").read_text(encoding="utf-8")
+    flow = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
+    observation = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    assert 'CONF_POOL_LIGHT_ENTITY = "pool_light_entity"' in const
+    assert 'CONF_POOL_LIGHT_ENTITY: ["light"]' in flow
+    for concept in ("pool_light.active", "pool_light.color_mode", "pool_light.effect"):
+        assert concept in observation
+
+
+def test_pool_light_optional_metadata_does_not_fail_observation_health() -> None:
+    source = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    assert "quality_required: bool = True" in source
+    assert 'ObservationConcept.POOL_LIGHT_COLOR_MODE, HomeAssistantValueType.STRING, None, True, "color_mode", quality_required=False' in source
+    assert 'ObservationConcept.POOL_LIGHT_EFFECT, HomeAssistantValueType.STRING, None, True, "effect", quality_required=False' in source
+
+
+def test_stale_available_values_are_warning_not_global_health_failure() -> None:
+    source = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    healthy_body = source.split("def healthy", 1)[1].split("def diagnostics", 1)[0]
+    assert "not self.missing_required and not self.unavailable_entities" in healthy_body
+    assert "not self.stale_entities" not in healthy_body
+    assert '"freshness_warning": bool(self.stale_entities)' in source
+
+
+def test_shadow_runtime_tolerates_partial_startup_snapshot() -> None:
+    source = (COMPONENT / "shadow.py").read_text(encoding="utf-8")
+    assert "ShadowRuntimeResult | None" in source
+    assert "if any(key not in facts or facts[key] is None for key in required):" in source
+    assert "return None" in source
