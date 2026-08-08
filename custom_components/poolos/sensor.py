@@ -155,6 +155,23 @@ def _observation_value(coordinator: PoolOSCoordinator, observation_id: str) -> A
     return None
 
 
+def _display_observation_value(coordinator: PoolOSCoordinator, observation_id: str) -> Any:
+    """Return operator-friendly telemetry without changing recorded evidence."""
+
+    value = _observation_value(coordinator, observation_id)
+
+    if observation_id in {"pool_light.color_mode", "pool_light.effect"}:
+        light_active = _observation_value(coordinator, "pool_light.active")
+        if light_active is False:
+            return "OFF"
+        if value is None:
+            return "UNKNOWN"
+
+    if isinstance(value, bool):
+        return "ON" if value else "OFF"
+    return value
+
+
 def _recorder_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     return {
         **coordinator.observation_recorder.diagnostics(),
@@ -340,7 +357,7 @@ SENSORS = (
     ),
 ) + tuple(
     PoolOSControlCenterSensorDescription(
-        key, name, lambda coordinator, runtime, observation_id=observation_id: _observation_value(coordinator, observation_id), icon=icon
+        key, name, lambda coordinator, runtime, observation_id=observation_id: _display_observation_value(coordinator, observation_id), icon=icon
     )
     for key, name, observation_id, icon in TELEMETRY
 )

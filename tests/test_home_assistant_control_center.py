@@ -100,3 +100,13 @@ def test_dashboard_explains_future_powerwall_conservation_without_actuation() ->
     assert "Grid & Resilience" in text
     assert "1800 RPM" in text
     assert "observation-only" in text
+
+
+def test_control_center_normalizes_boolean_and_pool_light_display_values() -> None:
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+    assert "def _display_observation_value" in source
+    assert 'return "ON" if value else "OFF"' in source
+    assert 'observation_id in {"pool_light.color_mode", "pool_light.effect"}' in source
+    assert 'if light_active is False:' in source
+    assert 'return "OFF"' in source
+    assert '_display_observation_value(coordinator, observation_id)' in source
