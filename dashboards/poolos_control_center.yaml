@@ -91,58 +91,84 @@ views:
           - type: entities
             show_header_toggle: false
             entities:
-              - sensor.poolos_control_center_pool_active
-              - sensor.poolos_control_center_spa_active
-              - sensor.poolos_control_center_pool_command_active
-              - sensor.poolos_control_center_spa_command_active
+              - entity: sensor.poolos_control_center_pool_active
+                name: Pool Active
+              - entity: sensor.poolos_control_center_spa_active
+                name: Spa Active
+              - entity: sensor.poolos_control_center_pool_command_active
+                name: Pool Command
+              - entity: sensor.poolos_control_center_spa_command_active
+                name: Spa Command
       - type: grid
         title: Temperatures
         cards:
           - type: entities
             show_header_toggle: false
             entities:
-              - sensor.poolos_control_center_pool_temperature
-              - sensor.poolos_control_center_pool_target_temperature
-              - sensor.poolos_control_center_spa_temperature
-              - sensor.poolos_control_center_spa_target_temperature
-              - sensor.poolos_control_center_water_temperature
-              - sensor.poolos_control_center_solar_roof_temperature
-              - sensor.poolos_control_center_air_temperature
+              - entity: sensor.poolos_control_center_pool_temperature
+                name: Pool Temperature
+              - entity: sensor.poolos_control_center_pool_target_temperature
+                name: Pool Target
+              - entity: sensor.poolos_control_center_spa_temperature
+                name: Spa Temperature
+              - entity: sensor.poolos_control_center_spa_target_temperature
+                name: Spa Target
+              - entity: sensor.poolos_control_center_water_temperature
+                name: Water Temperature
+              - entity: sensor.poolos_control_center_solar_roof_temperature
+                name: Solar Roof Temperature
+              - entity: sensor.poolos_control_center_air_temperature
+                name: Air Temperature
           - type: history-graph
             title: Temperature History
             hours_to_show: 6
             entities:
-              - sensor.poolos_control_center_pool_temperature
-              - sensor.poolos_control_center_water_temperature
-              - sensor.poolos_control_center_solar_roof_temperature
-              - sensor.poolos_control_center_air_temperature
+              - entity: sensor.poolos_control_center_pool_temperature
+                name: Pool
+              - entity: sensor.poolos_control_center_water_temperature
+                name: Water
+              - entity: sensor.poolos_control_center_solar_roof_temperature
+                name: Solar Roof
+              - entity: sensor.poolos_control_center_air_temperature
+                name: Air
       - type: grid
         title: Heating and Solar
         cards:
           - type: entities
             show_header_toggle: false
             entities:
-              - sensor.poolos_control_center_solar_active
-              - sensor.poolos_control_center_gas_heater_active
-              - sensor.poolos_control_center_pool_heating_demand
-              - sensor.poolos_control_center_spa_heating_demand
-              - sensor.poolos_control_center_solar_preferred
+              - entity: sensor.poolos_control_center_solar_active
+                name: Solar Active
+              - entity: sensor.poolos_control_center_gas_heater_active
+                name: Gas Heater
+              - entity: sensor.poolos_control_center_pool_heating_demand
+                name: Pool Heating Demand
+              - entity: sensor.poolos_control_center_spa_heating_demand
+                name: Spa Heating Demand
+              - entity: sensor.poolos_control_center_solar_preferred
+                name: Solar Preferred
           - type: history-graph
             title: Hydraulics History
             hours_to_show: 6
             entities:
-              - sensor.poolos_control_center_pump_rpm
-              - sensor.poolos_control_center_pump_gpm
-              - sensor.poolos_control_center_pump_power
+              - entity: sensor.poolos_control_center_pump_rpm
+                name: RPM
+              - entity: sensor.poolos_control_center_pump_gpm
+                name: GPM
+              - entity: sensor.poolos_control_center_pump_power
+                name: Power
       - type: grid
         title: Water Features
         cards:
           - type: entities
             show_header_toggle: false
             entities:
-              - sensor.poolos_control_center_waterfall_active
-              - sensor.poolos_control_center_jets_active
-              - sensor.poolos_control_center_slide_active
+              - entity: sensor.poolos_control_center_waterfall_active
+                name: Waterfall
+              - entity: sensor.poolos_control_center_jets_active
+                name: Jets
+              - entity: sensor.poolos_control_center_slide_active
+                name: Slide
       - type: grid
         title: Evidence and Analysis
         cards:
@@ -159,14 +185,22 @@ views:
             title: Full PoolOS Diagnostics
             show_header_toggle: false
             entities:
-              - sensor.poolos_control_center_operating_mode
-              - sensor.poolos_control_center_commissioning_stage
-              - sensor.poolos_control_center_shadow_runtime_status
-              - sensor.poolos_control_center_last_evaluation
-              - sensor.poolos_control_center_current_shadow_objective
-              - sensor.poolos_control_center_last_shadow_plan
-              - sensor.poolos_control_center_daily_counterfactual_report
-              - sensor.poolos_control_center_operator_recommendation
+              - entity: sensor.poolos_control_center_operating_mode
+                name: Operating Mode
+              - entity: sensor.poolos_control_center_commissioning_stage
+                name: Commissioning Stage
+              - entity: sensor.poolos_control_center_shadow_runtime_status
+                name: Shadow Runtime
+              - entity: sensor.poolos_control_center_last_evaluation
+                name: Last Evaluation
+              - entity: sensor.poolos_control_center_current_shadow_objective
+                name: Current Objective
+              - entity: sensor.poolos_control_center_last_shadow_plan
+                name: Last Shadow Plan
+              - entity: sensor.poolos_control_center_daily_counterfactual_report
+                name: Counterfactual Report
+              - entity: sensor.poolos_control_center_operator_recommendation
+                name: Operator Recommendation
           - type: markdown
             content: >-
               Daily evidence is exported automatically to `/config/poolos_logs/`

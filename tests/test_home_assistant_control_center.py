@@ -163,3 +163,32 @@ def test_health_incident_latch_has_non_actuating_manual_reset() -> None:
     assert "services.async_call" not in button
     assert "button.poolos_control_center_reset_health_incident" in dashboard
     assert "Health Incident Since Reset" in dashboard
+
+
+def test_dashboard_uses_concise_operator_facing_entity_names() -> None:
+    text = DASHBOARD.read_text(encoding="utf-8")
+    for label in (
+        "name: Pool Temperature",
+        "name: Pool Target",
+        "name: Spa Temperature",
+        "name: Spa Target",
+        "name: Water Temperature",
+        "name: Solar Roof Temperature",
+        "name: Air Temperature",
+        "name: Solar Active",
+        "name: Gas Heater",
+        "name: Pool Heating Demand",
+        "name: Spa Heating Demand",
+        "name: Solar Preferred",
+        "name: Waterfall",
+        "name: Jets",
+        "name: Slide",
+        "name: RPM",
+        "name: GPM",
+        "name: Power",
+    ):
+        assert label in text
+
+    # Dashboard aliases should prevent long generated friendly names from
+    # obscuring the useful part of labels in cards and graph legends.
+    assert "name: PoolOS Control Center" not in text
