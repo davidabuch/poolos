@@ -37,11 +37,22 @@ def _shadow(coordinator: PoolOSCoordinator) -> dict[str, Any]:
 def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     snapshot = coordinator.data
     if snapshot is None:
-        return {"mapped_observations": 0, "issues": ["no_snapshot"]}
+        return {
+            "healthy": False,
+            "mapped_observations": 0,
+            "missing_required": [],
+            "unavailable_entities": [],
+            "stale_entities": [],
+            "generated_at": None,
+            "diagnostic_reason": "no_snapshot",
+        }
     diagnostics = snapshot.diagnostics()
     return {
+        "healthy": bool(diagnostics.get("healthy", False)),
         "mapped_observations": diagnostics.get("observation_count", 0),
-        "issues": diagnostics.get("issues", []),
+        "missing_required": diagnostics.get("missing_required", []),
+        "unavailable_entities": diagnostics.get("unavailable_entities", []),
+        "stale_entities": diagnostics.get("stale_entities", []),
         "generated_at": diagnostics.get("generated_at"),
     }
 
