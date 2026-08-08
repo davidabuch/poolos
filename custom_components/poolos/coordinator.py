@@ -68,6 +68,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._event_refresh_count = 0
         self._reconciliation_refresh_count = 0
         self._last_observation_trigger = "not_started"
+        self._unhealthy_seen_since_start = False
+        self._last_unhealthy_at: datetime | None = None
+        self._last_unhealthy_missing_required: tuple[str, ...] = ()
+        self._last_unhealthy_unavailable_entities: tuple[str, ...] = ()
 
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run the periodic reconciliation/backstop observation refresh."""
@@ -142,6 +146,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             now=observed_at,
         )
         self._last_observation_trigger = trigger
+        if not snapshot.healthy:
+            self._unhealthy_seen_since_start = True
+            self._last_unhealthy_at = snapshot.generated_at
+            self._last_unhealthy_missing_required = snapshot.missing_required
+            self._last_unhealthy_unavailable_entities = snapshot.unavailable_entities
         self.shadow_runtime.evaluate(snapshot)
         health = {
             "healthy": snapshot.healthy,
@@ -273,6 +282,20 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             raise ValueError("published_at must be timezone-aware")
         self.operator_recommendation = recommendation
         self.operator_recommendation_published_at = (published_at or datetime.now(UTC)).astimezone(UTC)
+
+    def health_incident_diagnostics(self) -> dict[str, object]:
+        """Return latched unhealthy-state history for the current integration session."""
+
+        return {
+            "unhealthy_seen_since_start": self._unhealthy_seen_since_start,
+            "last_unhealthy_at": (
+                None if self._last_unhealthy_at is None else self._last_unhealthy_at.isoformat()
+            ),
+            "last_unhealthy_missing_required": list(self._last_unhealthy_missing_required),
+            "last_unhealthy_unavailable_entities": list(
+                self._last_unhealthy_unavailable_entities
+            ),
+        }
 
     def lifecycle_diagnostics(self) -> dict[str, object]:
         """Return stable integration lifecycle data for diagnostics and health."""
