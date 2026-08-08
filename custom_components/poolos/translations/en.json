@@ -22,7 +22,9 @@
           "waterfall_active_entity": "Waterfall/spillway entity (optional hydraulic context)",
           "jets_active_entity": "Jets entity (optional hydraulic context)",
           "slide_active_entity": "Slide entity (optional hydraulic context)",
-          "diagnostics_enabled": "Enable diagnostics"
+          "diagnostics_enabled": "Enable diagnostics",
+          "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
+          "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)"
         }
       }
     },
@@ -52,7 +54,9 @@
           "waterfall_active_entity": "Waterfall/spillway entity (optional hydraulic context)",
           "jets_active_entity": "Jets entity (optional hydraulic context)",
           "slide_active_entity": "Slide entity (optional hydraulic context)",
-          "diagnostics_enabled": "Enable diagnostics"
+          "diagnostics_enabled": "Enable diagnostics",
+          "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
+          "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)"
         }
       }
     }

@@ -53,6 +53,7 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
         "missing_required": diagnostics.get("missing_required", []),
         "unavailable_entities": diagnostics.get("unavailable_entities", []),
         "stale_entities": diagnostics.get("stale_entities", []),
+        "freshness_warning": diagnostics.get("freshness_warning", False),
         "generated_at": diagnostics.get("generated_at"),
     }
 
@@ -186,6 +187,11 @@ TELEMETRY = (
     ("waterfall_active", "Waterfall Active", "waterfall.active", "mdi:waterfall"),
     ("jets_active", "Jets Active", "jets.active", "mdi:weather-windy"),
     ("slide_active", "Slide Active", "slide.active", "mdi:slide"),
+    ("grid_available", "Grid Available", "grid.available", "mdi:transmission-tower"),
+    ("grid_outage_active", "Grid Outage Active", "grid.outage_active", "mdi:transmission-tower-off"),
+    ("pool_light_active", "Pool Light Active", "pool_light.active", "mdi:pool"),
+    ("pool_light_color_mode", "Pool Light Color Mode", "pool_light.color_mode", "mdi:palette"),
+    ("pool_light_effect", "Pool Light Scene / Effect", "pool_light.effect", "mdi:creation"),
 )
 
 

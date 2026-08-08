@@ -28,6 +28,37 @@ views:
             entity: sensor.poolos_control_center_recorder_status
             name: Daily Evidence Recorder
       - type: grid
+        title: Grid & Resilience
+        cards:
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.poolos_control_center_grid_available
+                name: Grid Available
+              - entity: sensor.poolos_control_center_grid_outage_active
+                name: Grid Outage Active
+          - type: markdown
+            content: >-
+              **Future Powerwall conservation:** if the grid goes down, PoolOS will
+              eventually cap required circulation at **1800 RPM** and shed
+              nonessential pool loads. Current commissioning remains observation-only.
+      - type: grid
+        title: Pool Lighting
+        cards:
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.poolos_control_center_pool_light_active
+                name: Pool Light Active
+              - entity: sensor.poolos_control_center_pool_light_color_mode
+                name: Pool Light Color Mode
+              - entity: sensor.poolos_control_center_pool_light_scene_effect
+                name: Pool Light Scene / Effect
+          - type: markdown
+            content: >-
+              PoolOS observes pool-light power and the Home Assistant-reported
+              color mode / scene for commissioning evidence. Light control remains disabled.
+      - type: grid
         title: Hydraulics
         cards:
           - type: gauge

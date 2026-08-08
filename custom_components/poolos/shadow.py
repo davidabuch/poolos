@@ -29,8 +29,15 @@ class HomeAssistantShadowRuntime:
     def latest(self) -> ShadowRuntimeResult | None:
         return self.runtime.latest
 
-    def evaluate(self, snapshot: ObservationSnapshot) -> ShadowRuntimeResult:
+    def evaluate(self, snapshot: ObservationSnapshot) -> ShadowRuntimeResult | None:
         facts = {item.observation_id: item.value for item in snapshot.observations}
+        required = (
+            ObservationConcept.POOL_TEMPERATURE.value,
+            ObservationConcept.POOL_ACTIVE.value,
+            ObservationConcept.PUMP_RPM.value,
+        )
+        if any(key not in facts or facts[key] is None for key in required):
+            return None
         fingerprint = observation_fingerprint(
             generated_at=snapshot.generated_at,
             facts={key: facts[key] for key in sorted(facts)},

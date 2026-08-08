@@ -20,8 +20,10 @@ from poolos.observations import FreshnessPolicy, ObservationFreshness, PoolObser
 from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
     CONF_HEATER_ACTIVE_ENTITY,
+    CONF_GRID_STATUS_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
+    CONF_POOL_LIGHT_ENTITY,
     CONF_POOL_THERMOSTAT_ENTITY,
     CONF_PUMP_GPM_ENTITY,
     CONF_PUMP_POWER_ENTITY,
@@ -70,6 +72,11 @@ class ObservationConcept(str, Enum):
     WATERFALL_ACTIVE = "waterfall.active"
     JETS_ACTIVE = "jets.active"
     SLIDE_ACTIVE = "slide.active"
+    GRID_AVAILABLE = "grid.available"
+    GRID_OUTAGE_ACTIVE = "grid.outage_active"
+    POOL_LIGHT_ACTIVE = "pool_light.active"
+    POOL_LIGHT_COLOR_MODE = "pool_light.color_mode"
+    POOL_LIGHT_EFFECT = "pool_light.effect"
 
     POOL_RAW_HVAC_MODE = "pool.raw_hvac_mode"
     SPA_RAW_HVAC_MODE = "spa.raw_hvac_mode"
@@ -93,9 +100,12 @@ class EntityMappingSpec:
     attribute: str | None = None
     boolean_map: Mapping[str, bool] | None = None
     freshness_required: bool = False
+    quality_required: bool = True
 
 
 HEATING_ACTION_MAP = MappingProxyType({"heating": True, "idle": False, "off": False})
+GRID_AVAILABLE_MAP = MappingProxyType({"on": True, "off": False})
+GRID_OUTAGE_MAP = MappingProxyType({"on": False, "off": True})
 
 MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
     # Pool thermostat: one HA entity yields distinct body, thermal-demand,
@@ -133,6 +143,11 @@ MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
     EntityMappingSpec(CONF_HEATER_ACTIVE_ENTITY, ObservationConcept.HEATER_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True),
     EntityMappingSpec(CONF_POOL_COMMAND_ENTITY, ObservationConcept.POOL_COMMAND_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True),
     EntityMappingSpec(CONF_SPA_COMMAND_ENTITY, ObservationConcept.SPA_COMMAND_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True),
+    EntityMappingSpec(CONF_GRID_STATUS_ENTITY, ObservationConcept.GRID_AVAILABLE, HomeAssistantValueType.BOOLEAN, None, True, boolean_map=GRID_AVAILABLE_MAP),
+    EntityMappingSpec(CONF_GRID_STATUS_ENTITY, ObservationConcept.GRID_OUTAGE_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True, boolean_map=GRID_OUTAGE_MAP),
+    EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True),
+    EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_COLOR_MODE, HomeAssistantValueType.STRING, None, True, "color_mode", quality_required=False),
+    EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_EFFECT, HomeAssistantValueType.STRING, None, True, "effect", quality_required=False),
 
     # Optional explanatory/hydraulic context.  Solar Preferred is recorded only
     # to explain Pentair behavior during learning; PoolOS does not depend on it.
@@ -167,7 +182,7 @@ class ObservationSnapshot:
     def healthy(self) -> bool:
         """Return whether every configured commissioning observation is usable."""
 
-        return not self.missing_required and not self.unavailable_entities and not self.stale_entities
+        return not self.missing_required and not self.unavailable_entities
 
     def diagnostics(self) -> dict[str, Any]:
         """Return stable diagnostics without exposing Home Assistant state values."""
@@ -180,6 +195,7 @@ class ObservationSnapshot:
             "missing_required": list(self.missing_required),
             "unavailable_entities": list(self.unavailable_entities),
             "stale_entities": list(self.stale_entities),
+            "freshness_warning": bool(self.stale_entities),
             "observations": [
                 {
                     "observation_id": item.observation_id,
@@ -306,7 +322,7 @@ def build_snapshot(
         )
         observation = mapper.map_state(state, binding)
         observations.append(observation)
-        if observation.quality.value == "invalid":
+        if observation.quality.value == "invalid" and spec.quality_required:
             unavailable.append(entity_id)
         elif spec.freshness_required:
             freshness_candidates.append((spec, entity_id, observation))
