@@ -125,8 +125,8 @@ MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
     EntityMappingSpec(CONF_PUMP_GPM_ENTITY, ObservationConcept.PUMP_GPM, HomeAssistantValueType.FLOAT, "gpm", True, freshness_required=True),
     EntityMappingSpec(CONF_PUMP_POWER_ENTITY, ObservationConcept.PUMP_POWER, HomeAssistantValueType.FLOAT, "W", True, freshness_required=True),
     EntityMappingSpec(CONF_WATER_TEMPERATURE_ENTITY, ObservationConcept.WATER_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True, freshness_required=True),
-    EntityMappingSpec(CONF_SOLAR_TEMPERATURE_ENTITY, ObservationConcept.SOLAR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True, freshness_required=True),
-    EntityMappingSpec(CONF_AIR_TEMPERATURE_ENTITY, ObservationConcept.AIR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True, freshness_required=True),
+    EntityMappingSpec(CONF_SOLAR_TEMPERATURE_ENTITY, ObservationConcept.SOLAR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True),
+    EntityMappingSpec(CONF_AIR_TEMPERATURE_ENTITY, ObservationConcept.AIR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True),
 
     # Actual equipment outcomes and explicit command/circuit context.
     EntityMappingSpec(CONF_SOLAR_ACTIVE_ENTITY, ObservationConcept.SOLAR_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True),
@@ -210,6 +210,57 @@ def configured_entity_ids(options: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(sorted(set(configured_entity_mapping(options).values())))
 
 
+
+def _active(values: Mapping[str, Any], concept: ObservationConcept) -> bool:
+    """Return a normalized boolean controller/physical state observation."""
+
+    return values.get(concept.value) is True
+
+
+def _freshness_required_now(
+    concept: ObservationConcept,
+    values: Mapping[str, Any],
+) -> bool:
+    """Return whether this measurement is expected to be live in the current state.
+
+    Pentair commonly stops republishing unchanged circulation-dependent values
+    while the equipment is idle.  Those retained values remain valid historical
+    context and must not make the entire commissioning snapshot unhealthy.
+    Freshness becomes mandatory as soon as the relevant body/circuit or another
+    hydraulic feature indicates that circulation should be active.
+    """
+
+    pool_active = _active(values, ObservationConcept.POOL_ACTIVE) or _active(
+        values, ObservationConcept.POOL_COMMAND_ACTIVE
+    )
+    spa_active = _active(values, ObservationConcept.SPA_ACTIVE) or _active(
+        values, ObservationConcept.SPA_COMMAND_ACTIVE
+    )
+    circulation_expected = any(
+        (
+            pool_active,
+            spa_active,
+            _active(values, ObservationConcept.SOLAR_ACTIVE),
+            _active(values, ObservationConcept.HEATER_ACTIVE),
+            _active(values, ObservationConcept.WATERFALL_ACTIVE),
+            _active(values, ObservationConcept.JETS_ACTIVE),
+            _active(values, ObservationConcept.SLIDE_ACTIVE),
+        )
+    )
+
+    if concept is ObservationConcept.POOL_TEMPERATURE:
+        return pool_active
+    if concept is ObservationConcept.SPA_TEMPERATURE:
+        return spa_active
+    if concept in {
+        ObservationConcept.PUMP_RPM,
+        ObservationConcept.PUMP_GPM,
+        ObservationConcept.PUMP_POWER,
+        ObservationConcept.WATER_TEMPERATURE,
+    }:
+        return circulation_expected
+    return True
+
 def build_snapshot(
     *,
     options: Mapping[str, Any],
@@ -228,6 +279,7 @@ def build_snapshot(
     unavailable: list[str] = []
     stale: list[str] = []
     observations: list[PoolObservation] = []
+    freshness_candidates: list[tuple[EntityMappingSpec, str, PoolObservation]] = []
     mapper = HomeAssistantObservationMapper()
     freshness_policy = FreshnessPolicy(max_age=stale_after)
     clock = FixedClock(generated_at)
@@ -256,10 +308,14 @@ def build_snapshot(
         observations.append(observation)
         if observation.quality.value == "invalid":
             unavailable.append(entity_id)
-        elif (
-            spec.freshness_required
-            and observation.freshness(clock=clock, policy=freshness_policy) is not ObservationFreshness.FRESH
-        ):
+        elif spec.freshness_required:
+            freshness_candidates.append((spec, entity_id, observation))
+
+    observation_values = {item.observation_id: item.value for item in observations}
+    for spec, entity_id, observation in freshness_candidates:
+        if not _freshness_required_now(spec.concept, observation_values):
+            continue
+        if observation.freshness(clock=clock, policy=freshness_policy) is not ObservationFreshness.FRESH:
             stale.append(entity_id)
 
     return ObservationSnapshot(
