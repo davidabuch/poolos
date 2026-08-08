@@ -20,7 +20,16 @@ views:
             name: Observation Health
           - type: tile
             entity: sensor.poolos_control_center_health_incident_since_restart
-            name: Health Incident Since Restart
+            name: Health Incident Since Reset
+          - type: button
+            entity: button.poolos_control_center_reset_health_incident
+            name: Reset Health Incident
+            icon: mdi:restore-alert
+            tap_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.poolos_control_center_reset_health_incident
           - type: tile
             entity: sensor.poolos_control_center_inferred_operating_state
             name: Inferred State

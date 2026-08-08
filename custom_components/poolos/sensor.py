@@ -54,6 +54,8 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
         "unavailable_entities": diagnostics.get("unavailable_entities", []),
         "stale_entities": diagnostics.get("stale_entities", []),
         "freshness_warning": diagnostics.get("freshness_warning", False),
+        "startup_grace_active": coordinator.in_startup_health_grace(),
+        "startup_grace_until": coordinator.health_incident_diagnostics()["startup_grace_until"],
         "generated_at": diagnostics.get("generated_at"),
     }
 
@@ -250,19 +252,17 @@ SENSORS = (
     PoolOSControlCenterSensorDescription(
         "observation_health",
         "Observation Health",
-        lambda coordinator, runtime: (
-            "UNKNOWN" if coordinator.data is None else "HEALTHY" if coordinator.data.healthy else "UNHEALTHY"
-        ),
+        lambda coordinator, runtime: coordinator.observation_health_state(),
         _snapshot_attributes,
         "mdi:heart-pulse",
     ),
     PoolOSControlCenterSensorDescription(
         "health_incident_since_restart",
-        "Health Incident Since Restart",
+        "Health Incident Since Reset",
         lambda coordinator, runtime: (
             "UNHEALTHY SEEN"
             if coordinator.health_incident_diagnostics()["unhealthy_seen_since_start"]
-            else "OK"
+            else "NO INCIDENTS"
         ),
         _health_incident_attributes,
         "mdi:alert-circle-check-outline",

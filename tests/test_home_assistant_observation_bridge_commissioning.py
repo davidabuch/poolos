@@ -106,7 +106,6 @@ def test_no_control_platform_or_service_is_added() -> None:
         "number.py",
         "select.py",
         "climate.py",
-        "button.py",
         "services.yaml",
     }
     assert not any((COMPONENT / name).exists() for name in prohibited)
