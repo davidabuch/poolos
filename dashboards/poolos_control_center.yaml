@@ -1,88 +1,131 @@
-title: PoolOS Control Center
+title: PoolOS Operations Center
 views:
-  - title: Commissioning
-    path: poolos-commissioning
+  - title: Live Operations
+    path: poolos-live
     icon: mdi:pool
     type: sections
+    max_columns: 4
     sections:
       - type: grid
-        title: Authority and Safety
+        title: PoolOS Status
         cards:
-          - type: entities
-            title: PoolOS Authority
-            show_header_toggle: false
-            entities:
-              - entity: sensor.poolos_operating_mode
-                name: Operating Mode
-              - entity: sensor.poolos_commissioning_stage
-                name: Commissioning Stage
-              - type: section
-                label: PoolOS is read-only. Command delivery is disabled.
-      - type: grid
-        title: Observation
-        cards:
+          - type: markdown
+            content: >-
+              ## OBSERVE ONLY
+              **Authority: NONE · Command delivery: DISABLED**
+
+              Recommendations are advisory commissioning evidence only; PoolOS cannot actuate equipment. No actuation occurs.
           - type: tile
-            entity: sensor.poolos_observation_health
+            entity: sensor.poolos_control_center_observation_health
             name: Observation Health
           - type: tile
-            entity: sensor.poolos_last_evaluation
-            name: Last Evaluation
+            entity: sensor.poolos_control_center_inferred_operating_state
+            name: Inferred State
+          - type: tile
+            entity: sensor.poolos_control_center_solar_behavior_inference
+            name: Solar Inference
+          - type: tile
+            entity: sensor.poolos_control_center_recorder_status
+            name: Daily Evidence Recorder
       - type: grid
-        title: Shadow Runtime
+        title: Hydraulics
         cards:
-          - type: tile
-            entity: sensor.poolos_shadow_runtime_status
-            name: Shadow Status
-          - type: tile
-            entity: sensor.poolos_current_objective
-            name: Current Objective
-          - type: tile
-            entity: sensor.poolos_last_plan
-            name: Last Plan
+          - type: gauge
+            entity: sensor.poolos_control_center_pump_rpm
+            name: Pump RPM
+            min: 0
+            max: 3450
+          - type: gauge
+            entity: sensor.poolos_control_center_pump_gpm
+            name: Flow
+            min: 0
+            max: 120
+          - type: gauge
+            entity: sensor.poolos_control_center_pump_power
+            name: Pump Power
+            min: 0
+            max: 3000
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - sensor.poolos_control_center_pool_active
+              - sensor.poolos_control_center_spa_active
+              - sensor.poolos_control_center_pool_command_active
+              - sensor.poolos_control_center_spa_command_active
       - type: grid
-        title: Behavioral Inference
+        title: Temperatures
         cards:
-          - type: tile
-            entity: sensor.poolos_inferred_operating_state
-            name: Inferred Operating State
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - sensor.poolos_control_center_pool_temperature
+              - sensor.poolos_control_center_pool_target_temperature
+              - sensor.poolos_control_center_spa_temperature
+              - sensor.poolos_control_center_spa_target_temperature
+              - sensor.poolos_control_center_water_temperature
+              - sensor.poolos_control_center_solar_roof_temperature
+              - sensor.poolos_control_center_air_temperature
+          - type: history-graph
+            title: Temperature History
+            hours_to_show: 6
+            entities:
+              - sensor.poolos_control_center_pool_temperature
+              - sensor.poolos_control_center_water_temperature
+              - sensor.poolos_control_center_solar_roof_temperature
+              - sensor.poolos_control_center_air_temperature
+      - type: grid
+        title: Heating and Solar
+        cards:
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - sensor.poolos_control_center_solar_active
+              - sensor.poolos_control_center_gas_heater_active
+              - sensor.poolos_control_center_pool_heating_demand
+              - sensor.poolos_control_center_spa_heating_demand
+              - sensor.poolos_control_center_solar_preferred
+          - type: history-graph
+            title: Hydraulics History
+            hours_to_show: 6
+            entities:
+              - sensor.poolos_control_center_pump_rpm
+              - sensor.poolos_control_center_pump_gpm
+              - sensor.poolos_control_center_pump_power
+      - type: grid
+        title: Water Features
+        cards:
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - sensor.poolos_control_center_waterfall_active
+              - sensor.poolos_control_center_jets_active
+              - sensor.poolos_control_center_slide_active
+      - type: grid
+        title: Evidence and Analysis
+        cards:
           - type: entity
-            entity: sensor.poolos_solar_behavior_inference
-            name: Solar Behavior Inference
+            entity: sensor.poolos_control_center_recorder_status
+            name: Recorder / Export Status
+          - type: entity
+            entity: sensor.poolos_control_center_daily_operational_retrospective
+            name: Today's Operation
+          - type: entity
+            entity: sensor.poolos_control_center_last_shadow_explanation
+            name: Latest Explanation
+          - type: entities
+            title: Full PoolOS Diagnostics
+            show_header_toggle: false
+            entities:
+              - sensor.poolos_control_center_operating_mode
+              - sensor.poolos_control_center_commissioning_stage
+              - sensor.poolos_control_center_shadow_runtime_status
+              - sensor.poolos_control_center_last_evaluation
+              - sensor.poolos_control_center_current_shadow_objective
+              - sensor.poolos_control_center_last_shadow_plan
+              - sensor.poolos_control_center_daily_counterfactual_report
+              - sensor.poolos_control_center_operator_recommendation
           - type: markdown
             content: >-
-              Behavioral inference is derived from recorded observations. It is not
-              an asserted IntelliCenter rule and does not provide control authority.
-      - type: grid
-        title: Daily Retrospective
-        cards:
-          - type: entity
-            entity: sensor.poolos_daily_operational_retrospective
-            name: Daily Actual Operation
-          - type: entity
-            entity: sensor.poolos_daily_counterfactual_report
-            name: PoolOS Counterfactual
-          - type: markdown
-            content: >-
-              The retrospective compares durable observed evidence with available
-              PoolOS advisory evidence. Missing runtime or timing targets are reported
-              as unavailable rather than inferred. No actuation occurs.
-      - type: grid
-        title: Operator Recommendation
-        cards:
-          - type: entity
-            entity: sensor.poolos_operator_recommendation
-            name: Current Recommendation
-          - type: markdown
-            content: >-
-              Recommendations are advisory commissioning evidence only. PoolOS has
-              no command authority and cannot actuate equipment.
-      - type: grid
-        title: Explanation
-        cards:
-          - type: entity
-            entity: sensor.poolos_last_explanation
-            name: Why PoolOS reached this result
-          - type: markdown
-            content: >-
-              PoolOS is operating without authority. Shadow plans and explanations
-              are commissioning evidence only and cannot control equipment.
+              Daily evidence is exported automatically to `/config/poolos_logs/`
+              as both JSONL and CSV. Upload the files for the desired date to
+              ChatGPT for timeline and behavioral analysis.

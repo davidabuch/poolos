@@ -782,6 +782,7 @@ Status: complete pending local validation.
 |---|---|---|
 | 11.4A | High-fidelity observation coverage + event-driven ingestion | DONE |
 | 11.4B | Local Home Assistant commissioning package | DONE |
+| 11.4C | Operations Center dashboard + daily evidence export | DONE |
 
 ### Epic 11.4A — High-Fidelity Observation Coverage + Event-Driven Ingestion
 
@@ -819,3 +820,12 @@ Status: complete pending local validation.
 - bootstraps the local vendored core before importing coordinator modules, avoiding GitHub credentials and runtime network installation;
 - documents install, update, verification, and rollback steps for direct `/config/custom_components/poolos` commissioning;
 - preserves OBSERVE/SHADOW mode, authority NONE, disabled command delivery, no control entities, and no Home Assistant equipment service calls from the commissioning integration.
+
+
+### Epic 11.4C — Operations Center + Daily Evidence Export
+
+- Expands the read-only dashboard into a live commissioning operations center.
+- Exposes normalized PoolOS telemetry sensors for hydraulics, temperatures, heating, solar, and water features.
+- Exports each local calendar day automatically to `/config/poolos_logs/` as JSONL and flattened CSV.
+- Keeps the append-only recorder under `.storage` as canonical durable evidence.
+- Exposes recorder/export health without increasing authority or enabling command delivery.

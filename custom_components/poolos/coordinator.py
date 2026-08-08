@@ -26,6 +26,7 @@ from poolos.operator_recommendation import OperatorRecommendation
 from poolos.observations import PersistentObservationRecorder, PoolObservation
 
 from .const import DOMAIN, INTEGRATION_VERSION, OBSERVATION_UPDATE_INTERVAL
+from poolos.evidence_export import DailyEvidenceExporter
 from .observation import (
     ObservationSnapshot,
     build_snapshot,
@@ -61,6 +62,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         storage_root = Path(hass.config.path(".storage", DOMAIN, entry.entry_id))
         self.observation_recorder = PersistentObservationRecorder(storage_root / "observations")
         self.recommendation_recorder = PersistentRecommendationRecorder(storage_root / "recommendations")
+        self.evidence_exporter = DailyEvidenceExporter(Path(hass.config.path("poolos_logs")), self.local_timezone)
         self._observation_lock = asyncio.Lock()
         self._remove_state_listener: Callable[[], None] | None = None
         self._event_refresh_count = 0
@@ -190,6 +192,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         if not wrote:
             return None
 
+        try:
+            self.evidence_exporter.export_day(self.observation_recorder, recorded_at)
+        except (OSError, TypeError, ValueError):
+            self.evidence_exporter.last_error = "daily evidence export failed"
+            LOGGER.exception("PoolOS daily evidence export failed")
+
         if recommendation_published_at is not None:
             try:
                 self.recommendation_recorder.record(
@@ -285,6 +293,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "shadow_runtime_enabled": True,
             "persistent_observation_recorder": self.observation_recorder.diagnostics(),
             "persistent_recommendation_recorder": self.recommendation_recorder.diagnostics(),
+            "daily_evidence_export": self.evidence_exporter.diagnostics(),
             "behavioral_inference": (
                 None if self.behavioral_inference_report is None else self.behavioral_inference_report.to_dict()
             ),
