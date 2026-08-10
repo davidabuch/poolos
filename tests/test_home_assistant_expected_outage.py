@@ -56,6 +56,13 @@ def test_diagnostic_sensor_and_dashboard_keep_annotation_and_reset_distinct() ->
     assert "sensor.poolos_control_center_expected_outage_annotation" in dashboard
     assert "button.poolos_control_center_acknowledge_expected_pentair_outage" in dashboard
     assert "button.poolos_control_center_reset_health_incident" in dashboard
+    assert "Acknowledge Expected Outage" in dashboard
+    assert "last_acknowledged_at" in dashboard
+    assert "matching_window_start" in dashboard
+    assert "matching_window_end" in dashboard
+    assert "matched_incident_count" in dashboard
+    assert "most_recent_matched_outage_start" in dashboard
+    assert "most_recent_matched_outage_end" in dashboard
     assert "Neither button controls Pentair" in dashboard
 
 
