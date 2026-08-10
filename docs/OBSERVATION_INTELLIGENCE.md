@@ -8,7 +8,8 @@ deterministic daily engineering evidence. It does not add equipment control.
 Every `DailyOperationalRetrospective` includes `soak_quality` with one status:
 
 - `GOOD`: coverage and health meet the conservative daily gates and no incident
-  or startup-window limitation is present.
+  or other degrading limitation is present. Startup provenance alone does not
+  degrade an otherwise good reporting window.
 - `DEGRADED`: evidence remains visible but must be reviewed before it contributes
   to cross-day learning.
 - `EXCLUDED`: evidence is too incomplete or unhealthy for behavioral-learning
@@ -20,10 +21,24 @@ engineering thresholds, not scientifically validated constants.
 ## Observation incidents
 
 An incident groups consecutive durable evidence for missing, unavailable, stale,
-or unhealthy upstream observations. The generic domain model does not assume
+or unhealthy upstream observations when canonical `health.healthy` is false.
+That canonical flag already incorporates the live observation bridge's
+context-aware freshness rules. A healthy record may therefore retain raw
+`stale_entities` metadata without representing an operational failure, and the
+retrospective must not reinterpret that tolerated metadata as an incident or
+degraded stale duration. The generic domain model does not assume
 that every incident is an IntelliCenter or network failure. A later healthy event
 closes the incident and proves recovery; otherwise the incident remains open.
 Recovery never deletes the incident or its source-event provenance.
+
+Each durable `baseline` begins a deterministic 60-second retrospective startup
+grace interval, matching live commissioning health behavior. Unhealthy,
+unavailable, or stale initialization evidence remains in raw provenance during
+that interval but does not create an incident or degradation duration. If
+supported unhealthy evidence continues beyond the grace boundary, a normal
+incident begins at the boundary. A baseline is evidence of startup behavior; it
+does not prove whether the cause was a Home Assistant restart, integration
+reload, first installation, or another initialization event.
 
 ## Solar learning
 

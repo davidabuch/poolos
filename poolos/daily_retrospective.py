@@ -91,6 +91,7 @@ class SoakQualityPolicy:
     maximum_good_gap: timedelta = timedelta(minutes=15)
     exclusion_gap: timedelta = timedelta(hours=2)
     exclusion_unhealthy_duration: timedelta = timedelta(hours=2)
+    startup_health_grace: timedelta = timedelta(seconds=60)
 
     def __post_init__(self) -> None:
         if not 0.0 < self.exclusion_coverage_ratio <= self.good_coverage_ratio <= 1.0:
@@ -101,6 +102,8 @@ class SoakQualityPolicy:
             raise ValueError("exclusion_gap must not be shorter than maximum_good_gap")
         if self.exclusion_unhealthy_duration <= timedelta(0):
             raise ValueError("exclusion_unhealthy_duration must be positive")
+        if self.startup_health_grace <= timedelta(0):
+            raise ValueError("startup_health_grace must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -629,6 +632,7 @@ class DailyOperationalRetrospectiveEngine:
             window_start=window_start,
             window_end=window_end,
             maximum_evidence_gap=self.maximum_evidence_gap,
+            startup_health_grace=self.soak_quality_policy.startup_health_grace,
         )
         soak_quality = _soak_quality(
             ordered,
@@ -701,6 +705,13 @@ class DailyOperationalRetrospectiveEngine:
         if not frames:
             return _empty_actual(window_start, window_end)
 
+        startup_grace_intervals = _startup_grace_intervals(
+            tuple(frame.event for frame in frames),
+            window_start=window_start,
+            window_end=window_end,
+            startup_health_grace=self.soak_quality_policy.startup_health_grace,
+        )
+
         seed_index = _seed_index(frames, window_start)
         if (
             seed_index is not None
@@ -767,6 +778,13 @@ class DailyOperationalRetrospectiveEngine:
             coverage += seconds
             if bool(frame.event.health.get("healthy", False)):
                 healthy_coverage += seconds
+            else:
+                effective_end = interval_start + timedelta(seconds=seconds)
+                healthy_coverage += seconds - _duration_outside_intervals(
+                    interval_start,
+                    effective_end,
+                    startup_grace_intervals,
+                )
 
             values = frame.values
             rpm = _number(values.get("pump.rpm"))
@@ -847,6 +865,7 @@ def _observation_incidents(
     window_start: datetime,
     window_end: datetime,
     maximum_evidence_gap: timedelta,
+    startup_health_grace: timedelta,
 ) -> tuple[ObservationIncident, ...]:
     relevant = _relevant_records(
         records,
@@ -854,38 +873,64 @@ def _observation_incidents(
         window_end=window_end,
         maximum_evidence_gap=maximum_evidence_gap,
     )
+    spans = _supported_spans(
+        records,
+        window_start=window_start,
+        window_end=window_end,
+        maximum_evidence_gap=maximum_evidence_gap,
+    )
+    supported_end_by_event = {record.event_id: end for record, _, end in spans}
+    grace_intervals = _startup_grace_intervals(
+        records,
+        window_start=window_start,
+        window_end=window_end,
+        startup_health_grace=startup_health_grace,
+    )
     incidents: list[ObservationIncident] = []
     active: dict[str, Any] | None = None
     for record in relevant:
         issue_reasons = _health_reasons(record)
-        if issue_reasons:
-            if active is None:
-                active = {
-                    "started_at": max(record.recorded_at, window_start),
-                    "reasons": set(),
-                    "missing": set(),
-                    "unavailable": set(),
-                    "stale": set(),
-                    "source_ids": [],
-                    "unhealthy": False,
-                }
-            active["reasons"].update(issue_reasons)
-            active["missing"].update(_health_values(record, "missing_required"))
-            active["unavailable"].update(
-                _health_values(record, "unavailable_entities")
-            )
-            active["stale"].update(_health_values(record, "stale_entities"))
-            active["source_ids"].append(record.event_id)
-            active["unhealthy"] = active["unhealthy"] or not bool(
-                record.health.get("healthy", False)
-            )
+        if not issue_reasons:
+            if active is not None and bool(record.health.get("healthy", False)):
+                active["source_ids"].append(record.event_id)
+                incidents.append(
+                    _build_incident(
+                        active,
+                        ended_at=record.recorded_at,
+                        window_end=window_end,
+                    )
+                )
+                active = None
             continue
-        if active is not None:
-            active["source_ids"].append(record.event_id)
-            incidents.append(
-                _build_incident(active, ended_at=record.recorded_at, window_end=window_end)
+        issue_start = max(record.recorded_at, window_start)
+        grace_end = _containing_grace_end(record.recorded_at, grace_intervals)
+        if grace_end is not None:
+            supported_end = supported_end_by_event.get(
+                record.event_id, record.recorded_at
             )
-            active = None
+            if supported_end <= grace_end:
+                continue
+            issue_start = max(grace_end, window_start)
+        if active is None:
+            active = {
+                "started_at": issue_start,
+                "reasons": set(),
+                "missing": set(),
+                "unavailable": set(),
+                "stale": set(),
+                "source_ids": [],
+                "unhealthy": False,
+            }
+        active["reasons"].update(issue_reasons)
+        active["missing"].update(_health_values(record, "missing_required"))
+        active["unavailable"].update(
+            _health_values(record, "unavailable_entities")
+        )
+        active["stale"].update(_health_values(record, "stale_entities"))
+        active["source_ids"].append(record.event_id)
+        active["unhealthy"] = active["unhealthy"] or not bool(
+            record.health.get("healthy", False)
+        )
     if active is not None:
         incidents.append(_build_incident(active, ended_at=None, window_end=window_end))
     return tuple(incidents)
@@ -949,32 +994,50 @@ def _soak_quality(
         window_end=window_end,
         maximum_evidence_gap=maximum_evidence_gap,
     )
-    healthy_ratio = (
-        0.0
-        if window_seconds <= 0
-        else min(1.0, actual.healthy_coverage_seconds / window_seconds)
+    grace_intervals = _startup_grace_intervals(
+        records,
+        window_start=window_start,
+        window_end=window_end,
+        startup_health_grace=policy.startup_health_grace,
     )
-    largest_gap = _largest_uncovered_gap(spans, window_start, window_end)
     unhealthy_duration = sum(
-        (end - start).total_seconds()
+        _duration_outside_intervals(start, end, grace_intervals)
         for record, start, end in spans
         if not bool(record.health.get("healthy", False))
     )
-    unavailable_duration = sum(
+    effective_healthy_coverage = sum(
         (end - start).total_seconds()
+        if bool(record.health.get("healthy", False))
+        else (end - start).total_seconds()
+        - _duration_outside_intervals(start, end, grace_intervals)
         for record, start, end in spans
-        if _health_values(record, "unavailable_entities")
+    )
+    healthy_ratio = (
+        0.0
+        if window_seconds <= 0
+        else min(1.0, effective_healthy_coverage / window_seconds)
+    )
+    largest_gap = _largest_uncovered_gap(spans, window_start, window_end)
+    unavailable_duration = sum(
+        _duration_outside_intervals(start, end, grace_intervals)
+        for record, start, end in spans
+        if not bool(record.health.get("healthy", False))
+        and _health_values(record, "unavailable_entities")
     )
     stale_duration = sum(
-        (end - start).total_seconds()
+        _duration_outside_intervals(start, end, grace_intervals)
         for record, start, end in spans
-        if _health_values(record, "stale_entities")
+        if not bool(record.health.get("healthy", False))
+        and _health_values(record, "stale_entities")
     )
     unavailable_or_stale_duration = sum(
-        (end - start).total_seconds()
+        _duration_outside_intervals(start, end, grace_intervals)
         for record, start, end in spans
-        if _health_values(record, "unavailable_entities")
-        or _health_values(record, "stale_entities")
+        if not bool(record.health.get("healthy", False))
+        and (
+            _health_values(record, "unavailable_entities")
+            or _health_values(record, "stale_entities")
+        )
     )
     startup_ids = tuple(
         item.event_id
@@ -1012,7 +1075,10 @@ def _soak_quality(
     )
     if excluded:
         status = SoakQualityStatus.EXCLUDED
-    elif reason_codes:
+    elif any(
+        reason is not SoakQualityReason.STARTUP_OR_RESTART_WINDOW
+        for reason in reason_codes
+    ):
         status = SoakQualityStatus.DEGRADED
     else:
         status = SoakQualityStatus.GOOD
@@ -1254,9 +1320,10 @@ def _health_values(record: RecordedObservationEvent, key: str) -> tuple[str, ...
 
 
 def _health_reasons(record: RecordedObservationEvent) -> tuple[str, ...]:
+    if bool(record.health.get("healthy", False)):
+        return ()
     reasons: list[str] = []
-    if not bool(record.health.get("healthy", False)):
-        reasons.append(SoakQualityReason.OBSERVATION_HEALTH_INCIDENT.value)
+    reasons.append(SoakQualityReason.OBSERVATION_HEALTH_INCIDENT.value)
     if _health_values(record, "missing_required"):
         reasons.append(SoakQualityReason.REQUIRED_MAPPING_MISSING.value)
     if _health_values(record, "unavailable_entities"):
@@ -1264,6 +1331,54 @@ def _health_reasons(record: RecordedObservationEvent) -> tuple[str, ...]:
     if _health_values(record, "stale_entities"):
         reasons.append(SoakQualityReason.REQUIRED_ENTITY_STALE.value)
     return tuple(reasons)
+
+
+def _startup_grace_intervals(
+    records: tuple[RecordedObservationEvent, ...],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    startup_health_grace: timedelta,
+) -> tuple[tuple[datetime, datetime], ...]:
+    intervals = [
+        (max(record.recorded_at, window_start), min(record.recorded_at + startup_health_grace, window_end))
+        for record in records
+        if record.kind == "baseline"
+        and record.recorded_at < window_end
+        and record.recorded_at + startup_health_grace > window_start
+    ]
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in sorted(intervals):
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return tuple(merged)
+
+
+def _containing_grace_end(
+    timestamp: datetime,
+    intervals: tuple[tuple[datetime, datetime], ...],
+) -> datetime | None:
+    return next(
+        (end for start, end in intervals if start <= timestamp < end),
+        None,
+    )
+
+
+def _duration_outside_intervals(
+    start: datetime,
+    end: datetime,
+    intervals: tuple[tuple[datetime, datetime], ...],
+) -> float:
+    total = (end - start).total_seconds()
+    suppressed = 0.0
+    for interval_start, interval_end in intervals:
+        overlap_start = max(start, interval_start)
+        overlap_end = min(end, interval_end)
+        if overlap_end > overlap_start:
+            suppressed += (overlap_end - overlap_start).total_seconds()
+    return max(0.0, total - suppressed)
 
 
 def _attribute_values(

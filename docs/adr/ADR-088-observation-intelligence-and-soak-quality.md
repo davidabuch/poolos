@@ -25,10 +25,14 @@ remains the raw source of truth. `BehavioralInferenceEngine` remains the sole
 owner of inferred solar transitions and now pairs activations with subsequent
 deactivations into immutable solar episodes.
 
-Observation incidents use the neutral type `UPSTREAM_OBSERVATION_FAILURE`. An
-incident begins when durable health evidence is unhealthy, unavailable, missing,
-or stale and closes only when a subsequent event explicitly contains no such
-issue. Consecutive affected records form one incident. Recovery evidence is kept
+Observation incidents use the neutral type `UPSTREAM_OBSERVATION_FAILURE`.
+Canonical `health.healthy` is authoritative because the live observation bridge
+already applies context-aware freshness semantics. A healthy record may contain
+diagnostic `stale_entities`; that tolerated metadata does not independently open
+an incident or accrue degraded stale duration. An incident begins when durable
+health evidence is unhealthy and preserves any accompanying unavailable,
+missing, or stale details. It closes when a subsequent event is canonically
+healthy. Consecutive affected records form one incident. Recovery evidence is kept
 in provenance. An incident without recovery before the reporting-window end is
 `OPEN`, has no fabricated end time, and reports elapsed duration only through the
 explicit window end. Incident identity derives from its type, start boundary, and
@@ -41,6 +45,15 @@ count, stable reason codes, baseline/startup evidence, and exact durable source
 IDs. A durable `baseline` proves that a recorder startup window exists; it does
 not by itself distinguish first installation from restart.
 
+Each durable `baseline` starts a deterministic 60-second grace interval defined
+centrally by `SoakQualityPolicy.startup_health_grace`. This mirrors the existing
+live `STARTUP_HEALTH_GRACE` behavior without importing Home Assistant into the
+vendor-independent report model. Initialization failures inside grace remain raw
+provenance but do not open normal incidents, reduce healthy coverage, accrue
+unhealthy/unavailable/stale duration, or independently degrade quality. If
+supported unhealthy evidence crosses the grace boundary, suppression stops at
+that boundary and a normal incident is created.
+
 ## Conservative classification policy
 
 Coverage is calculated using the existing bounded-evidence rule: one durable
@@ -48,8 +61,9 @@ frame supports at most 15 minutes unless a newer frame arrives first. The
 following initial engineering gates are centralized in `SoakQualityPolicy`, are
 testable, and are deliberately not claimed as scientifically validated:
 
-- `GOOD` requires at least 95% total and healthy coverage, no incident or
-  startup-window reason, and no unsupported gap longer than 15 minutes.
+- `GOOD` requires at least 95% total and calibrated healthy coverage, no
+  degrading incident reason, and no unsupported gap longer than 15 minutes.
+  Informational startup provenance may be present on a `GOOD` window.
 - `EXCLUDED` applies below 75% total or healthy coverage, at a gap of two hours
   or more, or at two hours or more of supported unhealthy duration.
 - all other affected windows are `DEGRADED`.
