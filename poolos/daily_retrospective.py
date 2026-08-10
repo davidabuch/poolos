@@ -7,7 +7,7 @@ requests, or physical actuation.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from hashlib import sha256
@@ -25,11 +25,12 @@ from .behavioral_inference import (
     SolarEpisode,
     SolarEpisodeState,
 )
+from .expected_outage import ExpectedOutageAcknowledgment, intervals_intersect
 from .operator_recommendation import OperatorRecommendation, OperatorRecommendationStatus
 from .observations import RecordedObservationEvent
 
 SCHEMA_VERSION = "1.0.0"
-RETROSPECTIVE_SCHEMA_VERSION = "1.1.0"
+RETROSPECTIVE_SCHEMA_VERSION = "1.2.0"
 _MIN_RUNNING_RPM = 100.0
 _MINIMUM_MEDIAN_SAMPLES = 2
 
@@ -71,6 +72,13 @@ class ObservationIncidentState(str, Enum):
 
     OPEN = "OPEN"
     RECOVERED = "RECOVERED"
+
+
+class ObservationIncidentClassification(str, Enum):
+    """Whether an actual incident has durable explanatory context."""
+
+    UNEXPECTED = "UNEXPECTED"
+    EXPECTED_OUTAGE = "EXPECTED_OUTAGE"
 
 
 class SolarLearningQuality(str, Enum):
@@ -123,6 +131,14 @@ class ObservationIncident:
     unavailable_observations: tuple[str, ...]
     stale_observations: tuple[str, ...]
     source_event_ids: tuple[str, ...]
+    expected: bool = False
+    classification: ObservationIncidentClassification = (
+        ObservationIncidentClassification.UNEXPECTED
+    )
+    acknowledged_by_operator: bool = False
+    acknowledgment_ids: tuple[str, ...] = ()
+    matched_acknowledgments: tuple[ExpectedOutageAcknowledgment, ...] = ()
+    troubleshooting_required: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,6 +155,14 @@ class ObservationIncident:
             "unavailable_observations": list(self.unavailable_observations),
             "stale_observations": list(self.stale_observations),
             "source_event_ids": list(self.source_event_ids),
+            "expected": self.expected,
+            "classification": self.classification.value,
+            "acknowledged_by_operator": self.acknowledged_by_operator,
+            "acknowledgment_ids": list(self.acknowledgment_ids),
+            "matched_acknowledgments": [
+                item.to_dict() for item in self.matched_acknowledgments
+            ],
+            "troubleshooting_required": self.troubleshooting_required,
         }
 
 
@@ -159,6 +183,11 @@ class SoakQualityAssessment:
     reason_codes: tuple[SoakQualityReason, ...]
     assessment: str
     source_evidence_ids: tuple[str, ...]
+    expected_incident_count: int = 0
+    unexpected_incident_count: int = 0
+    expected_outage_duration_seconds: float = 0.0
+    unexpected_unhealthy_duration_seconds: float = 0.0
+    commissioning_healthy_coverage_ratio: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -183,6 +212,17 @@ class SoakQualityAssessment:
             "reason_codes": [item.value for item in self.reason_codes],
             "assessment": self.assessment,
             "source_evidence_ids": list(self.source_evidence_ids),
+            "expected_incident_count": self.expected_incident_count,
+            "unexpected_incident_count": self.unexpected_incident_count,
+            "expected_outage_duration_seconds": round(
+                self.expected_outage_duration_seconds, 3
+            ),
+            "unexpected_unhealthy_duration_seconds": round(
+                self.unexpected_unhealthy_duration_seconds, 3
+            ),
+            "commissioning_healthy_coverage_ratio": round(
+                self.commissioning_healthy_coverage_ratio, 6
+            ),
         }
 
 
@@ -612,6 +652,9 @@ class DailyOperationalRetrospectiveEngine:
         report_date: str,
         advisories: Iterable[RecordedRecommendationEvent] = (),
         recommendation: OperatorRecommendation | None = None,
+        expected_outage_acknowledgments: Iterable[
+            ExpectedOutageAcknowledgment
+        ] = (),
         complete_day: bool,
     ) -> DailyOperationalRetrospective:
         """Generate one deterministic retrospective for the explicit reporting window."""
@@ -626,13 +669,24 @@ class DailyOperationalRetrospectiveEngine:
         ordered = tuple(
             sorted(evidence, key=lambda item: (item.recorded_at, item.event_id))
         )
+        acknowledgments = tuple(
+            sorted(
+                expected_outage_acknowledgments,
+                key=lambda item: (item.acknowledged_at, item.acknowledgment_id),
+            )
+        )
         actual = self._actual_metrics(ordered, window_start=window_start, window_end=window_end)
-        incidents = _observation_incidents(
+        raw_incidents = _observation_incidents(
             ordered,
             window_start=window_start,
             window_end=window_end,
             maximum_evidence_gap=self.maximum_evidence_gap,
             startup_health_grace=self.soak_quality_policy.startup_health_grace,
+        )
+        incidents = _classify_expected_outages(
+            raw_incidents,
+            acknowledgments=acknowledgments,
+            window_end=window_end,
         )
         soak_quality = _soak_quality(
             ordered,
@@ -657,6 +711,17 @@ class DailyOperationalRetrospectiveEngine:
             soak_quality=soak_quality,
             window_start=window_start,
             window_end=window_end,
+            excluded_evidence_ids=frozenset(
+                event_id
+                for incident in incidents
+                if incident.expected
+                for event_id in incident.source_event_ids
+            ),
+            excluded_intervals=tuple(
+                (incident.started_at, incident.ended_at or window_end)
+                for incident in incidents
+                if incident.expected
+            ),
         )
         daily_assessment = _daily_assessment(soak_quality, solar_learning)
         ordered_advisories = tuple(
@@ -976,6 +1041,46 @@ def _build_incident(
     )
 
 
+def _classify_expected_outages(
+    incidents: tuple[ObservationIncident, ...],
+    *,
+    acknowledgments: tuple[ExpectedOutageAcknowledgment, ...],
+    window_end: datetime,
+) -> tuple[ObservationIncident, ...]:
+    """Add operator context after raw incident construction and startup calibration."""
+
+    classified: list[ObservationIncident] = []
+    for incident in incidents:
+        incident_end = incident.ended_at or window_end
+        matched = tuple(
+            acknowledgment
+            for acknowledgment in acknowledgments
+            if intervals_intersect(
+                incident.started_at,
+                incident_end,
+                acknowledgment.matching_window_start,
+                acknowledgment.matching_window_end,
+            )
+        )
+        if not matched:
+            classified.append(incident)
+            continue
+        classified.append(
+            replace(
+                incident,
+                expected=True,
+                classification=ObservationIncidentClassification.EXPECTED_OUTAGE,
+                acknowledged_by_operator=True,
+                acknowledgment_ids=tuple(
+                    item.acknowledgment_id for item in matched
+                ),
+                matched_acknowledgments=matched,
+                troubleshooting_required=False,
+            )
+        )
+    return tuple(classified)
+
+
 def _soak_quality(
     records: tuple[RecordedObservationEvent, ...],
     *,
@@ -1000,22 +1105,42 @@ def _soak_quality(
         window_end=window_end,
         startup_health_grace=policy.startup_health_grace,
     )
+    expected_intervals = tuple(
+        (incident.started_at, incident.ended_at or window_end)
+        for incident in incidents
+        if incident.expected
+    )
+    commissioning_exclusions = _merge_intervals(
+        (*grace_intervals, *expected_intervals)
+    )
     unhealthy_duration = sum(
         _duration_outside_intervals(start, end, grace_intervals)
         for record, start, end in spans
         if not bool(record.health.get("healthy", False))
     )
-    effective_healthy_coverage = sum(
+    raw_effective_healthy_coverage = sum(
         (end - start).total_seconds()
         if bool(record.health.get("healthy", False))
         else (end - start).total_seconds()
         - _duration_outside_intervals(start, end, grace_intervals)
         for record, start, end in spans
     )
-    healthy_ratio = (
+    commissioning_effective_healthy_coverage = sum(
+        (end - start).total_seconds()
+        if bool(record.health.get("healthy", False))
+        else (end - start).total_seconds()
+        - _duration_outside_intervals(start, end, commissioning_exclusions)
+        for record, start, end in spans
+    )
+    raw_healthy_ratio = (
         0.0
         if window_seconds <= 0
-        else min(1.0, effective_healthy_coverage / window_seconds)
+        else min(1.0, raw_effective_healthy_coverage / window_seconds)
+    )
+    commissioning_healthy_ratio = (
+        0.0
+        if window_seconds <= 0
+        else min(1.0, commissioning_effective_healthy_coverage / window_seconds)
     )
     largest_gap = _largest_uncovered_gap(spans, window_start, window_end)
     unavailable_duration = sum(
@@ -1044,15 +1169,18 @@ def _soak_quality(
         for item in records
         if window_start <= item.recorded_at < window_end and item.kind == "baseline"
     )
-    all_reasons = {reason for incident in incidents for reason in incident.reasons}
+    unexpected_incidents = tuple(item for item in incidents if not item.expected)
+    all_reasons = {
+        reason for incident in unexpected_incidents for reason in incident.reasons
+    }
     reason_codes: list[SoakQualityReason] = []
     if actual.coverage_ratio < policy.good_coverage_ratio:
         reason_codes.append(SoakQualityReason.INSUFFICIENT_COVERAGE)
-    if healthy_ratio < policy.good_coverage_ratio:
+    if commissioning_healthy_ratio < policy.good_coverage_ratio:
         reason_codes.append(SoakQualityReason.INSUFFICIENT_HEALTHY_COVERAGE)
     if largest_gap > policy.maximum_good_gap.total_seconds():
         reason_codes.append(SoakQualityReason.LARGE_EVIDENCE_GAP)
-    if incidents:
+    if unexpected_incidents:
         reason_codes.append(SoakQualityReason.OBSERVATION_HEALTH_INCIDENT)
     for value in (
         SoakQualityReason.REQUIRED_ENTITY_UNAVAILABLE,
@@ -1067,9 +1195,15 @@ def _soak_quality(
     excluded = any(
         (
             actual.coverage_ratio < policy.exclusion_coverage_ratio,
-            healthy_ratio < policy.exclusion_coverage_ratio,
+            commissioning_healthy_ratio < policy.exclusion_coverage_ratio,
             largest_gap >= policy.exclusion_gap.total_seconds(),
-            unhealthy_duration
+            sum(
+                _duration_outside_intervals(
+                    start, end, commissioning_exclusions
+                )
+                for record, start, end in spans
+                if not bool(record.health.get("healthy", False))
+            )
             >= policy.exclusion_unhealthy_duration.total_seconds(),
         )
     )
@@ -1089,14 +1223,14 @@ def _soak_quality(
         )
     assessment = (
         f"Observation quality {status.value}: {actual.coverage_ratio * 100:.1f}% "
-        f"coverage, {len(incidents)} observation incident"
-        f"{'s' if len(incidents) != 1 else ''}."
+        f"coverage, {len(unexpected_incidents)} unexpected and "
+        f"{len(incidents) - len(unexpected_incidents)} expected observation incidents."
     )
     source_ids = tuple(dict.fromkeys(record.event_id for record, _, _ in spans))
     return SoakQualityAssessment(
         status=status,
         observation_coverage_ratio=actual.coverage_ratio,
-        healthy_observation_coverage_ratio=healthy_ratio,
+        healthy_observation_coverage_ratio=raw_healthy_ratio,
         largest_evidence_gap_seconds=largest_gap,
         unhealthy_duration_seconds=unhealthy_duration,
         unavailable_duration_seconds=unavailable_duration,
@@ -1107,6 +1241,17 @@ def _soak_quality(
         reason_codes=tuple(reason_codes),
         assessment=assessment,
         source_evidence_ids=source_ids,
+        expected_incident_count=len(incidents) - len(unexpected_incidents),
+        unexpected_incident_count=len(unexpected_incidents),
+        expected_outage_duration_seconds=sum(
+            item.duration_seconds for item in incidents if item.expected
+        ),
+        unexpected_unhealthy_duration_seconds=sum(
+            _duration_outside_intervals(start, end, commissioning_exclusions)
+            for record, start, end in spans
+            if not bool(record.health.get("healthy", False))
+        ),
+        commissioning_healthy_coverage_ratio=commissioning_healthy_ratio,
     )
 
 
@@ -1118,19 +1263,27 @@ def _daily_solar_learning(
     soak_quality: SoakQualityAssessment,
     window_start: datetime,
     window_end: datetime,
+    excluded_evidence_ids: frozenset[str] = frozenset(),
+    excluded_intervals: tuple[tuple[datetime, datetime], ...] = (),
 ) -> DailySolarLearningSummary:
     transitions = tuple(
         item
         for item in events
         if item.kind in {"SOLAR_ACTIVATED", "SOLAR_DEACTIVATED"}
         and window_start <= item.occurred_at < window_end
+        and not excluded_evidence_ids.intersection(item.evidence_event_ids)
+        and not _timestamp_in_intervals(item.occurred_at, excluded_intervals)
     )
     activations = tuple(item for item in transitions if item.kind == "SOLAR_ACTIVATED")
     deactivations = tuple(
         item for item in transitions if item.kind == "SOLAR_DEACTIVATED"
     )
     daily_episodes = tuple(
-        item for item in episodes if window_start <= item.activation_time < window_end
+        item
+        for item in episodes
+        if window_start <= item.activation_time < window_end
+        and not excluded_evidence_ids.intersection(item.source_event_ids)
+        and not _episode_intersects_intervals(item, excluded_intervals, window_end)
     )
     complete = tuple(
         item for item in daily_episodes if item.state is SolarEpisodeState.CLOSED
@@ -1379,6 +1532,39 @@ def _duration_outside_intervals(
         if overlap_end > overlap_start:
             suppressed += (overlap_end - overlap_start).total_seconds()
     return max(0.0, total - suppressed)
+
+
+def _merge_intervals(
+    intervals: tuple[tuple[datetime, datetime], ...],
+) -> tuple[tuple[datetime, datetime], ...]:
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in sorted(intervals):
+        if end <= start:
+            continue
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return tuple(merged)
+
+
+def _timestamp_in_intervals(
+    timestamp: datetime,
+    intervals: tuple[tuple[datetime, datetime], ...],
+) -> bool:
+    return any(start <= timestamp <= end for start, end in intervals)
+
+
+def _episode_intersects_intervals(
+    episode: SolarEpisode,
+    intervals: tuple[tuple[datetime, datetime], ...],
+    window_end: datetime,
+) -> bool:
+    episode_end = episode.deactivation_time or window_end
+    return any(
+        intervals_intersect(episode.activation_time, episode_end, start, end)
+        for start, end in intervals
+    )
 
 
 def _attribute_values(
@@ -1721,6 +1907,7 @@ __all__ = [
     "DailyOperationalRetrospective",
     "DailyOperationalRetrospectiveEngine",
     "ObservationIncident",
+    "ObservationIncidentClassification",
     "ObservationIncidentState",
     "PersistentRecommendationRecorder",
     "RETROSPECTIVE_SCHEMA_VERSION",

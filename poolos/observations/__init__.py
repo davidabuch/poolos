@@ -17,6 +17,7 @@ from .persistent import (
     PersistentObservationRecorder,
     RecordedObservationEvent,
 )
+from ..expected_outage import ExpectedOutageAcknowledgment
 from .store import (
     ObservationOutOfOrderError,
     ObservationSourceKey,
@@ -28,6 +29,7 @@ from .store import (
 __all__ = [
     "ConfidenceBand",
     "Evidence",
+    "ExpectedOutageAcknowledgment",
     "FreshnessPolicy",
     "Observation",
     "ObservationFreshness",

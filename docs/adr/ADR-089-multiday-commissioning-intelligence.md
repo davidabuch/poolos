@@ -95,3 +95,7 @@ Commissioning evidence can progress deterministically from accumulation to human
 review readiness while preserving daily authority boundaries and exact
 provenance. Operational policy design remains a separate explicitly reviewed
 future milestone.
+
+ADR-090 distinguishes durable operator-acknowledged expected outages from
+unexplained incidents. Expected incidents remain total provenance but do not
+independently block human policy review.

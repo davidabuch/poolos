@@ -151,13 +151,22 @@ class MultiDayCommissioningReport:
     degraded_report_ids: tuple[str, ...]
     excluded_report_ids: tuple[str, ...]
     total_incident_count: int
+    expected_incident_count: int
+    unexpected_incident_count: int
     incident_days: int
+    expected_incident_days: int
+    unexpected_incident_days: int
     incident_dates: tuple[date, ...]
     total_supported_incident_duration_seconds: float
+    expected_outage_duration_seconds: float
+    unexpected_incident_duration_seconds: float
     recovered_incident_count: int
     open_incident_count: int
+    open_unexpected_incident_count: int
     most_recent_incident_date: date | None
     most_recent_incident_at: datetime | None
+    most_recent_unexpected_incident_date: date | None
+    most_recent_unexpected_incident_at: datetime | None
     usable_solar_learning_days: int
     complete_solar_episode_count: int
     open_solar_episode_count: int
@@ -200,13 +209,24 @@ class MultiDayCommissioningReport:
             "degraded_report_ids": list(self.degraded_report_ids),
             "excluded_report_ids": list(self.excluded_report_ids),
             "total_incident_count": self.total_incident_count,
+            "expected_incident_count": self.expected_incident_count,
+            "unexpected_incident_count": self.unexpected_incident_count,
             "incident_days": self.incident_days,
+            "expected_incident_days": self.expected_incident_days,
+            "unexpected_incident_days": self.unexpected_incident_days,
             "incident_dates": [item.isoformat() for item in self.incident_dates],
             "total_supported_incident_duration_seconds": round(
                 self.total_supported_incident_duration_seconds, 3
             ),
+            "expected_outage_duration_seconds": round(
+                self.expected_outage_duration_seconds, 3
+            ),
+            "unexpected_incident_duration_seconds": round(
+                self.unexpected_incident_duration_seconds, 3
+            ),
             "recovered_incident_count": self.recovered_incident_count,
             "open_incident_count": self.open_incident_count,
+            "open_unexpected_incident_count": self.open_unexpected_incident_count,
             "most_recent_incident_date": (
                 None
                 if self.most_recent_incident_date is None
@@ -216,6 +236,16 @@ class MultiDayCommissioningReport:
                 None
                 if self.most_recent_incident_at is None
                 else self.most_recent_incident_at.isoformat()
+            ),
+            "most_recent_unexpected_incident_date": (
+                None
+                if self.most_recent_unexpected_incident_date is None
+                else self.most_recent_unexpected_incident_date.isoformat()
+            ),
+            "most_recent_unexpected_incident_at": (
+                None
+                if self.most_recent_unexpected_incident_at is None
+                else self.most_recent_unexpected_incident_at.isoformat()
             ),
             "usable_solar_learning_days": self.usable_solar_learning_days,
             "complete_solar_episode_count": self.complete_solar_episode_count,
@@ -309,6 +339,12 @@ class MultiDayCommissioningIntelligence:
             for item in ordered
             for incident in item.incidents
         )
+        expected_incidents = tuple(
+            item for item in incidents if item[1].expected
+        )
+        unexpected_incidents = tuple(
+            item for item in incidents if not item[1].expected
+        )
         incident_reports = {item.report_id for item, _ in incidents}
         incident_dates = tuple(
             sorted({_report_date(item) for item, _ in incidents})
@@ -356,10 +392,23 @@ class MultiDayCommissioningIntelligence:
             key=lambda item: (item[1].started_at, item[1].incident_id),
             default=None,
         )
+        most_recent_unexpected = max(
+            unexpected_incidents,
+            key=lambda item: (item[1].started_at, item[1].incident_id),
+            default=None,
+        )
         recent_cutoff = end_date - timedelta(days=self.policy.recent_incident_days - 1)
-        recent_incident = any(_report_date(item) >= recent_cutoff for item, _ in incidents)
+        recent_incident = any(
+            _report_date(item) >= recent_cutoff
+            for item, _ in unexpected_incidents
+        )
+        open_unexpected_incidents = sum(
+            incident.state is ObservationIncidentState.OPEN
+            for _, incident in unexpected_incidents
+        )
         open_incidents = sum(
-            incident.state is ObservationIncidentState.OPEN for _, incident in incidents
+            incident.state is ObservationIncidentState.OPEN
+            for _, incident in incidents
         )
 
         reasons: list[CommissioningEvidenceReason] = []
@@ -382,7 +431,7 @@ class MultiDayCommissioningIntelligence:
             )
         if recent_incident:
             reasons.append(CommissioningEvidenceReason.RECENT_OBSERVATION_INCIDENT)
-        if open_incidents:
+        if open_unexpected_incidents:
             reasons.append(CommissioningEvidenceReason.OPEN_OBSERVATION_INCIDENT)
         quality_dominates = len(degraded) + len(excluded) > len(good)
         if quality_dominates:
@@ -440,18 +489,46 @@ class MultiDayCommissioningIntelligence:
             degraded_report_ids=tuple(item.report_id for item in degraded),
             excluded_report_ids=tuple(item.report_id for item in excluded),
             total_incident_count=len(incidents),
+            expected_incident_count=len(expected_incidents),
+            unexpected_incident_count=len(unexpected_incidents),
             incident_days=len(incident_reports),
+            expected_incident_days=len(
+                {_report_date(item) for item, _ in expected_incidents}
+            ),
+            unexpected_incident_days=len(
+                {_report_date(item) for item, _ in unexpected_incidents}
+            ),
             incident_dates=incident_dates,
             total_supported_incident_duration_seconds=sum(
                 incident.duration_seconds for _, incident in incidents
             ),
-            recovered_incident_count=len(incidents) - open_incidents,
+            expected_outage_duration_seconds=sum(
+                incident.duration_seconds for _, incident in expected_incidents
+            ),
+            unexpected_incident_duration_seconds=sum(
+                incident.duration_seconds for _, incident in unexpected_incidents
+            ),
+            recovered_incident_count=sum(
+                incident.state is ObservationIncidentState.RECOVERED
+                for _, incident in incidents
+            ),
             open_incident_count=open_incidents,
+            open_unexpected_incident_count=open_unexpected_incidents,
             most_recent_incident_date=(
                 None if most_recent is None else _report_date(most_recent[0])
             ),
             most_recent_incident_at=(
                 None if most_recent is None else most_recent[1].started_at
+            ),
+            most_recent_unexpected_incident_date=(
+                None
+                if most_recent_unexpected is None
+                else _report_date(most_recent_unexpected[0])
+            ),
+            most_recent_unexpected_incident_at=(
+                None
+                if most_recent_unexpected is None
+                else most_recent_unexpected[1].started_at
             ),
             usable_solar_learning_days=len(contributions),
             complete_solar_episode_count=complete_episodes,
@@ -499,7 +576,9 @@ def _consecutive_reports(
             break
         if report.soak_quality.status is not SoakQualityStatus.GOOD:
             break
-        if require_incident_free and report.incidents:
+        if require_incident_free and any(
+            not incident.expected for incident in report.incidents
+        ):
             break
         count += 1
         expected = report_date - timedelta(days=1)

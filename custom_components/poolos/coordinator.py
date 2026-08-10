@@ -21,6 +21,7 @@ from poolos.daily_retrospective import (
     DailyOperationalRetrospectiveEngine,
     PersistentRecommendationRecorder,
 )
+from poolos.expected_outage import ExpectedOutageAcknowledgment
 from poolos.homeassistant.observations import HomeAssistantState
 from poolos.multiday_commissioning import (
     MultiDayCommissioningIntelligence,
@@ -70,6 +71,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.latest_completed_daily_retrospective: DailyOperationalRetrospective | None = None
         self.multiday_commissioning_engine = MultiDayCommissioningIntelligence()
         self.multiday_commissioning_report: MultiDayCommissioningReport | None = None
+        self.latest_expected_outage_acknowledgment: (
+            ExpectedOutageAcknowledgment | None
+        ) = None
         self._completed_history_for_date: date | None = None
         self._completed_history: tuple[DailyOperationalRetrospective, ...] = ()
         self.local_timezone = ZoneInfo(hass.config.time_zone)
@@ -187,11 +191,18 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 )
             )
             if result is not None:
-                inference, current_retro, completed_retro, multiday_report = result
+                (
+                    inference,
+                    current_retro,
+                    completed_retro,
+                    multiday_report,
+                    latest_acknowledgment,
+                ) = result
                 self.behavioral_inference_report = inference
                 self.current_daily_retrospective = current_retro
                 self.latest_completed_daily_retrospective = completed_retro
                 self.multiday_commissioning_report = multiday_report
+                self.latest_expected_outage_acknowledgment = latest_acknowledgment
         except (OSError, TypeError, ValueError):
             LOGGER.exception("PoolOS persistent observation/inference/retrospective update failed")
         return snapshot
@@ -204,11 +215,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         health: dict[str, object],
         recommendation: OperatorRecommendation | None,
         recommendation_published_at: datetime | None,
+        force_analysis: bool = False,
     ) -> tuple[
         BehavioralInferenceReport,
         DailyOperationalRetrospective,
         DailyOperationalRetrospective,
         MultiDayCommissioningReport | None,
+        ExpectedOutageAcknowledgment | None,
     ] | None:
         """Persist evidence and refresh inference/retrospective only on durable writes."""
 
@@ -217,14 +230,15 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             observations=observations,
             health=health,
         )
-        if not wrote:
+        if not wrote and not force_analysis:
             return None
 
-        try:
-            self.evidence_exporter.export_day(self.observation_recorder, recorded_at)
-        except (OSError, TypeError, ValueError):
-            self.evidence_exporter.last_error = "daily evidence export failed"
-            LOGGER.exception("PoolOS daily evidence export failed")
+        if wrote:
+            try:
+                self.evidence_exporter.export_day(self.observation_recorder, recorded_at)
+            except (OSError, TypeError, ValueError):
+                self.evidence_exporter.last_error = "daily evidence export failed"
+                LOGGER.exception("PoolOS daily evidence export failed")
 
         if recommendation_published_at is not None:
             try:
@@ -243,6 +257,16 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         inference = self.behavioral_inference_engine.infer(inference_records)
 
         local_now = recorded_at.astimezone(self.local_timezone)
+        retained_acknowledgments = (
+            self.observation_recorder.query_expected_outage_acknowledgments(
+                start=recorded_at
+                - timedelta(days=self.observation_recorder.retention.retention_days),
+                end=recorded_at + timedelta(hours=2, microseconds=1),
+            )
+        )
+        latest_acknowledgment = (
+            retained_acknowledgments[-1] if retained_acknowledgments else None
+        )
         current_start_local = datetime.combine(local_now.date(), time.min, tzinfo=self.local_timezone)
         current_start = current_start_local.astimezone(UTC)
         next_start_local = current_start_local + timedelta(days=1)
@@ -251,6 +275,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         current_query_start = current_start - self.daily_retrospective_engine.maximum_evidence_gap
         current_records = self.observation_recorder.query(start=current_query_start, end=current_end)
         current_advisories = self.recommendation_recorder.query(start=current_start, end=current_end)
+        current_acknowledgments = self.observation_recorder.query_expected_outage_acknowledgments(
+            start=current_start,
+            end=current_end,
+        )
         current_recommendation = _recommendation_for_window(
             recommendation,
             recommendation_published_at,
@@ -264,6 +292,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             report_date=local_now.date().isoformat(),
             advisories=current_advisories,
             recommendation=current_recommendation,
+            expected_outage_acknowledgments=current_acknowledgments,
             complete_day=False,
         )
 
@@ -273,6 +302,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         previous_query_start = previous_start - self.daily_retrospective_engine.maximum_evidence_gap
         previous_records = self.observation_recorder.query(start=previous_query_start, end=previous_end)
         previous_advisories = self.recommendation_recorder.query(start=previous_start, end=previous_end)
+        previous_acknowledgments = self.observation_recorder.query_expected_outage_acknowledgments(
+            start=previous_start,
+            end=previous_end,
+        )
         previous_recommendation = _recommendation_for_window(
             recommendation,
             recommendation_published_at,
@@ -286,6 +319,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             report_date=previous_start_local.date().isoformat(),
             advisories=previous_advisories,
             recommendation=previous_recommendation,
+            expected_outage_acknowledgments=previous_acknowledgments,
             complete_day=True,
         )
         history = self._completed_retrospective_history(
@@ -302,7 +336,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 end_date=date.fromisoformat(history[-1].report_date),
             )
         )
-        return inference, current_retro, completed_retro, multiday_report
+        return (
+            inference,
+            current_retro,
+            completed_retro,
+            multiday_report,
+            latest_acknowledgment,
+        )
 
     def _completed_retrospective_history(
         self,
@@ -346,6 +386,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             start=first_local.astimezone(UTC),
             end=query_end,
         )
+        acknowledgments = self.observation_recorder.query_expected_outage_acknowledgments(
+            start=first_local.astimezone(UTC),
+            end=query_end,
+        )
         reports: list[DailyOperationalRetrospective] = []
         report_date = first_date
         while report_date <= latest_date:
@@ -368,6 +412,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                         start=day_start,
                         end=day_end,
                     ),
+                    expected_outage_acknowledgments=acknowledgments,
                     complete_day=True,
                 )
             )
@@ -375,6 +420,97 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._completed_history_for_date = latest_date
         self._completed_history = tuple(reports)
         return self._completed_history
+
+    async def async_acknowledge_expected_outage(
+        self, *, acknowledged_at: datetime | None = None
+    ) -> ExpectedOutageAcknowledgment:
+        """Persist local operator context and refresh read-only analysis."""
+
+        at = acknowledged_at or datetime.now(UTC)
+        if at.tzinfo is None or at.utcoffset() is None:
+            raise ValueError("acknowledged_at must be timezone-aware")
+        at = at.astimezone(UTC)
+        acknowledgment = ExpectedOutageAcknowledgment.create(
+            acknowledged_at=at,
+            source_id=f"home_assistant:{self.config_entry.entry_id}",
+        )
+        await self.hass.async_add_executor_job(
+            self.observation_recorder.record_expected_outage_acknowledgment,
+            acknowledgment,
+        )
+        try:
+            await self.hass.async_add_executor_job(
+                self.evidence_exporter.export_day,
+                self.observation_recorder,
+                at,
+            )
+        except (OSError, TypeError, ValueError):
+            self.evidence_exporter.last_error = "daily evidence export failed"
+            LOGGER.exception("PoolOS expected-outage evidence export failed")
+        self._completed_history_for_date = None
+        self.latest_expected_outage_acknowledgment = acknowledgment
+        snapshot = self.data
+        if snapshot is not None:
+            health = {
+                "healthy": snapshot.healthy,
+                "missing_required": list(snapshot.missing_required),
+                "unavailable_entities": list(snapshot.unavailable_entities),
+                "stale_entities": list(snapshot.stale_entities),
+            }
+            result = await self.hass.async_add_executor_job(
+                partial(
+                    self._record_infer_and_retro,
+                    recorded_at=at,
+                    observations=snapshot.observations,
+                    health=health,
+                    recommendation=self.operator_recommendation,
+                    recommendation_published_at=self.operator_recommendation_published_at,
+                    force_analysis=True,
+                )
+            )
+            if result is not None:
+                inference, current, completed, multiday, latest_acknowledgment = result
+                self.behavioral_inference_report = inference
+                self.current_daily_retrospective = current
+                self.latest_completed_daily_retrospective = completed
+                self.multiday_commissioning_report = multiday
+                self.latest_expected_outage_acknowledgment = latest_acknowledgment
+        self.async_update_listeners()
+        return acknowledgment
+
+    def expected_outage_annotation_diagnostics(
+        self, *, at: datetime | None = None
+    ) -> dict[str, object]:
+        """Return concise persisted annotation and matched-incident diagnostics."""
+
+        current = (at or datetime.now(UTC)).astimezone(UTC)
+        latest = self.latest_expected_outage_acknowledgment
+        incidents = (
+            ()
+            if self.current_daily_retrospective is None
+            else tuple(
+                incident
+                for incident in self.current_daily_retrospective.incidents
+                if incident.expected
+            )
+        )
+        recent_incident = incidents[-1] if incidents else None
+        active = latest is not None and latest.matching_window_start <= current <= latest.matching_window_end
+        return {
+            "state": "ACTIVE" if active else "NONE",
+            "annotation_active": active,
+            "last_acknowledgment_id": None if latest is None else latest.acknowledgment_id,
+            "last_acknowledged_at": None if latest is None else latest.acknowledged_at.isoformat(),
+            "matching_window_start": None if latest is None else latest.matching_window_start.isoformat(),
+            "matching_window_end": None if latest is None else latest.matching_window_end.isoformat(),
+            "matched_incident_count": len(incidents),
+            "most_recent_matched_outage_start": None if recent_incident is None else recent_incident.started_at.isoformat(),
+            "most_recent_matched_outage_end": None if recent_incident is None or recent_incident.ended_at is None else recent_incident.ended_at.isoformat(),
+            "observation_health_unchanged": True,
+            "authority": "none",
+            "annotation_authority": "operator_context_only",
+            "command_delivery_enabled": False,
+        }
 
     def publish_operator_recommendation(
         self,

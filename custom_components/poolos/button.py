@@ -22,7 +22,12 @@ async def async_setup_entry(
     """Set up the non-actuating diagnostic reset button."""
 
     runtime = entry.runtime_data
-    async_add_entities([PoolOSResetHealthIncidentButton(runtime.coordinator, entry)])
+    async_add_entities(
+        [
+            PoolOSResetHealthIncidentButton(runtime.coordinator, entry),
+            PoolOSAcknowledgeExpectedOutageButton(runtime.coordinator, entry),
+        ]
+    )
 
 
 class PoolOSResetHealthIncidentButton(
@@ -57,3 +62,31 @@ class PoolOSResetHealthIncidentButton(
         """Clear acknowledged diagnostic history; never actuate pool equipment."""
 
         self.coordinator.reset_health_incident_latch()
+
+
+class PoolOSAcknowledgeExpectedOutageButton(
+    CoordinatorEntity[PoolOSCoordinator], ButtonEntity
+):
+    """Persist operator annotation evidence without controlling equipment."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_name = "Acknowledge Expected Pentair Outage"
+    _attr_icon = "mdi:power-plug-off-outline"
+
+    def __init__(
+        self, coordinator: PoolOSCoordinator, entry: ConfigEntry[PoolOSRuntimeData]
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_acknowledge_expected_pentair_outage"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "PoolOS Control Center",
+            "manufacturer": "PoolOS",
+            "model": "Operational Commissioning Runtime",
+        }
+
+    async def async_press(self) -> None:
+        """Record local annotation context; never actuate or clear health."""
+
+        await self.coordinator.async_acknowledge_expected_outage()

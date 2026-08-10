@@ -12,6 +12,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
+from ..expected_outage import ExpectedOutageAcknowledgment
 from .model import PoolObservation
 
 SCHEMA_VERSION = "1.0.0"
@@ -185,10 +186,66 @@ class PersistentObservationRecorder:
                     if not line.strip():
                         continue
                     payload = json.loads(line)
+                    if payload.get("record_type", "observation") != "observation":
+                        continue
                     recorded_at = datetime.fromisoformat(payload["recorded_at"])
                     if start <= recorded_at < end:
                         records.append(_recorded_event(payload))
         return tuple(sorted(records, key=lambda item: (item.recorded_at, item.event_id)))
+
+    def record_expected_outage_acknowledgment(
+        self, acknowledgment: ExpectedOutageAcknowledgment
+    ) -> bool:
+        """Append operator annotation evidence without changing observation state."""
+
+        payload = {
+            "record_type": "expected_outage_acknowledgment",
+            "recorded_at": acknowledgment.acknowledged_at.astimezone(UTC).isoformat(),
+            **acknowledgment.to_dict(),
+        }
+        try:
+            self._append(payload)
+            self._prune(acknowledgment.acknowledged_at)
+        except OSError as exc:
+            self._write_errors += 1
+            self._last_error = str(exc)
+            raise
+        self._records_written += 1
+        self._last_error = None
+        return True
+
+    def query_expected_outage_acknowledgments(
+        self, *, start: datetime, end: datetime
+    ) -> tuple[ExpectedOutageAcknowledgment, ...]:
+        """Return durable acknowledgments whose matching windows intersect a range."""
+
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("query bounds must be timezone-aware")
+        if end <= start:
+            raise ValueError("end must be after start")
+        acknowledgments: dict[str, ExpectedOutageAcknowledgment] = {}
+        if not self.root.exists():
+            return ()
+        for path in sorted(self.root.glob("observations-*.jsonl")):
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    payload = json.loads(line)
+                    if payload.get("record_type") != "expected_outage_acknowledgment":
+                        continue
+                    acknowledgment = _expected_outage_acknowledgment(payload)
+                    if (
+                        acknowledgment.matching_window_start <= end
+                        and start <= acknowledgment.matching_window_end
+                    ):
+                        acknowledgments[acknowledgment.acknowledgment_id] = acknowledgment
+        return tuple(
+            sorted(
+                acknowledgments.values(),
+                key=lambda item: (item.acknowledged_at, item.acknowledgment_id),
+            )
+        )
 
     def diagnostics(self) -> dict[str, Any]:
         """Return recorder health without exposing raw pool values."""
@@ -283,6 +340,26 @@ def _recorded_event(payload: dict[str, Any]) -> RecordedObservationEvent:
         changed_observation_ids=tuple(payload["changed_observation_ids"]),
         observations=tuple(payload["observations"]),
         health=dict(payload["health"]),
+    )
+
+
+def _expected_outage_acknowledgment(
+    payload: dict[str, Any],
+) -> ExpectedOutageAcknowledgment:
+    from ..expected_outage import ExpectedOutageClassification, ExpectedOutageSource
+
+    return ExpectedOutageAcknowledgment(
+        acknowledgment_id=str(payload["acknowledgment_id"]),
+        schema_version=str(payload["schema_version"]),
+        acknowledged_at=datetime.fromisoformat(payload["acknowledged_at"]),
+        matching_window_start=datetime.fromisoformat(payload["matching_window_start"]),
+        matching_window_end=datetime.fromisoformat(payload["matching_window_end"]),
+        classification=ExpectedOutageClassification(payload["classification"]),
+        source=ExpectedOutageSource(payload["source"]),
+        source_id=str(payload["source_id"]),
+        reason_code=(
+            None if payload.get("reason_code") is None else str(payload["reason_code"])
+        ),
     )
 
 
