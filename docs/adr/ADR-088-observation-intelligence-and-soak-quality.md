@@ -120,3 +120,6 @@ Engineers can distinguish good, degraded, and excluded days; inspect recovered
 or open upstream incidents; and review solar episodes with their exact context
 and provenance. Observed IntelliCenter behavior remains commissioning evidence,
 not a production solar-control rule.
+
+ADR-089 aggregates completed ADR-088 daily reports across explicit date ranges.
+It does not change this ADR's per-day quality, incident, or solar authority.

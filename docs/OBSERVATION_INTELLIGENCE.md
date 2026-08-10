@@ -59,3 +59,28 @@ Observation intelligence consumes durable evidence and produces typed reports,
 JSON/CSV exports, diagnostics, and read-only Home Assistant publication. It
 contains no service call, command, equipment write, automatic actuation retry,
 vendor operation, or authority increase.
+
+## Multi-day commissioning intelligence
+
+Milestone 11.6 aggregates only completed canonical daily retrospectives across a
+caller-supplied inclusive date range. It does not reread raw observation logs or
+reinterpret daily quality. `GOOD` days form the clean evidence base;
+`DEGRADED` and `EXCLUDED` days remain visible in provenance but contribute no
+clean cross-day solar samples.
+
+The default commissioning gate requires 5 `GOOD` days, 3 consecutive `GOOD`
+days, 3 clean usable solar-learning days, 5 complete solar episodes, and no
+incident in the most recent 2 reporting dates. Missing reports, open/recent
+incidents, or a period dominated by `DEGRADED` and `EXCLUDED` days requires
+engineering review. These values are conservative commissioning defaults, not
+scientifically validated thresholds.
+
+`SUFFICIENT_FOR_POLICY_REVIEW` allows only human review of empirical evidence. It
+does not choose a solar differential, create a controller rule, change PoolOS
+policy, increase authority, or enable actuation. Observed Pentair behavior is not
+necessarily optimal behavior.
+
+Home Assistant publishes a rolling report over at most 14 completed local days.
+The coordinator reconstructs canonical daily reports in its existing executor
+workflow; the multi-day core consumes only those reports and never a current
+partial day.

@@ -177,6 +177,43 @@ def _solar_learning_attributes(
     }
 
 
+def _multiday_commissioning_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.multiday_commissioning_report
+    if report is None:
+        return {
+            "available": False,
+            "authority": "none",
+            "policy_created": False,
+            "command_delivery_enabled": False,
+        }
+    return {"available": True, **report.to_dict()}
+
+
+def _multiday_count_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.multiday_commissioning_report
+    if report is None:
+        return {
+            "available": False,
+            "authority": "none",
+            "policy_created": False,
+            "command_delivery_enabled": False,
+        }
+    return {
+        "available": True,
+        "report_id": report.report_id,
+        "start_date": report.start_date.isoformat(),
+        "end_date": report.end_date.isoformat(),
+        "evidence_status": report.evidence_status.value,
+        "authority": "none",
+        "policy_created": False,
+        "command_delivery_enabled": False,
+    }
+
+
 def _counterfactual_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     report = coordinator.current_daily_retrospective
     if report is None:
@@ -297,6 +334,7 @@ SENSORS = (
                 "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
                 "11.3A", "11.3B", "11.3C", "11.3D", "11.4A",
                 "11.5",
+                "11.5.1", "11.6",
             ],
             "next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT",
             "authority_increase_requires_approval": True,
@@ -383,6 +421,50 @@ SENSORS = (
         ),
         _solar_learning_attributes,
         "mdi:book-check-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "commissioning_evidence_status",
+        "Commissioning Evidence Status",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.multiday_commissioning_report is None
+            else coordinator.multiday_commissioning_report.evidence_status.value
+        ),
+        _multiday_commissioning_attributes,
+        "mdi:clipboard-check-multiple-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "good_observation_days",
+        "Good Observation Days",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.multiday_commissioning_report is None
+            else coordinator.multiday_commissioning_report.good_days
+        ),
+        _multiday_count_attributes,
+        "mdi:calendar-check-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "usable_solar_learning_days",
+        "Usable Solar Learning Days",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.multiday_commissioning_report is None
+            else coordinator.multiday_commissioning_report.usable_solar_learning_days
+        ),
+        _multiday_count_attributes,
+        "mdi:calendar-star",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "complete_solar_episodes",
+        "Complete Solar Episodes",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.multiday_commissioning_report is None
+            else coordinator.multiday_commissioning_report.complete_solar_episode_count
+        ),
+        _multiday_count_attributes,
+        "mdi:solar-panel-large",
     ),
     PoolOSControlCenterSensorDescription(
         "shadow_runtime_status",

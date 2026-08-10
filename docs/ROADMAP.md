@@ -857,6 +857,7 @@ Status: complete.
 |---|---|---|
 | 11.5 | Observation intelligence and soak quality | DONE |
 | 11.5.1 | Real-world observation calibration | DONE |
+| 11.6 | Multi-day commissioning intelligence | DONE |
 
 ### Milestone 11.5 — Observation Intelligence and Soak Quality
 
@@ -884,3 +885,18 @@ Status: complete pending validation.
 - begins a normal incident at the grace boundary when supported unhealthy evidence persists, preserving true failure detection and recovery provenance;
 - keeps existing serialized fields, Home Assistant entity IDs, dashboard structure, authority NONE, and disabled command delivery;
 - adds no service call, command, retry, vendor/network operation, or physical actuation.
+
+### Milestone 11.6 — Multi-Day Commissioning Intelligence
+
+Status: complete pending validation.
+
+- adds one deterministic vendor-neutral boundary over completed canonical daily retrospectives and an explicit inclusive date range;
+- counts GOOD, DEGRADED, and EXCLUDED days without reinterpreting daily quality or allowing degraded/excluded reports to contaminate clean solar evidence;
+- reports consecutive GOOD and incident-free days, neutral incident burden, supported unhealthy duration, recent/open incident state, and exact daily provenance;
+- aggregates clean daily activation/deactivation differentials, activation roof temperatures, episode counts, supported descriptive statistics, and provisional cross-day hysteresis evidence;
+- defines centralized conservative `ACCUMULATING`, `REVIEW_REQUIRED`, and `SUFFICIENT_FOR_POLICY_REVIEW` commissioning defaults;
+- treats sufficiency only as permission for human evidence review, never automatic threshold selection, policy creation, authority increase, or actuation;
+- rebuilds at most 14 completed local-day reports through the existing Home Assistant executor path and publishes four concise read-only diagnostics;
+- adds ADR-089 for the new cross-day commissioning-evidence boundary;
+- preserves existing daily report fields, entity IDs, observation-health semantics, and 11.5/11.5.1 behavior;
+- adds no Home Assistant service call, command, proposal, retry, network/vendor operation, or physical actuation.

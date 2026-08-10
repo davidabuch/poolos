@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from functools import partial
 import logging
 from pathlib import Path
@@ -22,12 +22,17 @@ from poolos.daily_retrospective import (
     PersistentRecommendationRecorder,
 )
 from poolos.homeassistant.observations import HomeAssistantState
+from poolos.multiday_commissioning import (
+    MultiDayCommissioningIntelligence,
+    MultiDayCommissioningReport,
+)
 from poolos.operator_recommendation import OperatorRecommendation
 from poolos.observations import PersistentObservationRecorder, PoolObservation
 
 from .const import (
     DOMAIN,
     INTEGRATION_VERSION,
+    MULTIDAY_COMMISSIONING_WINDOW_DAYS,
     OBSERVATION_UPDATE_INTERVAL,
     STARTUP_HEALTH_GRACE,
 )
@@ -63,6 +68,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.daily_retrospective_engine = DailyOperationalRetrospectiveEngine()
         self.current_daily_retrospective: DailyOperationalRetrospective | None = None
         self.latest_completed_daily_retrospective: DailyOperationalRetrospective | None = None
+        self.multiday_commissioning_engine = MultiDayCommissioningIntelligence()
+        self.multiday_commissioning_report: MultiDayCommissioningReport | None = None
+        self._completed_history_for_date: date | None = None
+        self._completed_history: tuple[DailyOperationalRetrospective, ...] = ()
         self.local_timezone = ZoneInfo(hass.config.time_zone)
         storage_root = Path(hass.config.path(".storage", DOMAIN, entry.entry_id))
         self.observation_recorder = PersistentObservationRecorder(storage_root / "observations")
@@ -178,10 +187,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 )
             )
             if result is not None:
-                inference, current_retro, completed_retro = result
+                inference, current_retro, completed_retro, multiday_report = result
                 self.behavioral_inference_report = inference
                 self.current_daily_retrospective = current_retro
                 self.latest_completed_daily_retrospective = completed_retro
+                self.multiday_commissioning_report = multiday_report
         except (OSError, TypeError, ValueError):
             LOGGER.exception("PoolOS persistent observation/inference/retrospective update failed")
         return snapshot
@@ -198,6 +208,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         BehavioralInferenceReport,
         DailyOperationalRetrospective,
         DailyOperationalRetrospective,
+        MultiDayCommissioningReport | None,
     ] | None:
         """Persist evidence and refresh inference/retrospective only on durable writes."""
 
@@ -277,7 +288,93 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             recommendation=previous_recommendation,
             complete_day=True,
         )
-        return inference, current_retro, completed_retro
+        history = self._completed_retrospective_history(
+            recorded_at=recorded_at,
+            recommendation=recommendation,
+            recommendation_published_at=recommendation_published_at,
+        )
+        multiday_report = (
+            None
+            if not history
+            else self.multiday_commissioning_engine.generate(
+                history,
+                start_date=date.fromisoformat(history[0].report_date),
+                end_date=date.fromisoformat(history[-1].report_date),
+            )
+        )
+        return inference, current_retro, completed_retro, multiday_report
+
+    def _completed_retrospective_history(
+        self,
+        *,
+        recorded_at: datetime,
+        recommendation: OperatorRecommendation | None,
+        recommendation_published_at: datetime | None,
+        maximum_days: int = MULTIDAY_COMMISSIONING_WINDOW_DAYS,
+    ) -> tuple[DailyOperationalRetrospective, ...]:
+        """Rebuild a bounded completed-day sequence for cross-day analysis."""
+
+        local_now = recorded_at.astimezone(self.local_timezone)
+        latest_date = local_now.date() - timedelta(days=1)
+        if self._completed_history_for_date == latest_date:
+            return self._completed_history
+        floor_date = latest_date - timedelta(days=maximum_days - 1)
+        floor_local = datetime.combine(floor_date, time.min, tzinfo=self.local_timezone)
+        end_local = datetime.combine(
+            local_now.date(), time.min, tzinfo=self.local_timezone
+        )
+        query_start = (
+            floor_local.astimezone(UTC)
+            - self.daily_retrospective_engine.maximum_evidence_gap
+        )
+        query_end = end_local.astimezone(UTC)
+        records = self.observation_recorder.query(start=query_start, end=query_end)
+        evidence_dates = tuple(
+            item.recorded_at.astimezone(self.local_timezone).date()
+            for item in records
+            if item.recorded_at >= floor_local.astimezone(UTC)
+        )
+        if not evidence_dates:
+            self._completed_history_for_date = latest_date
+            self._completed_history = ()
+            return self._completed_history
+        first_date = max(floor_date, min(evidence_dates))
+        first_local = datetime.combine(
+            first_date, time.min, tzinfo=self.local_timezone
+        )
+        advisories = self.recommendation_recorder.query(
+            start=first_local.astimezone(UTC),
+            end=query_end,
+        )
+        reports: list[DailyOperationalRetrospective] = []
+        report_date = first_date
+        while report_date <= latest_date:
+            day_start_local = datetime.combine(
+                report_date, time.min, tzinfo=self.local_timezone
+            )
+            day_end_local = day_start_local + timedelta(days=1)
+            day_start = day_start_local.astimezone(UTC)
+            day_end = day_end_local.astimezone(UTC)
+            reports.append(
+                self.daily_retrospective_engine.generate(
+                    records,
+                    window_start=day_start,
+                    window_end=day_end,
+                    report_date=report_date.isoformat(),
+                    advisories=advisories,
+                    recommendation=_recommendation_for_window(
+                        recommendation,
+                        recommendation_published_at,
+                        start=day_start,
+                        end=day_end,
+                    ),
+                    complete_day=True,
+                )
+            )
+            report_date += timedelta(days=1)
+        self._completed_history_for_date = latest_date
+        self._completed_history = tuple(reports)
+        return self._completed_history
 
     def publish_operator_recommendation(
         self,
@@ -373,6 +470,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 None
                 if self.latest_completed_daily_retrospective is None
                 else self.latest_completed_daily_retrospective.to_dict()
+            ),
+            "multiday_commissioning_report": (
+                None
+                if self.multiday_commissioning_report is None
+                else self.multiday_commissioning_report.to_dict()
             ),
             "shadow_runtime": self.shadow_runtime.diagnostics(),
             "operator_recommendation": (
