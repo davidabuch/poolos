@@ -44,13 +44,37 @@ views:
                 entity_id: button.poolos_control_center_reset_health_incident
           - type: button
             entity: button.poolos_control_center_acknowledge_expected_pentair_outage
-            name: Acknowledge Expected Pentair Outage
+            name: Acknowledge Expected Outage
             icon: mdi:power-plug-off-outline
             tap_action:
               action: perform-action
               perform_action: button.press
               target:
                 entity_id: button.poolos_control_center_acknowledge_expected_pentair_outage
+          - type: markdown
+            content: |
+              {% set entity = 'sensor.poolos_control_center_expected_outage_annotation' %}
+              {% set acknowledged = state_attr(entity, 'last_acknowledged_at') %}
+              {% set window_start = state_attr(entity, 'matching_window_start') %}
+              {% set window_end = state_attr(entity, 'matching_window_end') %}
+              {% set matched = state_attr(entity, 'matched_incident_count') %}
+              {% set outage_start = state_attr(entity, 'most_recent_matched_outage_start') %}
+              {% set outage_end = state_attr(entity, 'most_recent_matched_outage_end') %}
+              **Expected Outage Annotation — {{ states(entity) }}**
+
+              {% if acknowledged %}
+              **Acknowledged:** {{ as_timestamp(acknowledged) | timestamp_custom('%b %-d, %-I:%M %p %Z', true) }}
+
+              **Matching window:** {{ as_timestamp(window_start) | timestamp_custom('%-I:%M %p %Z', true) }} – {{ as_timestamp(window_end) | timestamp_custom('%-I:%M %p %Z', true) }}
+
+              **Matched incidents:** {{ matched | default(0, true) }}
+              {% if outage_start %}
+
+              **Most recent matched outage:** {{ as_timestamp(outage_start) | timestamp_custom('%b %-d, %-I:%M %p %Z', true) }}{% if outage_end %} – {{ as_timestamp(outage_end) | timestamp_custom('%-I:%M %p %Z', true) }}{% else %} – OPEN{% endif %}
+              {% endif %}
+              {% else %}
+              No expected-outage acknowledgment has been recorded.
+              {% endif %}
           - type: markdown
             content: >-
               **Expected outage** records annotation context only and never
