@@ -856,6 +856,7 @@ Status: complete.
 | ID | Work item | Status |
 |---|---|---|
 | 11.5 | Observation intelligence and soak quality | DONE |
+| 11.5.1 | Real-world observation calibration | DONE |
 
 ### Milestone 11.5 — Observation Intelligence and Soak Quality
 
@@ -871,3 +872,15 @@ Status: complete pending validation.
 - publishes only five concise read-only Control Center diagnostics with richer evidence in attributes and updates the existing dashboard;
 - documents that observed Pentair behavior is empirical commissioning evidence rather than a PoolOS control policy;
 - adds no Home Assistant service call, Pentair/HAL/RS-485/vendor/network write, command, retry, runtime authority, or physical actuation.
+
+### Milestone 11.5.1 — Real-World Observation Calibration
+
+Status: complete pending validation.
+
+- calibrates retrospective incident and quality analysis from real commissioning evidence observed on 2026-08-09 without committing the raw 11 MB log;
+- treats canonical `health.healthy` as authoritative for context-aware freshness, so tolerated stale metadata on healthy records remains diagnostic provenance rather than a failure;
+- adds a centralized deterministic 60-second grace interval after every durable baseline, matching live startup-health behavior;
+- preserves baseline, unavailable, stale, and unhealthy initialization evidence while excluding grace-only transients from incidents and degradation durations;
+- begins a normal incident at the grace boundary when supported unhealthy evidence persists, preserving true failure detection and recovery provenance;
+- keeps existing serialized fields, Home Assistant entity IDs, dashboard structure, authority NONE, and disabled command delivery;
+- adds no service call, command, retry, vendor/network operation, or physical actuation.

@@ -214,12 +214,13 @@ def test_baseline_is_startup_evidence_without_claiming_restart() -> None:
     )
     result = report(records, end=START + timedelta(minutes=30))
 
-    assert result.soak_quality.status is SoakQualityStatus.DEGRADED
+    assert result.soak_quality.status is SoakQualityStatus.GOOD
     assert result.soak_quality.startup_evidence_ids == ("baseline",)
     assert (
         SoakQualityReason.STARTUP_OR_RESTART_WINDOW
         in result.soak_quality.reason_codes
     )
+    assert SoakQualityReason.COMPLETE_HEALTHY_WINDOW in result.soak_quality.reason_codes
 
 
 def test_solar_transition_is_enriched_and_episode_is_closed() -> None:
