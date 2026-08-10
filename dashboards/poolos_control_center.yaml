@@ -42,15 +42,38 @@ views:
               perform_action: button.press
               target:
                 entity_id: button.poolos_control_center_reset_health_incident
-          - type: button
-            entity: button.poolos_control_center_acknowledge_expected_pentair_outage
-            name: Acknowledge Expected Outage
-            icon: mdi:power-plug-off-outline
-            tap_action:
-              action: perform-action
-              perform_action: button.press
-              target:
-                entity_id: button.poolos_control_center_acknowledge_expected_pentair_outage
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.poolos_control_center_expected_outage_annotation
+                state_not: ACTIVE
+            card:
+              type: tile
+              entity: sensor.poolos_control_center_expected_outage_annotation
+              name: Acknowledge Expected Outage
+              icon: mdi:power-plug-off-outline
+              hide_state: true
+              tap_action:
+                action: perform-action
+                perform_action: button.press
+                target:
+                  entity_id: button.poolos_control_center_acknowledge_expected_pentair_outage
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.poolos_control_center_expected_outage_annotation
+                state: ACTIVE
+            card:
+              type: tile
+              entity: sensor.poolos_control_center_expected_outage_annotation
+              name: EXPECTED OUTAGE ACTIVE
+              icon: mdi:power-plug-off-outline
+              color: red
+              tap_action:
+                action: perform-action
+                perform_action: button.press
+                target:
+                  entity_id: button.poolos_control_center_acknowledge_expected_pentair_outage
           - type: markdown
             content: |
               {% set entity = 'sensor.poolos_control_center_expected_outage_annotation' %}
