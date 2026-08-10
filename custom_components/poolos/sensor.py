@@ -25,9 +25,10 @@ class PoolOSControlCenterSensorDescription:
 
     key: str
     name: str
-    value: Callable[[PoolOSCoordinator, PoolOSRuntimeData], str | int | None]
+    value: Callable[[PoolOSCoordinator, PoolOSRuntimeData], str | int | float | None]
     attributes: Callable[[PoolOSCoordinator, PoolOSRuntimeData], dict[str, Any]] | None = None
     icon: str | None = None
+    unit: str | None = None
 
 
 def _shadow(coordinator: PoolOSCoordinator) -> dict[str, Any]:
@@ -117,8 +118,60 @@ def _retrospective_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRun
         "average_running_rpm": actual["average_running_rpm"],
         "pump_energy_kwh": actual["pump_energy_kwh"],
         "temperatures": actual["temperatures"],
+        "soak_quality": data["soak_quality"],
+        "incidents": data["incidents"],
+        "solar_learning": data["solar_learning"],
+        "daily_assessment": data["daily_assessment"],
         "latest_completed_report_id": None if completed is None else completed.report_id,
         "latest_completed_report_date": None if completed is None else completed.report_date,
+        "authority": "none",
+        "command_delivery_enabled": False,
+    }
+
+
+def _quality_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.current_daily_retrospective
+    if report is None:
+        return {"available": False, "authority": "none"}
+    return {
+        "available": True,
+        "report_id": report.report_id,
+        "report_date": report.report_date,
+        **report.soak_quality.to_dict(),
+        "authority": "none",
+        "command_delivery_enabled": False,
+    }
+
+
+def _incidents_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.current_daily_retrospective
+    if report is None:
+        return {"available": False, "incidents": [], "authority": "none"}
+    return {
+        "available": True,
+        "report_id": report.report_id,
+        "report_date": report.report_date,
+        "incidents": [item.to_dict() for item in report.incidents],
+        "authority": "none",
+        "command_delivery_enabled": False,
+    }
+
+
+def _solar_learning_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.current_daily_retrospective
+    if report is None:
+        return {"available": False, "authority": "none"}
+    return {
+        "available": True,
+        "report_id": report.report_id,
+        "report_date": report.report_date,
+        **report.solar_learning.to_dict(),
         "authority": "none",
         "command_delivery_enabled": False,
     }
@@ -243,6 +296,7 @@ SENSORS = (
                 "11.1A", "11.1B", "11.1C", "11.1D", "11.1E",
                 "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
                 "11.3A", "11.3B", "11.3C", "11.3D", "11.4A",
+                "11.5",
             ],
             "next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT",
             "authority_increase_requires_approval": True,
@@ -266,6 +320,69 @@ SENSORS = (
         ),
         _health_incident_attributes,
         "mdi:alert-circle-check-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "observation_quality",
+        "Observation Quality",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.current_daily_retrospective is None
+            else coordinator.current_daily_retrospective.soak_quality.status.value
+        ),
+        _quality_attributes,
+        "mdi:chart-timeline-variant-shimmer",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "observation_coverage",
+        "Observation Coverage",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.current_daily_retrospective is None
+            else round(
+                coordinator.current_daily_retrospective.soak_quality.observation_coverage_ratio
+                * 100,
+                1,
+            )
+        ),
+        _quality_attributes,
+        "mdi:percent-circle-outline",
+        "%",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "observation_incidents_today",
+        "Observation Incidents Today",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.current_daily_retrospective is None
+            else len(coordinator.current_daily_retrospective.incidents)
+        ),
+        _incidents_attributes,
+        "mdi:alert-decagram-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "solar_transitions_today",
+        "Solar Transitions Today",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.current_daily_retrospective is None
+            else (
+                coordinator.current_daily_retrospective.solar_learning.activation_count
+                + coordinator.current_daily_retrospective.solar_learning.deactivation_count
+            )
+        ),
+        _solar_learning_attributes,
+        "mdi:solar-panel-large",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "solar_learning_quality",
+        "Solar Learning Quality",
+        lambda coordinator, runtime: (
+            "NOT_AVAILABLE"
+            if coordinator.current_daily_retrospective is None
+            else coordinator.current_daily_retrospective.solar_learning.learning_quality.value
+        ),
+        _solar_learning_attributes,
+        "mdi:book-check-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "shadow_runtime_status",
@@ -416,6 +533,7 @@ class PoolOSControlCenterSensor(CoordinatorEntity[PoolOSCoordinator], SensorEnti
         self._attr_name = description.name
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_icon = description.icon
+        self._attr_native_unit_of_measurement = description.unit
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "PoolOS Control Center",
@@ -425,7 +543,7 @@ class PoolOSControlCenterSensor(CoordinatorEntity[PoolOSCoordinator], SensorEnti
         }
 
     @property
-    def native_value(self) -> str | int | datetime | None:
+    def native_value(self) -> str | int | float | datetime | None:
         return self._description.value(self.coordinator, self._runtime)
 
     @property

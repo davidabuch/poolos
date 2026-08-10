@@ -21,6 +21,15 @@ views:
           - type: tile
             entity: sensor.poolos_control_center_health_incident_since_restart
             name: Health Incident Since Reset
+          - type: tile
+            entity: sensor.poolos_control_center_observation_quality
+            name: Observation Quality
+          - type: tile
+            entity: sensor.poolos_control_center_observation_coverage
+            name: Observation Coverage
+          - type: tile
+            entity: sensor.poolos_control_center_observation_incidents_today
+            name: Incidents Today
           - type: button
             entity: button.poolos_control_center_reset_health_incident
             name: Reset Health Incident
@@ -36,6 +45,12 @@ views:
           - type: tile
             entity: sensor.poolos_control_center_solar_behavior_inference
             name: Solar Inference
+          - type: tile
+            entity: sensor.poolos_control_center_solar_transitions_today
+            name: Solar Transitions Today
+          - type: tile
+            entity: sensor.poolos_control_center_solar_learning_quality
+            name: Solar Learning Quality
           - type: tile
             entity: sensor.poolos_control_center_recorder_status
             name: Daily Evidence Recorder

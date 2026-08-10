@@ -29,6 +29,9 @@ def test_daily_export_writes_easy_jsonl_and_csv(tmp_path: Path) -> None:
     assert "pool_light.active" in header
     assert "pool_light.color_mode" in header
     assert "pool_light.effect" in header
+    assert "missing_required" in header
+    assert "unavailable_entities" in header
+    assert "stale_entities" in header
 
 
 def test_export_diagnostics_expose_operator_path(tmp_path: Path) -> None:
