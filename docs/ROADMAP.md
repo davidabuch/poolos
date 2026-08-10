@@ -850,3 +850,24 @@ Status: complete.
 - Expose pool-light state and mode/scene in the Operations Center and daily JSONL/CSV exports.
 - Missing optional light metadata must not make observation health unhealthy; light entity availability remains required.
 - Future Home Assistant-mediated light control remains outside the current OBSERVE-only authority boundary.
+
+## PoolOS Observation Intelligence Milestones
+
+| ID | Work item | Status |
+|---|---|---|
+| 11.5 | Observation intelligence and soak quality | DONE |
+
+### Milestone 11.5 — Observation Intelligence and Soak Quality
+
+Status: complete pending validation.
+
+- adds immutable deterministic daily `GOOD`, `DEGRADED`, and `EXCLUDED` soak-quality evidence using centralized conservative engineering thresholds;
+- reports total and healthy coverage, largest unsupported gap, unhealthy and unavailable/stale duration, stable reason codes, startup-window evidence, and exact durable provenance;
+- groups consecutive missing, unavailable, stale, or unhealthy evidence into neutral recovered or open upstream-observation incidents without assuming an IntelliCenter root cause;
+- enriches the canonical behavioral-inference solar transitions with available thermal, hydraulic, demand, equipment, preference, and offset-aware time context;
+- pairs activations with subsequent deactivations into deterministic closed episodes while preserving unmatched activations as explicitly open;
+- extends the canonical daily retrospective with empirical transition/episode counts, observed runtime, sample values, supported medians, provisional hysteresis evidence, learning eligibility, limitations, and a deterministic engineering assessment;
+- preserves existing JSON/CSV evidence fields and adds concise raw health columns needed for independent incident verification;
+- publishes only five concise read-only Control Center diagnostics with richer evidence in attributes and updates the existing dashboard;
+- documents that observed Pentair behavior is empirical commissioning evidence rather than a PoolOS control policy;
+- adds no Home Assistant service call, Pentair/HAL/RS-485/vendor/network write, command, retry, runtime authority, or physical actuation.

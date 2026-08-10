@@ -15,15 +15,23 @@ import json
 import math
 import os
 from pathlib import Path
+import statistics
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
-from .behavioral_inference import BehavioralInferenceEngine, InferredBehaviorEvent
+from .behavioral_inference import (
+    BehavioralInferenceEngine,
+    InferredBehaviorEvent,
+    SolarEpisode,
+    SolarEpisodeState,
+)
 from .operator_recommendation import OperatorRecommendation, OperatorRecommendationStatus
 from .observations import RecordedObservationEvent
 
 SCHEMA_VERSION = "1.0.0"
+RETROSPECTIVE_SCHEMA_VERSION = "1.1.0"
 _MIN_RUNNING_RPM = 100.0
+_MINIMUM_MEDIAN_SAMPLES = 2
 
 
 class CounterfactualStatus(str, Enum):
@@ -33,6 +41,214 @@ class CounterfactualStatus(str, Enum):
     NO_CHANGE_RECOMMENDED = "NO_CHANGE_RECOMMENDED"
     CHANGE_RECOMMENDED = "CHANGE_RECOMMENDED"
     ADVISORY_LIMITED = "ADVISORY_LIMITED"
+
+
+class SoakQualityStatus(str, Enum):
+    """Whether one reporting window is trustworthy for behavioral learning."""
+
+    GOOD = "GOOD"
+    DEGRADED = "DEGRADED"
+    EXCLUDED = "EXCLUDED"
+
+
+class SoakQualityReason(str, Enum):
+    """Stable machine-readable reasons supporting a soak-quality classification."""
+
+    INSUFFICIENT_COVERAGE = "INSUFFICIENT_COVERAGE"
+    INSUFFICIENT_HEALTHY_COVERAGE = "INSUFFICIENT_HEALTHY_COVERAGE"
+    LARGE_EVIDENCE_GAP = "LARGE_EVIDENCE_GAP"
+    OBSERVATION_HEALTH_INCIDENT = "OBSERVATION_HEALTH_INCIDENT"
+    REQUIRED_ENTITY_UNAVAILABLE = "REQUIRED_ENTITY_UNAVAILABLE"
+    REQUIRED_ENTITY_STALE = "REQUIRED_ENTITY_STALE"
+    REQUIRED_MAPPING_MISSING = "REQUIRED_MAPPING_MISSING"
+    STARTUP_OR_RESTART_WINDOW = "STARTUP_OR_RESTART_WINDOW"
+    COMPLETE_HEALTHY_WINDOW = "COMPLETE_HEALTHY_WINDOW"
+    COMPLETE_HEALTHY_DAY = "COMPLETE_HEALTHY_DAY"
+
+
+class ObservationIncidentState(str, Enum):
+    """Whether an observation incident has explicit recovery evidence."""
+
+    OPEN = "OPEN"
+    RECOVERED = "RECOVERED"
+
+
+class SolarLearningQuality(str, Enum):
+    """How daily solar evidence may be used for later engineering analysis."""
+
+    INCLUDED = "INCLUDED"
+    DEGRADED = "DEGRADED"
+    EXCLUDED = "EXCLUDED"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+
+
+@dataclass(frozen=True, slots=True)
+class SoakQualityPolicy:
+    """Explicit conservative engineering thresholds; not scientifically validated."""
+
+    good_coverage_ratio: float = 0.95
+    exclusion_coverage_ratio: float = 0.75
+    maximum_good_gap: timedelta = timedelta(minutes=15)
+    exclusion_gap: timedelta = timedelta(hours=2)
+    exclusion_unhealthy_duration: timedelta = timedelta(hours=2)
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.exclusion_coverage_ratio <= self.good_coverage_ratio <= 1.0:
+            raise ValueError("coverage thresholds must satisfy 0 < exclusion <= good <= 1")
+        if self.maximum_good_gap <= timedelta(0):
+            raise ValueError("maximum_good_gap must be positive")
+        if self.exclusion_gap < self.maximum_good_gap:
+            raise ValueError("exclusion_gap must not be shorter than maximum_good_gap")
+        if self.exclusion_unhealthy_duration <= timedelta(0):
+            raise ValueError("exclusion_unhealthy_duration must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationIncident:
+    """One continuous neutral upstream observation failure or degradation."""
+
+    incident_id: str
+    incident_type: str
+    state: ObservationIncidentState
+    started_at: datetime
+    ended_at: datetime | None
+    duration_seconds: float
+    recovered: bool
+    health_state: str
+    reasons: tuple[str, ...]
+    missing_required: tuple[str, ...]
+    unavailable_observations: tuple[str, ...]
+    stale_observations: tuple[str, ...]
+    source_event_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "incident_id": self.incident_id,
+            "incident_type": self.incident_type,
+            "state": self.state.value,
+            "started_at": self.started_at.isoformat(),
+            "ended_at": None if self.ended_at is None else self.ended_at.isoformat(),
+            "duration_seconds": round(self.duration_seconds, 3),
+            "recovered": self.recovered,
+            "health_state": self.health_state,
+            "reasons": list(self.reasons),
+            "missing_required": list(self.missing_required),
+            "unavailable_observations": list(self.unavailable_observations),
+            "stale_observations": list(self.stale_observations),
+            "source_event_ids": list(self.source_event_ids),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SoakQualityAssessment:
+    """Immutable daily observation completeness and health assessment."""
+
+    status: SoakQualityStatus
+    observation_coverage_ratio: float
+    healthy_observation_coverage_ratio: float
+    largest_evidence_gap_seconds: float
+    unhealthy_duration_seconds: float
+    unavailable_duration_seconds: float
+    stale_duration_seconds: float
+    unavailable_or_stale_duration_seconds: float
+    incident_count: int
+    startup_evidence_ids: tuple[str, ...]
+    reason_codes: tuple[SoakQualityReason, ...]
+    assessment: str
+    source_evidence_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "observation_coverage_ratio": round(self.observation_coverage_ratio, 6),
+            "healthy_observation_coverage_ratio": round(
+                self.healthy_observation_coverage_ratio, 6
+            ),
+            "largest_evidence_gap_seconds": round(
+                self.largest_evidence_gap_seconds, 3
+            ),
+            "unhealthy_duration_seconds": round(self.unhealthy_duration_seconds, 3),
+            "unavailable_duration_seconds": round(
+                self.unavailable_duration_seconds, 3
+            ),
+            "stale_duration_seconds": round(self.stale_duration_seconds, 3),
+            "unavailable_or_stale_duration_seconds": round(
+                self.unavailable_or_stale_duration_seconds, 3
+            ),
+            "incident_count": self.incident_count,
+            "startup_evidence_ids": list(self.startup_evidence_ids),
+            "reason_codes": [item.value for item in self.reason_codes],
+            "assessment": self.assessment,
+            "source_evidence_ids": list(self.source_evidence_ids),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DailySolarLearningSummary:
+    """Daily empirical solar evidence, explicitly separate from control policy."""
+
+    activation_count: int
+    deactivation_count: int
+    complete_episode_count: int
+    open_episode_count: int
+    total_observed_runtime_seconds: float
+    first_activation_time: datetime | None
+    last_deactivation_time: datetime | None
+    activation_roof_temperatures_f: tuple[float, ...]
+    activation_roof_to_pool_differentials_f: tuple[float, ...]
+    deactivation_roof_to_pool_differentials_f: tuple[float, ...]
+    median_activation_roof_temperature_f: float | None
+    median_activation_differential_f: float | None
+    median_deactivation_differential_f: float | None
+    provisional_hysteresis_differential_f: float | None
+    learning_quality: SolarLearningQuality
+    usable_for_learning: bool
+    assessment: str
+    limitations: tuple[str, ...]
+    episodes: tuple[SolarEpisode, ...]
+    source_evidence_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "activation_count": self.activation_count,
+            "deactivation_count": self.deactivation_count,
+            "complete_episode_count": self.complete_episode_count,
+            "open_episode_count": self.open_episode_count,
+            "total_observed_runtime_seconds": round(
+                self.total_observed_runtime_seconds, 3
+            ),
+            "first_activation_time": (
+                None
+                if self.first_activation_time is None
+                else self.first_activation_time.isoformat()
+            ),
+            "last_deactivation_time": (
+                None
+                if self.last_deactivation_time is None
+                else self.last_deactivation_time.isoformat()
+            ),
+            "activation_roof_temperatures_f": list(
+                self.activation_roof_temperatures_f
+            ),
+            "activation_roof_to_pool_differentials_f": list(
+                self.activation_roof_to_pool_differentials_f
+            ),
+            "deactivation_roof_to_pool_differentials_f": list(
+                self.deactivation_roof_to_pool_differentials_f
+            ),
+            "median_activation_roof_temperature_f": self.median_activation_roof_temperature_f,
+            "median_activation_differential_f": self.median_activation_differential_f,
+            "median_deactivation_differential_f": self.median_deactivation_differential_f,
+            "provisional_hysteresis_differential_f": self.provisional_hysteresis_differential_f,
+            "learning_quality": self.learning_quality.value,
+            "usable_for_learning": self.usable_for_learning,
+            "assessment": self.assessment,
+            "limitations": list(self.limitations),
+            "episodes": [item.to_dict() for item in self.episodes],
+            "source_evidence_ids": list(self.source_evidence_ids),
+            "empirical_evidence_only": True,
+            "poolos_control_rule": False,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +528,10 @@ class DailyOperationalRetrospective:
     complete_day: bool
     actual: ActualOperationalMetrics
     counterfactual: CounterfactualReport
+    soak_quality: SoakQualityAssessment
+    incidents: tuple[ObservationIncident, ...]
+    solar_learning: DailySolarLearningSummary
+    daily_assessment: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -322,6 +542,10 @@ class DailyOperationalRetrospective:
             "complete_day": self.complete_day,
             "actual": self.actual.to_dict(),
             "counterfactual": self.counterfactual.to_dict(),
+            "soak_quality": self.soak_quality.to_dict(),
+            "incidents": [item.to_dict() for item in self.incidents],
+            "solar_learning": self.solar_learning.to_dict(),
+            "daily_assessment": self.daily_assessment,
             "authority": "none",
             "command_delivery_enabled": False,
         }
@@ -364,10 +588,16 @@ class _TemperatureAccumulator:
 class DailyOperationalRetrospectiveEngine:
     """Build daily summaries from durable evidence without crossing control boundaries."""
 
-    def __init__(self, *, maximum_evidence_gap: timedelta = timedelta(minutes=15)) -> None:
+    def __init__(
+        self,
+        *,
+        maximum_evidence_gap: timedelta = timedelta(minutes=15),
+        soak_quality_policy: SoakQualityPolicy | None = None,
+    ) -> None:
         if maximum_evidence_gap <= timedelta(0):
             raise ValueError("maximum_evidence_gap must be positive")
         self.maximum_evidence_gap = maximum_evidence_gap
+        self.soak_quality_policy = soak_quality_policy or SoakQualityPolicy()
         self._behavioral = BehavioralInferenceEngine()
 
     def generate(
@@ -384,8 +614,47 @@ class DailyOperationalRetrospectiveEngine:
         """Generate one deterministic retrospective for the explicit reporting window."""
 
         _validate_window(window_start, window_end)
-        ordered = tuple(sorted(records, key=lambda item: (item.recorded_at, item.event_id)))
+        evidence = tuple(records)
+        if any(
+            item.recorded_at.tzinfo is None or item.recorded_at.utcoffset() is None
+            for item in evidence
+        ):
+            raise ValueError("retrospective evidence timestamps must be timezone-aware")
+        ordered = tuple(
+            sorted(evidence, key=lambda item: (item.recorded_at, item.event_id))
+        )
         actual = self._actual_metrics(ordered, window_start=window_start, window_end=window_end)
+        incidents = _observation_incidents(
+            ordered,
+            window_start=window_start,
+            window_end=window_end,
+            maximum_evidence_gap=self.maximum_evidence_gap,
+        )
+        soak_quality = _soak_quality(
+            ordered,
+            actual=actual,
+            incidents=incidents,
+            window_start=window_start,
+            window_end=window_end,
+            maximum_evidence_gap=self.maximum_evidence_gap,
+            policy=self.soak_quality_policy,
+            complete_day=complete_day,
+        )
+        inference_records = tuple(
+            item
+            for item in ordered
+            if window_start - self.maximum_evidence_gap <= item.recorded_at < window_end
+        )
+        inference = self._behavioral.infer(inference_records)
+        solar_learning = _daily_solar_learning(
+            inference.events,
+            inference.solar_episodes,
+            actual=actual,
+            soak_quality=soak_quality,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        daily_assessment = _daily_assessment(soak_quality, solar_learning)
         ordered_advisories = tuple(
             sorted(
                 (item for item in advisories if window_start <= item.published_at < window_end),
@@ -395,22 +664,30 @@ class DailyOperationalRetrospectiveEngine:
         counterfactual = _counterfactual(actual, ordered_advisories, recommendation)
         generated_at = window_end
         identity_payload = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": RETROSPECTIVE_SCHEMA_VERSION,
             "report_date": report_date,
             "generated_at": generated_at.isoformat(),
             "complete_day": complete_day,
             "actual": actual.to_dict(),
             "counterfactual": counterfactual.to_dict(),
+            "soak_quality": soak_quality.to_dict(),
+            "incidents": [item.to_dict() for item in incidents],
+            "solar_learning": solar_learning.to_dict(),
+            "daily_assessment": daily_assessment,
         }
         report_id = "daily-retrospective-" + sha256(_canonical_json(identity_payload).encode("utf-8")).hexdigest()[:24]
         return DailyOperationalRetrospective(
             report_id=report_id,
-            schema_version=SCHEMA_VERSION,
+            schema_version=RETROSPECTIVE_SCHEMA_VERSION,
             report_date=report_date,
             generated_at=generated_at,
             complete_day=complete_day,
             actual=actual,
             counterfactual=counterfactual,
+            soak_quality=soak_quality,
+            incidents=incidents,
+            solar_learning=solar_learning,
+            daily_assessment=daily_assessment,
         )
 
     def _actual_metrics(
@@ -562,6 +839,448 @@ class DailyOperationalRetrospectiveEngine:
             temperatures={key: accumulator.summary() for key, accumulator in temps.items()},
             source_event_ids=tuple(used_event_ids),
         )
+
+
+def _observation_incidents(
+    records: tuple[RecordedObservationEvent, ...],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    maximum_evidence_gap: timedelta,
+) -> tuple[ObservationIncident, ...]:
+    relevant = _relevant_records(
+        records,
+        window_start=window_start,
+        window_end=window_end,
+        maximum_evidence_gap=maximum_evidence_gap,
+    )
+    incidents: list[ObservationIncident] = []
+    active: dict[str, Any] | None = None
+    for record in relevant:
+        issue_reasons = _health_reasons(record)
+        if issue_reasons:
+            if active is None:
+                active = {
+                    "started_at": max(record.recorded_at, window_start),
+                    "reasons": set(),
+                    "missing": set(),
+                    "unavailable": set(),
+                    "stale": set(),
+                    "source_ids": [],
+                    "unhealthy": False,
+                }
+            active["reasons"].update(issue_reasons)
+            active["missing"].update(_health_values(record, "missing_required"))
+            active["unavailable"].update(
+                _health_values(record, "unavailable_entities")
+            )
+            active["stale"].update(_health_values(record, "stale_entities"))
+            active["source_ids"].append(record.event_id)
+            active["unhealthy"] = active["unhealthy"] or not bool(
+                record.health.get("healthy", False)
+            )
+            continue
+        if active is not None:
+            active["source_ids"].append(record.event_id)
+            incidents.append(
+                _build_incident(active, ended_at=record.recorded_at, window_end=window_end)
+            )
+            active = None
+    if active is not None:
+        incidents.append(_build_incident(active, ended_at=None, window_end=window_end))
+    return tuple(incidents)
+
+
+def _build_incident(
+    evidence: dict[str, Any],
+    *,
+    ended_at: datetime | None,
+    window_end: datetime,
+) -> ObservationIncident:
+    started_at = evidence["started_at"]
+    duration_end = window_end if ended_at is None else min(ended_at, window_end)
+    source_ids = tuple(dict.fromkeys(str(item) for item in evidence["source_ids"]))
+    reasons = tuple(sorted(str(item) for item in evidence["reasons"]))
+    payload = {
+        "incident_type": "UPSTREAM_OBSERVATION_FAILURE",
+        "started_at": started_at.isoformat(),
+        "first_source_event_id": source_ids[0],
+    }
+    incident_id = "observation-incident-" + sha256(
+        _canonical_json(payload).encode("utf-8")
+    ).hexdigest()[:24]
+    recovered = ended_at is not None
+    return ObservationIncident(
+        incident_id=incident_id,
+        incident_type="UPSTREAM_OBSERVATION_FAILURE",
+        state=(
+            ObservationIncidentState.RECOVERED
+            if recovered
+            else ObservationIncidentState.OPEN
+        ),
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_seconds=max(0.0, (duration_end - started_at).total_seconds()),
+        recovered=recovered,
+        health_state="UNHEALTHY" if evidence["unhealthy"] else "DEGRADED",
+        reasons=reasons,
+        missing_required=tuple(sorted(evidence["missing"])),
+        unavailable_observations=tuple(sorted(evidence["unavailable"])),
+        stale_observations=tuple(sorted(evidence["stale"])),
+        source_event_ids=source_ids,
+    )
+
+
+def _soak_quality(
+    records: tuple[RecordedObservationEvent, ...],
+    *,
+    actual: ActualOperationalMetrics,
+    incidents: tuple[ObservationIncident, ...],
+    window_start: datetime,
+    window_end: datetime,
+    maximum_evidence_gap: timedelta,
+    policy: SoakQualityPolicy,
+    complete_day: bool,
+) -> SoakQualityAssessment:
+    window_seconds = (window_end - window_start).total_seconds()
+    spans = _supported_spans(
+        records,
+        window_start=window_start,
+        window_end=window_end,
+        maximum_evidence_gap=maximum_evidence_gap,
+    )
+    healthy_ratio = (
+        0.0
+        if window_seconds <= 0
+        else min(1.0, actual.healthy_coverage_seconds / window_seconds)
+    )
+    largest_gap = _largest_uncovered_gap(spans, window_start, window_end)
+    unhealthy_duration = sum(
+        (end - start).total_seconds()
+        for record, start, end in spans
+        if not bool(record.health.get("healthy", False))
+    )
+    unavailable_duration = sum(
+        (end - start).total_seconds()
+        for record, start, end in spans
+        if _health_values(record, "unavailable_entities")
+    )
+    stale_duration = sum(
+        (end - start).total_seconds()
+        for record, start, end in spans
+        if _health_values(record, "stale_entities")
+    )
+    unavailable_or_stale_duration = sum(
+        (end - start).total_seconds()
+        for record, start, end in spans
+        if _health_values(record, "unavailable_entities")
+        or _health_values(record, "stale_entities")
+    )
+    startup_ids = tuple(
+        item.event_id
+        for item in records
+        if window_start <= item.recorded_at < window_end and item.kind == "baseline"
+    )
+    all_reasons = {reason for incident in incidents for reason in incident.reasons}
+    reason_codes: list[SoakQualityReason] = []
+    if actual.coverage_ratio < policy.good_coverage_ratio:
+        reason_codes.append(SoakQualityReason.INSUFFICIENT_COVERAGE)
+    if healthy_ratio < policy.good_coverage_ratio:
+        reason_codes.append(SoakQualityReason.INSUFFICIENT_HEALTHY_COVERAGE)
+    if largest_gap > policy.maximum_good_gap.total_seconds():
+        reason_codes.append(SoakQualityReason.LARGE_EVIDENCE_GAP)
+    if incidents:
+        reason_codes.append(SoakQualityReason.OBSERVATION_HEALTH_INCIDENT)
+    for value in (
+        SoakQualityReason.REQUIRED_ENTITY_UNAVAILABLE,
+        SoakQualityReason.REQUIRED_ENTITY_STALE,
+        SoakQualityReason.REQUIRED_MAPPING_MISSING,
+    ):
+        if value.value in all_reasons:
+            reason_codes.append(value)
+    if startup_ids:
+        reason_codes.append(SoakQualityReason.STARTUP_OR_RESTART_WINDOW)
+
+    excluded = any(
+        (
+            actual.coverage_ratio < policy.exclusion_coverage_ratio,
+            healthy_ratio < policy.exclusion_coverage_ratio,
+            largest_gap >= policy.exclusion_gap.total_seconds(),
+            unhealthy_duration
+            >= policy.exclusion_unhealthy_duration.total_seconds(),
+        )
+    )
+    if excluded:
+        status = SoakQualityStatus.EXCLUDED
+    elif reason_codes:
+        status = SoakQualityStatus.DEGRADED
+    else:
+        status = SoakQualityStatus.GOOD
+        reason_codes.append(
+            SoakQualityReason.COMPLETE_HEALTHY_DAY
+            if complete_day
+            else SoakQualityReason.COMPLETE_HEALTHY_WINDOW
+        )
+    assessment = (
+        f"Observation quality {status.value}: {actual.coverage_ratio * 100:.1f}% "
+        f"coverage, {len(incidents)} observation incident"
+        f"{'s' if len(incidents) != 1 else ''}."
+    )
+    source_ids = tuple(dict.fromkeys(record.event_id for record, _, _ in spans))
+    return SoakQualityAssessment(
+        status=status,
+        observation_coverage_ratio=actual.coverage_ratio,
+        healthy_observation_coverage_ratio=healthy_ratio,
+        largest_evidence_gap_seconds=largest_gap,
+        unhealthy_duration_seconds=unhealthy_duration,
+        unavailable_duration_seconds=unavailable_duration,
+        stale_duration_seconds=stale_duration,
+        unavailable_or_stale_duration_seconds=unavailable_or_stale_duration,
+        incident_count=len(incidents),
+        startup_evidence_ids=startup_ids,
+        reason_codes=tuple(reason_codes),
+        assessment=assessment,
+        source_evidence_ids=source_ids,
+    )
+
+
+def _daily_solar_learning(
+    events: tuple[InferredBehaviorEvent, ...],
+    episodes: tuple[SolarEpisode, ...],
+    *,
+    actual: ActualOperationalMetrics,
+    soak_quality: SoakQualityAssessment,
+    window_start: datetime,
+    window_end: datetime,
+) -> DailySolarLearningSummary:
+    transitions = tuple(
+        item
+        for item in events
+        if item.kind in {"SOLAR_ACTIVATED", "SOLAR_DEACTIVATED"}
+        and window_start <= item.occurred_at < window_end
+    )
+    activations = tuple(item for item in transitions if item.kind == "SOLAR_ACTIVATED")
+    deactivations = tuple(
+        item for item in transitions if item.kind == "SOLAR_DEACTIVATED"
+    )
+    daily_episodes = tuple(
+        item for item in episodes if window_start <= item.activation_time < window_end
+    )
+    complete = tuple(
+        item for item in daily_episodes if item.state is SolarEpisodeState.CLOSED
+    )
+    activation_roofs = _attribute_values(activations, "solar_temperature_f")
+    activation_diffs = _attribute_values(
+        activations, "roof_to_pool_differential_f"
+    )
+    deactivation_diffs = _attribute_values(
+        deactivations, "roof_to_pool_differential_f"
+    )
+    activation_median = _supported_median(activation_diffs)
+    deactivation_median = _supported_median(deactivation_diffs)
+    hysteresis = (
+        None
+        if activation_median is None or deactivation_median is None
+        else round(activation_median - deactivation_median, 3)
+    )
+    if not complete:
+        quality = SolarLearningQuality.INSUFFICIENT_EVIDENCE
+        usable = False
+    elif soak_quality.status is SoakQualityStatus.EXCLUDED:
+        quality = SolarLearningQuality.EXCLUDED
+        usable = False
+    elif soak_quality.status is SoakQualityStatus.DEGRADED:
+        quality = SolarLearningQuality.DEGRADED
+        usable = True
+    else:
+        quality = SolarLearningQuality.INCLUDED
+        usable = True
+
+    limitations = [
+        "Observed solar behavior is empirical Pentair evidence, not a PoolOS control rule.",
+        "Transition medians require at least two available samples; missing values are not imputed.",
+    ]
+    if soak_quality.status is SoakQualityStatus.EXCLUDED:
+        limitations.append(
+            "This reporting window is excluded from behavioral-learning conclusions by soak quality."
+        )
+    elif soak_quality.status is SoakQualityStatus.DEGRADED:
+        limitations.append(
+            "This reporting window is degraded and requires review before cross-day learning."
+        )
+    if any(item.state is SolarEpisodeState.OPEN for item in daily_episodes):
+        limitations.append(
+            "At least one activation has no observed deactivation in this reporting window."
+        )
+    if not complete:
+        assessment = "No complete solar episode supports daily learning."
+    else:
+        assessment = (
+            f"Solar learning {quality.value}: {len(activations)} activation"
+            f"{'s' if len(activations) != 1 else ''}, {len(complete)} complete episode"
+            f"{'s' if len(complete) != 1 else ''}."
+        )
+    source_ids = tuple(
+        dict.fromkeys(
+            event_id
+            for transition in transitions
+            for event_id in transition.evidence_event_ids
+        )
+    )
+    return DailySolarLearningSummary(
+        activation_count=len(activations),
+        deactivation_count=len(deactivations),
+        complete_episode_count=len(complete),
+        open_episode_count=sum(
+            item.state is SolarEpisodeState.OPEN for item in daily_episodes
+        ),
+        total_observed_runtime_seconds=actual.solar_runtime_seconds,
+        first_activation_time=(
+            None if not activations else activations[0].occurred_at
+        ),
+        last_deactivation_time=(
+            None if not deactivations else deactivations[-1].occurred_at
+        ),
+        activation_roof_temperatures_f=activation_roofs,
+        activation_roof_to_pool_differentials_f=activation_diffs,
+        deactivation_roof_to_pool_differentials_f=deactivation_diffs,
+        median_activation_roof_temperature_f=_supported_median(activation_roofs),
+        median_activation_differential_f=activation_median,
+        median_deactivation_differential_f=deactivation_median,
+        provisional_hysteresis_differential_f=hysteresis,
+        learning_quality=quality,
+        usable_for_learning=usable,
+        assessment=assessment,
+        limitations=tuple(limitations),
+        episodes=daily_episodes,
+        source_evidence_ids=source_ids,
+    )
+
+
+def _daily_assessment(
+    quality: SoakQualityAssessment,
+    solar: DailySolarLearningSummary,
+) -> str:
+    if solar.first_activation_time is None:
+        solar_text = "No solar activation was observed."
+    else:
+        first = solar.first_activation_time.isoformat()
+        first_diff = (
+            None
+            if not solar.activation_roof_to_pool_differentials_f
+            else solar.activation_roof_to_pool_differentials_f[0]
+        )
+        differential_text = (
+            " with no available roof-to-pool differential"
+            if first_diff is None
+            else f" at a {first_diff:.1f}°F roof-to-pool differential"
+        )
+        solar_text = (
+            f"Solar activated {solar.activation_count} time"
+            f"{'s' if solar.activation_count != 1 else ''}; first activation {first}"
+            f"{differential_text}."
+        )
+    return f"{quality.assessment} {solar_text}"
+
+
+def _relevant_records(
+    records: tuple[RecordedObservationEvent, ...],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    maximum_evidence_gap: timedelta,
+) -> tuple[RecordedObservationEvent, ...]:
+    predecessor: RecordedObservationEvent | None = None
+    inside: list[RecordedObservationEvent] = []
+    for record in records:
+        if record.recorded_at < window_start:
+            predecessor = record
+        elif record.recorded_at < window_end:
+            inside.append(record)
+    if (
+        predecessor is not None
+        and predecessor.recorded_at >= window_start - maximum_evidence_gap
+    ):
+        inside.insert(0, predecessor)
+    return tuple(inside)
+
+
+def _supported_spans(
+    records: tuple[RecordedObservationEvent, ...],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    maximum_evidence_gap: timedelta,
+) -> tuple[tuple[RecordedObservationEvent, datetime, datetime], ...]:
+    relevant = _relevant_records(
+        records,
+        window_start=window_start,
+        window_end=window_end,
+        maximum_evidence_gap=maximum_evidence_gap,
+    )
+    spans: list[tuple[RecordedObservationEvent, datetime, datetime]] = []
+    for index, record in enumerate(relevant):
+        start = max(record.recorded_at, window_start)
+        next_at = window_end
+        if index + 1 < len(relevant):
+            next_at = min(next_at, relevant[index + 1].recorded_at)
+        end = min(next_at, start + maximum_evidence_gap, window_end)
+        if end > start:
+            spans.append((record, start, end))
+    return tuple(spans)
+
+
+def _largest_uncovered_gap(
+    spans: tuple[tuple[RecordedObservationEvent, datetime, datetime], ...],
+    window_start: datetime,
+    window_end: datetime,
+) -> float:
+    cursor = window_start
+    largest = 0.0
+    for _, start, end in spans:
+        if start > cursor:
+            largest = max(largest, (start - cursor).total_seconds())
+        cursor = max(cursor, end)
+    if cursor < window_end:
+        largest = max(largest, (window_end - cursor).total_seconds())
+    return largest
+
+
+def _health_values(record: RecordedObservationEvent, key: str) -> tuple[str, ...]:
+    value = record.health.get(key, ())
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(sorted(str(item) for item in value if str(item).strip()))
+
+
+def _health_reasons(record: RecordedObservationEvent) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if not bool(record.health.get("healthy", False)):
+        reasons.append(SoakQualityReason.OBSERVATION_HEALTH_INCIDENT.value)
+    if _health_values(record, "missing_required"):
+        reasons.append(SoakQualityReason.REQUIRED_MAPPING_MISSING.value)
+    if _health_values(record, "unavailable_entities"):
+        reasons.append(SoakQualityReason.REQUIRED_ENTITY_UNAVAILABLE.value)
+    if _health_values(record, "stale_entities"):
+        reasons.append(SoakQualityReason.REQUIRED_ENTITY_STALE.value)
+    return tuple(reasons)
+
+
+def _attribute_values(
+    events: tuple[InferredBehaviorEvent, ...], key: str
+) -> tuple[float, ...]:
+    values = [
+        value
+        for event in events
+        if (value := _number(event.attributes.get(key))) is not None
+    ]
+    return tuple(values)
+
+
+def _supported_median(values: tuple[float, ...]) -> float | None:
+    if len(values) < _MINIMUM_MEDIAN_SAMPLES:
+        return None
+    return round(float(statistics.median(values)), 3)
 
 
 def _priming_ranges(
@@ -883,10 +1602,19 @@ __all__ = [
     "CounterfactualDifference",
     "CounterfactualReport",
     "CounterfactualStatus",
+    "DailySolarLearningSummary",
     "DailyOperationalRetrospective",
     "DailyOperationalRetrospectiveEngine",
+    "ObservationIncident",
+    "ObservationIncidentState",
     "PersistentRecommendationRecorder",
+    "RETROSPECTIVE_SCHEMA_VERSION",
     "RecordedRecommendationEvent",
     "SCHEMA_VERSION",
+    "SoakQualityAssessment",
+    "SoakQualityPolicy",
+    "SoakQualityReason",
+    "SoakQualityStatus",
+    "SolarLearningQuality",
     "TemperatureSummary",
 ]

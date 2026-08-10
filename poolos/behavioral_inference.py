@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import statistics
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 from .observations import RecordedObservationEvent
@@ -52,6 +53,56 @@ class InferredBehaviorEvent:
     evidence_event_ids: tuple[str, ...]
     attributes: Mapping[str, Any]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_event_ids", tuple(self.evidence_event_ids))
+        object.__setattr__(
+            self,
+            "attributes",
+            MappingProxyType(dict(sorted(self.attributes.items()))),
+        )
+
+
+class SolarEpisodeState(str, Enum):
+    """Whether an observed solar episode has an explicit deactivation."""
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+
+@dataclass(frozen=True, slots=True)
+class SolarEpisode:
+    """One activation paired with its next observed deactivation, when present."""
+
+    episode_id: str
+    state: SolarEpisodeState
+    activation_time: datetime
+    deactivation_time: datetime | None
+    duration_seconds: float | None
+    activation_transition: InferredBehaviorEvent
+    deactivation_transition: InferredBehaviorEvent | None
+    source_event_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source_event_ids", tuple(self.source_event_ids))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "episode_id": self.episode_id,
+            "state": self.state.value,
+            "activation_time": self.activation_time.isoformat(),
+            "deactivation_time": (
+                None if self.deactivation_time is None else self.deactivation_time.isoformat()
+            ),
+            "duration_seconds": self.duration_seconds,
+            "activation_transition": _event_dict(self.activation_transition),
+            "deactivation_transition": (
+                None
+                if self.deactivation_transition is None
+                else _event_dict(self.deactivation_transition)
+            ),
+            "source_event_ids": list(self.source_event_ids),
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class SolarBehaviorInference:
@@ -79,6 +130,7 @@ class BehavioralInferenceReport:
     current_state: InferredOperatingState
     current_state_confidence: float
     events: tuple[InferredBehaviorEvent, ...]
+    solar_episodes: tuple[SolarEpisode, ...]
     solar: SolarBehaviorInference
     source_event_ids: tuple[str, ...]
 
@@ -93,18 +145,8 @@ class BehavioralInferenceReport:
             "current_state_confidence": self.current_state_confidence,
             "source_event_count": len(self.source_event_ids),
             "source_event_ids": list(self.source_event_ids),
-            "events": [
-                {
-                    "inference_id": item.inference_id,
-                    "kind": item.kind,
-                    "occurred_at": item.occurred_at.isoformat(),
-                    "confidence": item.confidence,
-                    "summary": item.summary,
-                    "evidence_event_ids": list(item.evidence_event_ids),
-                    "attributes": dict(item.attributes),
-                }
-                for item in self.events
-            ],
+            "events": [_event_dict(item) for item in self.events],
+            "solar_episodes": [item.to_dict() for item in self.solar_episodes],
             "solar": {
                 "activation_samples": self.solar.activation_samples,
                 "deactivation_samples": self.solar.deactivation_samples,
@@ -124,6 +166,7 @@ class BehavioralInferenceReport:
 class _Frame:
     event: RecordedObservationEvent
     values: Mapping[str, Any]
+    units: Mapping[str, str | None]
     confidence: float
 
 
@@ -151,7 +194,15 @@ class BehavioralInferenceEngine:
     def infer(self, records: Iterable[RecordedObservationEvent]) -> BehavioralInferenceReport:
         """Infer behavior deterministically from durable observed evidence."""
 
-        ordered = tuple(sorted(records, key=lambda item: (item.recorded_at, item.event_id)))
+        evidence = tuple(records)
+        if any(
+            item.recorded_at.tzinfo is None or item.recorded_at.utcoffset() is None
+            for item in evidence
+        ):
+            raise ValueError("behavioral inference evidence timestamps must be timezone-aware")
+        ordered = tuple(
+            sorted(evidence, key=lambda item: (item.recorded_at, item.event_id))
+        )
         if not ordered:
             return BehavioralInferenceReport(
                 schema_version=SCHEMA_VERSION,
@@ -160,6 +211,7 @@ class BehavioralInferenceEngine:
                 current_state=InferredOperatingState.UNKNOWN,
                 current_state_confidence=0.0,
                 events=(),
+                solar_episodes=(),
                 solar=_empty_solar(),
                 source_event_ids=(),
             )
@@ -244,18 +296,14 @@ class BehavioralInferenceEngine:
                     pool_f=_number(frame.values.get("pool.temperature")),
                 )
                 solar_samples.append(sample)
+                attributes = _solar_transition_attributes(frame, sample, rpm)
                 inferred.append(
                     _inferred_event(
                         kind="SOLAR_ACTIVATED" if solar_now else "SOLAR_DEACTIVATED",
                         frame=frame,
                         confidence=frame.confidence,
                         summary=_solar_summary(sample),
-                        attributes={
-                            "solar_temperature_f": sample.roof_f,
-                            "pool_temperature_f": sample.pool_f,
-                            "temperature_differential_f": sample.differential_f,
-                            "pump_rpm": rpm,
-                        },
+                        attributes=attributes,
                     )
                 )
 
@@ -279,13 +327,17 @@ class BehavioralInferenceEngine:
             previous = frame
 
         current_state, state_confidence = self._current_state(frames, inferred)
+        ordered_events = tuple(
+            sorted(inferred, key=lambda item: (item.occurred_at, item.inference_id))
+        )
         return BehavioralInferenceReport(
             schema_version=SCHEMA_VERSION,
             generated_from_start=frames[0].event.recorded_at,
             generated_from_end=frames[-1].event.recorded_at,
             current_state=current_state,
             current_state_confidence=state_confidence,
-            events=tuple(sorted(inferred, key=lambda item: (item.occurred_at, item.inference_id))),
+            events=ordered_events,
+            solar_episodes=_solar_episodes(ordered_events),
             solar=_solar_inference(solar_samples),
             source_event_ids=tuple(item.event.event_id for item in frames),
         )
@@ -317,12 +369,15 @@ class BehavioralInferenceEngine:
 
 def _frame(event: RecordedObservationEvent) -> _Frame:
     values: dict[str, Any] = {}
+    units: dict[str, str | None] = {}
     confidences: list[float] = []
     for observation in event.observations:
         observation_id = str(observation.get("observation_id", ""))
         if not observation_id:
             continue
         values[observation_id] = observation.get("value")
+        raw_unit = observation.get("unit")
+        units[observation_id] = None if raw_unit is None else str(raw_unit)
         confidence = _number(observation.get("confidence"))
         if confidence is not None:
             confidences.append(max(0.0, min(1.0, confidence)))
@@ -330,7 +385,111 @@ def _frame(event: RecordedObservationEvent) -> _Frame:
     base = min(confidences) if confidences else 0.5
     if not healthy:
         base = min(base, 0.5)
-    return _Frame(event=event, values=values, confidence=base)
+    return _Frame(event=event, values=values, units=units, confidence=base)
+
+
+def _solar_transition_attributes(
+    frame: _Frame,
+    sample: _SolarSample,
+    rpm: float | None,
+) -> dict[str, Any]:
+    water_f = _number(frame.values.get("water.temperature"))
+    attributes: dict[str, Any] = {
+        "solar_temperature_f": sample.roof_f,
+        "pool_temperature_f": sample.pool_f,
+        "temperature_differential_f": sample.differential_f,
+        "roof_to_pool_differential_f": sample.differential_f,
+        "water_temperature_f": water_f,
+        "roof_to_water_differential_f": (
+            None if sample.roof_f is None or water_f is None else sample.roof_f - water_f
+        ),
+        "air_temperature_f": _number(frame.values.get("air.temperature")),
+        "pool_target_temperature_f": _number(
+            frame.values.get("pool.target_temperature")
+        ),
+        "pool_heating_demand_active": _boolean(
+            frame.values.get("pool.heating_demand_active")
+        ),
+        "spa_active": _boolean(frame.values.get("spa.active")),
+        "pool_active": _boolean(frame.values.get("pool.active")),
+        "heater_active": _boolean(frame.values.get("heater.active")),
+        "solar_preferred_active": _boolean(
+            frame.values.get("solar_preferred.active")
+        ),
+        "pump_rpm": rpm,
+        "pump_gpm": _number(frame.values.get("pump.gpm")),
+        "pump_power": _number(frame.values.get("pump.power")),
+        "pump_power_unit": frame.units.get("pump.power"),
+        "time_of_day": frame.event.recorded_at.timetz().isoformat(),
+        "utc_offset_minutes": int(
+            (frame.event.recorded_at.utcoffset() or timedelta(0)).total_seconds() / 60
+        ),
+    }
+    return {key: value for key, value in attributes.items() if value is not None}
+
+
+def _solar_episodes(
+    events: tuple[InferredBehaviorEvent, ...],
+) -> tuple[SolarEpisode, ...]:
+    episodes: list[SolarEpisode] = []
+    activation: InferredBehaviorEvent | None = None
+    for event in events:
+        if event.kind == "SOLAR_ACTIVATED":
+            if activation is None:
+                activation = event
+            continue
+        if event.kind != "SOLAR_DEACTIVATED" or activation is None:
+            continue
+        episodes.append(_solar_episode(activation, event))
+        activation = None
+    if activation is not None:
+        episodes.append(_solar_episode(activation, None))
+    return tuple(episodes)
+
+
+def _solar_episode(
+    activation: InferredBehaviorEvent,
+    deactivation: InferredBehaviorEvent | None,
+) -> SolarEpisode:
+    source_ids = activation.evidence_event_ids + (
+        () if deactivation is None else deactivation.evidence_event_ids
+    )
+    payload = {
+        "activation_id": activation.inference_id,
+    }
+    episode_id = "solar-episode-" + hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:24]
+    return SolarEpisode(
+        episode_id=episode_id,
+        state=(
+            SolarEpisodeState.OPEN
+            if deactivation is None
+            else SolarEpisodeState.CLOSED
+        ),
+        activation_time=activation.occurred_at,
+        deactivation_time=None if deactivation is None else deactivation.occurred_at,
+        duration_seconds=(
+            None
+            if deactivation is None
+            else (deactivation.occurred_at - activation.occurred_at).total_seconds()
+        ),
+        activation_transition=activation,
+        deactivation_transition=deactivation,
+        source_event_ids=source_ids,
+    )
+
+
+def _event_dict(item: InferredBehaviorEvent) -> dict[str, Any]:
+    return {
+        "inference_id": item.inference_id,
+        "kind": item.kind,
+        "occurred_at": item.occurred_at.isoformat(),
+        "confidence": item.confidence,
+        "summary": item.summary,
+        "evidence_event_ids": list(item.evidence_event_ids),
+        "attributes": dict(item.attributes),
+    }
 
 
 def _solar_inference(samples: list[_SolarSample]) -> SolarBehaviorInference:
@@ -451,4 +610,6 @@ __all__ = [
     "InferredOperatingState",
     "SCHEMA_VERSION",
     "SolarBehaviorInference",
+    "SolarEpisode",
+    "SolarEpisodeState",
 ]

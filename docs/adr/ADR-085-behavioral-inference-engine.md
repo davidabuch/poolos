@@ -35,3 +35,5 @@ The HACS validation workflow is also promoted from manual-only execution to pull
 ## Consequences
 
 11.3D can use the same provenance-aware inference output to calculate daily actual-operation metrics and compare them with PoolOS counterfactual recommendations. Live observation can later refine threshold estimates across repeated days without hard-coding assumptions derived from a single morning.
+
+ADR-088 extends this same canonical inference authority with richer observed solar-transition context and deterministic open/closed solar episodes. It does not introduce a second solar inference engine or a control rule.

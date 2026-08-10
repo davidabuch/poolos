@@ -33,6 +33,7 @@ The manual explains why PoolOS exists, how responsibilities are divided, how evi
 
 - [Public API Policy](PUBLIC_API.md)
 - [Development Roadmap](ROADMAP.md)
+- [Observation Intelligence and Soak Quality](OBSERVATION_INTELLIGENCE.md)
 - [Architecture Decision Records](adr/)
 
 ## Document roles

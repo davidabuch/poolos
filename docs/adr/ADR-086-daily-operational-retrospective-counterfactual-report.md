@@ -62,3 +62,5 @@ The Home Assistant coordinator computes retrospective reports in the executor af
 ## Consequences
 
 PoolOS can now retain and summarize what the real system did each day while keeping counterfactual advisory claims evidence-bounded. Future milestones may enrich the 11.2 advisory contract with explicit duration or scheduling targets; when that occurs, the same retrospective model can add exact duration/timing differences without changing its fact-versus-counterfactual boundary.
+
+ADR-088 extends this same canonical report with additive soak-quality, incident, solar-learning, and daily-assessment evidence while preserving existing actual and counterfactual fields.

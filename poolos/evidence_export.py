@@ -11,6 +11,7 @@ from poolos.observations import PersistentObservationRecorder, RecordedObservati
 
 CSV_FIELDS = (
     "recorded_at", "local_time", "event_kind", "changed_observation_ids", "observation_healthy",
+    "missing_required", "unavailable_entities", "stale_entities",
     "pool.active", "spa.active", "pool.command_active", "spa.command_active",
     "pump.rpm", "pump.gpm", "pump.power", "pool.temperature", "pool.target_temperature",
     "spa.temperature", "spa.target_temperature", "water.temperature", "solar.temperature",
@@ -69,6 +70,15 @@ class DailyEvidenceExporter:
                     "event_kind": record.kind,
                     "changed_observation_ids": ";".join(record.changed_observation_ids),
                     "observation_healthy": record.health.get("healthy"),
+                    "missing_required": ";".join(
+                        str(item) for item in record.health.get("missing_required", ())
+                    ),
+                    "unavailable_entities": ";".join(
+                        str(item) for item in record.health.get("unavailable_entities", ())
+                    ),
+                    "stale_entities": ";".join(
+                        str(item) for item in record.health.get("stale_entities", ())
+                    ),
                     **values,
                 }
                 writer.writerow(row)
