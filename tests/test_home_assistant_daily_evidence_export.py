@@ -5,6 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from poolos.evidence_export import CSV_FIELDS, DailyEvidenceExporter
+from poolos.expected_outage import ExpectedOutageAcknowledgment
 from poolos.observations import PersistentObservationRecorder
 from tests.test_persistent_observation_recorder import obs
 
@@ -39,3 +40,26 @@ def test_export_diagnostics_expose_operator_path(tmp_path: Path) -> None:
     diagnostics = exporter.diagnostics()
     assert diagnostics["export_directory"].endswith("poolos_logs")
     assert diagnostics["exports_written_this_runtime"] == 0
+
+
+def test_daily_export_preserves_expected_outage_annotation_metadata(
+    tmp_path: Path,
+) -> None:
+    recorder = PersistentObservationRecorder(tmp_path / "storage")
+    exporter = DailyEvidenceExporter(tmp_path / "poolos_logs", ZoneInfo("UTC"))
+    now = datetime(2026, 8, 9, 9, 15, tzinfo=UTC)
+    acknowledgment = ExpectedOutageAcknowledgment.create(
+        acknowledged_at=now,
+        source_id="home_assistant:test-entry",
+    )
+    recorder.record_expected_outage_acknowledgment(acknowledgment)
+    exporter.export_day(recorder, now)
+
+    jsonl = tmp_path / "poolos_logs" / "poolos_2026-08-09.jsonl"
+    payload = json.loads(jsonl.read_text().splitlines()[0])
+    assert payload["record_type"] == "expected_outage_acknowledgment"
+    assert payload["acknowledgment_id"] == acknowledgment.acknowledgment_id
+    assert payload["matching_window_start"] == acknowledgment.matching_window_start.isoformat()
+    csv_text = (tmp_path / "poolos_logs" / "poolos_2026-08-09.csv").read_text()
+    assert "EXPECTED_OUTAGE" in csv_text
+    assert acknowledgment.acknowledgment_id in csv_text

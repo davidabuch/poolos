@@ -71,6 +71,12 @@ def _health_incident_attributes(
     return coordinator.health_incident_diagnostics()
 
 
+def _expected_outage_annotation_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    return coordinator.expected_outage_annotation_diagnostics()
+
+
 def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     report = coordinator.behavioral_inference_report
     if report is None:
@@ -334,7 +340,7 @@ SENSORS = (
                 "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
                 "11.3A", "11.3B", "11.3C", "11.3D", "11.4A",
                 "11.5",
-                "11.5.1", "11.6",
+                "11.5.1", "11.6", "11.6.1",
             ],
             "next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT",
             "authority_increase_requires_approval": True,
@@ -358,6 +364,15 @@ SENSORS = (
         ),
         _health_incident_attributes,
         "mdi:alert-circle-check-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "expected_outage_annotation",
+        "Expected Outage Annotation",
+        lambda coordinator, runtime: coordinator.expected_outage_annotation_diagnostics()[
+            "state"
+        ],
+        _expected_outage_annotation_attributes,
+        "mdi:clipboard-text-clock-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "observation_quality",

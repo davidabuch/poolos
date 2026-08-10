@@ -858,6 +858,7 @@ Status: complete.
 | 11.5 | Observation intelligence and soak quality | DONE |
 | 11.5.1 | Real-world observation calibration | DONE |
 | 11.6 | Multi-day commissioning intelligence | DONE |
+| 11.6.1 | Expected Pentair outage annotation | DONE |
 
 ### Milestone 11.5 — Observation Intelligence and Soak Quality
 
@@ -900,3 +901,17 @@ Status: complete pending validation.
 - adds ADR-089 for the new cross-day commissioning-evidence boundary;
 - preserves existing daily report fields, entity IDs, observation-health semantics, and 11.5/11.5.1 behavior;
 - adds no Home Assistant service call, command, proposal, retry, network/vendor operation, or physical actuation.
+
+### Milestone 11.6.1 — Expected Pentair Outage Annotation
+
+Status: complete pending validation.
+
+- adds immutable deterministic acknowledgment evidence with a centralized two-hour-before/two-hour-after incident-matching policy;
+- persists annotations in the append-only observation store and restores them deterministically after restart;
+- preserves raw health, live alerts, actual incident intervals, unavailable/stale observations, and source evidence while adding expected/unexpected classification;
+- excludes expected outages from unexplained reliability burden without treating missing outage evidence as valid behavioral learning;
+- carries expected/unexpected provenance into multi-day readiness without letting expected outages independently block review;
+- adds one always-available diagnostic annotation button, one concise status sensor, and wording distinct from the existing latch reset;
+- exports acknowledgment identity, timestamp, matching window, classification, and source beside unchanged raw health evidence;
+- documents the operator-context boundary in ADR-090;
+- performs no equipment service call, Pentair write, network/vendor operation, health suppression, authority increase, policy creation, or physical actuation.

@@ -84,3 +84,23 @@ Home Assistant publishes a rolling report over at most 14 completed local days.
 The coordinator reconstructs canonical daily reports in its existing executor
 workflow; the multi-day core consumes only those reports and never a current
 partial day.
+
+## Expected-outage operator annotation
+
+Milestone 11.6.1 adds an observation-only dashboard button for known Pentair or
+IntelliCenter interruptions. Pressing it at `T` durably records a matching
+window from `T - 2 hours` through `T + 2 hours`. It can match an outage
+acknowledged before, during, or after it occurred, including across local
+midnight. The matching window is not the outage duration.
+
+Raw health remains truthful and live `UNHEALTHY` alerts are never suppressed.
+The incident retains its actual start, end, duration, unavailable or stale
+observations, and source IDs. A match adds `EXPECTED_OUTAGE`,
+`OPERATOR_ACKNOWLEDGED`, acknowledgment provenance, and
+`troubleshooting_required: false`.
+
+Expected incidents remain visible but do not count as unexplained commissioning
+reliability incidents. Evidence inside the actual outage remains unavailable
+and is excluded from solar learning; independent coverage or evidence gaps may
+still lower daily quality. The button cannot reset health, restart Pentair, call
+equipment services, change policy, or increase authority.

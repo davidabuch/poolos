@@ -123,3 +123,7 @@ not a production solar-control rule.
 
 ADR-089 aggregates completed ADR-088 daily reports across explicit date ranges.
 It does not change this ADR's per-day quality, incident, or solar authority.
+
+ADR-090 adds durable expected-outage context after startup calibration and
+actual incident construction. Raw health, outage intervals, and provenance
+remain unchanged; expected-versus-unexpected interpretation is additive.
