@@ -100,23 +100,37 @@ def _solar_inference_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSR
 
 
 
-def _retrospective_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+def _retrospective_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    """Expose a compact HA summary; full evidence remains in PoolOS storage."""
+
     report = coordinator.current_daily_retrospective
     if report is None:
-        return {"available": False, "authority": "none", "command_delivery_enabled": False}
+        return {
+            "available": False,
+            "authority": "none",
+            "command_delivery_enabled": False,
+        }
+
     data = report.to_dict()
     actual = data["actual"]
+    quality = report.soak_quality
+    solar = report.solar_learning
     completed = coordinator.latest_completed_daily_retrospective
+
     return {
         "available": True,
-        "report_id": data["report_id"],
-        "report_date": data["report_date"],
+        "report_id": report.report_id,
+        "report_date": report.report_date,
         "complete_day": data["complete_day"],
         "coverage_ratio": actual["coverage_ratio"],
         "pump_runtime_seconds": actual["pump_runtime_seconds"],
         "runtime_by_mode_seconds": actual["runtime_by_mode_seconds"],
         "priming_count": actual["priming_count"],
-        "inferred_priming_duration_seconds": actual["inferred_priming_duration_seconds"],
+        "inferred_priming_duration_seconds": actual[
+            "inferred_priming_duration_seconds"
+        ],
         "spa_runtime_seconds": actual["spa_runtime_seconds"],
         "solar_runtime_seconds": actual["solar_runtime_seconds"],
         "heater_runtime_seconds": actual["heater_runtime_seconds"],
@@ -124,12 +138,26 @@ def _retrospective_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRun
         "average_running_rpm": actual["average_running_rpm"],
         "pump_energy_kwh": actual["pump_energy_kwh"],
         "temperatures": actual["temperatures"],
-        "soak_quality": data["soak_quality"],
-        "incidents": data["incidents"],
-        "solar_learning": data["solar_learning"],
+        "observation_quality": quality.status.value,
+        "observation_coverage_ratio": round(
+            quality.observation_coverage_ratio, 6
+        ),
+        "incident_count": quality.incident_count,
+        "expected_incident_count": quality.expected_incident_count,
+        "unexpected_incident_count": quality.unexpected_incident_count,
+        "solar_learning_quality": solar.learning_quality.value,
+        "solar_usable_for_learning": solar.usable_for_learning,
+        "solar_activation_count": solar.activation_count,
+        "solar_deactivation_count": solar.deactivation_count,
+        "complete_solar_episode_count": solar.complete_episode_count,
+        "open_solar_episode_count": solar.open_episode_count,
         "daily_assessment": data["daily_assessment"],
-        "latest_completed_report_id": None if completed is None else completed.report_id,
-        "latest_completed_report_date": None if completed is None else completed.report_date,
+        "latest_completed_report_id": (
+            None if completed is None else completed.report_id
+        ),
+        "latest_completed_report_date": (
+            None if completed is None else completed.report_date
+        ),
         "authority": "none",
         "command_delivery_enabled": False,
     }
@@ -138,14 +166,50 @@ def _retrospective_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRun
 def _quality_attributes(
     coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
 ) -> dict[str, Any]:
+    """Expose compact Recorder-safe soak-quality diagnostics."""
+
     report = coordinator.current_daily_retrospective
     if report is None:
         return {"available": False, "authority": "none"}
+
+    quality = report.soak_quality
     return {
         "available": True,
         "report_id": report.report_id,
         "report_date": report.report_date,
-        **report.soak_quality.to_dict(),
+        "status": quality.status.value,
+        "observation_coverage_ratio": round(
+            quality.observation_coverage_ratio, 6
+        ),
+        "healthy_observation_coverage_ratio": round(
+            quality.healthy_observation_coverage_ratio, 6
+        ),
+        "commissioning_healthy_coverage_ratio": round(
+            quality.commissioning_healthy_coverage_ratio, 6
+        ),
+        "largest_evidence_gap_seconds": round(
+            quality.largest_evidence_gap_seconds, 3
+        ),
+        "unhealthy_duration_seconds": round(
+            quality.unhealthy_duration_seconds, 3
+        ),
+        "unavailable_duration_seconds": round(
+            quality.unavailable_duration_seconds, 3
+        ),
+        "stale_duration_seconds": round(
+            quality.stale_duration_seconds, 3
+        ),
+        "incident_count": quality.incident_count,
+        "expected_incident_count": quality.expected_incident_count,
+        "unexpected_incident_count": quality.unexpected_incident_count,
+        "expected_outage_duration_seconds": round(
+            quality.expected_outage_duration_seconds, 3
+        ),
+        "unexpected_unhealthy_duration_seconds": round(
+            quality.unexpected_unhealthy_duration_seconds, 3
+        ),
+        "reason_codes": [item.value for item in quality.reason_codes],
+        "assessment": quality.assessment,
         "authority": "none",
         "command_delivery_enabled": False,
     }

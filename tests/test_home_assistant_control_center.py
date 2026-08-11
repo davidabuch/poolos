@@ -199,3 +199,22 @@ def test_dashboard_uses_concise_operator_facing_entity_names() -> None:
     # Dashboard aliases should prevent long generated friendly names from
     # obscuring the useful part of labels in cards and graph legends.
     assert "name: PoolOS Control Center" not in text
+
+def test_recorder_facing_diagnostics_do_not_embed_bulk_evidence() -> None:
+    """HA sensor attributes stay summaries; durable stores retain full evidence."""
+
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+
+    quality = source.split("def _quality_attributes(", 1)[1]
+    quality = quality.split("def _incidents_attributes(", 1)[0]
+    assert "startup_evidence_ids" not in quality
+    assert "source_evidence_ids" not in quality
+    assert "soak_quality.to_dict()" not in quality
+
+    retrospective = source.split("def _retrospective_attributes(", 1)[1]
+    retrospective = retrospective.split("def _quality_attributes(", 1)[0]
+    assert '"soak_quality": data["soak_quality"]' not in retrospective
+    assert '"incidents": data["incidents"]' not in retrospective
+    assert '"solar_learning": data["solar_learning"]' not in retrospective
+    assert '"incident_count"' in retrospective
+    assert '"solar_learning_quality"' in retrospective
