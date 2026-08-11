@@ -915,3 +915,33 @@ Status: complete pending validation.
 - exports acknowledgment identity, timestamp, matching window, classification, and source beside unchanged raw health evidence;
 - documents the operator-context boundary in ADR-090;
 - performs no equipment service call, Pentair write, network/vendor operation, health suppression, authority increase, policy creation, or physical actuation.
+
+## Epic 12 — Native IntelliCenter Independence
+
+Product requirement: **PoolOS production installation must require only Home
+Assistant, PoolOS, and supported Pentair IntelliCenter hardware. No separate
+third-party IntelliCenter integration may be required.**
+
+| ID | Work item | Status |
+|---|---|---|
+| 12.0A | Native read-only IntelliCenter adapter and parity harness | DONE |
+| 12.0B | Native equipment inventory and full observation parity | PLANNED |
+| 12.0C | Native PoolOS observation source selectable in HA | PLANNED |
+| 12.0D | Native PoolOS source becomes default; legacy HA bridge remains fallback | PLANNED |
+| 12.0E | PoolOS publishes complete native HA entity set | PLANNED |
+| 12.0F | Remove required dependency on separate IntelliCenter integration | PLANNED |
+| 12.1+ | Native command path after explicit safety and authority approval | PLANNED |
+
+### Milestone 12.0A — Native IntelliCenter Read-Only Transport and Parity Harness
+
+Status: complete pending validation.
+
+- establishes a PoolOS-owned immutable read-source and canonical mapping boundary without importing or exposing the reference integration's controller;
+- temporarily copies only stable protocol snapshot fields from the existing IntelliCenter integration, behind a replaceable source seam and without reading its HA entities;
+- maps supported pool/spa, pump, temperature, heating, solar, and named-circuit facts with distinct native provenance and explicit missing concepts;
+- compares native and HA-derived canonical observations deterministically using explicit missing, stale, type, and value outcomes plus documented numeric tolerances;
+- keeps HA-derived observations solely authoritative for every commissioning, intelligence, recommendation, decision, and execution input;
+- isolates native initialization, disconnection, absence, and malformed snapshots from PoolOS observation health and soak quality;
+- publishes four compact read-only diagnostic entities without complete snapshots or histories in Home Assistant attributes;
+- documents the parity-first migration and physical-control prohibition in ADR-091;
+- preserves authority NONE, command delivery DISABLED, and physical Pentair delivery DISABLED.
