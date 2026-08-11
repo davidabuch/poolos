@@ -13,6 +13,9 @@ from typing import Any, Iterable, Mapping
 
 from .observations import PoolObservation
 
+PARITY_DIAGNOSTIC_ISSUE_LIMIT = 40
+_DIAGNOSTIC_TEXT_LIMIT = 64
+
 
 class ObservationParityStatus(str, Enum):
     MATCH = "MATCH"
@@ -118,6 +121,29 @@ class ObservationParityReport:
         if include_details:
             result["details"] = [item.to_dict() for item in self.details]
         return result
+
+    def diagnostic_attributes(self) -> dict[str, Any]:
+        """Return bounded detail sufficient to diagnose shadow parity failures."""
+
+        issues = tuple(
+            item for item in self.details if item.status is not ObservationParityStatus.MATCH
+        )
+        status_breakdown = {
+            status.value: sum(item.status is status for item in self.details)
+            for status in ObservationParityStatus
+        }
+        return {
+            **self.to_dict(include_details=False),
+            "available": True,
+            "status_breakdown": status_breakdown,
+            "issue_count": len(issues),
+            "displayed_issue_count": min(len(issues), PARITY_DIAGNOSTIC_ISSUE_LIMIT),
+            "issues_truncated": len(issues) > PARITY_DIAGNOSTIC_ISSUE_LIMIT,
+            "issues": [
+                _diagnostic_detail(item)
+                for item in issues[:PARITY_DIAGNOSTIC_ISSUE_LIMIT]
+            ],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,11 +310,42 @@ def _values_match(left: Any, right: Any, *, tolerance: float | None) -> bool:
     return bool(left == right)
 
 
+def _diagnostic_detail(detail: ObservationParityDetail) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "concept": detail.concept,
+        "status": detail.status.value,
+        "ha_value": _compact_diagnostic_value(detail.ha_value),
+        "native_value": _compact_diagnostic_value(detail.native_value),
+    }
+    if detail.tolerance is not None:
+        result["tolerance"] = detail.tolerance
+    if detail.ha_observed_at is not None:
+        result["ha_observed_at"] = detail.ha_observed_at.isoformat()
+    if detail.native_observed_at is not None:
+        result["native_observed_at"] = detail.native_observed_at.isoformat()
+    if detail.ha_source_id is not None:
+        result["ha_source_id"] = detail.ha_source_id[:_DIAGNOSTIC_TEXT_LIMIT]
+    if detail.native_source_id is not None:
+        result["native_source_id"] = detail.native_source_id[
+            :_DIAGNOSTIC_TEXT_LIMIT
+        ]
+    return result
+
+
+def _compact_diagnostic_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value[:_DIAGNOSTIC_TEXT_LIMIT]
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return str(value)[:_DIAGNOSTIC_TEXT_LIMIT]
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 __all__ = [
+    "PARITY_DIAGNOSTIC_ISSUE_LIMIT",
     "PARITY_TOLERANCES",
     "ObservationParityDetail",
     "ObservationParityEngine",

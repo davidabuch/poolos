@@ -49,7 +49,11 @@ from .observation import (
     configured_entity_ids,
     configured_entity_mapping,
 )
-from .native_intellicenter import native_transport_snapshot
+from .native_intellicenter import (
+    NativeSnapshotInventory,
+    native_snapshot_inventory,
+    native_transport_snapshot,
+)
 from .shadow import HomeAssistantShadowRuntime
 
 LOGGER = logging.getLogger(__name__)
@@ -84,6 +88,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.native_intellicenter_snapshot: (
             NativeIntelliCenterObservationSnapshot | None
         ) = None
+        self.native_intellicenter_inventory: NativeSnapshotInventory | None = None
         self.native_intellicenter_parity_engine = ObservationParityEngine()
         self.native_intellicenter_parity_report: ObservationParityReport | None = None
         self._completed_history_for_date: date | None = None
@@ -247,6 +252,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             )
         )
         if not entries:
+            self.native_intellicenter_inventory = None
             self.native_intellicenter_snapshot = (
                 self.native_intellicenter_adapter.initializing(observed_at)
                 if self.in_startup_health_grace(observed_at)
@@ -260,6 +266,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             api = None if runtime is None else getattr(runtime, "api", None)
             reference = None if api is None else getattr(api, "snapshot", None)
             if reference is None:
+                self.native_intellicenter_inventory = None
                 self.native_intellicenter_snapshot = (
                     self.native_intellicenter_adapter.initializing(observed_at)
                     if self.in_startup_health_grace(observed_at)
@@ -269,7 +276,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     )
                 )
             else:
+                self.native_intellicenter_inventory = None
                 try:
+                    self.native_intellicenter_inventory = native_snapshot_inventory(
+                        reference,
+                        fallback_observed_at=observed_at,
+                    )
                     transport = native_transport_snapshot(
                         reference,
                         source_id=f"intellicenter_protocol:{entry.entry_id}",
@@ -713,6 +725,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 None
                 if self.native_intellicenter_snapshot is None
                 else dict(self.native_intellicenter_snapshot.diagnostics())
+            ),
+            "native_intellicenter_inventory": (
+                None
+                if self.native_intellicenter_inventory is None
+                else dict(self.native_intellicenter_inventory.diagnostics())
             ),
             "native_intellicenter_parity": (
                 None

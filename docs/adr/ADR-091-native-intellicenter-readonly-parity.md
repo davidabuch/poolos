@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for PoolOS milestone 12.0A.
+Accepted for PoolOS milestone 12.0A; amended by milestone 12.0B.
 
 ## Context
 
@@ -87,3 +87,41 @@ physical Pentair delivery remains disabled.
 PoolOS can measure native-versus-bridge parity before changing any source of
 truth. Full native inventory, source selection, entity publication, dependency
 removal, and any command path remain separate reviewed milestones.
+
+## Milestone 12.0B diagnostic calibration
+
+Before native evidence can become selectable, PoolOS must make the deployed
+reference snapshot shape and every parity failure inspectable. The Home
+Assistant host therefore publishes three additional shadow-only diagnostics:
+
+- a bounded inventory of the known body, pump, temperature-sensor, and circuit
+  collections, including collection presence, counts, compact identities, API
+  version, temperature unit, and whether `observed_at` came from the snapshot
+  or the PoolOS refresh fallback;
+- the deterministic set of canonical native concepts actually mapped, with
+  compact value type, value, quality, and native provenance; and
+- a bounded parity issue list with both values, timestamps, source identities,
+  applicable tolerance, and a complete status breakdown.
+
+Inventory publication is limited to 24 deterministically ordered identities per
+collection. Parity detail is limited to the current comparison set, capped at
+40 deterministically ordered issues, and reports truncation explicitly. These
+limits keep the diagnostic attributes below Home Assistant Recorder's limit
+without serializing arbitrary reference objects or histories.
+
+The parity engine's comparison set, tolerances, freshness policy, type rules,
+and failure statuses are unchanged. A connected source can legitimately report
+zero parity when its mapped concepts are absent, stale, differently typed, or
+different in value; availability alone does not imply a match.
+
+The reference body model's explicit active heat source is now authoritative for
+distinguishing `solar.active` from gas-only `heater.active`, while its selected
+heat mode provides `solar_preferred.active`. Named circuits remain fallbacks
+when that direct evidence is unavailable. Active heating with an absent or
+unknown heat source remains missing rather than being guessed. Ambiguous pump
+or temperature-probe selection likewise remains missing.
+
+All 12.0B diagnostics and mappings remain shadow-only. HA-derived observations
+remain authoritative and no parity rule is weakened. Authority remains NONE,
+command delivery remains disabled, and physical Pentair delivery remains
+disabled.
