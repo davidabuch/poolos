@@ -40,7 +40,7 @@ def native_transport_snapshot(
                 current_temperature=_number(item.current_temperature),
                 target_temperature=_number(item.target_temperature),
             )
-            for item in snapshot.bodies
+            for item in getattr(snapshot, "bodies", ())
         ),
         pumps=tuple(
             NativePumpState(
@@ -51,7 +51,7 @@ def native_transport_snapshot(
                 gpm=_number(item.flow_gpm),
                 power_watts=_number(item.power_watts),
             )
-            for item in snapshot.pumps
+            for item in getattr(snapshot, "pumps", ())
         ),
         temperatures=tuple(
             NativeTemperatureState(
@@ -60,7 +60,7 @@ def native_transport_snapshot(
                 kind=_temperature_kind(item.sensor_type),
                 temperature=_number(item.temperature),
             )
-            for item in snapshot.temperature_sensors
+            for item in getattr(snapshot, "temperature_sensors", ())
         ),
         circuits=tuple(
             NativeCircuitState(
@@ -70,7 +70,7 @@ def native_transport_snapshot(
                 use=None if item.use is None else str(item.use),
                 subtype=None if item.subtype is None else str(item.subtype),
             )
-            for item in snapshot.circuits
+            for item in getattr(snapshot, "circuits", ())
         ),
     )
 

@@ -162,3 +162,41 @@ def test_new_ha_path_has_no_services_commands_or_delivery() -> None:
         "physical equipment control",
     ):
         assert prohibited not in combined
+
+
+def test_reference_snapshot_missing_optional_collections_is_tolerated() -> None:
+    """Older reference snapshots must degrade to missing parity, not crash."""
+
+    import importlib.util
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    module_path = COMPONENT / "native_intellicenter.py"
+    spec = importlib.util.spec_from_file_location(
+        "poolos_native_intellicenter_test_module",
+        module_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    reference = SimpleNamespace(
+        connected=True,
+        temperature_unit="°F",
+        bodies=(),
+        temperature_sensors=(),
+        circuits=(),
+    )
+
+    result = module.native_transport_snapshot(
+        reference,
+        source_id="intellicenter_protocol:test",
+        fallback_observed_at=datetime(2026, 8, 10, 21, 30, tzinfo=UTC),
+    )
+
+    assert result.pumps == ()
+    assert result.bodies == ()
+    assert result.temperatures == ()
+    assert result.circuits == ()
