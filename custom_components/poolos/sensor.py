@@ -77,6 +77,41 @@ def _expected_outage_annotation_attributes(
     return coordinator.expected_outage_annotation_diagnostics()
 
 
+def _native_intellicenter_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    snapshot = coordinator.native_intellicenter_snapshot
+    if snapshot is None:
+        return {
+            "status": "INITIALIZING",
+            "authority": "none",
+            "command_delivery_enabled": False,
+        }
+    return dict(snapshot.diagnostics())
+
+
+def _native_parity_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.native_intellicenter_parity_report
+    if report is None:
+        return {
+            "available": False,
+            "authoritative_source": "home_assistant",
+            "authority": "none",
+            "command_delivery_enabled": False,
+        }
+    issues = tuple(item for item in report.details if item.status.value != "MATCH")
+    return {
+        "available": True,
+        **report.to_dict(include_details=False),
+        "issue_concepts": [
+            {"concept": item.concept, "status": item.status.value}
+            for item in issues
+        ],
+    }
+
+
 def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     report = coordinator.behavioral_inference_report
     if report is None:
@@ -404,7 +439,7 @@ SENSORS = (
                 "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
                 "11.3A", "11.3B", "11.3C", "11.3D", "11.4A",
                 "11.5",
-                "11.5.1", "11.6", "11.6.1",
+                "11.5.1", "11.6", "11.6.1", "12.0A",
             ],
             "next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT",
             "authority_increase_requires_approval": True,
@@ -437,6 +472,57 @@ SENSORS = (
         ],
         _expected_outage_annotation_attributes,
         "mdi:clipboard-text-clock-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_status",
+        "Native IntelliCenter Status",
+        lambda coordinator, runtime: (
+            "INITIALIZING"
+            if coordinator.native_intellicenter_snapshot is None
+            else coordinator.native_intellicenter_snapshot.status.value
+        ),
+        _native_intellicenter_attributes,
+        "mdi:lan-connect",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_parity",
+        "Native IntelliCenter Parity",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.native_intellicenter_parity_report is None
+            else round(
+                coordinator.native_intellicenter_parity_report.parity_ratio * 100,
+                1,
+            )
+        ),
+        _native_parity_attributes,
+        "mdi:compare-horizontal",
+        "%",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_matched_concepts",
+        "Native IntelliCenter Matched Concepts",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.native_intellicenter_parity_report is None
+            else coordinator.native_intellicenter_parity_report.match_count
+        ),
+        _native_parity_attributes,
+        "mdi:check-decagram-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_mismatches",
+        "Native IntelliCenter Mismatches",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.native_intellicenter_parity_report is None
+            else (
+                coordinator.native_intellicenter_parity_report.compared_concept_count
+                - coordinator.native_intellicenter_parity_report.match_count
+            )
+        ),
+        _native_parity_attributes,
+        "mdi:alert-circle-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "observation_quality",

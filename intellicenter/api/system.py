@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from homeassistant.const import UnitOfTemperature
@@ -61,6 +62,7 @@ class IntelliCenterAPI:
             chemistries=(),
             covers=(),
             system=None,
+            observed_at=None,
         )
 
     @property
@@ -255,6 +257,7 @@ class IntelliCenterAPI:
             chemistries=chemistries,
             covers=covers,
             system=system,
+            observed_at=datetime.now(UTC),
         )
         return self._snapshot
 

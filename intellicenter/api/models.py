@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from homeassistant.const import UnitOfTemperature
@@ -260,3 +261,4 @@ class IntelliCenterSnapshot:
     chemistries: tuple[ChemistryState, ...]
     covers: tuple[CoverState, ...]
     system: SystemState | None
+    observed_at: datetime | None = None

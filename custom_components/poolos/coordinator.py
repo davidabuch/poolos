@@ -23,12 +23,17 @@ from poolos.daily_retrospective import (
 )
 from poolos.expected_outage import ExpectedOutageAcknowledgment
 from poolos.homeassistant.observations import HomeAssistantState
+from poolos.intellicenter_readonly import (
+    NativeIntelliCenterObservationSnapshot,
+    NativeIntelliCenterReadAdapter,
+)
 from poolos.multiday_commissioning import (
     MultiDayCommissioningIntelligence,
     MultiDayCommissioningReport,
 )
 from poolos.operator_recommendation import OperatorRecommendation
 from poolos.observations import PersistentObservationRecorder, PoolObservation
+from poolos.observation_parity import ObservationParityEngine, ObservationParityReport
 
 from .const import (
     DOMAIN,
@@ -44,6 +49,7 @@ from .observation import (
     configured_entity_ids,
     configured_entity_mapping,
 )
+from .native_intellicenter import native_transport_snapshot
 from .shadow import HomeAssistantShadowRuntime
 
 LOGGER = logging.getLogger(__name__)
@@ -74,6 +80,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.latest_expected_outage_acknowledgment: (
             ExpectedOutageAcknowledgment | None
         ) = None
+        self.native_intellicenter_adapter = NativeIntelliCenterReadAdapter()
+        self.native_intellicenter_snapshot: (
+            NativeIntelliCenterObservationSnapshot | None
+        ) = None
+        self.native_intellicenter_parity_engine = ObservationParityEngine()
+        self.native_intellicenter_parity_report: ObservationParityReport | None = None
         self._completed_history_for_date: date | None = None
         self._completed_history: tuple[DailyOperationalRetrospective, ...] = ()
         self.local_timezone = ZoneInfo(hass.config.time_zone)
@@ -166,6 +178,19 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             states=states,
             now=observed_at,
         )
+        try:
+            self._refresh_native_intellicenter_parity(
+                snapshot, observed_at=observed_at
+            )
+        except Exception:  # Defensive isolation for a non-authoritative shadow source.
+            LOGGER.exception("PoolOS native IntelliCenter shadow refresh failed")
+            self.native_intellicenter_snapshot = (
+                self.native_intellicenter_adapter.unavailable(
+                    observed_at,
+                    reason_code="NATIVE_SHADOW_FAILURE",
+                )
+            )
+            self.native_intellicenter_parity_report = None
         self._last_observation_trigger = trigger
         if not snapshot.healthy and not self.in_startup_health_grace(observed_at):
             self._unhealthy_seen_since_start = True
@@ -206,6 +231,78 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         except (OSError, TypeError, ValueError):
             LOGGER.exception("PoolOS persistent observation/inference/retrospective update failed")
         return snapshot
+
+    def _refresh_native_intellicenter_parity(
+        self,
+        authoritative_snapshot: ObservationSnapshot,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        """Refresh shadow native parity without touching commissioning inputs."""
+
+        entries = tuple(
+            sorted(
+                self.hass.config_entries.async_entries("intellicenter"),
+                key=lambda item: item.entry_id,
+            )
+        )
+        if not entries:
+            self.native_intellicenter_snapshot = (
+                self.native_intellicenter_adapter.initializing(observed_at)
+                if self.in_startup_health_grace(observed_at)
+                else self.native_intellicenter_adapter.unavailable(
+                    observed_at, reason_code="REFERENCE_SOURCE_NOT_CONFIGURED"
+                )
+            )
+        else:
+            entry = entries[0]
+            runtime = getattr(entry, "runtime_data", None)
+            api = None if runtime is None else getattr(runtime, "api", None)
+            reference = None if api is None else getattr(api, "snapshot", None)
+            if reference is None:
+                self.native_intellicenter_snapshot = (
+                    self.native_intellicenter_adapter.initializing(observed_at)
+                    if self.in_startup_health_grace(observed_at)
+                    else self.native_intellicenter_adapter.unavailable(
+                        observed_at,
+                        reason_code="REFERENCE_SOURCE_NOT_READY",
+                    )
+                )
+            else:
+                try:
+                    transport = native_transport_snapshot(
+                        reference,
+                        source_id=f"intellicenter_protocol:{entry.entry_id}",
+                        fallback_observed_at=observed_at,
+                    )
+                    self.native_intellicenter_snapshot = (
+                        self.native_intellicenter_adapter.map_snapshot(
+                            transport,
+                            generated_at=observed_at,
+                        )
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    LOGGER.exception("PoolOS native IntelliCenter read snapshot rejected")
+                    self.native_intellicenter_snapshot = (
+                        self.native_intellicenter_adapter.unavailable(
+                            observed_at,
+                            reason_code="REFERENCE_SNAPSHOT_INVALID",
+                        )
+                    )
+
+        native = self.native_intellicenter_snapshot
+        if native is None or native.status.value == "INITIALIZING":
+            self.native_intellicenter_parity_report = None
+            return
+        self.native_intellicenter_parity_report = (
+            self.native_intellicenter_parity_engine.compare(
+                authoritative_snapshot.observations,
+                native.observations,
+                generated_at=observed_at,
+                ha_source_available=True,
+                native_source_available=native.available,
+            )
+        )
 
     def _record_infer_and_retro(
         self,
@@ -611,6 +708,18 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 None
                 if self.multiday_commissioning_report is None
                 else self.multiday_commissioning_report.to_dict()
+            ),
+            "native_intellicenter": (
+                None
+                if self.native_intellicenter_snapshot is None
+                else dict(self.native_intellicenter_snapshot.diagnostics())
+            ),
+            "native_intellicenter_parity": (
+                None
+                if self.native_intellicenter_parity_report is None
+                else self.native_intellicenter_parity_report.to_dict(
+                    include_details=False
+                )
             ),
             "shadow_runtime": self.shadow_runtime.diagnostics(),
             "operator_recommendation": (

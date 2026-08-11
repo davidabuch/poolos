@@ -23,6 +23,7 @@ def test_required_integration_files_exist() -> None:
         "coordinator.py",
         "diagnostics.py",
         "manifest.json",
+        "native_intellicenter.py",
         "observation.py",
         "shadow.py",
         "sensor.py",
