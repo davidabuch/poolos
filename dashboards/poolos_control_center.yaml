@@ -130,6 +130,12 @@ views:
                 name: Matched Concepts
               - entity: sensor.poolos_control_center_native_intellicenter_mismatches
                 name: Parity Issues
+              - entity: sensor.poolos_control_center_native_intellicenter_snapshot_inventory
+                name: Native Snapshot Inventory
+              - entity: sensor.poolos_control_center_native_intellicenter_mapped_concepts
+                name: Native Mapped Concepts
+              - entity: sensor.poolos_control_center_native_intellicenter_parity_issues
+                name: Native Parity Issue Details
       - type: grid
         title: Grid & Resilience
         cards:

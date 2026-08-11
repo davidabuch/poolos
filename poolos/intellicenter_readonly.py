@@ -52,6 +52,8 @@ class NativeBodyState:
     heating_active: bool
     current_temperature: float | None
     target_temperature: float | None
+    active_heat_source: str | None = None
+    selected_heat_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +163,22 @@ class NativeIntelliCenterObservationSnapshot:
                 "authority": "none",
                 "command_delivery_enabled": False,
             }
+        )
+
+    def mapped_concept_diagnostics(self) -> tuple[Mapping[str, Any], ...]:
+        """Return deterministic, compact diagnostics for mapped concepts."""
+
+        return tuple(
+            MappingProxyType(
+                {
+                    "concept": item.observation_id,
+                    "native_source_id": _compact_diagnostic_value(item.source_id),
+                    "quality": item.quality.value,
+                    "value_type": type(item.value).__name__,
+                    "value": _compact_diagnostic_value(item.value),
+                }
+            )
+            for item in self.observations
         )
 
 
@@ -273,12 +291,19 @@ class NativeIntelliCenterReadAdapter:
             if circuit is not None:
                 _put(values, concept, circuit.active, None, circuit.native_id)
 
-        if pool is not None or spa is not None:
-            heater_active = bool(
-                (pool is not None and pool.heating_active)
-                or (spa is not None and spa.heating_active)
-            )
-            _put(values, "heater.active", heater_active, None, "body-heating-state")
+        bodies = tuple(item for item in (pool, spa) if item is not None)
+        heater_active = _active_heat_source_value(bodies, expected_source="gas")
+        solar_active = _active_heat_source_value(bodies, expected_source="solar")
+        solar_preferred = _solar_preferred_value(bodies)
+        _put(values, "heater.active", heater_active, None, "body-heat-source")
+        _put(values, "solar.active", solar_active, None, "body-heat-source")
+        _put(
+            values,
+            "solar_preferred.active",
+            solar_preferred,
+            None,
+            "body-selected-heat-mode",
+        )
 
         observations = tuple(
             PoolObservation(
@@ -362,6 +387,35 @@ def _primary_pump(pumps: tuple[NativePumpState, ...]) -> NativePumpState | None:
     return running[0] if len(running) == 1 else None
 
 
+def _active_heat_source_value(
+    bodies: tuple[NativeBodyState, ...], *, expected_source: str
+) -> bool | None:
+    active = tuple(body for body in bodies if body.heating_active)
+    if not active:
+        return False if bodies else None
+    sources = tuple(_normalized_token(body.active_heat_source) for body in active)
+    if any(source in {None, "unknown"} for source in sources):
+        return None
+    return expected_source in sources
+
+
+def _solar_preferred_value(bodies: tuple[NativeBodyState, ...]) -> bool | None:
+    modes = tuple(
+        mode
+        for body in bodies
+        if (mode := _normalized_token(body.selected_heat_mode)) not in {None, "unknown"}
+    )
+    if not modes:
+        return None
+    return "solar preferred" in modes
+
+
+def _normalized_token(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return " ".join(value.strip().casefold().replace("_", " ").replace("-", " ").split())
+
+
 def _temperature(
     temperatures: tuple[NativeTemperatureState, ...], kind: NativeTemperatureKind
 ) -> NativeTemperatureState | None:
@@ -424,6 +478,14 @@ def _canonical_temperature(value: float | None, unit: str) -> float | None:
     if normalized in {"°c", "c", "celsius"}:
         return round(value * 9.0 / 5.0 + 32.0, 3)
     return value
+
+
+def _compact_diagnostic_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value[:64]
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return str(value)[:64]
 
 
 __all__ = [

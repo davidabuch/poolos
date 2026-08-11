@@ -126,6 +126,26 @@ def test_native_staleness_has_explicit_status() -> None:
     assert report.details[0].status is ObservationParityStatus.STALE_NATIVE
 
 
+def test_available_native_source_can_have_zero_parity_without_source_failure() -> None:
+    concepts = tuple(f"diagnostic.concept.{index:02d}" for index in range(35))
+    report = compare(
+        tuple(observation(concept, True, source=f"ha:{concept}") for concept in concepts),
+        tuple(
+            observation(concept, False, source=f"native:{concept}")
+            for concept in reversed(concepts)
+        ),
+    )
+
+    assert report.native_source_available is True
+    assert report.compared_concept_count == 35
+    assert report.match_count == 0
+    assert report.mismatch_count == 35
+    assert report.parity_ratio == 0.0
+    assert {
+        item.status for item in report.details
+    } == {ObservationParityStatus.VALUE_MISMATCH}
+
+
 def test_input_order_and_replay_are_deterministic() -> None:
     ha = (
         observation("pump.power", 1000.0, source="ha:power"),

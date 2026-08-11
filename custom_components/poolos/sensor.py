@@ -90,6 +90,43 @@ def _native_intellicenter_attributes(
     return dict(snapshot.diagnostics())
 
 
+def _native_inventory_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    inventory = coordinator.native_intellicenter_inventory
+    if inventory is None:
+        return {
+            "available": False,
+            "authority": "none",
+            "command_delivery_enabled": False,
+        }
+    return {"available": True, **dict(inventory.diagnostics())}
+
+
+def _native_mapped_concept_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    snapshot = coordinator.native_intellicenter_snapshot
+    if snapshot is None:
+        return {
+            "available": False,
+            "mapped_concept_count": 0,
+            "mapped_concepts": [],
+            "authority": "none",
+            "command_delivery_enabled": False,
+        }
+    mapped = [dict(item) for item in snapshot.mapped_concept_diagnostics()]
+    return {
+        "available": snapshot.available,
+        "mapped_concept_count": len(mapped),
+        "mapped_concepts": mapped,
+        "missing_concept_count": len(snapshot.missing_concepts),
+        "missing_concepts": list(snapshot.missing_concepts),
+        "authority": "none",
+        "command_delivery_enabled": False,
+    }
+
+
 def _native_parity_attributes(
     coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
 ) -> dict[str, Any]:
@@ -110,6 +147,21 @@ def _native_parity_attributes(
             for item in issues
         ],
     }
+
+
+def _native_parity_issue_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    report = coordinator.native_intellicenter_parity_report
+    if report is None:
+        return {
+            "available": False,
+            "issues": [],
+            "authoritative_source": "home_assistant",
+            "authority": "none",
+            "command_delivery_enabled": False,
+        }
+    return report.diagnostic_attributes()
 
 
 def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
@@ -523,6 +575,47 @@ SENSORS = (
         ),
         _native_parity_attributes,
         "mdi:alert-circle-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_snapshot_inventory",
+        "Native IntelliCenter Snapshot Inventory",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.native_intellicenter_inventory is None
+            else (
+                coordinator.native_intellicenter_inventory.body_count
+                + coordinator.native_intellicenter_inventory.pump_count
+                + coordinator.native_intellicenter_inventory.temperature_sensor_count
+                + coordinator.native_intellicenter_inventory.circuit_count
+            )
+        ),
+        _native_inventory_attributes,
+        "mdi:format-list-bulleted-type",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_mapped_concepts",
+        "Native IntelliCenter Mapped Concepts",
+        lambda coordinator, runtime: (
+            0
+            if coordinator.native_intellicenter_snapshot is None
+            else len(coordinator.native_intellicenter_snapshot.observations)
+        ),
+        _native_mapped_concept_attributes,
+        "mdi:map-check-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_intellicenter_parity_issues",
+        "Native IntelliCenter Parity Issues",
+        lambda coordinator, runtime: (
+            None
+            if coordinator.native_intellicenter_parity_report is None
+            else sum(
+                item.status.value != "MATCH"
+                for item in coordinator.native_intellicenter_parity_report.details
+            )
+        ),
+        _native_parity_issue_attributes,
+        "mdi:text-search",
     ),
     PoolOSControlCenterSensorDescription(
         "observation_quality",

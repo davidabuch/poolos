@@ -925,7 +925,7 @@ third-party IntelliCenter integration may be required.**
 | ID | Work item | Status |
 |---|---|---|
 | 12.0A | Native read-only IntelliCenter adapter and parity harness | DONE |
-| 12.0B | Native equipment inventory and full observation parity | PLANNED |
+| 12.0B | Native IntelliCenter parity diagnostics and mapping calibration | CURRENT |
 | 12.0C | Native PoolOS observation source selectable in HA | PLANNED |
 | 12.0D | Native PoolOS source becomes default; legacy HA bridge remains fallback | PLANNED |
 | 12.0E | PoolOS publishes complete native HA entity set | PLANNED |
@@ -934,7 +934,7 @@ third-party IntelliCenter integration may be required.**
 
 ### Milestone 12.0A — Native IntelliCenter Read-Only Transport and Parity Harness
 
-Status: complete pending validation.
+Status: complete.
 
 - establishes a PoolOS-owned immutable read-source and canonical mapping boundary without importing or exposing the reference integration's controller;
 - temporarily copies only stable protocol snapshot fields from the existing IntelliCenter integration, behind a replaceable source seam and without reading its HA entities;
@@ -945,3 +945,30 @@ Status: complete pending validation.
 - publishes four compact read-only diagnostic entities without complete snapshots or histories in Home Assistant attributes;
 - documents the parity-first migration and physical-control prohibition in ADR-091;
 - preserves authority NONE, command delivery DISABLED, and physical Pentair delivery DISABLED.
+
+### Milestone 12.0B — Native IntelliCenter Parity Diagnostics and Mapping Calibration
+
+Status: current pending validation.
+
+- exposes a deterministic, bounded inventory of the reference snapshot's body,
+  pump, temperature-sensor, and circuit collections without serializing
+  arbitrary protocol objects;
+- publishes dedicated snapshot-inventory, mapped-concept, and detailed parity
+  issue diagnostic sensors while retaining the four parity summary sensors;
+- distinguishes collection absence in older snapshot schemas from a present but
+  empty collection and identifies when observation time uses the refresh
+  fallback;
+- reports mapped native concepts with compact type, value, quality, and native
+  provenance evidence;
+- reports per-status parity breakdown and bounded issue details with both source
+  values, timestamps, identities, and applicable tolerance;
+- calibrates heater, solar-active, and solar-preferred mappings using explicit
+  normalized body heat-source evidence from the reference read model;
+- preserves explicit missing evidence for ambiguous pumps, probes, and older
+  body schemas instead of borrowing values from Home Assistant;
+- does not weaken parity tolerances, freshness, type, or comparison rules;
+- keeps HA observations solely authoritative for health, soak quality,
+  retrospective, commissioning, recommendation, decision, and execution paths;
+  and
+- preserves authority NONE, command delivery DISABLED, and physical Pentair
+  delivery DISABLED.
