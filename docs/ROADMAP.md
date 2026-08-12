@@ -927,8 +927,8 @@ third-party IntelliCenter integration may be required.**
 | 12.0A | Native read-only IntelliCenter adapter and parity harness | DONE |
 | 12.0B | Native IntelliCenter parity diagnostics and mapping calibration | DONE |
 | 12.0C1 | Independent IntelliCenter read-only transport and raw discovery | DONE |
-| 12.0C2 | Native inventory semantics and parity calibration | CURRENT |
-| 12.0C3 | Sustained independent parity commissioning | PLANNED |
+| 12.0C2 | Native inventory semantics and parity calibration | DONE |
+| 12.0C3 | Sustained independent parity commissioning | CURRENT |
 | 12.0C | Native PoolOS observation source selectable in HA | PLANNED |
 | 12.0D | Native PoolOS source becomes default; legacy HA bridge remains fallback | PLANNED |
 | 12.0E | PoolOS publishes complete native HA entity set | PLANNED |
@@ -1007,7 +1007,7 @@ complete in 12.0C1, and native evidence is not yet selectable as authority.
 
 ### Milestone 12.0C2 — Native Inventory Semantics and Parity Calibration
 
-Status: current pending review.
+Status: complete.
 
 - distinguishes an HA entity's preserved source/report timestamp from the
   explicit time PoolOS successfully sampled its current cached state for shadow
@@ -1033,3 +1033,32 @@ Status: current pending review.
 Milestone 12.0C3 remains responsible for sustained independent parity
 commissioning. The live water-temperature discrepancy remains evidence to
 investigate, not a value to suppress or reinterpret.
+
+### Milestone 12.0C3 — Sustained Native Parity Commissioning
+
+Status: current pending review.
+
+- appends privacy-safe per-cycle native parity evidence to
+  `/config/poolos_logs/native_parity_history.jsonl` and atomically publishes a
+  human-readable summary at `native_parity_commissioning.json`;
+- retains seven days and at most 30,000 cycles, with hourly retention sweeps,
+  covering the initial 72-hour continuous-evidence target without unbounded
+  growth;
+- reconstructs commissioning state across Home Assistant restarts and PoolOS
+  reloads, while corrupt or unwritable evidence remains isolated from
+  authoritative HA observation processing;
+- summarizes per-concept matches, each failure status, tolerance-aware numeric
+  deltas, current and longest mismatch runs, and time since last match;
+- tracks transport unavailability, reconnect increments, discovery-generation
+  changes, evidence gaps, total elapsed time, and the current uninterrupted
+  evidence duration;
+- exposes neutral `COLLECTING`, `INSUFFICIENT_DURATION`, `DEGRADED`, and
+  `READY_FOR_REVIEW` states through one compact Recorder-safe diagnostic entity;
+- leaves the 0.5°F solar-temperature tolerance unchanged so transient evidence
+  can be evaluated rather than hidden; and
+- preserves HA authority, authority NONE, command delivery disabled, physical
+  delivery disabled, and the read-only protocol allowlist.
+
+`READY_FOR_REVIEW` means only that the current continuous evidence run has
+reached 72 hours without persistent adverse evidence. It does not approve or
+grant native authority.

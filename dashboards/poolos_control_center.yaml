@@ -138,6 +138,8 @@ views:
                 name: Native Mapped Concepts
               - entity: sensor.poolos_control_center_native_intellicenter_parity_issues
                 name: Native Parity Issue Details
+              - entity: sensor.poolos_control_center_native_parity_commissioning
+                name: Sustained Native Parity Commissioning
       - type: grid
         title: Grid & Resilience
         cards:
