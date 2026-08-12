@@ -299,6 +299,67 @@ def test_snapshot_is_defensive_and_feeds_existing_normalization_and_parity(
     assert report.parity_ratio == 1.0
 
 
+def test_sense_mapping_uses_documented_subtype_and_calibrated_source_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = (
+        (
+            "S-AIR",
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": "AIR",
+                "SNAME": "Outdoor",
+                "PARENT": "SYS01",
+                "SOURCE": 78,
+                "PROBE": 77,
+                "CALIB": 1,
+            },
+        ),
+        (
+            "S-WATER",
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": "POOL",
+                "SNAME": "Water",
+                "PARENT": "SYS01",
+                "SOURCE": 95,
+            },
+        ),
+        (
+            "S-UNKNOWN",
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": "OTHER",
+                "SNAME": "Air Sensor Name Must Not Guess",
+                "PARENT": "SYS01",
+                "SOURCE": 88,
+            },
+        ),
+    )
+    transport = module.IndependentIntelliCenterReadOnlyTransport(host="192.0.2.10")
+    asyncio.run(transport.async_start())
+
+    snapshot = transport.read_snapshot()
+    temperatures = {item.native_id: item for item in snapshot.temperatures}
+    canonical = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot, generated_at=snapshot.observed_at
+    )
+    values = {item.observation_id: item.value for item in canonical.observations}
+
+    assert temperatures["S-AIR"].kind.value == "air"
+    assert temperatures["S-WATER"].kind.value == "water"
+    assert temperatures["S-UNKNOWN"].kind.value == "unknown"
+    assert values["air.temperature"] == 78.0
+    assert values["water.temperature"] == 95.0
+    assert 88 not in values.values()
+    unknown_raw = next(
+        item for item in snapshot.raw_inventory if item.native_id == "S-UNKNOWN"
+    )
+    assert unknown_raw.subtype == "OTHER"
+    assert dict((item.name, item.value) for item in unknown_raw.attributes)["SOURCE"] == 88
+
+
 def test_disconnect_reconnect_and_clean_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_module(monkeypatch)
     transport = module.IndependentIntelliCenterReadOnlyTransport(host="192.0.2.10")

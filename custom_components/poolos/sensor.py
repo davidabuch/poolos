@@ -100,7 +100,13 @@ def _native_inventory_attributes(
             "authority": "none",
             "command_delivery_enabled": False,
         }
-    return {"available": True, **dict(inventory)}
+    return {
+        "available": True,
+        **dict(inventory),
+        "complete_inventory_export": dict(
+            coordinator.native_inventory_exporter.diagnostics()
+        ),
+    }
 
 
 def _independent_intellicenter_transport_attributes(

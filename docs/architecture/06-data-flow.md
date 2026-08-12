@@ -71,6 +71,13 @@ private protocol controller is guarded to discovery, parameter-read, update-
 subscription, and keepalive operations; it exposes no equipment-control surface
 (ADR-092).
 
+Native parity also carries a comparison-cycle sample timestamp separately from
+the HA source/report timestamp. This prevents an unchanged but successfully
+read HA cache value from becoming falsely stale in shadow comparison while
+leaving canonical operational freshness unchanged. An explicit hardware-domain
+eligibility set keeps non-IntelliCenter facts outside the parity denominator;
+excluded facts remain ordinary authoritative PoolOS observations (ADR-093).
+
 ## 2. Observations become evaluation context
 
 A decision cycle assembles the facts needed for one evaluation:

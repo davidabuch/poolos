@@ -69,16 +69,27 @@ DISCOVERED_OBJECT_TYPES = frozenset(
         "CIRCGRP",
         "CIRCUIT",
         "EXTINSTR",
+        "FDR",
+        "FEATR",
         "HEATER",
+        "MODULE",
+        "PANEL",
+        "PERMIT",
         "PMPCIRC",
+        "PRESS",
         "PUMP",
+        "REMBTN",
+        "REMOTE",
         "SCHED",
         "SENSE",
+        "STATUS",
         "SYSTEM",
+        "SYSTIM",
+        "VALVE",
     }
 )
-_UNKNOWN_TYPE_IDENTITY_ATTRIBUTES = frozenset(
-    {SNAME_ATTR, PARENT_ATTR, SUBTYP_ATTR}
+_UNKNOWN_TYPE_DISCOVERY_ATTRIBUTES = frozenset(
+    {SNAME_ATTR, PARENT_ATTR, STATUS_ATTR, SUBTYP_ATTR}
 )
 _RAW_TEXT_LIMIT = 256
 
@@ -133,7 +144,7 @@ class _DiscoveryPoolModel(PoolModel):
         if isinstance(object_type, str) and object_type:
             self._discovery_attribute_map.setdefault(
                 object_type,
-                set(_UNKNOWN_TYPE_IDENTITY_ATTRIBUTES),
+                set(_UNKNOWN_TYPE_DISCOVERY_ATTRIBUTES),
             )
         return super().add_object(objnam, params)
 
@@ -477,6 +488,8 @@ def _copy_body(
         target_temperature=_number(item[LOTMP_ATTR]),
         active_heat_source=_heater_source(selected_heater),
         selected_heat_mode=_heater_mode(selected_heater),
+        raw_heater_id=selected_heater_id,
+        raw_htmode=_optional_text(heat_mode),
     )
 
 
@@ -495,18 +508,14 @@ def _copy_pump(item: PoolObject) -> NativePumpState | None:
 
 
 def _copy_temperature(item: PoolObject) -> NativeTemperatureState:
-    text = " ".join(
-        str(value).casefold()
-        for value in (item.subtype, item.sname, item.objnam)
-        if value is not None
-    )
-    kind = NativeTemperatureKind.UNKNOWN
-    if "air" in text:
-        kind = NativeTemperatureKind.AIR
-    elif "solar" in text:
-        kind = NativeTemperatureKind.SOLAR
-    elif any(token in text for token in ("water", "pool", "spa")):
-        kind = NativeTemperatureKind.WATER
+    # pyintellicenter documents SOURCE as the calibrated reading and SUBTYP as
+    # exactly AIR, SOLAR, or POOL (water).  Names and parents are retained in raw
+    # inventory but never used to guess probe semantics.
+    kind = {
+        "AIR": NativeTemperatureKind.AIR,
+        "SOLAR": NativeTemperatureKind.SOLAR,
+        "POOL": NativeTemperatureKind.WATER,
+    }.get(str(item.subtype or "").strip().upper(), NativeTemperatureKind.UNKNOWN)
     return NativeTemperatureState(
         native_id=str(item.objnam),
         name=str(item.sname or item.objnam),
