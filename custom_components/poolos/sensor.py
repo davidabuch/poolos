@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -100,7 +100,26 @@ def _native_inventory_attributes(
             "authority": "none",
             "command_delivery_enabled": False,
         }
-    return {"available": True, **dict(inventory.diagnostics())}
+    return {"available": True, **dict(inventory)}
+
+
+def _independent_intellicenter_transport_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    transport = coordinator.independent_intellicenter_transport
+    if transport is None:
+        return {
+            "state": "UNAVAILABLE",
+            "configured": False,
+            "authority": "none",
+            "command_delivery_enabled": False,
+            "physical_delivery_enabled": False,
+            "read_only_safety_mode": True,
+        }
+    return {
+        "configured": True,
+        **dict(transport.diagnostics(generated_at=datetime.now(UTC))),
+    }
 
 
 def _native_mapped_concept_attributes(
@@ -526,6 +545,17 @@ SENSORS = (
         "mdi:clipboard-text-clock-outline",
     ),
     PoolOSControlCenterSensorDescription(
+        "independent_intellicenter_transport",
+        "Independent IntelliCenter Read-Only Transport",
+        lambda coordinator, runtime: (
+            "UNAVAILABLE"
+            if coordinator.independent_intellicenter_transport is None
+            else coordinator.independent_intellicenter_transport.state.value
+        ),
+        _independent_intellicenter_transport_attributes,
+        "mdi:lan-pending",
+    ),
+    PoolOSControlCenterSensorDescription(
         "native_intellicenter_status",
         "Native IntelliCenter Status",
         lambda coordinator, runtime: (
@@ -582,11 +612,10 @@ SENSORS = (
         lambda coordinator, runtime: (
             None
             if coordinator.native_intellicenter_inventory is None
-            else (
-                coordinator.native_intellicenter_inventory.body_count
-                + coordinator.native_intellicenter_inventory.pump_count
-                + coordinator.native_intellicenter_inventory.temperature_sensor_count
-                + coordinator.native_intellicenter_inventory.circuit_count
+            else int(
+                coordinator.native_intellicenter_inventory.get(
+                    "total_native_object_count", 0
+                )
             )
         ),
         _native_inventory_attributes,

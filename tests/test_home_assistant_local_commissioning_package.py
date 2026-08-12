@@ -23,7 +23,8 @@ def test_local_vendor_bootstrap_runs_before_coordinator_import() -> None:
 def test_source_manifest_remains_release_pinned_for_future_distribution() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0",
+        "pyintellicenter==0.1.20",
     ]
 
 
@@ -44,7 +45,7 @@ def test_local_builder_produces_self_contained_custom_component(tmp_path: Path) 
         assert "custom_components/poolos/_vendor/poolos/__init__.py" in names
         assert "custom_components/poolos/LOCAL_COMMISSIONING.txt" in names
         manifest = json.loads(archive.read("custom_components/poolos/manifest.json"))
-        assert manifest["requirements"] == []
+        assert manifest["requirements"] == ["pyintellicenter==0.1.20"]
         assert manifest["version"] == "0.10.0"
         assert not any("__pycache__" in name for name in names)
         assert not any(name.endswith((".pyc", ".pyo", ".DS_Store")) for name in names)

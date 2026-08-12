@@ -129,8 +129,8 @@ def test_native_shadow_cannot_affect_authoritative_commissioning_inputs() -> Non
 
 def test_native_failure_is_isolated_and_startup_is_not_an_alarm() -> None:
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
-    assert 'reason_code="REFERENCE_SOURCE_NOT_CONFIGURED"' in coordinator
-    assert 'reason_code="REFERENCE_SNAPSHOT_INVALID"' in coordinator
+    assert 'reason_code="INDEPENDENT_HOST_NOT_CONFIGURED"' in coordinator
+    assert 'reason_code="INDEPENDENT_SNAPSHOT_INVALID"' in coordinator
     assert "self.native_intellicenter_parity_report = None" in coordinator
     assert 'reason_code="NATIVE_SHADOW_FAILURE"' in coordinator
     assert "Defensive isolation for a non-authoritative shadow source" in coordinator
@@ -150,6 +150,7 @@ def test_ha_diagnostics_are_compact_and_dashboard_exposes_summary_and_detail_ent
         "native_intellicenter_snapshot_inventory",
         "native_intellicenter_mapped_concepts",
         "native_intellicenter_parity_issues",
+        "independent_intellicenter_transport",
     ):
         assert f'"{key}"' in sensor
         assert f"sensor.poolos_control_center_{key}" in dashboard

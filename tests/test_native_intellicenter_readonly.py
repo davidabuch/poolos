@@ -19,6 +19,8 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterStatus,
     NativeIntelliCenterTransportSnapshot,
     NativePumpState,
+    NativeRawAttribute,
+    NativeRawObject,
     NativeTemperatureKind,
     NativeTemperatureState,
 )
@@ -116,6 +118,47 @@ def test_missing_native_values_remain_explicitly_missing() -> None:
     assert result.observations == ()
     assert result.missing_concepts == NATIVE_TARGET_CONCEPTS
     assert result.available is True
+
+
+def test_raw_discovery_inventory_is_immutable_deterministic_and_bounded() -> None:
+    raw = tuple(
+        NativeRawObject(
+            native_id=f"OBJ{index:03d}",
+            object_type="MYSTERY" if index == 0 else "CIRCUIT",
+            subtype="FEATURE",
+            name=f"Object {index}",
+            parent_id="PANEL1",
+            observed_at=NOW,
+            attributes=tuple(
+                NativeRawAttribute(f"ATTR{attribute:02d}", f"value-{attribute}")
+                for attribute in range(20)
+            ),
+        )
+        for index in reversed(range(30))
+    )
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="direct-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        raw_inventory=raw,
+    )
+
+    diagnostics = dict(snapshot.raw_inventory_diagnostics())
+
+    assert snapshot.raw_inventory[0].native_id == "OBJ001"
+    assert snapshot.raw_inventory[-1].object_type == "MYSTERY"
+    assert diagnostics["total_native_object_count"] == 30
+    assert diagnostics["count_by_native_object_type"] == {
+        "CIRCUIT": 29,
+        "MYSTERY": 1,
+    }
+    assert diagnostics["displayed_native_object_count"] == 20
+    assert diagnostics["inventory_truncated"] is True
+    assert diagnostics["raw_inventory"][0]["attribute_count"] == 20
+    assert len(diagnostics["raw_inventory"][0]["attribute_names"]) == 16
+    with pytest.raises(FrozenInstanceError):
+        snapshot.raw_inventory[0].name = "changed"  # type: ignore[misc]
 
 
 def test_metric_temperatures_are_normalized_to_canonical_fahrenheit() -> None:

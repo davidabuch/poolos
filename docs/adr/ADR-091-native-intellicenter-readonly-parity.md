@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for PoolOS milestone 12.0A; amended by milestone 12.0B.
+Accepted for PoolOS milestone 12.0A; amended by milestone 12.0B and extended by
+ADR-092 for milestone 12.0C1.
 
 ## Context
 
@@ -87,6 +88,10 @@ physical Pentair delivery remains disabled.
 PoolOS can measure native-versus-bridge parity before changing any source of
 truth. Full native inventory, source selection, entity publication, dependency
 removal, and any command path remain separate reviewed milestones.
+
+ADR-092 replaces the temporary borrowed snapshot feed with an independent,
+guarded read-only connection while retaining this adapter, parity policy, and
+HA-derived source-of-truth decision.
 
 ## Milestone 12.0B diagnostic calibration
 

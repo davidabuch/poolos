@@ -10,6 +10,10 @@ INTEGRATION_VERSION = "0.10.0"
 
 CONF_DIAGNOSTICS_ENABLED = "diagnostics_enabled"
 DEFAULT_DIAGNOSTICS_ENABLED = True
+CONF_INTELLICENTER_HOST = "intellicenter_host"
+CONF_INTELLICENTER_TRANSPORT = "intellicenter_transport"
+DEFAULT_INTELLICENTER_TRANSPORT = "tcp"
+INTELLICENTER_TRANSPORT_OPTIONS = ("tcp", "websocket")
 
 # High-fidelity observation sources.  Pool/spa thermostat entities are reused for
 # several attribute-level observations; no template sensors are required.

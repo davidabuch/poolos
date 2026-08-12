@@ -7,10 +7,11 @@
   "config_flow": true,
   "documentation": "https://github.com/davidabuch/poolos",
   "integration_type": "service",
-  "iot_class": "calculated",
+  "iot_class": "local_push",
   "issue_tracker": "https://github.com/davidabuch/poolos/issues",
   "requirements": [
-    "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
+    "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0",
+    "pyintellicenter==0.1.20"
   ],
   "single_config_entry": true,
   "version": "0.10.0"

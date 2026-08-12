@@ -14,6 +14,8 @@ from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_HEATER_ACTIVE_ENTITY,
+    CONF_INTELLICENTER_HOST,
+    CONF_INTELLICENTER_TRANSPORT,
     CONF_GRID_STATUS_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
@@ -31,9 +33,11 @@ from .const import (
     CONF_WATERFALL_ACTIVE_ENTITY,
     CONF_WATER_TEMPERATURE_ENTITY,
     DEFAULT_DIAGNOSTICS_ENABLED,
+    DEFAULT_INTELLICENTER_TRANSPORT,
     DEFAULT_OPERATING_MODE,
     DOMAIN,
     NAME,
+    INTELLICENTER_TRANSPORT_OPTIONS,
 )
 
 
@@ -124,5 +128,20 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
             default=current.get(CONF_DIAGNOSTICS_ENABLED, DEFAULT_DIAGNOSTICS_ENABLED),
         )
     ] = bool
+    fields[
+        vol.Optional(
+            CONF_INTELLICENTER_HOST,
+            default=current.get(CONF_INTELLICENTER_HOST, vol.UNDEFINED),
+        )
+    ] = str
+    fields[
+        vol.Required(
+            CONF_INTELLICENTER_TRANSPORT,
+            default=current.get(
+                CONF_INTELLICENTER_TRANSPORT,
+                DEFAULT_INTELLICENTER_TRANSPORT,
+            ),
+        )
+    ] = vol.In(INTELLICENTER_TRANSPORT_OPTIONS)
     assert set(ALL_ENTITY_OPTIONS) == required.keys() | optional.keys()
     return vol.Schema(fields)
