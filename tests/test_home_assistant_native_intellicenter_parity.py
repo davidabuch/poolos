@@ -150,10 +150,14 @@ def test_ha_diagnostics_are_compact_and_dashboard_exposes_summary_and_detail_ent
         "native_intellicenter_snapshot_inventory",
         "native_intellicenter_mapped_concepts",
         "native_intellicenter_parity_issues",
-        "independent_intellicenter_transport",
     ):
         assert f'"{key}"' in sensor
         assert f"sensor.poolos_control_center_{key}" in dashboard
+    assert '"independent_intellicenter_transport"' in sensor
+    assert (
+        "sensor.poolos_control_center_independent_intellicenter_read_only_transport"
+        in dashboard
+    )
     assert "include_details=False" in sensor
     assert '"issue_concepts"' in sensor
     assert "diagnostic_attributes()" in sensor
