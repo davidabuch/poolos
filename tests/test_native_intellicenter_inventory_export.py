@@ -155,7 +155,7 @@ def test_sensitive_system_permit_and_location_fields_are_redacted() -> None:
         transport_metadata={"controller_name": "Private Family"},
     )
     encoded = json.dumps(payload, sort_keys=True)
-    system, permit, systim = payload["objects"]
+    permit, system, systim = payload["objects"]
 
     assert system["name"] == NATIVE_INVENTORY_REDACTED_VALUE
     assert system["attributes"]["VER"] == "3.014"
