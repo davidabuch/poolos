@@ -31,6 +31,10 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterReadAdapter,
 )
 from poolos.native_inventory_export import NativeIntelliCenterInventoryExporter
+from poolos.native_parity_commissioning import (
+    NativeParityCommissioningStore,
+    NativeParityCommissioningSummary,
+)
 from poolos.multiday_commissioning import (
     MultiDayCommissioningIntelligence,
     MultiDayCommissioningReport,
@@ -126,6 +130,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.evidence_exporter = DailyEvidenceExporter(Path(hass.config.path("poolos_logs")), self.local_timezone)
         self.native_inventory_exporter = NativeIntelliCenterInventoryExporter(
             Path(hass.config.path("poolos_logs"))
+        )
+        self.native_parity_commissioning_store = NativeParityCommissioningStore(
+            Path(hass.config.path("poolos_logs"))
+        )
+        self.native_parity_commissioning_summary: NativeParityCommissioningSummary = (
+            self.native_parity_commissioning_store.summary()
         )
         self._native_inventory_exported_snapshot_at: datetime | None = None
         self._observation_lock = asyncio.Lock()
@@ -249,6 +259,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 )
             )
             self.native_intellicenter_parity_report = None
+        try:
+            await self._async_record_native_parity_commissioning(observed_at)
+        except (OSError, TypeError, ValueError):
+            self.native_parity_commissioning_store.last_error = (
+                "native parity commissioning persistence failed"
+            )
+            LOGGER.exception("PoolOS native parity commissioning persistence failed")
         try:
             await self._async_export_native_intellicenter_inventory(observed_at)
         except (OSError, TypeError, ValueError):
@@ -395,6 +412,28 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             )
         )
         self._native_inventory_exported_snapshot_at = snapshot.observed_at
+
+    async def _async_record_native_parity_commissioning(
+        self, recorded_at: datetime
+    ) -> None:
+        """Persist shadow parity without affecting authoritative HA processing."""
+
+        report = self.native_intellicenter_parity_report
+        transport = self.independent_intellicenter_transport
+        if report is None or transport is None:
+            return
+        diagnostics = transport.diagnostics(generated_at=recorded_at)
+        self.native_parity_commissioning_summary = (
+            await self.hass.async_add_executor_job(
+                partial(
+                    self.native_parity_commissioning_store.record,
+                    report,
+                    transport_state=transport.state.value,
+                    reconnect_count=int(diagnostics["reconnect_count"]),
+                    discovery_generation=int(diagnostics["discovery_generation"]),
+                )
+            )
+        )
 
     def _record_infer_and_retro(
         self,
@@ -787,6 +826,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "daily_evidence_export": self.evidence_exporter.diagnostics(),
             "native_intellicenter_inventory_export": dict(
                 self.native_inventory_exporter.diagnostics()
+            ),
+            "native_parity_commissioning": (
+                self.native_parity_commissioning_store.diagnostics()
             ),
             "behavioral_inference": (
                 None if self.behavioral_inference_report is None else self.behavioral_inference_report.to_dict()

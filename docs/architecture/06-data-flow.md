@@ -78,6 +78,13 @@ leaving canonical operational freshness unchanged. An explicit hardware-domain
 eligibility set keeps non-IntelliCenter facts outside the parity denominator;
 excluded facts remain ordinary authoritative PoolOS observations (ADR-093).
 
+Sustained native commissioning appends only privacy-safe parity-domain evidence
+to a bounded, restart-recoverable history and derives transient/persistent
+mismatch plus transport-stability summaries. The 72-hour status is readiness
+for human review, never source authority. This shadow history has no path into
+operational observation health, intelligence, decisions, execution, or delivery
+(ADR-094).
+
 ## 2. Observations become evaluation context
 
 A decision cycle assembles the facts needed for one evaluation:

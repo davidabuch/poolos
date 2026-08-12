@@ -189,6 +189,16 @@ def _native_parity_issue_attributes(
     return report.diagnostic_attributes()
 
 
+def _native_parity_commissioning_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    del runtime
+    return coordinator.native_parity_commissioning_summary.diagnostic_attributes(
+        history_path=str(coordinator.native_parity_commissioning_store.history_path),
+        last_error=coordinator.native_parity_commissioning_store.last_error,
+    )
+
+
 def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     report = coordinator.behavioral_inference_report
     if report is None:
@@ -651,6 +661,15 @@ SENSORS = (
         ),
         _native_parity_issue_attributes,
         "mdi:text-search",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "native_parity_commissioning",
+        "Native Parity Commissioning",
+        lambda coordinator, runtime: (
+            coordinator.native_parity_commissioning_summary.status.value
+        ),
+        _native_parity_commissioning_attributes,
+        "mdi:timeline-check-outline",
     ),
     PoolOSControlCenterSensorDescription(
         "observation_quality",

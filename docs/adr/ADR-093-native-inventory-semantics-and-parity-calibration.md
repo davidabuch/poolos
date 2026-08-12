@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for PoolOS milestone 12.0C2, with post-commissioning privacy hardening.
+Accepted for PoolOS milestone 12.0C2, with post-commissioning privacy hardening;
+extended by ADR-094 for milestone 12.0C3.
 
 ## Context
 

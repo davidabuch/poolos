@@ -136,6 +136,11 @@ def test_native_failure_is_isolated_and_startup_is_not_an_alarm() -> None:
     assert "Defensive isolation for a non-authoritative shadow source" in coordinator
     assert "if self.in_startup_health_grace(observed_at)" in coordinator
     assert "native_source_available=native.available" in coordinator
+    assert "await self._async_record_native_parity_commissioning(observed_at)" in coordinator
+    assert '"native parity commissioning persistence failed"' in coordinator
+    assert coordinator.index("native parity commissioning persistence failed") < coordinator.index(
+        "self.shadow_runtime.evaluate(snapshot)"
+    )
 
 
 def test_ha_diagnostics_are_compact_and_dashboard_exposes_summary_and_detail_entities() -> None:
@@ -150,6 +155,7 @@ def test_ha_diagnostics_are_compact_and_dashboard_exposes_summary_and_detail_ent
         "native_intellicenter_snapshot_inventory",
         "native_intellicenter_mapped_concepts",
         "native_intellicenter_parity_issues",
+        "native_parity_commissioning",
     ):
         assert f'"{key}"' in sensor
         assert f"sensor.poolos_control_center_{key}" in dashboard
