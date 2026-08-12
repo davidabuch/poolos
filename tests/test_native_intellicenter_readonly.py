@@ -46,8 +46,20 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
                 82.0,
                 86.0,
                 active_heat_source="gas",
+                raw_heater_id="HTR01",
+                raw_htmode="1",
             ),
-            NativeBodyState("B1201", "Spa", NativeBodyKind.SPA, False, False, 80.0, 100.0),
+            NativeBodyState(
+                "B1201",
+                "Spa",
+                NativeBodyKind.SPA,
+                False,
+                False,
+                80.0,
+                100.0,
+                raw_heater_id="HTR02",
+                raw_htmode="0",
+            ),
         ),
         pumps=(NativePumpState("PMP01", "Filter Pump", True, 2200.0, 42.0, 1234.0),),
         temperatures=(
@@ -63,6 +75,9 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
             NativeCircuitState("C05", "Waterfall", False),
             NativeCircuitState("C06", "Jets", False),
             NativeCircuitState("C07", "Slide", True),
+            NativeCircuitState(
+                "C0002", "Pool Light", False, subtype="INTELLI"
+            ),
         ),
     )
 
@@ -98,6 +113,13 @@ def test_maps_supported_concepts_with_distinct_native_provenance() -> None:
     assert values["solar_preferred.active"].value is True
     assert values["slide.active"].value is True
     assert values["heater.active"].value is True
+    assert values["pool.raw_heater_id"].value == "HTR01"
+    assert values["pool.raw_htmode"].value == "1"
+    assert values["spa.raw_heater_id"].value == "HTR02"
+    assert values["spa.raw_htmode"].value == "0"
+    assert values["pool_light.active"].value is False
+    assert "pool_light.color_mode" not in values
+    assert "pool_light.effect" not in values
     assert all(item.quality is ObservationQuality.GOOD for item in values.values())
     assert all(
         item.source_id is not None
@@ -118,6 +140,57 @@ def test_missing_native_values_remain_explicitly_missing() -> None:
     assert result.observations == ()
     assert result.missing_concepts == NATIVE_TARGET_CONCEPTS
     assert result.available is True
+
+
+def test_absent_body_raw_fields_and_ambiguous_lights_are_not_fabricated() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="panel-main",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101", "Pool", NativeBodyKind.POOL, True, False, 82.0, 86.0
+            ),
+        ),
+        circuits=(
+            NativeCircuitState("C0002", "Pool Light", False, subtype="INTELLI"),
+            NativeCircuitState("C0099", "Pool Light", True, subtype="INTELLI"),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+    concepts = {item.observation_id for item in result.observations}
+
+    assert "pool.raw_heater_id" not in concepts
+    assert "pool.raw_htmode" not in concepts
+    assert "pool.raw_hvac_mode" not in concepts
+    assert "pool.raw_hvac_action" not in concepts
+    assert "pool_light.active" not in concepts
+    assert "pool_light.color_mode" not in concepts
+    assert "pool_light.effect" not in concepts
+
+
+def test_ambiguous_same_subtype_sense_probes_are_not_selected_by_name() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="panel-main",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        temperatures=(
+            NativeTemperatureState("S01", "Air", NativeTemperatureKind.AIR, 78.0),
+            NativeTemperatureState(
+                "S02", "Outdoor Probe", NativeTemperatureKind.AIR, 79.0
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+
+    assert "air.temperature" not in {
+        item.observation_id for item in result.observations
+    }
+    assert "air.temperature" in result.missing_concepts
 
 
 def test_raw_discovery_inventory_is_immutable_deterministic_and_bounded() -> None:

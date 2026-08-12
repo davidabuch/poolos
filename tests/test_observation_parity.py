@@ -9,6 +9,7 @@ from poolos.observation_parity import (
     ObservationParityStatus,
     PARITY_TOLERANCES,
 )
+from poolos.intellicenter_readonly import INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
 
 NOW = datetime(2026, 8, 10, 18, 0, tzinfo=UTC)
@@ -163,3 +164,72 @@ def test_input_order_and_replay_are_deterministic() -> None:
         "pool.active",
         "pump.power",
     )
+
+
+def test_current_ha_sample_is_fresh_without_overwriting_source_timestamp() -> None:
+    source_time = NOW - timedelta(hours=2)
+    report = ObservationParityEngine().compare(
+        (observation("pool.temperature", 99.0, source="ha:pool", observed_at=source_time),),
+        (observation("pool.temperature", 99.0, source="native:pool"),),
+        generated_at=NOW,
+        ha_source_available=True,
+        native_source_available=True,
+        ha_sampled_at_by_concept={"pool.temperature": NOW},
+    )
+
+    detail = report.details[0]
+    assert detail.status is ObservationParityStatus.MATCH
+    assert detail.ha_observed_at == source_time
+    assert detail.ha_sampled_at == NOW
+    assert detail.to_dict()["ha_observed_at"] == source_time.isoformat()
+    assert detail.to_dict()["ha_sampled_at"] == NOW.isoformat()
+
+
+def test_unsampled_old_ha_and_old_native_evidence_remain_stale() -> None:
+    old = NOW - timedelta(minutes=6)
+    stale_ha = ObservationParityEngine().compare(
+        (observation("pool.active", True, source="ha:pool", observed_at=old),),
+        (observation("pool.active", True, source="native:pool"),),
+        generated_at=NOW,
+        ha_source_available=True,
+        native_source_available=True,
+    )
+    stale_native = ObservationParityEngine().compare(
+        (observation("pool.active", True, source="ha:pool", observed_at=old),),
+        (observation("pool.active", True, source="native:pool", observed_at=old),),
+        generated_at=NOW,
+        ha_source_available=True,
+        native_source_available=True,
+        ha_sampled_at_by_concept={"pool.active": NOW},
+    )
+
+    assert stale_ha.details[0].status is ObservationParityStatus.STALE_HA
+    assert stale_native.details[0].status is ObservationParityStatus.STALE_NATIVE
+
+
+def test_intellicenter_eligibility_excludes_grid_without_hiding_native_gaps() -> None:
+    report = ObservationParityEngine().compare(
+        (
+            observation("grid.available", True, source="ha:grid"),
+            observation("grid.outage_active", False, source="ha:grid"),
+            observation("pool.active", True, source="ha:pool"),
+            observation("pump.rpm", 0, source="ha:pump"),
+        ),
+        (observation("pool.active", True, source="native:pool"),),
+        generated_at=NOW,
+        ha_source_available=True,
+        native_source_available=True,
+        ha_sampled_at_by_concept={
+            "grid.available": NOW,
+            "grid.outage_active": NOW,
+            "pool.active": NOW,
+            "pump.rpm": NOW,
+        },
+        eligible_concepts=INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS,
+    )
+
+    assert report.compared_concept_count == 2
+    assert report.match_count == 1
+    assert report.missing_native_count == 1
+    assert report.excluded_concepts == ("grid.available", "grid.outage_active")
+    assert {item.concept for item in report.details} == {"pool.active", "pump.rpm"}

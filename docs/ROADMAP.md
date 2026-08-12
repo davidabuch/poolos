@@ -926,8 +926,8 @@ third-party IntelliCenter integration may be required.**
 |---|---|---|
 | 12.0A | Native read-only IntelliCenter adapter and parity harness | DONE |
 | 12.0B | Native IntelliCenter parity diagnostics and mapping calibration | DONE |
-| 12.0C1 | Independent IntelliCenter read-only transport and raw discovery | CURRENT |
-| 12.0C2 | Native raw-inventory normalization and deterministic mapping | PLANNED |
+| 12.0C1 | Independent IntelliCenter read-only transport and raw discovery | DONE |
+| 12.0C2 | Native inventory semantics and parity calibration | CURRENT |
 | 12.0C3 | Sustained independent parity commissioning | PLANNED |
 | 12.0C | Native PoolOS observation source selectable in HA | PLANNED |
 | 12.0D | Native PoolOS source becomes default; legacy HA bridge remains fallback | PLANNED |
@@ -978,7 +978,7 @@ Status: complete.
 
 ### Milestone 12.0C1 — Independent IntelliCenter Read-Only Transport and Raw Discovery
 
-Status: current pending review.
+Status: complete.
 
 - replaces the borrowed reference-integration snapshot feed with a PoolOS-owned
   TCP or WebSocket connection configured on the PoolOS entry;
@@ -1004,3 +1004,32 @@ Status: current pending review.
 Milestone 12.0C2 will normalize and map reviewed raw inventory identities.
 Milestone 12.0C3 will require sustained independent parity evidence. Neither is
 complete in 12.0C1, and native evidence is not yet selectable as authority.
+
+### Milestone 12.0C2 — Native Inventory Semantics and Parity Calibration
+
+Status: current pending review.
+
+- distinguishes an HA entity's preserved source/report timestamp from the
+  explicit time PoolOS successfully sampled its current cached state for shadow
+  parity, without changing operational freshness or health semantics;
+- defines an explicit IntelliCenter parity-eligible concept set, excluding grid
+  evidence and HA-only HVAC/light abstractions while retaining incomplete valid
+  controller concepts as visible missing-native evidence;
+- maps explicit BODY `HEATER` and `HTMODE` values for pool and spa without
+  inventing HA HVAC mode/action equivalents;
+- maps Pool Light power state only for one unambiguous `INTELLI` Pool Light
+  circuit and does not infer color or effect;
+- follows pyintellicenter's documented SENSE model: `SOURCE` is the calibrated
+  reading and only exact `AIR`, `SOLAR`, and `POOL` subtypes receive canonical
+  meanings; ambiguous probes remain raw;
+- exports the complete deterministic raw inventory atomically to
+  `/config/poolos_logs/native_intellicenter_inventory.json`, while the HA
+  diagnostic inventory remains capped at 20 objects;
+- preserves additional and future object types as bounded raw evidence without
+  guessed PoolOS semantics; and
+- keeps HA-derived observations authoritative, authority NONE, command delivery
+  disabled, physical delivery disabled, and the protocol allowlist unchanged.
+
+Milestone 12.0C3 remains responsible for sustained independent parity
+commissioning. The live water-temperature discrepancy remains evidence to
+investigate, not a value to suppress or reinterpret.

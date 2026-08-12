@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for PoolOS milestone 12.0C1.
+Accepted for PoolOS milestone 12.0C1; extended by ADR-093 for milestone 12.0C2.
 
 ## Context
 

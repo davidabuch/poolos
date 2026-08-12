@@ -100,6 +100,8 @@ class NativeBodyState:
     target_temperature: float | None
     active_heat_source: str | None = None
     selected_heat_mode: str | None = None
+    raw_heater_id: str | None = None
+    raw_htmode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,8 +292,11 @@ NATIVE_TARGET_CONCEPTS = (
     "pool.active",
     "pool.command_active",
     "pool.heating_demand_active",
+    "pool.raw_heater_id",
+    "pool.raw_htmode",
     "pool.target_temperature",
     "pool.temperature",
+    "pool_light.active",
     "pump.gpm",
     "pump.power",
     "pump.rpm",
@@ -302,11 +307,19 @@ NATIVE_TARGET_CONCEPTS = (
     "spa.active",
     "spa.command_active",
     "spa.heating_demand_active",
+    "spa.raw_heater_id",
+    "spa.raw_htmode",
     "spa.target_temperature",
     "spa.temperature",
     "water.temperature",
     "waterfall.active",
 )
+
+# The IntelliCenter-specific comparison domain is intentionally narrower than
+# the complete canonical HA observation set.  Grid/Powerwall facts, HA-only HVAC
+# abstractions, and light color/effect abstractions are not controller-native
+# evidence and therefore cannot affect the native parity denominator.
+INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS = frozenset(NATIVE_TARGET_CONCEPTS)
 
 
 class NativeIntelliCenterReadAdapter:
@@ -392,6 +405,16 @@ class NativeIntelliCenterReadAdapter:
             if circuit is not None:
                 _put(values, concept, circuit.active, None, circuit.native_id)
 
+        pool_light = _pool_light(circuits)
+        if pool_light is not None:
+            _put(
+                values,
+                "pool_light.active",
+                pool_light.active,
+                None,
+                pool_light.native_id,
+            )
+
         bodies = tuple(item for item in (pool, spa) if item is not None)
         heater_active = _active_heat_source_value(bodies, expected_source="gas")
         solar_active = _active_heat_source_value(bodies, expected_source="solar")
@@ -457,6 +480,8 @@ def _body_values(
         None,
         body.native_id,
     )
+    _put(values, f"{prefix}.raw_heater_id", body.raw_heater_id, None, body.native_id)
+    _put(values, f"{prefix}.raw_htmode", body.raw_htmode, None, body.native_id)
     _put(
         values,
         f"{prefix}.temperature",
@@ -525,10 +550,7 @@ def _temperature(
         for item in sorted(temperatures, key=lambda sensor: sensor.native_id)
         if item.kind is kind
     )
-    if len(candidates) == 1:
-        return candidates[0]
-    exact = tuple(item for item in candidates if item.name.strip().casefold() == kind.value)
-    return exact[0] if len(exact) == 1 else None
+    return candidates[0] if len(candidates) == 1 else None
 
 
 _CIRCUIT_ALIASES: Mapping[str, frozenset[str]] = MappingProxyType(
@@ -561,6 +583,24 @@ def _circuit(
     return None
 
 
+def _pool_light(
+    circuits: tuple[NativeCircuitState, ...],
+) -> NativeCircuitState | None:
+    """Select an explicitly typed Pool Light circuit without guessing effects."""
+
+    candidates = tuple(
+        circuit
+        for circuit in circuits
+        if _normalized_token(circuit.subtype) == "intelli"
+        and "pool light"
+        in {
+            _normalized_token(circuit.name),
+            _normalized_token(circuit.use),
+        }
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _put(
     values: dict[str, tuple[Any, str | None, str]],
     concept: str,
@@ -590,6 +630,7 @@ def _compact_diagnostic_value(value: Any) -> Any:
 
 
 __all__ = [
+    "INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS",
     "NATIVE_ADAPTER_ID",
     "NATIVE_TARGET_CONCEPTS",
     "NativeBodyKind",

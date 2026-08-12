@@ -51,6 +51,7 @@ class ObservationParityDetail:
     native_value: Any
     tolerance: float | None
     ha_observed_at: datetime | None
+    ha_sampled_at: datetime | None
     native_observed_at: datetime | None
     ha_stale: bool
     native_stale: bool
@@ -66,6 +67,9 @@ class ObservationParityDetail:
             "tolerance": self.tolerance,
             "ha_observed_at": (
                 None if self.ha_observed_at is None else self.ha_observed_at.isoformat()
+            ),
+            "ha_sampled_at": (
+                None if self.ha_sampled_at is None else self.ha_sampled_at.isoformat()
             ),
             "native_observed_at": (
                 None
@@ -94,11 +98,13 @@ class ObservationParityReport:
     stale_ha_count: int
     parity_ratio: float
     details: tuple[ObservationParityDetail, ...]
+    excluded_concepts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.generated_at.tzinfo is None or self.generated_at.utcoffset() is None:
             raise ValueError("parity generated_at must be timezone-aware")
         object.__setattr__(self, "details", tuple(self.details))
+        object.__setattr__(self, "excluded_concepts", tuple(sorted(self.excluded_concepts)))
 
     def to_dict(self, *, include_details: bool = True) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -114,6 +120,8 @@ class ObservationParityReport:
             "stale_native_count": self.stale_native_count,
             "stale_ha_count": self.stale_ha_count,
             "parity_ratio": self.parity_ratio,
+            "excluded_concept_count": len(self.excluded_concepts),
+            "excluded_concepts": list(self.excluded_concepts),
             "authority": "none",
             "command_delivery_enabled": False,
             "authoritative_source": "home_assistant",
@@ -174,14 +182,37 @@ class ObservationParityEngine:
         generated_at: datetime,
         ha_source_available: bool,
         native_source_available: bool,
+        ha_sampled_at_by_concept: Mapping[str, datetime] | None = None,
+        eligible_concepts: frozenset[str] | None = None,
     ) -> ObservationParityReport:
         if generated_at.tzinfo is None or generated_at.utcoffset() is None:
             raise ValueError("generated_at must be timezone-aware")
         ha = _by_concept(ha_observations, "HA")
         native = _by_concept(native_observations, "native")
-        concepts = tuple(sorted(set(ha) | set(native)))
+        sampled = _validated_sample_times(ha_sampled_at_by_concept or {})
+        all_concepts = set(ha) | set(native)
+        concepts = tuple(
+            sorted(
+                all_concepts
+                if eligible_concepts is None
+                else all_concepts.intersection(eligible_concepts)
+            )
+        )
+        excluded = tuple(
+            sorted(
+                ()
+                if eligible_concepts is None
+                else all_concepts.difference(eligible_concepts)
+            )
+        )
         details = tuple(
-            self._compare_one(concept, ha.get(concept), native.get(concept), generated_at)
+            self._compare_one(
+                concept,
+                ha.get(concept),
+                native.get(concept),
+                generated_at,
+                ha_sampled_at=sampled.get(concept),
+            )
             for concept in concepts
         )
         match_count = sum(item.status is ObservationParityStatus.MATCH for item in details)
@@ -199,6 +230,7 @@ class ObservationParityEngine:
             "native_source_available": native_source_available,
             "ha_source_available": ha_source_available,
             "details": [item.to_dict() for item in details],
+            "excluded_concepts": list(excluded),
         }
         report_id = "observation-parity-" + sha256(
             _canonical_json(payload).encode("utf-8")
@@ -221,6 +253,7 @@ class ObservationParityEngine:
             stale_ha_count=sum(item.ha_stale for item in details),
             parity_ratio=0.0 if compared == 0 else round(match_count / compared, 6),
             details=details,
+            excluded_concepts=excluded,
         )
 
     def _compare_one(
@@ -229,8 +262,15 @@ class ObservationParityEngine:
         ha: PoolObservation | None,
         native: PoolObservation | None,
         generated_at: datetime,
+        *,
+        ha_sampled_at: datetime | None,
     ) -> ObservationParityDetail:
-        ha_stale = _stale(ha, generated_at, self.policy.stale_after)
+        ha_stale = _stale(
+            ha,
+            generated_at,
+            self.policy.stale_after,
+            sampled_at=ha_sampled_at,
+        )
         native_stale = _stale(native, generated_at, self.policy.stale_after)
         if native is None:
             status = ObservationParityStatus.MISSING_NATIVE
@@ -257,6 +297,7 @@ class ObservationParityEngine:
             native_value=None if native is None else native.value,
             tolerance=self.policy.tolerances.get(concept),
             ha_observed_at=None if ha is None else ha.observed_at,
+            ha_sampled_at=ha_sampled_at,
             native_observed_at=None if native is None else native.observed_at,
             ha_stale=ha_stale,
             native_stale=native_stale,
@@ -280,14 +321,31 @@ def _stale(
     observation: PoolObservation | None,
     generated_at: datetime,
     stale_after: timedelta,
+    *,
+    sampled_at: datetime | None = None,
 ) -> bool:
     if observation is None:
         return False
-    if observation.observed_at is None:
+    freshness_timestamp = sampled_at or observation.observed_at
+    if freshness_timestamp is None:
         return True
-    if observation.observed_at.tzinfo is None or observation.observed_at.utcoffset() is None:
+    if freshness_timestamp.tzinfo is None or freshness_timestamp.utcoffset() is None:
         raise ValueError("parity observation timestamps must be timezone-aware")
-    return generated_at - observation.observed_at > stale_after
+    return generated_at - freshness_timestamp > stale_after
+
+
+def _validated_sample_times(
+    values: Mapping[str, datetime],
+) -> Mapping[str, datetime]:
+    result: dict[str, datetime] = {}
+    for concept, sampled_at in values.items():
+        normalized = concept.strip()
+        if not normalized:
+            raise ValueError("parity sample concept must not be blank")
+        if sampled_at.tzinfo is None or sampled_at.utcoffset() is None:
+            raise ValueError("parity sample timestamps must be timezone-aware")
+        result[normalized] = sampled_at
+    return MappingProxyType(dict(sorted(result.items())))
 
 
 def _same_value_type(left: Any, right: Any) -> bool:
@@ -321,6 +379,8 @@ def _diagnostic_detail(detail: ObservationParityDetail) -> dict[str, Any]:
         result["tolerance"] = detail.tolerance
     if detail.ha_observed_at is not None:
         result["ha_observed_at"] = detail.ha_observed_at.isoformat()
+    if detail.ha_sampled_at is not None:
+        result["ha_sampled_at"] = detail.ha_sampled_at.isoformat()
     if detail.native_observed_at is not None:
         result["native_observed_at"] = detail.native_observed_at.isoformat()
     if detail.ha_source_id is not None:

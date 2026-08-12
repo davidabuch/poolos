@@ -26,15 +26,21 @@ from poolos.daily_retrospective import (
 from poolos.expected_outage import ExpectedOutageAcknowledgment
 from poolos.homeassistant.observations import HomeAssistantState
 from poolos.intellicenter_readonly import (
+    INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS,
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterReadAdapter,
 )
+from poolos.native_inventory_export import NativeIntelliCenterInventoryExporter
 from poolos.multiday_commissioning import (
     MultiDayCommissioningIntelligence,
     MultiDayCommissioningReport,
 )
 from poolos.operator_recommendation import OperatorRecommendation
-from poolos.observations import PersistentObservationRecorder, PoolObservation
+from poolos.observations import (
+    ObservationQuality,
+    PersistentObservationRecorder,
+    PoolObservation,
+)
 from poolos.observation_parity import ObservationParityEngine, ObservationParityReport
 
 from .const import (
@@ -118,6 +124,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.observation_recorder = PersistentObservationRecorder(storage_root / "observations")
         self.recommendation_recorder = PersistentRecommendationRecorder(storage_root / "recommendations")
         self.evidence_exporter = DailyEvidenceExporter(Path(hass.config.path("poolos_logs")), self.local_timezone)
+        self.native_inventory_exporter = NativeIntelliCenterInventoryExporter(
+            Path(hass.config.path("poolos_logs"))
+        )
+        self._native_inventory_exported_snapshot_at: datetime | None = None
         self._observation_lock = asyncio.Lock()
         self._remove_state_listener: Callable[[], None] | None = None
         self._event_refresh_count = 0
@@ -239,6 +249,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 )
             )
             self.native_intellicenter_parity_report = None
+        try:
+            await self._async_export_native_intellicenter_inventory(observed_at)
+        except (OSError, TypeError, ValueError):
+            self.native_inventory_exporter.last_error = "native inventory export failed"
+            LOGGER.exception("PoolOS native IntelliCenter inventory export failed")
         self._last_observation_trigger = trigger
         if not snapshot.healthy and not self.in_startup_health_grace(observed_at):
             self._unhealthy_seen_since_start = True
@@ -350,8 +365,36 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 generated_at=observed_at,
                 ha_source_available=True,
                 native_source_available=native.available,
+                ha_sampled_at_by_concept={
+                    item.observation_id: authoritative_snapshot.generated_at
+                    for item in authoritative_snapshot.observations
+                    if item.quality is ObservationQuality.GOOD
+                },
+                eligible_concepts=INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS,
             )
         )
+
+    async def _async_export_native_intellicenter_inventory(
+        self, exported_at: datetime
+    ) -> None:
+        """Write complete raw discovery outside bounded HA state attributes."""
+
+        transport = self.independent_intellicenter_transport
+        snapshot = None if transport is None else transport.latest_snapshot
+        if transport is None or snapshot is None:
+            return
+        if snapshot.observed_at == self._native_inventory_exported_snapshot_at:
+            return
+        metadata = dict(transport.diagnostics(generated_at=exported_at))
+        await self.hass.async_add_executor_job(
+            partial(
+                self.native_inventory_exporter.export,
+                snapshot,
+                exported_at=exported_at,
+                transport_metadata=metadata,
+            )
+        )
+        self._native_inventory_exported_snapshot_at = snapshot.observed_at
 
     def _record_infer_and_retro(
         self,
@@ -742,6 +785,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "persistent_observation_recorder": self.observation_recorder.diagnostics(),
             "persistent_recommendation_recorder": self.recommendation_recorder.diagnostics(),
             "daily_evidence_export": self.evidence_exporter.diagnostics(),
+            "native_intellicenter_inventory_export": dict(
+                self.native_inventory_exporter.diagnostics()
+            ),
             "behavioral_inference": (
                 None if self.behavioral_inference_report is None else self.behavioral_inference_report.to_dict()
             ),
