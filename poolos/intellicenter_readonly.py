@@ -20,6 +20,8 @@ from .observations import (
 )
 
 NATIVE_ADAPTER_ID = "poolos.native_intellicenter.readonly.v1"
+RAW_INVENTORY_DIAGNOSTIC_LIMIT = 20
+RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT = 16
 
 
 class NativeIntelliCenterStatus(str, Enum):
@@ -41,6 +43,50 @@ class NativeTemperatureKind(str, Enum):
     WATER = "water"
     SOLAR = "solar"
     UNKNOWN = "unknown"
+
+
+NativeRawScalar = str | int | float | bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRawAttribute:
+    """One defensively copied native attribute value."""
+
+    name: str
+    value: NativeRawScalar
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("native raw attribute name must not be blank")
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRawObject:
+    """Immutable native equipment evidence retained before semantic mapping."""
+
+    native_id: str
+    object_type: str
+    subtype: str | None
+    name: str | None
+    parent_id: str | None
+    observed_at: datetime
+    attributes: tuple[NativeRawAttribute, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.native_id.strip():
+            raise ValueError("native raw object id must not be blank")
+        if not self.object_type.strip():
+            raise ValueError("native raw object type must not be blank")
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("native raw object observed_at must be timezone-aware")
+        names = [item.name for item in self.attributes]
+        if len(names) != len(set(names)):
+            raise ValueError("native raw object attributes must be unique")
+        object.__setattr__(
+            self,
+            "attributes",
+            tuple(sorted(self.attributes, key=lambda item: item.name)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +141,7 @@ class NativeIntelliCenterTransportSnapshot:
     pumps: tuple[NativePumpState, ...] = ()
     temperatures: tuple[NativeTemperatureState, ...] = ()
     circuits: tuple[NativeCircuitState, ...] = ()
+    raw_inventory: tuple[NativeRawObject, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.source_id.strip():
@@ -105,6 +152,60 @@ class NativeIntelliCenterTransportSnapshot:
         object.__setattr__(self, "pumps", tuple(self.pumps))
         object.__setattr__(self, "temperatures", tuple(self.temperatures))
         object.__setattr__(self, "circuits", tuple(self.circuits))
+        raw_inventory = tuple(
+            sorted(
+                self.raw_inventory,
+                key=lambda item: (item.object_type, item.native_id),
+            )
+        )
+        identities = [(item.object_type, item.native_id) for item in raw_inventory]
+        if len(identities) != len(set(identities)):
+            raise ValueError("native raw inventory identities must be unique")
+        object.__setattr__(self, "raw_inventory", raw_inventory)
+
+    def raw_inventory_diagnostics(self) -> Mapping[str, Any]:
+        """Return deterministic bounded diagnostics for raw discovery evidence."""
+
+        counts: dict[str, int] = {}
+        for item in self.raw_inventory:
+            counts[item.object_type] = counts.get(item.object_type, 0) + 1
+        displayed = self.raw_inventory[:RAW_INVENTORY_DIAGNOSTIC_LIMIT]
+        return MappingProxyType(
+            {
+                "snapshot_observed_at": self.observed_at.isoformat(),
+                "total_native_object_count": len(self.raw_inventory),
+                "count_by_native_object_type": dict(sorted(counts.items())),
+                "displayed_native_object_count": len(displayed),
+                "inventory_truncated": len(self.raw_inventory) > len(displayed),
+                "inventory_limit": RAW_INVENTORY_DIAGNOSTIC_LIMIT,
+                "attribute_name_limit_per_object": RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT,
+                "raw_inventory": [
+                    {
+                        "id": item.native_id[:64],
+                        "type": item.object_type[:32],
+                        "subtype": None if item.subtype is None else item.subtype[:48],
+                        "name": None if item.name is None else item.name[:64],
+                        "parent_id": (
+                            None if item.parent_id is None else item.parent_id[:64]
+                        ),
+                        "attribute_count": len(item.attributes),
+                        "attribute_names": [
+                            attribute.name[:48]
+                            for attribute in item.attributes[
+                                :RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT
+                            ]
+                        ],
+                        "attributes_truncated": len(item.attributes)
+                        > RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT,
+                        "observed_at": item.observed_at.isoformat(),
+                    }
+                    for item in displayed
+                ],
+                "authority": "none",
+                "command_delivery_enabled": False,
+                "read_only_safety_mode": True,
+            }
+        )
 
 
 class NativeIntelliCenterReadError(RuntimeError):
@@ -501,6 +602,11 @@ __all__ = [
     "NativeIntelliCenterStatus",
     "NativeIntelliCenterTransportSnapshot",
     "NativePumpState",
+    "NativeRawAttribute",
+    "NativeRawObject",
+    "NativeRawScalar",
     "NativeTemperatureKind",
     "NativeTemperatureState",
+    "RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT",
+    "RAW_INVENTORY_DIAGNOSTIC_LIMIT",
 ]

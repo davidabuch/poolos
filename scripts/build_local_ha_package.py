@@ -39,7 +39,11 @@ def _ignore(_directory: str, names: list[str]) -> set[str]:
 def _rewrite_manifest(component: Path) -> None:
     manifest_path = component / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["requirements"] = []
+    manifest["requirements"] = [
+        requirement
+        for requirement in manifest.get("requirements", [])
+        if not requirement.startswith("poolos@")
+    ]
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 

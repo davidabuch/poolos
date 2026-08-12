@@ -122,6 +122,8 @@ views:
             title: Native IntelliCenter Shadow Parity
             show_header_toggle: false
             entities:
+              - entity: sensor.poolos_control_center_independent_intellicenter_transport
+                name: Independent Read-Only Transport
               - entity: sensor.poolos_control_center_native_intellicenter_status
                 name: Native Status
               - entity: sensor.poolos_control_center_native_intellicenter_parity

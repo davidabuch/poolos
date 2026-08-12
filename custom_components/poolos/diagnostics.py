@@ -8,9 +8,20 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import PoolOSConfigEntry
-from .const import CONF_DIAGNOSTICS_ENABLED, INTEGRATION_VERSION
+from .const import (
+    CONF_DIAGNOSTICS_ENABLED,
+    CONF_INTELLICENTER_HOST,
+    INTEGRATION_VERSION,
+)
 
-_TO_REDACT = {"access_token", "token", "api_key", "host", "url"}
+_TO_REDACT = {
+    "access_token",
+    "token",
+    "api_key",
+    "host",
+    CONF_INTELLICENTER_HOST,
+    "url",
+}
 
 
 async def async_get_config_entry_diagnostics(

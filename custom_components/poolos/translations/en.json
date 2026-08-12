@@ -24,7 +24,9 @@
           "slide_active_entity": "Slide entity (optional hydraulic context)",
           "diagnostics_enabled": "Enable diagnostics",
           "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
-          "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)"
+          "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)",
+          "intellicenter_host": "IntelliCenter host for independent read-only discovery (optional)",
+          "intellicenter_transport": "Independent IntelliCenter transport"
         }
       }
     },
@@ -56,7 +58,9 @@
           "slide_active_entity": "Slide entity (optional hydraulic context)",
           "diagnostics_enabled": "Enable diagnostics",
           "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
-          "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)"
+          "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)",
+          "intellicenter_host": "IntelliCenter host for independent read-only discovery (optional)",
+          "intellicenter_transport": "Independent IntelliCenter transport"
         }
       }
     }

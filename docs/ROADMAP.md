@@ -925,7 +925,10 @@ third-party IntelliCenter integration may be required.**
 | ID | Work item | Status |
 |---|---|---|
 | 12.0A | Native read-only IntelliCenter adapter and parity harness | DONE |
-| 12.0B | Native IntelliCenter parity diagnostics and mapping calibration | CURRENT |
+| 12.0B | Native IntelliCenter parity diagnostics and mapping calibration | DONE |
+| 12.0C1 | Independent IntelliCenter read-only transport and raw discovery | CURRENT |
+| 12.0C2 | Native raw-inventory normalization and deterministic mapping | PLANNED |
+| 12.0C3 | Sustained independent parity commissioning | PLANNED |
 | 12.0C | Native PoolOS observation source selectable in HA | PLANNED |
 | 12.0D | Native PoolOS source becomes default; legacy HA bridge remains fallback | PLANNED |
 | 12.0E | PoolOS publishes complete native HA entity set | PLANNED |
@@ -948,7 +951,7 @@ Status: complete.
 
 ### Milestone 12.0B — Native IntelliCenter Parity Diagnostics and Mapping Calibration
 
-Status: current pending validation.
+Status: complete.
 
 - exposes a deterministic, bounded inventory of the reference snapshot's body,
   pump, temperature-sensor, and circuit collections without serializing
@@ -972,3 +975,32 @@ Status: current pending validation.
   and
 - preserves authority NONE, command delivery DISABLED, and physical Pentair
   delivery DISABLED.
+
+### Milestone 12.0C1 — Independent IntelliCenter Read-Only Transport and Raw Discovery
+
+Status: current pending review.
+
+- replaces the borrowed reference-integration snapshot feed with a PoolOS-owned
+  TCP or WebSocket connection configured on the PoolOS entry;
+- pins and encapsulates `pyintellicenter` behind a private controller whose
+  command gate admits only `GetParamList` discovery/keepalive reads and
+  `RequestParamList` read subscriptions;
+- retains immutable, deterministically ordered raw native inventory for BODY,
+  CIRCUIT, CIRCGRP/CIRCGROUP, HEATER, PUMP, PMPCIRC, SENSE, CHEM, SCHED,
+  EXTINSTR, SYSTEM, and unknown future object types;
+- feeds only already-supported unambiguous facts through the 12.0A native
+  adapter and existing parity engine; raw-only evidence is not guessed into
+  canonical meaning;
+- retains the separate Home Assistant IntelliCenter integration as the
+  authoritative observation oracle during commissioning;
+- isolates connection, discovery, malformed-model, disconnect, and reconnect
+  failures from authoritative HA observations and every downstream intelligence
+  path;
+- publishes bounded independent-transport and raw-inventory diagnostics with
+  explicit truncation and conservative Recorder payload size; and
+- preserves authority NONE, command delivery DISABLED, and physical Pentair
+  delivery DISABLED as structural invariants documented by ADR-092.
+
+Milestone 12.0C2 will normalize and map reviewed raw inventory identities.
+Milestone 12.0C3 will require sustained independent parity evidence. Neither is
+complete in 12.0C1, and native evidence is not yet selectable as authority.

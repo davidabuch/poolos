@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
 EXPECTED_VERSION = "0.10.0"
 EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0"
+EXPECTED_PROTOCOL_REQUIREMENT = "pyintellicenter==0.1.20"
 
 
 def _json(path: Path) -> dict[str, object]:
@@ -34,8 +35,11 @@ def test_manifest_is_hacs_complete_and_release_pinned() -> None:
         assert key in manifest
     assert manifest["domain"] == "poolos"
     assert manifest["version"] == EXPECTED_VERSION
-    assert manifest["iot_class"] == "calculated"
-    assert manifest["requirements"] == [EXPECTED_CORE_REQUIREMENT]
+    assert manifest["iot_class"] == "local_push"
+    assert manifest["requirements"] == [
+        EXPECTED_CORE_REQUIREMENT,
+        EXPECTED_PROTOCOL_REQUIREMENT,
+    ]
     assert "@main" not in EXPECTED_CORE_REQUIREMENT
 
 

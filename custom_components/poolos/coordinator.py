@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+import contextlib
 from datetime import UTC, date, datetime, time, timedelta
 from functools import partial
 import logging
 from pathlib import Path
+from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
@@ -36,6 +38,9 @@ from poolos.observations import PersistentObservationRecorder, PoolObservation
 from poolos.observation_parity import ObservationParityEngine, ObservationParityReport
 
 from .const import (
+    CONF_INTELLICENTER_HOST,
+    CONF_INTELLICENTER_TRANSPORT,
+    DEFAULT_INTELLICENTER_TRANSPORT,
     DOMAIN,
     INTEGRATION_VERSION,
     MULTIDAY_COMMISSIONING_WINDOW_DAYS,
@@ -49,10 +54,9 @@ from .observation import (
     configured_entity_ids,
     configured_entity_mapping,
 )
-from .native_intellicenter import (
-    NativeSnapshotInventory,
-    native_snapshot_inventory,
-    native_transport_snapshot,
+from .independent_intellicenter import (
+    IndependentIntelliCenterReadOnlyTransport,
+    IndependentIntelliCenterTransportState,
 )
 from .shadow import HomeAssistantShadowRuntime
 
@@ -88,7 +92,23 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.native_intellicenter_snapshot: (
             NativeIntelliCenterObservationSnapshot | None
         ) = None
-        self.native_intellicenter_inventory: NativeSnapshotInventory | None = None
+        configured = {**dict(entry.data), **dict(entry.options)}
+        independent_host = str(configured.get(CONF_INTELLICENTER_HOST, "")).strip()
+        self.independent_intellicenter_transport = (
+            None
+            if not independent_host
+            else IndependentIntelliCenterReadOnlyTransport(
+                host=independent_host,
+                transport=str(
+                    configured.get(
+                        CONF_INTELLICENTER_TRANSPORT,
+                        DEFAULT_INTELLICENTER_TRANSPORT,
+                    )
+                ),
+            )
+        )
+        self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
+        self.native_intellicenter_inventory: Mapping[str, object] | None = None
         self.native_intellicenter_parity_engine = ObservationParityEngine()
         self.native_intellicenter_parity_report: ObservationParityReport | None = None
         self._completed_history_for_date: date | None = None
@@ -120,6 +140,29 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 observed_at=datetime.now(UTC),
                 trigger="periodic_reconciliation",
             )
+
+    def async_start_independent_intellicenter(self) -> None:
+        """Start the independent shadow connection without blocking HA setup."""
+
+        transport = self.independent_intellicenter_transport
+        if transport is None or self._independent_intellicenter_start_task is not None:
+            return
+        self._independent_intellicenter_start_task = self.hass.async_create_task(
+            transport.async_start(),
+            "PoolOS independent IntelliCenter read-only transport",
+        )
+
+    async def async_stop_independent_intellicenter(self) -> None:
+        """Stop the independent connection and any in-flight startup."""
+
+        task = self._independent_intellicenter_start_task
+        self._independent_intellicenter_start_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if self.independent_intellicenter_transport is not None:
+            await self.independent_intellicenter_transport.async_stop()
 
     def async_start_event_observation(self) -> None:
         """Subscribe to mapped HA state changes for immediate observation."""
@@ -245,60 +288,54 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     ) -> None:
         """Refresh shadow native parity without touching commissioning inputs."""
 
-        entries = tuple(
-            sorted(
-                self.hass.config_entries.async_entries("intellicenter"),
-                key=lambda item: item.entry_id,
-            )
-        )
-        if not entries:
+        independent = self.independent_intellicenter_transport
+        if independent is None:
             self.native_intellicenter_inventory = None
             self.native_intellicenter_snapshot = (
                 self.native_intellicenter_adapter.initializing(observed_at)
                 if self.in_startup_health_grace(observed_at)
                 else self.native_intellicenter_adapter.unavailable(
-                    observed_at, reason_code="REFERENCE_SOURCE_NOT_CONFIGURED"
+                    observed_at, reason_code="INDEPENDENT_HOST_NOT_CONFIGURED"
                 )
             )
         else:
-            entry = entries[0]
-            runtime = getattr(entry, "runtime_data", None)
-            api = None if runtime is None else getattr(runtime, "api", None)
-            reference = None if api is None else getattr(api, "snapshot", None)
-            if reference is None:
+            transport_snapshot = independent.latest_snapshot
+            if transport_snapshot is None:
                 self.native_intellicenter_inventory = None
                 self.native_intellicenter_snapshot = (
                     self.native_intellicenter_adapter.initializing(observed_at)
                     if self.in_startup_health_grace(observed_at)
+                    and independent.state
+                    in {
+                        IndependentIntelliCenterTransportState.INITIALIZING,
+                        IndependentIntelliCenterTransportState.CONNECTING,
+                        IndependentIntelliCenterTransportState.DISCOVERING,
+                        IndependentIntelliCenterTransportState.RECONNECTING,
+                    }
                     else self.native_intellicenter_adapter.unavailable(
                         observed_at,
-                        reason_code="REFERENCE_SOURCE_NOT_READY",
+                        reason_code="INDEPENDENT_TRANSPORT_UNAVAILABLE",
                     )
                 )
             else:
-                self.native_intellicenter_inventory = None
+                self.native_intellicenter_inventory = MappingProxyType(
+                    dict(transport_snapshot.raw_inventory_diagnostics())
+                )
                 try:
-                    self.native_intellicenter_inventory = native_snapshot_inventory(
-                        reference,
-                        fallback_observed_at=observed_at,
-                    )
-                    transport = native_transport_snapshot(
-                        reference,
-                        source_id=f"intellicenter_protocol:{entry.entry_id}",
-                        fallback_observed_at=observed_at,
-                    )
                     self.native_intellicenter_snapshot = (
                         self.native_intellicenter_adapter.map_snapshot(
-                            transport,
+                            transport_snapshot,
                             generated_at=observed_at,
                         )
                     )
                 except (AttributeError, TypeError, ValueError):
-                    LOGGER.exception("PoolOS native IntelliCenter read snapshot rejected")
+                    LOGGER.exception(
+                        "PoolOS independent IntelliCenter read snapshot rejected"
+                    )
                     self.native_intellicenter_snapshot = (
                         self.native_intellicenter_adapter.unavailable(
                             observed_at,
-                            reason_code="REFERENCE_SNAPSHOT_INVALID",
+                            reason_code="INDEPENDENT_SNAPSHOT_INVALID",
                         )
                     )
 
@@ -729,7 +766,16 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "native_intellicenter_inventory": (
                 None
                 if self.native_intellicenter_inventory is None
-                else dict(self.native_intellicenter_inventory.diagnostics())
+                else dict(self.native_intellicenter_inventory)
+            ),
+            "independent_intellicenter_transport": (
+                None
+                if self.independent_intellicenter_transport is None
+                else dict(
+                    self.independent_intellicenter_transport.diagnostics(
+                        generated_at=datetime.now(UTC)
+                    )
+                )
             ),
             "native_intellicenter_parity": (
                 None

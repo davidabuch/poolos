@@ -61,6 +61,16 @@ The transformation must preserve:
 
 No decision is made at this stage.
 
+During native IntelliCenter commissioning, two independent observation-edge
+paths coexist. HA-derived entities remain authoritative. A separately configured
+PoolOS-owned read connection copies controller discovery and subscription state
+into immutable native snapshots, then passes only reviewed fields through the
+same canonical normalization and shadow parity boundary. Raw native inventory
+is diagnostic evidence, not canonical meaning or execution authority. The
+private protocol controller is guarded to discovery, parameter-read, update-
+subscription, and keepalive operations; it exposes no equipment-control surface
+(ADR-092).
+
 ## 2. Observations become evaluation context
 
 A decision cycle assembles the facts needed for one evaluation:
