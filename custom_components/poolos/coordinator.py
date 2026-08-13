@@ -132,7 +132,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             Path(hass.config.path("poolos_logs"))
         )
         self.native_parity_commissioning_store = NativeParityCommissioningStore(
-            Path(hass.config.path("poolos_logs"))
+            Path(hass.config.path("poolos_logs")),
+            load_history=False,
         )
         self.native_parity_commissioning_summary: NativeParityCommissioningSummary = (
             self.native_parity_commissioning_store.summary()
@@ -140,6 +141,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._native_inventory_exported_snapshot_at: datetime | None = None
         self._observation_lock = asyncio.Lock()
         self._remove_state_listener: Callable[[], None] | None = None
+        self._unloading = False
         self._event_refresh_count = 0
         self._reconciliation_refresh_count = 0
         self._last_observation_trigger = "not_started"
@@ -151,10 +153,25 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._last_unhealthy_missing_required: tuple[str, ...] = ()
         self._last_unhealthy_unavailable_entities: tuple[str, ...] = ()
 
+    async def async_initialize_persistence(self) -> None:
+        """Load disk-backed commissioning state without blocking HA's event loop."""
+
+        def load_and_summarize() -> NativeParityCommissioningSummary:
+            self.native_parity_commissioning_store.load()
+            return self.native_parity_commissioning_store.summary()
+
+        self.native_parity_commissioning_summary = (
+            await self.hass.async_add_executor_job(load_and_summarize)
+        )
+
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run the periodic reconciliation/backstop observation refresh."""
 
+        if self._unloading and self.data is not None:
+            return self.data
         async with self._observation_lock:
+            if self._unloading and self.data is not None:
+                return self.data
             self._reconciliation_refresh_count += 1
             return await self._async_observe(
                 observed_at=datetime.now(UTC),
@@ -187,7 +204,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     def async_start_event_observation(self) -> None:
         """Subscribe to mapped HA state changes for immediate observation."""
 
-        if self._remove_state_listener is not None:
+        if self._unloading or self._remove_state_listener is not None:
             return
         configured = {**dict(self.config_entry.data), **dict(self.config_entry.options)}
         entity_ids = configured_entity_ids(configured)
@@ -207,10 +224,22 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._remove_state_listener()
         self._remove_state_listener = None
 
+    async def async_prepare_unload(self) -> None:
+        """Stop new observations and wait for any active observation to finish."""
+
+        self._unloading = True
+        self.async_stop_event_observation()
+        async with self._observation_lock:
+            pass
+
     async def _async_mapped_state_changed(self, event: Event) -> None:
         """Capture a mapped HA state/attribute change without waiting for polling."""
 
+        if self._unloading:
+            return
         async with self._observation_lock:
+            if self._unloading:
+                return
             self._event_refresh_count += 1
             timestamp = event.time_fired.astimezone(UTC)
             snapshot = await self._async_observe(
@@ -828,7 +857,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 self.native_inventory_exporter.diagnostics()
             ),
             "native_parity_commissioning": (
-                self.native_parity_commissioning_store.diagnostics()
+                self.native_parity_commissioning_store.diagnostics(
+                    summary=self.native_parity_commissioning_summary
+                )
             ),
             "behavioral_inference": (
                 None if self.behavioral_inference_report is None else self.behavioral_inference_report.to_dict()

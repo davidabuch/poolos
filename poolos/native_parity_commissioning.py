@@ -352,6 +352,7 @@ class NativeParityCommissioningStore:
         retention: timedelta = COMMISSIONING_RETENTION,
         maximum_records: int = COMMISSIONING_MAX_RECORDS,
         maximum_continuous_gap: timedelta = COMMISSIONING_MAX_CONTINUOUS_GAP,
+        load_history: bool = True,
     ) -> None:
         if target_duration <= timedelta(0) or retention < target_duration:
             raise ValueError("commissioning retention must cover the positive target")
@@ -367,7 +368,9 @@ class NativeParityCommissioningStore:
         self._records: tuple[NativeParityEvidenceRecord, ...] = ()
         self._last_retention_sweep_at: datetime | None = None
         self._history_needs_rewrite = False
-        self._load()
+        self._loaded = False
+        if load_history:
+            self.load()
 
     @property
     def history_path(self) -> Path:
@@ -381,6 +384,18 @@ class NativeParityCommissioningStore:
     def records(self) -> tuple[NativeParityEvidenceRecord, ...]:
         return self._records
 
+    @property
+    def loaded(self) -> bool:
+        return self._loaded
+
+    def load(self) -> None:
+        """Load retained history once; callers choose the execution context."""
+
+        if self._loaded:
+            return
+        self._load()
+        self._loaded = True
+
     def record(
         self,
         report: ObservationParityReport,
@@ -389,6 +404,10 @@ class NativeParityCommissioningStore:
         reconnect_count: int,
         discovery_generation: int,
     ) -> NativeParityCommissioningSummary:
+        if not self._loaded:
+            raise RuntimeError(
+                "native parity commissioning history must be loaded before recording"
+            )
         evidence = NativeParityEvidenceRecord.from_report(
             report,
             transport_state=transport_state,
@@ -418,6 +437,7 @@ class NativeParityCommissioningStore:
             self._last_retention_sweep_at = evidence.generated_at
         pruned = len(retained) != len(candidates)
         self._records = retained
+        summary = self.summary()
         if self.persistence_available:
             try:
                 self.root.mkdir(parents=True, exist_ok=True)
@@ -425,13 +445,13 @@ class NativeParityCommissioningStore:
                     self._rewrite_history()
                 else:
                     self._append_history(evidence)
-                self._write_summary(self.summary())
+                self._write_summary(summary)
                 self.last_error = None
                 self._history_needs_rewrite = False
             except (OSError, TypeError, ValueError):
                 self.last_error = "native parity commissioning persistence failed"
                 self._history_needs_rewrite = True
-        return self.summary()
+        return summary
 
     def summary(self) -> NativeParityCommissioningSummary:
         return summarize_native_parity(
@@ -440,8 +460,10 @@ class NativeParityCommissioningStore:
             maximum_continuous_gap=self.maximum_continuous_gap,
         )
 
-    def diagnostics(self) -> dict[str, Any]:
-        summary = self.summary()
+    def diagnostics(
+        self, *, summary: NativeParityCommissioningSummary | None = None
+    ) -> dict[str, Any]:
+        summary = self.summary() if summary is None else summary
         return {
             **summary.diagnostic_attributes(
                 history_path=str(self.history_path),
@@ -452,6 +474,7 @@ class NativeParityCommissioningStore:
             "maximum_records": self.maximum_records,
             "retained_record_count": len(self._records),
             "persistence_available": self.persistence_available,
+            "history_loaded": self._loaded,
         }
 
     def _load(self) -> None:
