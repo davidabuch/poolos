@@ -132,7 +132,7 @@ MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
 
     # Physical/hydraulic/electrical truth.
     EntityMappingSpec(CONF_PUMP_RPM_ENTITY, ObservationConcept.PUMP_RPM, HomeAssistantValueType.INTEGER, "rpm", True, freshness_required=True),
-    EntityMappingSpec(CONF_PUMP_GPM_ENTITY, ObservationConcept.PUMP_GPM, HomeAssistantValueType.FLOAT, "gpm", True, freshness_required=True),
+    EntityMappingSpec(CONF_PUMP_GPM_ENTITY, ObservationConcept.PUMP_GPM, HomeAssistantValueType.FLOAT, "gpm", False, freshness_required=True),
     EntityMappingSpec(CONF_PUMP_POWER_ENTITY, ObservationConcept.PUMP_POWER, HomeAssistantValueType.FLOAT, "W", True, freshness_required=True),
     EntityMappingSpec(CONF_WATER_TEMPERATURE_ENTITY, ObservationConcept.WATER_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True, freshness_required=True),
     EntityMappingSpec(CONF_SOLAR_TEMPERATURE_ENTITY, ObservationConcept.SOLAR_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", True),

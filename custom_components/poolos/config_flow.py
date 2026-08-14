@@ -99,7 +99,6 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         CONF_POOL_THERMOSTAT_ENTITY: ["climate"],
         CONF_SPA_THERMOSTAT_ENTITY: ["climate"],
         CONF_PUMP_RPM_ENTITY: ["sensor", "number"],
-        CONF_PUMP_GPM_ENTITY: ["sensor"],
         CONF_PUMP_POWER_ENTITY: ["sensor"],
         CONF_WATER_TEMPERATURE_ENTITY: ["sensor"],
         CONF_SOLAR_TEMPERATURE_ENTITY: ["sensor"],
@@ -112,6 +111,7 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         CONF_POOL_LIGHT_ENTITY: ["light"],
     }
     optional = {
+        CONF_PUMP_GPM_ENTITY: ["sensor"],
         CONF_SOLAR_PREFERRED_ENTITY: ["binary_sensor", "switch"],
         CONF_WATERFALL_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_JETS_ACTIVE_ENTITY: ["binary_sensor", "switch"],
