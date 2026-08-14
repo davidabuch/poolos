@@ -192,7 +192,6 @@ def test_dashboard_uses_concise_operator_facing_entity_names() -> None:
         "name: Jets",
         "name: Slide",
         "name: RPM",
-        "name: GPM",
         "name: Power",
     ):
         assert label in text

@@ -180,11 +180,6 @@ views:
             min: 0
             max: 3450
           - type: gauge
-            entity: sensor.poolos_control_center_pump_gpm
-            name: Flow
-            min: 0
-            max: 120
-          - type: gauge
             entity: sensor.poolos_control_center_pump_power
             name: Pump Power
             min: 0
@@ -254,8 +249,6 @@ views:
             entities:
               - entity: sensor.poolos_control_center_pump_rpm
                 name: RPM
-              - entity: sensor.poolos_control_center_pump_gpm
-                name: GPM
               - entity: sensor.poolos_control_center_pump_power
                 name: Power
       - type: grid
