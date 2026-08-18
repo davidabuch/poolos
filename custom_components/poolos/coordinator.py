@@ -232,6 +232,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         async with self._observation_lock:
             pass
 
+    async def async_handle_homeassistant_stop(self, _event: Event) -> None:
+        """Quiesce PoolOS before Home Assistant reaches final-write shutdown."""
+
+        await self.async_prepare_unload()
+
     async def _async_mapped_state_changed(self, event: Event) -> None:
         """Capture a mapped HA state/attribute change without waiting for polling."""
 

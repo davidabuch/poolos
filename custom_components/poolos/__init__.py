@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 
 
@@ -48,6 +49,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     await coordinator.async_config_entry_first_refresh()
     coordinator.async_start_event_observation()
     entry.async_on_unload(coordinator.async_stop_event_observation)
+    entry.async_on_unload(
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP,
+            coordinator.async_handle_homeassistant_stop,
+        )
+    )
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
