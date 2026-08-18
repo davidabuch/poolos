@@ -714,22 +714,39 @@ def _continuous_start(
     records: tuple[NativeParityEvidenceRecord, ...], maximum_gap: timedelta
 ) -> tuple[datetime | None, float]:
     start: datetime | None = None
-    previous: datetime | None = None
+    previous_record: datetime | None = None
+    previous_complete: datetime | None = None
     largest = 0.0
+    maximum_gap_seconds = maximum_gap.total_seconds()
+
     for record in records:
-        gap = 0.0 if previous is None else (record.generated_at - previous).total_seconds()
-        largest = max(largest, gap)
+        record_gap = (
+            0.0
+            if previous_record is None
+            else (record.generated_at - previous_record).total_seconds()
+        )
+        largest = max(largest, record_gap)
+        previous_record = record.generated_at
+
+        if not _record_has_complete_comparison_evidence(record):
+            continue
+
         if (
             start is None
-            or not _record_has_complete_comparison_evidence(record)
-            or gap > maximum_gap.total_seconds()
+            or previous_complete is None
+            or (record.generated_at - previous_complete).total_seconds()
+            > maximum_gap_seconds
         ):
-            start = (
-                record.generated_at
-                if _record_has_complete_comparison_evidence(record)
-                else None
-            )
-        previous = record.generated_at
+            start = record.generated_at
+        previous_complete = record.generated_at
+
+    if not records or previous_complete is None:
+        return None, largest
+
+    latest = records[-1].generated_at
+    if (latest - previous_complete).total_seconds() > maximum_gap_seconds:
+        return None, largest
+
     return start, largest
 
 

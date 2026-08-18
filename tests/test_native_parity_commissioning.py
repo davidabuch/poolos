@@ -431,3 +431,59 @@ def test_incomplete_trailing_append_preserves_valid_prefix_and_repairs(
     assert [item["generated_at"] for item in repaired] == sorted(
         item["generated_at"] for item in repaired
     )
+
+def test_transient_incomplete_cycle_within_gap_preserves_continuity(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=1))
+    _record(store, NOW + timedelta(minutes=2), available=False)
+    summary = _record(store, NOW + timedelta(minutes=3))
+
+    assert summary.continuous_evidence_seconds == 3 * 60
+    assert summary.transport_unavailable_cycles == 1
+
+
+def test_incomplete_run_longer_than_gap_resets_on_recovery(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=1))
+    _record(store, NOW + timedelta(minutes=3), available=False)
+    _record(store, NOW + timedelta(minutes=5), available=False)
+    summary = _record(store, NOW + timedelta(minutes=7))
+
+    assert summary.continuous_evidence_seconds == 0
+
+
+def test_current_incomplete_cycle_within_gap_holds_continuity(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=2))
+    summary = _record(store, NOW + timedelta(minutes=4), available=False)
+
+    assert summary.continuous_evidence_seconds == 4 * 60
+
+
+def test_current_incomplete_run_beyond_gap_breaks_continuity(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=1))
+    _record(store, NOW + timedelta(minutes=4), available=False)
+    summary = _record(store, NOW + timedelta(minutes=7), available=False)
+
+    assert summary.continuous_evidence_seconds == 0
