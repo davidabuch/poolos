@@ -382,3 +382,52 @@ def test_production_commissioning_path_has_no_control_or_network_surface() -> No
         ".send(",
     ):
         assert prohibited not in source
+
+def test_out_of_order_evidence_rewrites_chronologically_and_survives_restart(
+    tmp_path,
+) -> None:
+    root = tmp_path / "poolos_logs"
+    store = NativeParityCommissioningStore(root)
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=2))
+    _record(store, NOW + timedelta(minutes=1))
+
+    generated = [
+        json.loads(line)["generated_at"]
+        for line in (root / "native_parity_history.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert generated == sorted(generated)
+
+    recovered = NativeParityCommissioningStore(root)
+    assert recovered.last_error is None
+    assert len(recovered.records) == 3
+    assert recovered.records == store.records
+
+
+def test_incomplete_trailing_append_preserves_valid_prefix_and_repairs(
+    tmp_path,
+) -> None:
+    root = tmp_path / "poolos_logs"
+    store = NativeParityCommissioningStore(root)
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=1))
+
+    history = root / "native_parity_history.jsonl"
+    with history.open("a", encoding="utf-8") as handle:
+        handle.write('{"schema_version":1')
+
+    recovered = NativeParityCommissioningStore(root)
+    assert len(recovered.records) == 2
+    assert recovered.last_error == (
+        "native parity commissioning history had incomplete trailing record"
+    )
+
+    _record(recovered, NOW + timedelta(minutes=2))
+    assert recovered.last_error is None
+    repaired = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+    assert len(repaired) == 3
+    assert [item["generated_at"] for item in repaired] == sorted(
+        item["generated_at"] for item in repaired
+    )

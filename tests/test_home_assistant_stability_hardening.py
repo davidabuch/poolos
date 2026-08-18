@@ -89,3 +89,27 @@ def test_unload_stops_new_event_observations_and_waits_for_active_work() -> None
 def test_lifecycle_diagnostics_uses_cached_parity_summary() -> None:
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
     assert "self.native_parity_commissioning_store.diagnostics(\n                    summary=self.native_parity_commissioning_summary" in coordinator
+
+def test_home_assistant_stop_quiesces_poolos_before_final_shutdown() -> None:
+    init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    assert "EVENT_HOMEASSISTANT_STOP" in init_source
+    assert "hass.bus.async_listen_once(" in init_source
+    assert "coordinator.async_handle_homeassistant_stop" in init_source
+    assert "async def async_handle_homeassistant_stop" in coordinator
+    stop_body = coordinator.split(
+        "async def async_handle_homeassistant_stop", 1
+    )[1].split("async def _async_mapped_state_changed", 1)[0]
+    assert "await self.async_prepare_unload()" in stop_body
+
+
+def test_commissioning_append_is_flushed_to_disk_before_return() -> None:
+    source = (ROOT / "poolos" / "native_parity_commissioning.py").read_text(
+        encoding="utf-8"
+    )
+    append_body = source.split("def _append_history", 1)[1].split(
+        "def _rewrite_history", 1
+    )[0]
+    assert "handle.flush()" in append_body
+    assert "os.fsync(handle.fileno())" in append_body

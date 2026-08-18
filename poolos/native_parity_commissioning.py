@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import json
 import math
+import os
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -414,19 +415,28 @@ class NativeParityCommissioningStore:
             reconnect_count=reconnect_count,
             discovery_generation=discovery_generation,
         )
-        if self._records and evidence.report_id == self._records[-1].report_id:
+        if any(evidence.report_id == item.report_id for item in self._records):
             return self.summary()
-        candidates = (*self._records, evidence)
+        out_of_order = bool(
+            self._records and evidence.generated_at < self._records[-1].generated_at
+        )
+        candidates = tuple(
+            sorted(
+                (*self._records, evidence),
+                key=lambda item: (item.generated_at, item.report_id),
+            )
+        )
+        latest_candidate_at = candidates[-1].generated_at
         sweep_due = (
             self._last_retention_sweep_at is None
-            or evidence.generated_at - self._last_retention_sweep_at
+            or latest_candidate_at - self._last_retention_sweep_at
             >= COMMISSIONING_RETENTION_SWEEP_INTERVAL
             or len(candidates) > self.maximum_records
         )
         retained = (
             _retain(
                 candidates,
-                latest=evidence.generated_at,
+                latest=latest_candidate_at,
                 retention=self.retention,
                 maximum_records=self.maximum_records,
             )
@@ -434,14 +444,14 @@ class NativeParityCommissioningStore:
             else candidates
         )
         if sweep_due:
-            self._last_retention_sweep_at = evidence.generated_at
+            self._last_retention_sweep_at = latest_candidate_at
         pruned = len(retained) != len(candidates)
         self._records = retained
         summary = self.summary()
         if self.persistence_available:
             try:
                 self.root.mkdir(parents=True, exist_ok=True)
-                if pruned or self._history_needs_rewrite:
+                if pruned or out_of_order or self._history_needs_rewrite:
                     self._rewrite_history()
                 else:
                     self._append_history(evidence)
@@ -482,12 +492,29 @@ class NativeParityCommissioningStore:
             return
         try:
             lines = self.history_path.read_text(encoding="utf-8").splitlines()
-            records = tuple(_record_from_dict(json.loads(line)) for line in lines if line.strip())
-            ordered = tuple(sorted(records, key=lambda item: item.generated_at))
-            if records != ordered:
-                raise ValueError("parity history must be chronologically ordered")
-            if len({item.report_id for item in ordered}) != len(ordered):
+            parsed: list[NativeParityEvidenceRecord] = []
+            trailing_partial = False
+            nonempty_indexes = [index for index, line in enumerate(lines) if line.strip()]
+            final_nonempty_index = nonempty_indexes[-1] if nonempty_indexes else None
+            for index, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    if index == final_nonempty_index and parsed:
+                        trailing_partial = True
+                        break
+                    raise
+                parsed.append(_record_from_dict(payload))
+            records = tuple(parsed)
+            if len({item.report_id for item in records}) != len(records):
                 raise ValueError("duplicate parity report identity")
+            ordered = tuple(
+                sorted(records, key=lambda item: (item.generated_at, item.report_id))
+            )
+            if records != ordered:
+                self._history_needs_rewrite = True
             if ordered:
                 ordered = _retain(
                     ordered,
@@ -499,6 +526,11 @@ class NativeParityCommissioningStore:
             self._last_retention_sweep_at = (
                 None if not ordered else ordered[-1].generated_at
             )
+            if trailing_partial:
+                self.last_error = (
+                    "native parity commissioning history had incomplete trailing record"
+                )
+                self._history_needs_rewrite = True
         except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
             # Fail closed with respect to corrupt historical evidence, but allow
             # the next valid commissioning cycle to replace the damaged history
@@ -511,6 +543,8 @@ class NativeParityCommissioningStore:
     def _append_history(self, record: NativeParityEvidenceRecord) -> None:
         with self.history_path.open("a", encoding="utf-8") as handle:
             handle.write(_canonical_json(record.to_dict()) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def _rewrite_history(self) -> None:
         temporary = self.history_path.with_suffix(".jsonl.tmp")
