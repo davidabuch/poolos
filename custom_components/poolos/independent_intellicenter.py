@@ -8,6 +8,7 @@ private implementation detail and every equipment mutation is blocked centrally.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import asyncio
 import contextlib
 from datetime import UTC, datetime
 from enum import Enum
@@ -189,6 +190,75 @@ class _ReadOnlyModelController(ICModelController):
         self._read_only_guard.require_allowed("SETPARAMLIST")
         raise AssertionError("unreachable")
 
+    async def refresh_body_metadata(
+        self,
+        objnam: str,
+        *,
+        applying_body_ids: set[str],
+    ) -> None:
+        """Refresh BODY state, then its currently selected heater metadata."""
+
+        # First refresh the BODY itself. HEATER must come from this fresh
+        # response rather than from the cached model because gas/solar source
+        # selection can change while the body remains active.
+        response = await self.send_cmd(
+            "RequestParamList",
+            {
+                "objectList": [
+                    {
+                        "objnam": objnam,
+                        "keys": [
+                            LOTMP_ATTR,
+                            HEATER_ATTR,
+                            HTMODE_ATTR,
+                            STATUS_ATTR,
+                            LSTTMP_ATTR,
+                        ],
+                    }
+                ]
+            },
+        )
+        object_list = response.get("objectList")
+        if not isinstance(object_list, list):
+            return
+
+        # Mark only the synchronous application of our own BODY response.
+        # There is no await inside this section, so an unrelated live update
+        # cannot be accidentally suppressed while network I/O is in flight.
+        applying_body_ids.add(objnam)
+        try:
+            self._apply_updates(object_list)
+        finally:
+            applying_body_ids.discard(objnam)
+
+        body = self._model[objnam]
+        if body is None:
+            return
+
+        selected_heater = body[HEATER_ATTR]
+        if selected_heater in (None, ""):
+            return
+
+        # Refresh metadata for the heater identified by the freshly read BODY.
+        response = await self.send_cmd(
+            "RequestParamList",
+            {
+                "objectList": [
+                    {
+                        "objnam": str(selected_heater),
+                        "keys": [
+                            OBJTYP_ATTR,
+                            SUBTYP_ATTR,
+                            SNAME_ATTR,
+                        ],
+                    }
+                ]
+            },
+        )
+        object_list = response.get("objectList")
+        if isinstance(object_list, list):
+            self._apply_updates(object_list)
+
 
 class _ReadOnlyConnectionHandler(ICConnectionHandler):
     """Forward pyintellicenter lifecycle callbacks without exposing its controller."""
@@ -273,6 +343,10 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._reconnect_count = 0
         self._discovery_generation = 0
         self._running = False
+        self._body_metadata_refresh_pending: set[str] = set()
+        self._body_metadata_refresh_dirty: set[str] = set()
+        self._body_metadata_refresh_applying: set[str] = set()
+        self._body_metadata_refresh_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def state(self) -> IndependentIntelliCenterTransportState:
@@ -307,6 +381,18 @@ class IndependentIntelliCenterReadOnlyTransport:
             return
         self._running = False
         self._handler.stop()
+
+        refresh_tasks = tuple(self._body_metadata_refresh_tasks)
+        for task in refresh_tasks:
+            task.cancel()
+        if refresh_tasks:
+            await asyncio.gather(*refresh_tasks, return_exceptions=True)
+
+        self._body_metadata_refresh_tasks.clear()
+        self._body_metadata_refresh_pending.clear()
+        self._body_metadata_refresh_dirty.clear()
+        self._body_metadata_refresh_applying.clear()
+
         with contextlib.suppress(Exception):
             await self._controller.stop()
         self._state = IndependentIntelliCenterTransportState.UNAVAILABLE
@@ -406,7 +492,8 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._state = IndependentIntelliCenterTransportState.RECONNECTING
 
     def _on_updated(self, updates: dict[str, dict[str, Any]]) -> None:
-        del updates
+        self._schedule_body_metadata_refreshes(updates)
+
         observed_at = datetime.now(UTC)
         self._last_native_update = observed_at
         self._latest_snapshot = self._copy_snapshot(
@@ -414,6 +501,80 @@ class IndependentIntelliCenterReadOnlyTransport:
             connected=True,
         )
         self._state = IndependentIntelliCenterTransportState.AVAILABLE
+
+    def _schedule_body_metadata_refreshes(
+        self,
+        updates: dict[str, dict[str, Any]],
+    ) -> None:
+        if not self._running:
+            return
+
+        trigger_attributes = {
+            STATUS_ATTR,
+            HTMODE_ATTR,
+            HEATER_ATTR,
+            LSTTMP_ATTR,
+        }
+
+        for objnam, changed in updates.items():
+            item = self._model[objnam]
+            if item is None or str(item.objtype) != BODY_TYPE:
+                continue
+
+            # Ignore the BODY callback produced while PoolOS is applying its
+            # own RequestParamList response.  An unsolicited IntelliCenter
+            # update may legitimately contain LOTMP plus HEATER/HTMODE, and
+            # must still participate in refresh/rerun handling.
+            if objnam in self._body_metadata_refresh_applying:
+                continue
+
+            if not trigger_attributes.intersection(changed):
+                continue
+
+            # If another real BODY update arrives while the request is in flight,
+            # remember it.  The worker will perform exactly one additional pass
+            # using the newest state rather than silently losing the transition.
+            if objnam in self._body_metadata_refresh_pending:
+                self._body_metadata_refresh_dirty.add(objnam)
+                continue
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                continue
+
+            self._body_metadata_refresh_pending.add(objnam)
+            task = loop.create_task(self._async_refresh_body_metadata(objnam))
+            self._body_metadata_refresh_tasks.add(task)
+            task.add_done_callback(self._on_body_metadata_refresh_done)
+
+    async def _async_refresh_body_metadata(self, objnam: str) -> None:
+        try:
+            while True:
+                self._body_metadata_refresh_dirty.discard(objnam)
+
+                await self._controller.refresh_body_metadata(
+                    objnam,
+                    applying_body_ids=self._body_metadata_refresh_applying,
+                )
+
+                if objnam not in self._body_metadata_refresh_dirty:
+                    break
+        except Exception as exc:
+            self._last_error_code = type(exc).__name__.upper()
+        finally:
+            self._body_metadata_refresh_pending.discard(objnam)
+            self._body_metadata_refresh_dirty.discard(objnam)
+
+    def _on_body_metadata_refresh_done(
+        self,
+        task: asyncio.Task[None],
+    ) -> None:
+        self._body_metadata_refresh_tasks.discard(task)
+        if task.cancelled():
+            return
+        with contextlib.suppress(Exception):
+            task.result()
 
     def _copy_snapshot(
         self, *, observed_at: datetime, connected: bool
@@ -551,16 +712,43 @@ def _body_kind(item: PoolObject) -> NativeBodyKind:
 
 
 def _heater_source(item: PoolObject | None) -> str | None:
-    if item is None or item.subtype is None:
+    if item is None:
         return None
-    subtype = str(item.subtype).strip().upper()
-    return {
+
+    subtype = (
+        None
+        if item.subtype is None
+        else str(item.subtype).strip().upper()
+    )
+    direct = {
         "HEATER": "gas",
         "GAS": "gas",
         "SOLAR": "solar",
         "ULTRA": "heat_pump",
         "HCOMBO": "hybrid",
     }.get(subtype)
+    if direct is not None:
+        return direct
+
+    # Fall back only to explicit descriptive metadata. Never infer a source
+    # from BODY HTMODE or from an opaque heater object ID.
+    text = " ".join(
+        str(value)
+        for value in (item.subtype, item.sname)
+        if value not in (None, "")
+    ).casefold().replace("_", " ").replace("-", " ")
+
+    if "solar preferred" in text:
+        return None
+    if "solar" in text:
+        return "solar"
+    if "gas" in text or "mastertemp" in text:
+        return "gas"
+    if "heat pump" in text or "ultratemp" in text:
+        return "heat_pump"
+    if "hybrid" in text:
+        return "hybrid"
+    return None
 
 
 def _heater_mode(item: PoolObject | None) -> str | None:

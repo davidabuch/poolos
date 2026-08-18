@@ -427,3 +427,558 @@ def test_new_native_core_modules_import_no_ha_command_delivery_or_network_api() 
             for module in imports
             for part in module.split(".")
         )
+
+
+def test_spa_gas_heat_uses_explicit_source_metadata() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-gas-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                False,
+                False,
+                89.0,
+                90.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="0",
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                True,
+                97.0,
+                98.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="1",
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["heater.active"] is True
+    assert values["solar.active"] is False
+    assert values["spa.heating_demand_active"] is True
+
+
+def test_spa_solar_heat_uses_explicit_source_metadata() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-solar-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                False,
+                False,
+                89.0,
+                90.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="0",
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                True,
+                97.0,
+                100.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="1",
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["heater.active"] is False
+    assert values["solar.active"] is True
+    assert values["spa.heating_demand_active"] is True
+
+
+def test_unknown_spa_heat_source_does_not_guess_gas_or_solar() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-unknown-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                True,
+                97.0,
+                100.0,
+                active_heat_source=None,
+                raw_heater_id="H0001",
+                raw_htmode="1",
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    concepts = {item.observation_id for item in result.observations}
+
+    assert "heater.active" not in concepts
+    assert "solar.active" not in concepts
+    assert "heater.active" in result.missing_concepts
+    assert "solar.active" in result.missing_concepts
+
+
+def test_water_temperature_tracks_single_active_spa_body() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="active-body-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                False,
+                False,
+                89.0,
+                90.0,
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                False,
+                98.0,
+                98.0,
+            ),
+        ),
+        temperatures=(
+            NativeTemperatureState(
+                "SSW11",
+                "Water Sensor 1",
+                NativeTemperatureKind.WATER,
+                89.0,
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["spa.temperature"] == 98.0
+    assert values["water.temperature"] == 98.0
+
+
+def test_water_temperature_falls_back_to_sense_when_idle() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="idle-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                False,
+                False,
+                89.0,
+                90.0,
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                False,
+                False,
+                98.0,
+                98.0,
+            ),
+        ),
+        temperatures=(
+            NativeTemperatureState(
+                "SSW11",
+                "Water Sensor 1",
+                NativeTemperatureKind.WATER,
+                89.0,
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["water.temperature"] == 89.0
+
+
+def test_after_spa_pool_can_resume_with_solar_heat() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="pool-resume-solar-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                True,
+                True,
+                90.0,
+                92.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="2",
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                False,
+                False,
+                98.0,
+                98.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="0",
+            ),
+        ),
+        temperatures=(
+            NativeTemperatureState(
+                "SSW11",
+                "Water Sensor 1",
+                NativeTemperatureKind.WATER,
+                90.0,
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["pool.active"] is True
+    assert values["spa.active"] is False
+    assert values["solar.active"] is True
+    assert values["heater.active"] is False
+    assert values["water.temperature"] == 90.0
+
+
+def test_after_spa_system_can_remain_idle_without_heat_source() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="post-spa-idle-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                False,
+                False,
+                90.0,
+                92.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="0",
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                False,
+                False,
+                98.0,
+                98.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="0",
+            ),
+        ),
+        temperatures=(
+            NativeTemperatureState(
+                "SSW11",
+                "Water Sensor 1",
+                NativeTemperatureKind.WATER,
+                90.0,
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["pool.active"] is False
+    assert values["spa.active"] is False
+    assert values["solar.active"] is False
+    assert values["heater.active"] is False
+    assert values["water.temperature"] == 90.0
+
+
+def test_active_spa_without_body_temperature_falls_back_to_water_sense() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-transition-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                True,
+                None,
+                100.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="1",
+            ),
+        ),
+        temperatures=(
+            NativeTemperatureState(
+                "SSW11",
+                "Water Sensor 1",
+                NativeTemperatureKind.WATER,
+                91.0,
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["water.temperature"] == 91.0
+    assert "water.temperature" not in result.missing_concepts
+
+
+def test_spa_gas_heat_can_cycle_off_and_back_on_without_missing_source() -> None:
+    resting = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-cycle-gas",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                False,
+                100.0,
+                100.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="0",
+            ),
+        ),
+    )
+    heating = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-cycle-gas",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                True,
+                99.0,
+                100.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="1",
+            ),
+        ),
+    )
+
+    resting_result = NativeIntelliCenterReadAdapter().map_snapshot(
+        resting,
+        generated_at=NOW,
+    )
+    heating_result = NativeIntelliCenterReadAdapter().map_snapshot(
+        heating,
+        generated_at=NOW,
+    )
+
+    resting_values = {
+        item.observation_id: item.value
+        for item in resting_result.observations
+    }
+    heating_values = {
+        item.observation_id: item.value
+        for item in heating_result.observations
+    }
+
+    assert resting_values["spa.active"] is True
+    assert resting_values["heater.active"] is False
+    assert resting_values["solar.active"] is False
+
+    assert heating_values["spa.active"] is True
+    assert heating_values["heater.active"] is True
+    assert heating_values["solar.active"] is False
+
+    assert "heater.active" not in resting_result.missing_concepts
+    assert "heater.active" not in heating_result.missing_concepts
+
+
+def test_spa_solar_heat_can_cycle_off_and_back_on_without_missing_source() -> None:
+    resting = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-cycle-solar",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                False,
+                100.0,
+                100.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="0",
+            ),
+        ),
+    )
+    heating = NativeIntelliCenterTransportSnapshot(
+        source_id="spa-cycle-solar",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                True,
+                True,
+                99.0,
+                100.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="1",
+            ),
+        ),
+    )
+
+    resting_result = NativeIntelliCenterReadAdapter().map_snapshot(
+        resting,
+        generated_at=NOW,
+    )
+    heating_result = NativeIntelliCenterReadAdapter().map_snapshot(
+        heating,
+        generated_at=NOW,
+    )
+
+    resting_values = {
+        item.observation_id: item.value
+        for item in resting_result.observations
+    }
+    heating_values = {
+        item.observation_id: item.value
+        for item in heating_result.observations
+    }
+
+    assert resting_values["spa.active"] is True
+    assert resting_values["heater.active"] is False
+    assert resting_values["solar.active"] is False
+
+    assert heating_values["spa.active"] is True
+    assert heating_values["heater.active"] is False
+    assert heating_values["solar.active"] is True
+
+    assert "solar.active" not in resting_result.missing_concepts
+    assert "solar.active" not in heating_result.missing_concepts
+
+
+def test_after_spa_pool_can_resume_without_heat() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="pool-resume-idle-heat-panel",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        bodies=(
+            NativeBodyState(
+                "B1101",
+                "Pool",
+                NativeBodyKind.POOL,
+                True,
+                False,
+                90.0,
+                92.0,
+                active_heat_source="solar",
+                raw_heater_id="H0002",
+                raw_htmode="0",
+            ),
+            NativeBodyState(
+                "B1202",
+                "Spa",
+                NativeBodyKind.SPA,
+                False,
+                False,
+                98.0,
+                98.0,
+                active_heat_source="gas",
+                raw_heater_id="H0001",
+                raw_htmode="0",
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+
+    assert values["pool.active"] is True
+    assert values["spa.active"] is False
+    assert values["heater.active"] is False
+    assert values["solar.active"] is False
