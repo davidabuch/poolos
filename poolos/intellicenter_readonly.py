@@ -385,7 +385,6 @@ class NativeIntelliCenterReadAdapter:
         for kind, concept in (
             (NativeTemperatureKind.AIR, "air.temperature"),
             (NativeTemperatureKind.SOLAR, "solar.temperature"),
-            (NativeTemperatureKind.WATER, "water.temperature"),
         ):
             sensor = _temperature(transport.temperatures, kind)
             if sensor is not None:
@@ -394,6 +393,41 @@ class NativeIntelliCenterReadAdapter:
                     concept,
                     _canonical_temperature(
                         sensor.temperature, transport.temperature_unit
+                    ),
+                    "°F",
+                    sensor.native_id,
+                )
+
+        active_body = _active_body(pool, spa)
+        if (
+            active_body is not None
+            and active_body.current_temperature is not None
+        ):
+            _put(
+                values,
+                "water.temperature",
+                _canonical_temperature(
+                    active_body.current_temperature,
+                    transport.temperature_unit,
+                ),
+                "°F",
+                active_body.native_id,
+            )
+        else:
+            # BODY temperature can be temporarily absent during hydraulic
+            # transitions.  Preserve complete evidence by falling back to the
+            # calibrated WATER SENSE reading when it exists.
+            sensor = _temperature(
+                transport.temperatures,
+                NativeTemperatureKind.WATER,
+            )
+            if sensor is not None:
+                _put(
+                    values,
+                    "water.temperature",
+                    _canonical_temperature(
+                        sensor.temperature,
+                        transport.temperature_unit,
                     ),
                     "°F",
                     sensor.native_id,
@@ -513,16 +547,38 @@ def _primary_pump(pumps: tuple[NativePumpState, ...]) -> NativePumpState | None:
     return running[0] if len(running) == 1 else None
 
 
+def _active_body(
+    pool: NativeBodyState | None,
+    spa: NativeBodyState | None,
+) -> NativeBodyState | None:
+    active = tuple(
+        body for body in (pool, spa) if body is not None and body.active
+    )
+    return active[0] if len(active) == 1 else None
+
+
 def _active_heat_source_value(
     bodies: tuple[NativeBodyState, ...], *, expected_source: str
 ) -> bool | None:
     active = tuple(body for body in bodies if body.heating_active)
     if not active:
         return False if bodies else None
+
     sources = tuple(_normalized_token(body.active_heat_source) for body in active)
-    if any(source in {None, "unknown"} for source in sources):
-        return None
-    return expected_source in sources
+    known_sources = tuple(
+        source for source in sources if source not in {None, "unknown"}
+    )
+
+    if expected_source in known_sources:
+        return True
+
+    if known_sources:
+        return False
+
+    # HTMODE indicates heating state, not heat-source identity. If the
+    # selected source is not explicitly known, remain fail-closed rather
+    # than guessing gas or solar.
+    return None
 
 
 def _solar_preferred_value(bodies: tuple[NativeBodyState, ...]) -> bool | None:

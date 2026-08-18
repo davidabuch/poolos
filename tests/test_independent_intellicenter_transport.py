@@ -88,6 +88,11 @@ class FakeModelController:
             uses_metric=False,
         )
         self.sent_operations: list[str] = []
+        self.sent_requests: list[tuple[str, dict[str, Any] | None]] = []
+        self.command_responses: dict[str, dict[str, Any]] = {}
+        self.command_response_queues: dict[str, list[dict[str, Any]]] = {}
+        self._updated_callback = None
+        self._model = model
         self.stopped = False
 
     async def start(self) -> None:
@@ -102,9 +107,37 @@ class FakeModelController:
     async def send_cmd(
         self, cmd: str, extra: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        del extra
         self.sent_operations.append(cmd)
-        return {"objectList": []}
+        self.sent_requests.append((cmd, extra))
+
+        queue = self.command_response_queues.get(cmd)
+        if queue:
+            return queue.pop(0)
+
+        return self.command_responses.get(cmd, {"objectList": []})
+
+    def set_updated_callback(self, callback) -> None:
+        self._updated_callback = callback
+
+    def _apply_updates(
+        self,
+        changes_as_list: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        updates: dict[str, dict[str, Any]] = {}
+
+        for entry in changes_as_list:
+            objnam = str(entry["objnam"])
+            params = dict(entry.get("params") or {})
+            item = self.model[objnam]
+            if item is None:
+                continue
+            item.properties.update(params)
+            updates[objnam] = params
+
+        if updates and self._updated_callback is not None:
+            self._updated_callback(self, updates)
+
+        return updates
 
     async def request_changes(
         self, objnam: str, changes: dict[str, Any]
@@ -130,6 +163,7 @@ class FakeConnectionHandler:
         self._controller = controller
         self.time_between_reconnects = time_between_reconnects
         self.stopped = False
+        controller.set_updated_callback(self.on_updated)
 
     async def start(self) -> None:
         await self._controller.start()
@@ -489,3 +523,302 @@ def test_production_path_has_no_ha_control_or_direct_socket_write() -> None:
     assert 'async_entries("intellicenter")' not in coordinator
     assert "async_start_independent_intellicenter" in lifecycle
     assert "async_stop_independent_intellicenter" in lifecycle
+
+
+def test_body_state_change_refreshes_stale_spa_target_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+
+    FakeModelController.initial_objects = _objects() + (
+        (
+            "B1202",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "SPA",
+                "SNAME": "Spa",
+                "PARENT": "SYS01",
+                "STATUS": "OFF",
+                "HTMODE": "0",
+                "LSTTMP": "98",
+                "LOTMP": "94",
+                "HEATER": "H0001",
+            },
+        ),
+    )
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        transport._controller.model.add_object(
+            "H0002",
+            {
+                "OBJTYP": "HEATER",
+                "SUBTYP": "SOLAR",
+                "SNAME": "Solar",
+                "PARENT": "SYS01",
+            },
+        )
+
+        transport._controller.command_response_queues["RequestParamList"] = [
+            {
+                "objectList": [
+                    {
+                        "objnam": "B1202",
+                        "params": {
+                            "LOTMP": "98",
+                            "HEATER": "H0002",
+                            "HTMODE": "1",
+                            "STATUS": "ON",
+                            "LSTTMP": "97",
+                        },
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "H0002",
+                        "params": {
+                            "OBJTYP": "HEATER",
+                            "SUBTYP": "SOLAR",
+                            "SNAME": "Solar",
+                        },
+                    }
+                ]
+            },
+        ]
+
+        spa = transport._controller.model["B1202"]
+        assert spa is not None
+        spa.properties["STATUS"] = "ON"
+        spa.properties["HTMODE"] = "1"
+
+        transport._on_updated(
+            {
+                "B1202": {
+                    "STATUS": "ON",
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert (
+            "RequestParamList",
+            {
+                "objectList": [
+                    {
+                        "objnam": "B1202",
+                        "keys": [
+                            "LOTMP",
+                            "HEATER",
+                            "HTMODE",
+                            "STATUS",
+                            "LSTTMP",
+                        ],
+                    }
+                ]
+            },
+        ) in transport._controller.sent_requests
+
+        assert (
+            "RequestParamList",
+            {
+                "objectList": [
+                    {
+                        "objnam": "H0002",
+                        "keys": ["OBJTYP", "SUBTYP", "SNAME"],
+                    }
+                ]
+            },
+        ) in transport._controller.sent_requests
+
+        snapshot = transport.read_snapshot()
+        spa_body = next(
+            body for body in snapshot.bodies if body.native_id == "B1202"
+        )
+        assert spa_body.target_temperature == 98.0
+        assert spa_body.raw_heater_id == "H0002"
+        assert spa_body.active_heat_source == "solar"
+
+        assert set(transport._controller.sent_operations) == {
+            "RequestParamList"
+        }
+
+        await transport.async_stop()
+        assert not transport._body_metadata_refresh_tasks
+        assert not transport._body_metadata_refresh_pending
+
+    asyncio.run(exercise())
+
+
+def test_lotmp_update_does_not_recursively_request_body_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "LOTMP": "90",
+                }
+            }
+        )
+
+        await asyncio.sleep(0)
+
+        assert transport._controller.sent_operations == []
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_body_update_during_pending_refresh_forces_one_rerun(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        calls: list[str] = []
+
+        async def refresh(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+        ) -> None:
+            del applying_body_ids
+            calls.append(objnam)
+
+            if len(calls) == 1:
+                # Simulate a new real BODY transition arriving while the
+                # first refresh is still pending.
+                transport._on_updated(
+                    {
+                        objnam: {
+                            "HEATER": "H0002",
+                        }
+                    }
+                )
+
+            await asyncio.sleep(0)
+
+        transport._controller.refresh_body_metadata = refresh
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        for _ in range(6):
+            await asyncio.sleep(0)
+
+        assert calls == ["B1101", "B1101"]
+        assert not transport._body_metadata_refresh_pending
+        assert not transport._body_metadata_refresh_dirty
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_unsolicited_lotmp_and_heater_update_still_refreshes_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        calls: list[str] = []
+
+        async def refresh(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+        ) -> None:
+            del applying_body_ids
+            calls.append(objnam)
+
+        transport._controller.refresh_body_metadata = refresh
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "LOTMP": "90",
+                    "HEATER": "H0002",
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        for _ in range(4):
+            await asyncio.sleep(0)
+
+        assert calls == ["B1101"]
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_internal_body_refresh_application_does_not_recurse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        transport._body_metadata_refresh_applying.add("B1101")
+        try:
+            transport._on_updated(
+                {
+                    "B1101": {
+                        "LOTMP": "90",
+                        "HEATER": "H0002",
+                        "HTMODE": "1",
+                    }
+                }
+            )
+        finally:
+            transport._body_metadata_refresh_applying.discard("B1101")
+
+        await asyncio.sleep(0)
+
+        assert transport._controller.sent_operations == []
+        assert not transport._body_metadata_refresh_pending
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
