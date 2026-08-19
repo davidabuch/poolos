@@ -7,7 +7,7 @@ private implementation detail and every equipment mutation is blocked centrally.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import asyncio
 import contextlib
 from datetime import UTC, datetime
@@ -44,6 +44,7 @@ from pyintellicenter import (
     PoolObject,
 )
 from pyintellicenter.attributes import ALL_ATTRIBUTES_BY_TYPE
+from pyintellicenter.exceptions import ICConnectionError, ICTimeoutError
 
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
@@ -195,8 +196,12 @@ class _ReadOnlyModelController(ICModelController):
         objnam: str,
         *,
         applying_body_ids: set[str],
+        generation_is_current: Callable[[], bool],
     ) -> None:
-        """Refresh BODY state, then its currently selected heater metadata."""
+        """Refresh BODY state and heater metadata for one connection generation."""
+
+        if not generation_is_current():
+            return
 
         # First refresh the BODY itself. HEATER must come from this fresh
         # response rather than from the cached model because gas/solar source
@@ -218,6 +223,12 @@ class _ReadOnlyModelController(ICModelController):
                 ]
             },
         )
+
+        # The connection may have changed while the request was in flight.
+        # Never apply an old-generation response to the current model.
+        if not generation_is_current():
+            return
+
         object_list = response.get("objectList")
         if not isinstance(object_list, list):
             return
@@ -231,12 +242,18 @@ class _ReadOnlyModelController(ICModelController):
         finally:
             applying_body_ids.discard(objnam)
 
+        if not generation_is_current():
+            return
+
         body = self._model[objnam]
         if body is None:
             return
 
         selected_heater = body[HEATER_ATTR]
         if selected_heater in (None, ""):
+            return
+
+        if not generation_is_current():
             return
 
         # Refresh metadata for the heater identified by the freshly read BODY.
@@ -255,6 +272,12 @@ class _ReadOnlyModelController(ICModelController):
                 ]
             },
         )
+
+        # A reconnect can also occur during the second request. The heater
+        # metadata response belongs to the same generation as its BODY request.
+        if not generation_is_current():
+            return
+
         object_list = response.get("objectList")
         if isinstance(object_list, list):
             self._apply_updates(object_list)
@@ -347,6 +370,7 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._body_metadata_refresh_dirty: set[str] = set()
         self._body_metadata_refresh_applying: set[str] = set()
         self._body_metadata_refresh_tasks: set[asyncio.Task[None]] = set()
+        self._connection_reconciliation_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def state(self) -> IndependentIntelliCenterTransportState:
@@ -382,12 +406,19 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._running = False
         self._handler.stop()
 
+        reconciliation_tasks = tuple(self._connection_reconciliation_tasks)
+        for task in reconciliation_tasks:
+            task.cancel()
+        if reconciliation_tasks:
+            await asyncio.gather(*reconciliation_tasks, return_exceptions=True)
+
         refresh_tasks = tuple(self._body_metadata_refresh_tasks)
         for task in refresh_tasks:
             task.cancel()
         if refresh_tasks:
             await asyncio.gather(*refresh_tasks, return_exceptions=True)
 
+        self._connection_reconciliation_tasks.clear()
         self._body_metadata_refresh_tasks.clear()
         self._body_metadata_refresh_pending.clear()
         self._body_metadata_refresh_dirty.clear()
@@ -477,6 +508,9 @@ class IndependentIntelliCenterReadOnlyTransport:
             connected=True,
         )
         self._state = IndependentIntelliCenterTransportState.AVAILABLE
+        self._schedule_connection_reconciliation(
+            discovery_generation=self._discovery_generation,
+        )
 
     def _on_disconnected(self, exc: Exception | None) -> None:
         observed_at = datetime.now(UTC)
@@ -492,6 +526,17 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._state = IndependentIntelliCenterTransportState.RECONNECTING
 
     def _on_updated(self, updates: dict[str, dict[str, Any]]) -> None:
+        # Connection lifecycle callbacks exclusively own transport availability.
+        # A model callback can arrive while start/reconnect is still in progress,
+        # or late while an old connection is being torn down. Such callbacks may
+        # have updated the controller model, but they must not publish that model
+        # as authoritative or resurrect a non-AVAILABLE transport.
+        if (
+            not self._running
+            or self._state is not IndependentIntelliCenterTransportState.AVAILABLE
+        ):
+            return
+
         self._schedule_body_metadata_refreshes(updates)
 
         observed_at = datetime.now(UTC)
@@ -500,13 +545,91 @@ class IndependentIntelliCenterReadOnlyTransport:
             observed_at=observed_at,
             connected=True,
         )
-        self._state = IndependentIntelliCenterTransportState.AVAILABLE
+
+    def _refresh_generation_is_current(
+        self,
+        discovery_generation: int,
+    ) -> bool:
+        """Return whether read work still belongs to the authoritative connection."""
+
+        return (
+            self._running
+            and discovery_generation == self._discovery_generation
+            and self._state is IndependentIntelliCenterTransportState.AVAILABLE
+        )
+
+    def _schedule_connection_reconciliation(
+        self,
+        *,
+        discovery_generation: int,
+    ) -> None:
+        """Reconcile all BODY metadata after a successful connection."""
+
+        if not self._refresh_generation_is_current(discovery_generation):
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        task = loop.create_task(
+            self._async_reconcile_bodies_after_connection(discovery_generation)
+        )
+        self._connection_reconciliation_tasks.add(task)
+        task.add_done_callback(self._on_connection_reconciliation_done)
+
+    async def _async_reconcile_bodies_after_connection(
+        self,
+        discovery_generation: int,
+    ) -> None:
+        # A previous-generation BODY worker can still be unwinding from failed
+        # network I/O. Let its cleanup finish before creating new work that uses
+        # the same per-BODY pending/dirty bookkeeping.
+        previous_refresh_tasks = tuple(self._body_metadata_refresh_tasks)
+        if previous_refresh_tasks:
+            await asyncio.gather(
+                *previous_refresh_tasks,
+                return_exceptions=True,
+            )
+
+        if not self._refresh_generation_is_current(discovery_generation):
+            return
+
+        updates = {
+            str(body.objnam): {STATUS_ATTR: body[STATUS_ATTR]}
+            for body in self._model.get_by_type(BODY_TYPE)
+        }
+        self._schedule_body_metadata_refreshes(
+            updates,
+            discovery_generation=discovery_generation,
+        )
+
+    def _on_connection_reconciliation_done(
+        self,
+        task: asyncio.Task[None],
+    ) -> None:
+        self._connection_reconciliation_tasks.discard(task)
+        if task.cancelled():
+            return
+        with contextlib.suppress(Exception):
+            task.result()
 
     def _schedule_body_metadata_refreshes(
         self,
         updates: dict[str, dict[str, Any]],
+        *,
+        discovery_generation: int | None = None,
     ) -> None:
         if not self._running:
+            return
+
+        generation = (
+            self._discovery_generation
+            if discovery_generation is None
+            else discovery_generation
+        )
+        if not self._refresh_generation_is_current(generation):
             return
 
         trigger_attributes = {
@@ -544,24 +667,68 @@ class IndependentIntelliCenterReadOnlyTransport:
                 continue
 
             self._body_metadata_refresh_pending.add(objnam)
-            task = loop.create_task(self._async_refresh_body_metadata(objnam))
+            task = loop.create_task(
+                self._async_refresh_body_metadata(
+                    objnam,
+                    discovery_generation=generation,
+                )
+            )
             self._body_metadata_refresh_tasks.add(task)
             task.add_done_callback(self._on_body_metadata_refresh_done)
 
-    async def _async_refresh_body_metadata(self, objnam: str) -> None:
+    async def _async_refresh_body_metadata(
+        self,
+        objnam: str,
+        *,
+        discovery_generation: int,
+    ) -> None:
         try:
-            while True:
+            while self._refresh_generation_is_current(discovery_generation):
                 self._body_metadata_refresh_dirty.discard(objnam)
 
-                await self._controller.refresh_body_metadata(
-                    objnam,
-                    applying_body_ids=self._body_metadata_refresh_applying,
-                )
+                refresh_succeeded = False
+                for attempt in range(2):
+                    try:
+                        await self._controller.refresh_body_metadata(
+                            objnam,
+                            applying_body_ids=self._body_metadata_refresh_applying,
+                            generation_is_current=lambda: self._refresh_generation_is_current(
+                                discovery_generation
+                            ),
+                        )
+                    except Exception as exc:
+                        self._last_error_code = type(exc).__name__.upper()
+
+                        is_transient = isinstance(
+                            exc,
+                            (ICConnectionError, ICTimeoutError),
+                        )
+                        if (
+                            not is_transient
+                            or attempt == 1
+                            or not self._refresh_generation_is_current(
+                                discovery_generation
+                            )
+                        ):
+                            return
+
+                        # Retry exactly once only for a recognized transient
+                        # pyintellicenter connection/request timeout while this
+                        # connection generation remains authoritative.
+                        await asyncio.sleep(0)
+                        continue
+
+                    refresh_succeeded = True
+                    break
+
+                if not refresh_succeeded:
+                    break
+
+                if not self._refresh_generation_is_current(discovery_generation):
+                    break
 
                 if objnam not in self._body_metadata_refresh_dirty:
                     break
-        except Exception as exc:
-            self._last_error_code = type(exc).__name__.upper()
         finally:
             self._body_metadata_refresh_pending.discard(objnam)
             self._body_metadata_refresh_dirty.discard(objnam)

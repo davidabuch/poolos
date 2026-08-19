@@ -253,6 +253,21 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
     pyic.ICModelController = FakeModelController
     pyic.PoolModel = FakePoolModel
     pyic.PoolObject = FakePoolObject
+
+    exceptions = ModuleType("pyintellicenter.exceptions")
+
+    class FakeICConnectionError(Exception):
+        pass
+
+    class FakeICTimeoutError(Exception):
+        pass
+
+    exceptions.ICConnectionError = FakeICConnectionError
+    exceptions.ICTimeoutError = FakeICTimeoutError
+
+    pyic.ICConnectionError = FakeICConnectionError
+    pyic.ICTimeoutError = FakeICTimeoutError
+
     attributes = ModuleType("pyintellicenter.attributes")
     attributes.ALL_ATTRIBUTES_BY_TYPE = {
         str(params["OBJTYP"]): {"SNAME", "PARENT", "SUBTYP", "STATUS"}
@@ -261,6 +276,7 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
     }
     monkeypatch.setitem(sys.modules, "pyintellicenter", pyic)
     monkeypatch.setitem(sys.modules, "pyintellicenter.attributes", attributes)
+    monkeypatch.setitem(sys.modules, "pyintellicenter.exceptions", exceptions)
     FakeModelController.initial_objects = _objects()
     FakeModelController.start_error = None
 
@@ -699,14 +715,31 @@ def test_body_update_during_pending_refresh_forces_one_rerun(
         )
         await transport.async_start()
 
+        # C5.6 performs one legitimate reconciliation after connection.
+        # Let that lifecycle work finish before isolating this test's behavior.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+        transport._controller.sent_operations.clear()
+        transport._controller.sent_requests.clear()
+
         calls: list[str] = []
 
         async def refresh(
             objnam: str,
             *,
             applying_body_ids: set[str],
+            generation_is_current,
         ) -> None:
             del applying_body_ids
+            assert generation_is_current()
             calls.append(objnam)
 
             if len(calls) == 1:
@@ -756,14 +789,31 @@ def test_unsolicited_lotmp_and_heater_update_still_refreshes_metadata(
         )
         await transport.async_start()
 
+        # C5.6 performs one legitimate reconciliation after connection.
+        # Let that lifecycle work finish before isolating this test's behavior.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+        transport._controller.sent_operations.clear()
+        transport._controller.sent_requests.clear()
+
         calls: list[str] = []
 
         async def refresh(
             objnam: str,
             *,
             applying_body_ids: set[str],
+            generation_is_current,
         ) -> None:
             del applying_body_ids
+            assert generation_is_current()
             calls.append(objnam)
 
         transport._controller.refresh_body_metadata = refresh
@@ -800,6 +850,21 @@ def test_internal_body_refresh_application_does_not_recurse(
         )
         await transport.async_start()
 
+        # C5.6 performs one legitimate reconciliation after connection.
+        # Let that lifecycle work finish before isolating this test's behavior.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+        transport._controller.sent_operations.clear()
+        transport._controller.sent_requests.clear()
+
         transport._body_metadata_refresh_applying.add("B1101")
         try:
             transport._on_updated(
@@ -819,6 +884,823 @@ def test_internal_body_refresh_application_does_not_recurse(
         assert transport._controller.sent_operations == []
         assert not transport._body_metadata_refresh_pending
 
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_connection_reconciliation_refreshes_all_known_bodies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+
+    FakeModelController.initial_objects = _objects() + (
+        (
+            "B1202",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "SPA",
+                "SNAME": "Spa",
+                "PARENT": "SYS01",
+                "STATUS": "ON",
+                "HTMODE": "1",
+                "LSTTMP": "97",
+                "LOTMP": "94",
+                "HEATER": "H0001",
+            },
+        ),
+    )
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        refreshed: list[str] = []
+
+        async def refresh_body_metadata(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+            generation_is_current,
+        ) -> None:
+            del applying_body_ids
+            assert generation_is_current()
+            refreshed.append(objnam)
+
+            if objnam == "B1202":
+                body = transport._controller.model[objnam]
+                assert body is not None
+                body.properties["LOTMP"] = "98"
+                transport._on_updated(
+                    {
+                        objnam: {
+                            "LOTMP": "98",
+                        }
+                    }
+                )
+
+        transport._controller.refresh_body_metadata = refresh_body_metadata
+
+        await transport.async_start()
+
+        for _ in range(12):
+            await asyncio.sleep(0)
+
+        assert "B1101" in refreshed
+        assert "B1202" in refreshed
+
+        snapshot = transport.read_snapshot()
+        spa = next(body for body in snapshot.bodies if body.native_id == "B1202")
+        assert spa.target_temperature == 98.0
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_reconnect_reconciliation_recovers_after_failed_body_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+
+    FakeModelController.initial_objects = _objects() + (
+        (
+            "B1202",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "SPA",
+                "SNAME": "Spa",
+                "PARENT": "SYS01",
+                "STATUS": "ON",
+                "HTMODE": "1",
+                "LSTTMP": "97",
+                "LOTMP": "94",
+                "HEATER": "H0001",
+            },
+        ),
+    )
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        spa_attempts = 0
+
+        async def refresh_body_metadata(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+            generation_is_current,
+        ) -> None:
+            nonlocal spa_attempts
+            del applying_body_ids
+
+            assert generation_is_current()
+
+            if objnam != "B1202":
+                return
+
+            spa_attempts += 1
+            if spa_attempts <= 2:
+                # C5.6 permits exactly one same-generation retry. Fail both
+                # attempts so this test continues to exercise recovery that
+                # specifically requires a later reconnect/reconciliation.
+                raise module.ICConnectionError("simulated refresh failure")
+
+            body = transport._controller.model[objnam]
+            assert body is not None
+            body.properties["LOTMP"] = "98"
+            transport._on_updated(
+                {
+                    objnam: {
+                        "LOTMP": "98",
+                    }
+                }
+            )
+
+        transport._controller.refresh_body_metadata = refresh_body_metadata
+
+        await transport.async_start()
+
+        for _ in range(12):
+            await asyncio.sleep(0)
+
+        # Initial attempt plus the one bounded same-generation retry must both
+        # have been exhausted before reconnect recovery is exercised.
+        assert spa_attempts == 2
+
+        transport._on_disconnected(ConnectionError("lost"))
+        transport._on_connected(reconnected=True)
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+
+        # Reconnect creates a new authoritative generation and therefore must
+        # make at least one fresh reconciliation attempt.
+        assert spa_attempts >= 3
+
+        snapshot = transport.read_snapshot()
+        spa = next(body for body in snapshot.bodies if body.native_id == "B1202")
+        assert spa.target_temperature == 98.0
+        assert transport.diagnostics(generated_at=NOW)["reconnect_count"] == 1
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_transient_body_refresh_failure_retries_once_without_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        # Drain the legitimate initial C5.6 connection reconciliation so this
+        # test isolates only the explicit BODY transition below.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        attempts = 0
+
+        async def refresh_body_metadata(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+            generation_is_current,
+        ) -> None:
+            nonlocal attempts
+            del applying_body_ids
+
+            assert generation_is_current()
+            assert objnam == "B1101"
+
+            attempts += 1
+            if attempts == 1:
+                raise module.ICConnectionError(
+                    "simulated transient RequestParamList failure"
+                )
+
+            body = transport._controller.model[objnam]
+            assert body is not None
+            body.properties["LOTMP"] = "98"
+
+            # Production refresh_body_metadata applies the response through
+            # _apply_updates(), which republishes the immutable snapshot.
+            transport._on_updated(
+                {
+                    objnam: {
+                        "LOTMP": "98",
+                    }
+                }
+            )
+
+        transport._controller.refresh_body_metadata = refresh_body_metadata
+
+        generation_before = transport._discovery_generation
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        for _ in range(12):
+            await asyncio.sleep(0)
+
+        assert attempts == 2
+        assert transport._discovery_generation == generation_before
+
+        snapshot = transport.read_snapshot()
+        body = next(
+            item for item in snapshot.bodies if item.native_id == "B1101"
+        )
+        assert body.target_temperature == 98.0
+
+        assert not transport._body_metadata_refresh_pending
+        assert not transport._body_metadata_refresh_dirty
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_transient_body_refresh_timeout_retries_once_without_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        # Drain initial C5.6 reconciliation so this test isolates the
+        # explicit BODY transition and its timeout retry.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        attempts = 0
+
+        async def refresh_body_metadata(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+            generation_is_current,
+        ) -> None:
+            nonlocal attempts
+            del applying_body_ids
+
+            assert generation_is_current()
+            assert objnam == "B1101"
+
+            attempts += 1
+
+            if attempts == 1:
+                raise module.ICTimeoutError(
+                    "simulated transient RequestParamList timeout"
+                )
+
+            body = transport._controller.model[objnam]
+            assert body is not None
+            body.properties["LOTMP"] = "99"
+
+            transport._on_updated(
+                {
+                    objnam: {
+                        "LOTMP": "99",
+                    }
+                }
+            )
+
+        transport._controller.refresh_body_metadata = refresh_body_metadata
+
+        generation_before = transport._discovery_generation
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        for _ in range(12):
+            await asyncio.sleep(0)
+
+        assert attempts == 2
+        assert transport._discovery_generation == generation_before
+
+        snapshot = transport.read_snapshot()
+        body = next(
+            item for item in snapshot.bodies if item.native_id == "B1101"
+        )
+        assert body.target_temperature == 99.0
+
+        assert not transport._body_metadata_refresh_pending
+        assert not transport._body_metadata_refresh_dirty
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_unexpected_body_refresh_failure_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        # Drain initial C5.6 reconciliation before isolating this worker.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        attempts = 0
+
+        async def refresh_body_metadata(
+            objnam: str,
+            *,
+            applying_body_ids: set[str],
+            generation_is_current,
+        ) -> None:
+            nonlocal attempts
+            del objnam, applying_body_ids
+            assert generation_is_current()
+            attempts += 1
+            raise TypeError("simulated programming failure")
+
+        transport._controller.refresh_body_metadata = refresh_body_metadata
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        for _ in range(12):
+            await asyncio.sleep(0)
+
+        # Unexpected software/data failures must never enter the bounded
+        # transient retry path.
+        assert attempts == 1
+        assert transport._last_error_code == "TYPEERROR"
+        assert not transport._body_metadata_refresh_pending
+        assert not transport._body_metadata_refresh_dirty
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_retrying_state_rejects_inflight_body_response_before_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        # Drain initial reconciliation so the blocked request below belongs
+        # unambiguously to the current authoritative generation.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        transport._controller.sent_operations.clear()
+        transport._controller.sent_requests.clear()
+
+        original_send_cmd = transport._controller.send_cmd
+        body_request_started = asyncio.Event()
+        release_body_response = asyncio.Event()
+        intercepted = False
+
+        async def delayed_send_cmd(
+            cmd: str,
+            extra: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            nonlocal intercepted
+
+            if (
+                not intercepted
+                and cmd == "RequestParamList"
+                and extra
+                and extra.get("objectList")
+                and extra["objectList"][0].get("objnam") == "B1101"
+            ):
+                intercepted = True
+                body_request_started.set()
+                await release_body_response.wait()
+
+                return {
+                    "objectList": [
+                        {
+                            "objnam": "B1101",
+                            "params": {
+                                "LOTMP": "113",
+                                "HEATER": "H0001",
+                                "HTMODE": "1",
+                                "STATUS": "ON",
+                                "LSTTMP": "99",
+                            },
+                        }
+                    ]
+                }
+
+            return await original_send_cmd(cmd, extra)
+
+        transport._controller.send_cmd = delayed_send_cmd
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        await body_request_started.wait()
+
+        old_generation = transport._discovery_generation
+
+        # Match the real ICConnectionHandler ordering: reconnection begins
+        # immediately, while the debounced on_disconnected callback may arrive
+        # later. RECONNECTING must already revoke authority from the old request.
+        transport._on_retrying(30)
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.RECONNECTING
+        )
+        assert transport._discovery_generation == old_generation
+
+        release_body_response.set()
+
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        body = transport._controller.model["B1101"]
+        assert body is not None
+        assert body["LOTMP"] != "113"
+
+        # Complete the remainder of the real handler lifecycle.
+        transport._on_disconnected(ConnectionError("debounced disconnect"))
+        transport._on_connected(reconnected=True)
+
+        assert transport._discovery_generation == old_generation + 1
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.AVAILABLE
+        )
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        # The new authoritative generation must have performed a fresh BODY
+        # reconciliation rather than allowing the old request to become current.
+        assert any(
+            cmd == "RequestParamList"
+            and request
+            and request.get("objectList")
+            and request["objectList"][0].get("objnam") == "B1101"
+            for cmd, request in transport._controller.sent_requests
+        )
+
+        transport._controller.send_cmd = original_send_cmd
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_late_model_update_cannot_resurrect_retrying_or_disconnected_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        # Drain the initial C5.6 reconciliation so this test begins from a
+        # stable authoritative AVAILABLE generation.
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.AVAILABLE
+        )
+
+        generation = transport._discovery_generation
+        snapshot_before = transport.latest_snapshot
+        last_update_before = transport._last_native_update
+
+        transport._on_retrying(30)
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.RECONNECTING
+        )
+
+        # Simulate a late callback from model work associated with the old
+        # connection. It must not restore AVAILABLE, publish a connected
+        # snapshot, or make old-generation refresh work authoritative again.
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.RECONNECTING
+        )
+        assert transport._discovery_generation == generation
+        assert transport.latest_snapshot is snapshot_before
+        assert transport._last_native_update == last_update_before
+        assert not transport._body_metadata_refresh_pending
+
+        transport._on_disconnected(ConnectionError("lost"))
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.DISCONNECTED
+        )
+
+        disconnected_snapshot = transport.latest_snapshot
+        disconnected_last_update = transport._last_native_update
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HEATER": "H0002",
+                }
+            }
+        )
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.DISCONNECTED
+        )
+        assert transport._discovery_generation == generation
+        assert transport.latest_snapshot is disconnected_snapshot
+        assert transport._last_native_update == disconnected_last_update
+        assert not transport._body_metadata_refresh_pending
+
+        # Only the connection lifecycle callback may restore availability.
+        transport._on_connected(reconnected=True)
+
+        assert (
+            transport.state
+            is module.IndependentIntelliCenterTransportState.AVAILABLE
+        )
+        assert transport._discovery_generation == generation + 1
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_old_generation_body_response_is_rejected_after_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        original_send_cmd = transport._controller.send_cmd
+        body_request_started = asyncio.Event()
+        release_body_response = asyncio.Event()
+
+        async def delayed_send_cmd(
+            cmd: str,
+            extra: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            if (
+                cmd == "RequestParamList"
+                and extra
+                and extra.get("objectList")
+                and extra["objectList"][0].get("objnam") == "B1101"
+            ):
+                body_request_started.set()
+                await release_body_response.wait()
+                return {
+                    "objectList": [
+                        {
+                            "objnam": "B1101",
+                            "params": {
+                                "LOTMP": "111",
+                                "HEATER": "H0001",
+                                "HTMODE": "1",
+                                "STATUS": "ON",
+                                "LSTTMP": "99",
+                            },
+                        }
+                    ]
+                }
+            return await original_send_cmd(cmd, extra)
+
+        transport._controller.send_cmd = delayed_send_cmd
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        await body_request_started.wait()
+
+        old_generation = transport._discovery_generation
+        transport._on_disconnected(ConnectionError("lost"))
+
+        release_body_response.set()
+
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        body = transport._controller.model["B1101"]
+        assert body is not None
+        assert body["LOTMP"] != "111"
+        assert transport._discovery_generation == old_generation
+
+        transport._controller.send_cmd = original_send_cmd
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_old_generation_body_response_is_rejected_after_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        assert not transport._connection_reconciliation_tasks
+        assert not transport._body_metadata_refresh_tasks
+
+        original_send_cmd = transport._controller.send_cmd
+        body_request_started = asyncio.Event()
+        release_body_response = asyncio.Event()
+
+        async def delayed_send_cmd(
+            cmd: str,
+            extra: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            if (
+                cmd == "RequestParamList"
+                and extra
+                and extra.get("objectList")
+                and extra["objectList"][0].get("objnam") == "B1101"
+                and not body_request_started.is_set()
+            ):
+                body_request_started.set()
+                await release_body_response.wait()
+                return {
+                    "objectList": [
+                        {
+                            "objnam": "B1101",
+                            "params": {
+                                "LOTMP": "112",
+                                "HEATER": "H0001",
+                                "HTMODE": "1",
+                                "STATUS": "ON",
+                                "LSTTMP": "100",
+                            },
+                        }
+                    ]
+                }
+            return await original_send_cmd(cmd, extra)
+
+        transport._controller.send_cmd = delayed_send_cmd
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "HTMODE": "1",
+                }
+            }
+        )
+
+        await body_request_started.wait()
+
+        old_generation = transport._discovery_generation
+
+        transport._on_disconnected(ConnectionError("lost"))
+        transport._on_connected(reconnected=True)
+
+        assert transport._discovery_generation == old_generation + 1
+
+        release_body_response.set()
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+
+        body = transport._controller.model["B1101"]
+        assert body is not None
+        assert body["LOTMP"] != "112"
+
+        transport._controller.send_cmd = original_send_cmd
         await transport.async_stop()
 
     asyncio.run(exercise())
