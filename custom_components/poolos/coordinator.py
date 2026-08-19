@@ -45,7 +45,11 @@ from poolos.observations import (
     PersistentObservationRecorder,
     PoolObservation,
 )
-from poolos.observation_parity import ObservationParityEngine, ObservationParityReport
+from poolos.observation_parity import (
+    ObservationParityEngine,
+    ObservationParityReport,
+    TemperatureParityEligibilityTracker,
+)
 
 from .const import (
     CONF_INTELLICENTER_HOST,
@@ -120,6 +124,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
         self.native_intellicenter_inventory: Mapping[str, object] | None = None
         self.native_intellicenter_parity_engine = ObservationParityEngine()
+        self.native_temperature_parity_eligibility = (
+            TemperatureParityEligibilityTracker()
+        )
         self.native_intellicenter_parity_report: ObservationParityReport | None = None
         self._completed_history_for_date: date | None = None
         self._completed_history: tuple[DailyOperationalRetrospective, ...] = ()
@@ -421,7 +428,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     for item in authoritative_snapshot.observations
                     if item.quality is ObservationQuality.GOOD
                 },
-                eligible_concepts=INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS,
+                eligible_concepts=(
+                    self.native_temperature_parity_eligibility.eligible_concepts(
+                        INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS,
+                        authoritative_snapshot.observations,
+                        observed_at=observed_at,
+                    )
+                ),
             )
         )
 

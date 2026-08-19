@@ -16,6 +16,15 @@ from .observations import PoolObservation
 PARITY_DIAGNOSTIC_ISSUE_LIMIT = 40
 _DIAGNOSTIC_TEXT_LIMIT = 64
 
+TEMPERATURE_TRANSITION_GRACE = timedelta(seconds=45)
+TEMPERATURE_TRANSITION_PARITY_CONCEPTS = frozenset(
+    {
+        "pool.temperature",
+        "spa.temperature",
+        "water.temperature",
+    }
+)
+
 
 class ObservationParityStatus(str, Enum):
     MATCH = "MATCH"
@@ -31,14 +40,14 @@ PARITY_TOLERANCES: Mapping[str, float] = MappingProxyType(
     {
         "air.temperature": 0.5,
         "pool.target_temperature": 0.5,
-        "pool.temperature": 0.5,
+        "pool.temperature": 1.0,
         "pump.gpm": 1.0,
         "pump.power": 50.0,
         "pump.rpm": 25.0,
         "solar.temperature": 0.5,
         "spa.target_temperature": 0.5,
-        "spa.temperature": 0.5,
-        "water.temperature": 0.5,
+        "spa.temperature": 1.0,
+        "water.temperature": 1.0,
     }
 )
 
@@ -166,6 +175,108 @@ class ObservationParityPolicy:
         if any(value < 0 or not math.isfinite(value) for value in normalized.values()):
             raise ValueError("parity tolerances must be finite and non-negative")
         object.__setattr__(self, "tolerances", MappingProxyType(dict(sorted(normalized.items()))))
+
+
+class TemperatureParityEligibilityTracker:
+    """Gate body/water temperature parity on stable circulation."""
+
+    def __init__(
+        self,
+        grace_period: timedelta = TEMPERATURE_TRANSITION_GRACE,
+    ) -> None:
+        if grace_period <= timedelta(0):
+            raise ValueError("temperature parity grace period must be positive")
+
+        self.grace_period = grace_period
+        self._last_signature: tuple[bool, bool, bool] | None = None
+        self._grace_until: datetime | None = None
+
+    def eligible_concepts(
+        self,
+        base_eligible_concepts: frozenset[str],
+        observations: Iterable[PoolObservation],
+        *,
+        observed_at: datetime,
+    ) -> frozenset[str]:
+        """Return concepts eligible for parity at one observation time."""
+
+        if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+            raise ValueError(
+                "temperature parity observed_at must be timezone-aware"
+            )
+
+        by_concept = {
+            observation.observation_id: observation
+            for observation in observations
+        }
+
+        signature = (
+            _observation_is_true(by_concept.get("pool.active")),
+            _observation_is_true(by_concept.get("spa.active")),
+            _observation_is_positive(by_concept.get("pump.rpm")),
+        )
+
+        if self._last_signature is None:
+            # Establish the current hydraulic/body baseline without inventing
+            # a transition merely because PoolOS itself restarted.
+            self._last_signature = signature
+        elif signature != self._last_signature:
+            self._last_signature = signature
+            self._grace_until = observed_at + self.grace_period
+
+        circulating = signature[2]
+
+        # With no active circulation, the equipment-pad water sensor does not
+        # represent current bulk pool/spa water. Retained values from HA and
+        # native IntelliCenter may therefore legitimately differ for minutes
+        # or hours and are not meaningful parity evidence.
+        if not circulating:
+            return _without_transition_temperatures(base_eligible_concepts)
+
+        # After circulation/body transitions, allow stagnant plumbing water
+        # and asynchronous body/sensor updates to stabilize before comparing
+        # the three physical body/water temperature concepts.
+        if self._grace_until is not None:
+            if observed_at < self._grace_until:
+                return _without_transition_temperatures(base_eligible_concepts)
+
+            self._grace_until = None
+
+        return base_eligible_concepts
+
+
+def _without_transition_temperatures(
+    concepts: frozenset[str],
+) -> frozenset[str]:
+    return frozenset(
+        concept
+        for concept in concepts
+        if concept not in TEMPERATURE_TRANSITION_PARITY_CONCEPTS
+    )
+
+
+def _observation_is_true(
+    observation: PoolObservation | None,
+) -> bool:
+    return observation is not None and observation.value is True
+
+
+def _observation_is_positive(
+    observation: PoolObservation | None,
+) -> bool:
+    if observation is None:
+        return False
+
+    value = observation.value
+
+    if isinstance(value, bool):
+        return False
+
+    if not isinstance(value, (int, float)):
+        return False
+
+    numeric = float(value)
+    return math.isfinite(numeric) and numeric > 0
 
 
 class ObservationParityEngine:
@@ -407,6 +518,9 @@ def _canonical_json(value: Any) -> str:
 __all__ = [
     "PARITY_DIAGNOSTIC_ISSUE_LIMIT",
     "PARITY_TOLERANCES",
+    "TEMPERATURE_TRANSITION_GRACE",
+    "TEMPERATURE_TRANSITION_PARITY_CONCEPTS",
+    "TemperatureParityEligibilityTracker",
     "ObservationParityDetail",
     "ObservationParityEngine",
     "ObservationParityPolicy",

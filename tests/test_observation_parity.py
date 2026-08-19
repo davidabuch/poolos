@@ -8,6 +8,8 @@ from poolos.observation_parity import (
     ObservationParityEngine,
     ObservationParityStatus,
     PARITY_TOLERANCES,
+    TEMPERATURE_TRANSITION_PARITY_CONCEPTS,
+    TemperatureParityEligibilityTracker,
 )
 from poolos.intellicenter_readonly import INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
@@ -58,7 +60,11 @@ def test_exact_and_tolerance_matches_are_explicit() -> None:
     assert report.match_count == 3
     assert report.mismatch_count == 0
     assert report.parity_ratio == 1.0
-    assert PARITY_TOLERANCES["pool.temperature"] == 0.5
+    assert PARITY_TOLERANCES["pool.temperature"] == 1.0
+    assert PARITY_TOLERANCES["spa.temperature"] == 1.0
+    assert PARITY_TOLERANCES["water.temperature"] == 1.0
+    assert PARITY_TOLERANCES["air.temperature"] == 0.5
+    assert PARITY_TOLERANCES["solar.temperature"] == 0.5
     assert PARITY_TOLERANCES["pump.rpm"] == 25.0
 
 
@@ -233,3 +239,497 @@ def test_intellicenter_eligibility_excludes_grid_without_hiding_native_gaps() ->
     assert report.missing_native_count == 1
     assert report.excluded_concepts == ("grid.available", "grid.outage_active")
     assert {item.concept for item in report.details} == {"pool.active", "pump.rpm"}
+
+
+def test_body_and_water_temperature_one_degree_difference_matches() -> None:
+    for concept in (
+        "pool.temperature",
+        "spa.temperature",
+        "water.temperature",
+    ):
+        report = compare(
+            (observation(concept, 86.0, source=f"ha:{concept}"),),
+            (observation(concept, 87.0, source=f"native:{concept}"),),
+        )
+
+        assert report.match_count == 1
+        assert report.mismatch_count == 0
+        assert report.details[0].status is ObservationParityStatus.MATCH
+        assert report.details[0].tolerance == 1.0
+
+
+def test_body_and_water_temperature_more_than_one_degree_mismatches() -> None:
+    for concept in (
+        "pool.temperature",
+        "spa.temperature",
+        "water.temperature",
+    ):
+        report = compare(
+            (observation(concept, 86.0, source=f"ha:{concept}"),),
+            (observation(concept, 87.1, source=f"native:{concept}"),),
+        )
+
+        assert report.match_count == 0
+        assert report.mismatch_count == 1
+        assert (
+            report.details[0].status
+            is ObservationParityStatus.VALUE_MISMATCH
+        )
+        assert report.details[0].tolerance == 1.0
+
+
+def test_two_degree_temperature_difference_mismatches() -> None:
+    for concept in (
+        "pool.temperature",
+        "spa.temperature",
+        "water.temperature",
+    ):
+        report = compare(
+            (observation(concept, 86.0, source=f"ha:{concept}"),),
+            (observation(concept, 88.0, source=f"native:{concept}"),),
+        )
+
+        assert report.match_count == 0
+        assert report.mismatch_count == 1
+        assert (
+            report.details[0].status
+            is ObservationParityStatus.VALUE_MISMATCH
+        )
+
+
+def _transition_state(
+    *,
+    observed_at: datetime,
+    pool_active: bool,
+    spa_active: bool,
+    pump_rpm: int,
+) -> tuple[PoolObservation, ...]:
+    return (
+        observation(
+            "pool.active",
+            pool_active,
+            source="ha:pool",
+            observed_at=observed_at,
+        ),
+        observation(
+            "spa.active",
+            spa_active,
+            source="ha:spa",
+            observed_at=observed_at,
+        ),
+        observation(
+            "pump.rpm",
+            pump_rpm,
+            source="ha:pump",
+            observed_at=observed_at,
+        ),
+    )
+
+
+def test_temperature_parity_is_excluded_while_circulation_is_off() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "air.temperature",
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    first = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=False,
+            spa_active=False,
+            pump_rpm=0,
+        ),
+        observed_at=NOW,
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(first)
+    assert {
+        "air.temperature",
+        "pool.active",
+        "spa.active",
+        "pump.rpm",
+    }.issubset(first)
+
+    hours_later = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW + timedelta(hours=6),
+            pool_active=False,
+            spa_active=False,
+            pump_rpm=0,
+        ),
+        observed_at=NOW + timedelta(hours=6),
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(hours_later)
+
+
+def test_temperature_parity_first_running_snapshot_establishes_baseline() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    result = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=NOW,
+    )
+
+    assert result == eligible
+
+
+def test_circulation_start_creates_45_second_temperature_grace() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "air.temperature",
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pump.gpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=False,
+            spa_active=False,
+            pump_rpm=0,
+        ),
+        observed_at=NOW,
+    )
+
+    start_at = NOW + timedelta(seconds=10)
+
+    during_grace = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=start_at,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=start_at,
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(
+        during_grace
+    )
+
+    assert {
+        "air.temperature",
+        "pool.active",
+        "spa.active",
+        "pump.rpm",
+        "pump.gpm",
+    }.issubset(during_grace)
+
+    before_expiry = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=start_at + timedelta(seconds=44),
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=start_at + timedelta(seconds=44),
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(
+        before_expiry
+    )
+
+    at_expiry = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=start_at + timedelta(seconds=45),
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=start_at + timedelta(seconds=45),
+    )
+
+    assert at_expiry == eligible
+
+
+def test_pool_to_spa_transition_restarts_temperature_grace() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=NOW,
+    )
+
+    spa_at = NOW + timedelta(seconds=60)
+
+    during_grace = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=spa_at,
+            pool_active=False,
+            spa_active=True,
+            pump_rpm=3000,
+        ),
+        observed_at=spa_at,
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(
+        during_grace
+    )
+
+    resumed = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=spa_at + timedelta(seconds=45),
+            pool_active=False,
+            spa_active=True,
+            pump_rpm=3000,
+        ),
+        observed_at=spa_at + timedelta(seconds=45),
+    )
+
+    assert resumed == eligible
+
+
+def test_second_body_transition_restarts_existing_grace() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=NOW,
+    )
+
+    spa_at = NOW + timedelta(seconds=60)
+
+    tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=spa_at,
+            pool_active=False,
+            spa_active=True,
+            pump_rpm=3000,
+        ),
+        observed_at=spa_at,
+    )
+
+    pool_again_at = spa_at + timedelta(seconds=30)
+
+    restarted = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=pool_again_at,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=pool_again_at,
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(
+        restarted
+    )
+
+    still_grace = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=pool_again_at + timedelta(seconds=44),
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=pool_again_at + timedelta(seconds=44),
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(
+        still_grace
+    )
+
+    resumed = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=pool_again_at + timedelta(seconds=45),
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=pool_again_at + timedelta(seconds=45),
+    )
+
+    assert resumed == eligible
+
+
+def test_rpm_speed_change_while_running_does_not_create_grace() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=NOW,
+    )
+
+    changed = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW + timedelta(seconds=10),
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=3000,
+        ),
+        observed_at=NOW + timedelta(seconds=10),
+    )
+
+    assert changed == eligible
+
+
+def test_circulation_stop_excludes_temperatures_beyond_grace_period() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    eligible = frozenset(
+        {
+            "pool.active",
+            "spa.active",
+            "pump.rpm",
+            "pool.temperature",
+            "spa.temperature",
+            "water.temperature",
+        }
+    )
+
+    tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=NOW,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2600,
+        ),
+        observed_at=NOW,
+    )
+
+    stop_at = NOW + timedelta(seconds=60)
+
+    stopped = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=stop_at,
+            pool_active=False,
+            spa_active=False,
+            pump_rpm=0,
+        ),
+        observed_at=stop_at,
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(stopped)
+
+    much_later = tracker.eligible_concepts(
+        eligible,
+        _transition_state(
+            observed_at=stop_at + timedelta(hours=2),
+            pool_active=False,
+            spa_active=False,
+            pump_rpm=0,
+        ),
+        observed_at=stop_at + timedelta(hours=2),
+    )
+
+    assert TEMPERATURE_TRANSITION_PARITY_CONCEPTS.isdisjoint(
+        much_later
+    )
+
+
+def test_temperature_transition_requires_timezone_aware_time() -> None:
+    tracker = TemperatureParityEligibilityTracker()
+
+    try:
+        tracker.eligible_concepts(
+            frozenset({"water.temperature"}),
+            (),
+            observed_at=datetime(2026, 8, 19, 12, 0),
+        )
+    except ValueError as exc:
+        assert "timezone-aware" in str(exc)
+    else:
+        raise AssertionError(
+            "naive transition timestamp should have been rejected"
+        )
