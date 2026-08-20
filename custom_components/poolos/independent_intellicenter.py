@@ -60,8 +60,11 @@ from poolos.intellicenter_readonly import (
     NativeTemperatureState,
 )
 
-# IntelliCenter BODY exposes SETPT as the user-facing configured target.
-# pyintellicenter 0.1.20 does not export a SETPT_ATTR constant.
+# IntelliCenter BODY target fields can converge at different times.
+# SETTMP updates promptly to the configured/requested target on this system,
+# while SETPT and LOTMP may lag before converging.
+# pyintellicenter 0.1.20 does not export these constants at package top level.
+_SETTMP_ATTR = "SETTMP"
 _SETPT_ATTR = "SETPT"
 
 ALLOWED_READ_ONLY_PROTOCOL_OPERATIONS = frozenset(
@@ -219,6 +222,7 @@ class _ReadOnlyModelController(ICModelController):
                         "keys": [
                             LOTMP_ATTR,
                             _SETPT_ATTR,
+                            _SETTMP_ATTR,
                             HEATER_ATTR,
                             HTMODE_ATTR,
                             STATUS_ATTR,
@@ -643,6 +647,7 @@ class IndependentIntelliCenterReadOnlyTransport:
             HEATER_ATTR,
             LSTTMP_ATTR,
             _SETPT_ATTR,
+            _SETTMP_ATTR,
         }
 
         for objnam, changed in updates.items():
@@ -819,14 +824,17 @@ def _copy_body(
         active=str(status).upper() != STATUS_OFF,
         heating_active=controller.is_body_heating(item.objnam),
         current_temperature=_number(item[LSTTMP_ATTR]),
-        # SETPT is IntelliCenter's user-facing configured target and changes
-        # immediately even while a body is OFF. LOTMP can retain the previous
-        # active heating target until the body starts. Prefer SETPT and retain
-        # LOTMP only as a compatibility fallback.
+        # SETTMP is the prompt configured/requested target on this IntelliCenter
+        # and can update well before SETPT/LOTMP converge. Prefer SETTMP, then
+        # SETPT, then LOTMP for compatibility with systems/firmware that omit it.
         target_temperature=(
-            _number(item[_SETPT_ATTR])
-            if _number(item[_SETPT_ATTR]) is not None
-            else _number(item[LOTMP_ATTR])
+            _number(item[_SETTMP_ATTR])
+            if _number(item[_SETTMP_ATTR]) is not None
+            else (
+                _number(item[_SETPT_ATTR])
+                if _number(item[_SETPT_ATTR]) is not None
+                else _number(item[LOTMP_ATTR])
+            )
         ),
         active_heat_source=_heater_source(selected_heater),
         selected_heat_mode=_heater_mode(selected_heater),
