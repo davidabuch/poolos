@@ -95,10 +95,17 @@ def _entity_selector(domains: list[str]) -> selector.EntitySelector:
 def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
     """Build the high-fidelity read-only observation mapping schema."""
 
+    # C5.9: IntelliCenter-owned controller observations come directly from
+    # PoolOS native transport. Grid remains mandatory external HA truth.
+    # Legacy Pentair mappings remain optional for parity commissioning.
     required = {
+        CONF_GRID_STATUS_ENTITY: ["binary_sensor"],
+    }
+    optional = {
         CONF_POOL_THERMOSTAT_ENTITY: ["climate"],
         CONF_SPA_THERMOSTAT_ENTITY: ["climate"],
         CONF_PUMP_RPM_ENTITY: ["sensor", "number"],
+        CONF_PUMP_GPM_ENTITY: ["sensor"],
         CONF_PUMP_POWER_ENTITY: ["sensor"],
         CONF_WATER_TEMPERATURE_ENTITY: ["sensor"],
         CONF_SOLAR_TEMPERATURE_ENTITY: ["sensor"],
@@ -107,16 +114,13 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         CONF_HEATER_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_POOL_COMMAND_ENTITY: ["binary_sensor", "switch"],
         CONF_SPA_COMMAND_ENTITY: ["binary_sensor", "switch"],
-        CONF_GRID_STATUS_ENTITY: ["binary_sensor"],
-        CONF_POOL_LIGHT_ENTITY: ["light"],
-    }
-    optional = {
-        CONF_PUMP_GPM_ENTITY: ["sensor"],
         CONF_SOLAR_PREFERRED_ENTITY: ["binary_sensor", "switch"],
         CONF_WATERFALL_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_JETS_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_SLIDE_ACTIVE_ENTITY: ["binary_sensor", "switch"],
+        CONF_POOL_LIGHT_ENTITY: ["light"],
     }
+
     fields: dict[vol.Marker, object] = {}
     for key, domains in required.items():
         fields[vol.Required(key, default=current.get(key, vol.UNDEFINED))] = _entity_selector(domains)

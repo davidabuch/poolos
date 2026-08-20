@@ -168,6 +168,7 @@ class ObservationSnapshot:
     unavailable_entities: tuple[str, ...]
     stale_entities: tuple[str, ...]
     mapped_entities: Mapping[str, str]
+    authoritative_source: str = "home_assistant"
 
     def __post_init__(self) -> None:
         if self.generated_at.tzinfo is None:
@@ -196,6 +197,7 @@ class ObservationSnapshot:
             "unavailable_entities": list(self.unavailable_entities),
             "stale_entities": list(self.stale_entities),
             "freshness_warning": bool(self.stale_entities),
+            "authoritative_source": self.authoritative_source,
             "observations": [
                 {
                     "observation_id": item.observation_id,
