@@ -633,6 +633,7 @@ def test_body_state_change_refreshes_stale_spa_target_read_only(
                         "objnam": "B1202",
                         "keys": [
                             "LOTMP",
+                            "SETPT",
                             "HEATER",
                             "HTMODE",
                             "STATUS",
@@ -1701,6 +1702,187 @@ def test_old_generation_body_response_is_rejected_after_reconnect(
         assert body["LOTMP"] != "112"
 
         transport._controller.send_cmd = original_send_cmd
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
+def test_source_prefers_setpt_for_body_target_temperature() -> None:
+    """SETPT is the user-facing target even while LOTMP remains stale."""
+    source = (
+        Path("custom_components/poolos/independent_intellicenter.py")
+        .read_text(encoding="utf-8")
+    )
+
+    assert '_SETPT_ATTR = "SETPT"' in source
+    assert "_number(item[_SETPT_ATTR])" in source
+    assert "else _number(item[LOTMP_ATTR])" in source
+
+
+def test_source_refreshes_body_when_setpt_changes() -> None:
+    """SETPT changes must participate in BODY reconciliation."""
+    source = (
+        Path("custom_components/poolos/independent_intellicenter.py")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "_SETPT_ATTR," in source
+    assert "LOTMP_ATTR," in source
+    assert "trigger_attributes = {" in source
+
+
+def test_copy_body_prefers_setpt_over_stale_lotmp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use SETPT as the user-facing target when LOTMP is stale."""
+    module = _load_module(monkeypatch)
+
+    model = FakePoolModel({"BODY": set(), "HEATER": set()})
+    body = model.add_object(
+        "B1202",
+        {
+            "OBJTYP": "BODY",
+            "SUBTYP": "SPA",
+            "SNAME": "Spa",
+            "STATUS": "OFF",
+            "HTMODE": "0",
+            "LSTTMP": "86",
+            "LOTMP": "98",
+            "SETPT": "101",
+            "HEATER": "H0001",
+        },
+    )
+    assert body is not None
+
+    controller = FakeModelController(
+        "192.0.2.10",
+        model,
+        keepalive_interval=90.0,
+        transport="tcp",
+    )
+
+    copied = module._copy_body(body, controller)
+
+    assert copied is not None
+    assert copied.target_temperature == 101.0
+
+
+def test_copy_body_falls_back_to_lotmp_when_setpt_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use LOTMP when SETPT is not available."""
+    module = _load_module(monkeypatch)
+
+    model = FakePoolModel({"BODY": set(), "HEATER": set()})
+    body = model.add_object(
+        "B1202",
+        {
+            "OBJTYP": "BODY",
+            "SUBTYP": "SPA",
+            "SNAME": "Spa",
+            "STATUS": "OFF",
+            "HTMODE": "0",
+            "LSTTMP": "86",
+            "LOTMP": "98",
+            "HEATER": "H0001",
+        },
+    )
+    assert body is not None
+
+    controller = FakeModelController(
+        "192.0.2.10",
+        model,
+        keepalive_interval=90.0,
+        transport="tcp",
+    )
+
+    copied = module._copy_body(body, controller)
+
+    assert copied is not None
+    assert copied.target_temperature == 98.0
+
+
+def test_setpt_update_triggers_body_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A SETPT update should trigger one BODY metadata refresh."""
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        transport._controller.sent_operations.clear()
+        transport._controller.sent_requests.clear()
+
+        transport._controller.command_response_queues["RequestParamList"] = [
+            {
+                "objectList": [
+                    {
+                        "objnam": "B1101",
+                        "params": {
+                            "LOTMP": "86",
+                            "SETPT": "91",
+                            "HEATER": "H0001",
+                            "HTMODE": "1",
+                            "STATUS": "ON",
+                            "LSTTMP": "82",
+                        },
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "H0001",
+                        "params": {
+                            "OBJTYP": "HEATER",
+                            "SUBTYP": "HEATER",
+                            "SNAME": "Gas Heater",
+                        },
+                    }
+                ]
+            },
+        ]
+
+        body = transport._controller.model["B1101"]
+        assert body is not None
+        body.properties["SETPT"] = "91"
+
+        transport._on_updated(
+            {
+                "B1101": {
+                    "SETPT": "91",
+                }
+            }
+        )
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if not transport._body_metadata_refresh_tasks:
+                break
+
+        body_requests = [
+            request
+            for request in transport._controller.sent_requests
+            if request[0] == "RequestParamList"
+            and request[1]
+            and request[1].get("objectList")
+            and request[1]["objectList"][0].get("objnam") == "B1101"
+        ]
+
+        assert len(body_requests) == 1
+        assert "SETPT" in body_requests[0][1]["objectList"][0]["keys"]
+
+        snapshot = transport.read_snapshot()
+        pool_body = next(
+            item for item in snapshot.bodies if item.native_id == "B1101"
+        )
+        assert pool_body.target_temperature == 91.0
+
         await transport.async_stop()
 
     asyncio.run(exercise())
