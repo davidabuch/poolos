@@ -352,6 +352,7 @@ class IndependentIntelliCenterReadOnlyTransport:
 
         self._host = normalized_host
         self._transport_name = transport
+        self._snapshot_update_callback: Callable[[], None] | None = None
         self._guard = ReadOnlyProtocolGuard()
         self._model = _DiscoveryPoolModel()
         self._controller = _ReadOnlyModelController(
@@ -392,6 +393,21 @@ class IndependentIntelliCenterReadOnlyTransport:
     @property
     def latest_snapshot(self) -> NativeIntelliCenterTransportSnapshot | None:
         return self._latest_snapshot
+
+    def _set_snapshot_update_callback(
+        self,
+        callback: Callable[[], None] | None,
+    ) -> None:
+        """Set the callback invoked after a new authoritative snapshot is published."""
+
+        self._snapshot_update_callback = callback
+
+    def _notify_snapshot_updated(self) -> None:
+        """Notify the owner that a new authoritative snapshot is available."""
+
+        callback = self._snapshot_update_callback
+        if callback is not None:
+            callback()
 
     async def async_start(self) -> None:
         """Start independent discovery without propagating failure to HA observations."""
@@ -554,6 +570,7 @@ class IndependentIntelliCenterReadOnlyTransport:
             observed_at=observed_at,
             connected=True,
         )
+        self._notify_snapshot_updated()
 
     def _refresh_generation_is_current(
         self,

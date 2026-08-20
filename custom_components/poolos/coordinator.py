@@ -123,6 +123,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             )
         )
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
+        self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
         self.native_intellicenter_inventory: Mapping[str, object] | None = None
         self.native_intellicenter_parity_engine = ObservationParityEngine()
         self.native_temperature_parity_eligibility = (
@@ -192,13 +193,58 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         transport = self.independent_intellicenter_transport
         if transport is None or self._independent_intellicenter_start_task is not None:
             return
+        transport._set_snapshot_update_callback(
+            self._async_schedule_native_intellicenter_refresh
+        )
         self._independent_intellicenter_start_task = self.hass.async_create_task(
             transport.async_start(),
             "PoolOS independent IntelliCenter read-only transport",
         )
 
+    def _async_schedule_native_intellicenter_refresh(self) -> None:
+        """Schedule propagation of a newly published native snapshot into HA."""
+
+        if self._unloading:
+            return
+        task = self._native_intellicenter_refresh_task
+        if task is not None and not task.done():
+            return
+        self._native_intellicenter_refresh_task = self.hass.async_create_task(
+            self._async_native_intellicenter_snapshot_updated(),
+            "PoolOS native IntelliCenter snapshot propagation",
+        )
+
+    async def _async_native_intellicenter_snapshot_updated(self) -> None:
+        """Publish a native transport update without waiting for reconciliation."""
+
+        try:
+            if self._unloading:
+                return
+            async with self._observation_lock:
+                if self._unloading:
+                    return
+                self._event_refresh_count += 1
+                snapshot = await self._async_observe(
+                    observed_at=datetime.now(UTC),
+                    trigger="native_intellicenter_update",
+                )
+                self.async_set_updated_data(snapshot)
+        finally:
+            self._native_intellicenter_refresh_task = None
+
     async def async_stop_independent_intellicenter(self) -> None:
         """Stop the independent connection and any in-flight startup."""
+
+        transport = self.independent_intellicenter_transport
+        if transport is not None:
+            transport._set_snapshot_update_callback(None)
+
+        refresh_task = self._native_intellicenter_refresh_task
+        self._native_intellicenter_refresh_task = None
+        if refresh_task is not None and not refresh_task.done():
+            refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await refresh_task
 
         task = self._independent_intellicenter_start_task
         self._independent_intellicenter_start_task = None
