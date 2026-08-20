@@ -51,7 +51,7 @@ def test_manifest_and_runtime_version_remain_synchronized() -> None:
 
 def test_component_only_publishes_read_only_diagnostic_platforms() -> None:
     source = (COMPONENT / "const.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("sensor", "button")' in source
+    assert 'PLATFORMS = ("sensor", "binary_sensor", "button")' in source
     prohibited = {"switch.py", "number.py", "select.py", "climate.py", "services.yaml"}
     assert not any((COMPONENT / name).exists() for name in prohibited)
 

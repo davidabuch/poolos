@@ -31,6 +31,150 @@ class PoolOSControlCenterSensorDescription:
     unit: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class PoolOSNativeSensorDescription:
+    """Describe one read-only native IntelliCenter sensor."""
+
+    concept: str
+    name: str
+    icon: str | None = None
+    unit: str | None = None
+    diagnostic: bool = False
+
+
+def _native_observation(
+    coordinator: PoolOSCoordinator,
+    concept: str,
+) -> Any:
+    snapshot = coordinator.native_intellicenter_snapshot
+    if snapshot is None:
+        return None
+    for observation in snapshot.observations:
+        if observation.observation_id == concept:
+            return observation
+    return None
+
+
+def _native_observation_value(
+    coordinator: PoolOSCoordinator,
+    concept: str,
+) -> str | int | float | None:
+    observation = _native_observation(coordinator, concept)
+    if observation is None:
+        return None
+    return observation.value
+
+
+def _native_observation_attributes(
+    coordinator: PoolOSCoordinator,
+    concept: str,
+) -> dict[str, Any]:
+    observation = _native_observation(coordinator, concept)
+    snapshot = coordinator.native_intellicenter_snapshot
+
+    if observation is None:
+        return {
+            "canonical_concept": concept,
+            "source": "poolos.independent_intellicenter",
+            "available": False,
+            "authority": "none",
+            "command_delivery_enabled": False,
+            "read_only": True,
+        }
+
+    quality = observation.quality
+    quality_value = getattr(quality, "value", str(quality))
+
+    return {
+        "canonical_concept": concept,
+        "source": "poolos.independent_intellicenter",
+        "source_id": observation.source_id,
+        "observed_at": observation.observed_at.isoformat(),
+        "quality": quality_value,
+        "available": bool(getattr(snapshot, "available", False)),
+        "authority": "none",
+        "command_delivery_enabled": False,
+        "read_only": True,
+    }
+
+
+NATIVE_SENSORS: tuple[PoolOSNativeSensorDescription, ...] = (
+    PoolOSNativeSensorDescription("air.temperature", "Air Temperature", "mdi:thermometer", "°F"),
+    PoolOSNativeSensorDescription("pool.raw_heater_id", "Pool Heater ID", "mdi:identifier", diagnostic=True),
+    PoolOSNativeSensorDescription("pool.raw_htmode", "Pool Heat Mode Raw", "mdi:code-tags", diagnostic=True),
+    PoolOSNativeSensorDescription("pool.target_temperature", "Pool Target Temperature", "mdi:thermometer-check", "°F"),
+    PoolOSNativeSensorDescription("pool.temperature", "Pool Temperature", "mdi:pool-thermometer", "°F"),
+    PoolOSNativeSensorDescription("pump.gpm", "Pump Flow Rate", "mdi:water-pump", "gal/min"),
+    PoolOSNativeSensorDescription("pump.power", "Pump Power", "mdi:flash", "W"),
+    PoolOSNativeSensorDescription("pump.rpm", "Pump RPM", "mdi:speedometer", "rpm"),
+    PoolOSNativeSensorDescription("solar.temperature", "Solar Temperature", "mdi:solar-power", "°F"),
+    PoolOSNativeSensorDescription("spa.raw_heater_id", "Spa Heater ID", "mdi:identifier", diagnostic=True),
+    PoolOSNativeSensorDescription("spa.raw_htmode", "Spa Heat Mode Raw", "mdi:code-tags", diagnostic=True),
+    PoolOSNativeSensorDescription("spa.target_temperature", "Spa Target Temperature", "mdi:thermometer-check", "°F"),
+    PoolOSNativeSensorDescription("spa.temperature", "Spa Temperature", "mdi:hot-tub", "°F"),
+    PoolOSNativeSensorDescription("water.temperature", "Water Temperature", "mdi:thermometer-water", "°F"),
+)
+
+
+class PoolOSNativeIntelliCenterSensor(
+    CoordinatorEntity[PoolOSCoordinator],
+    SensorEntity,
+):
+    """Expose one canonical native IntelliCenter observation."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: PoolOSCoordinator,
+        entry: ConfigEntry[PoolOSRuntimeData],
+        description: PoolOSNativeSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self._description = description
+        self._attr_name = description.name
+        key = description.concept.replace(".", "_")
+        self._attr_unique_id = f"{entry.entry_id}_native_intellicenter_{key}"
+        self._attr_icon = description.icon
+        self._attr_native_unit_of_measurement = description.unit
+        if description.diagnostic:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_native_intellicenter")},
+            "name": "PoolOS Native IntelliCenter",
+            "manufacturer": "PoolOS",
+            "model": "Independent IntelliCenter Read-Only Transport",
+            "sw_version": INTEGRATION_VERSION,
+        }
+
+    @property
+    def native_value(self) -> str | int | float | None:
+        return _native_observation_value(
+            self.coordinator,
+            self._description.concept,
+        )
+
+    @property
+    def available(self) -> bool:
+        observation = _native_observation(
+            self.coordinator,
+            self._description.concept,
+        )
+        snapshot = self.coordinator.native_intellicenter_snapshot
+        return (
+            snapshot is not None
+            and bool(getattr(snapshot, "available", False))
+            and observation is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return _native_observation_attributes(
+            self.coordinator,
+            self._description.concept,
+        )
+
+
 def _shadow(coordinator: PoolOSCoordinator) -> dict[str, Any]:
     return coordinator.shadow_runtime.diagnostics() or {}
 
@@ -904,6 +1048,14 @@ async def async_setup_entry(
     async_add_entities(
         PoolOSControlCenterSensor(runtime.coordinator, entry, runtime, description)
         for description in SENSORS
+    )
+    async_add_entities(
+        PoolOSNativeIntelliCenterSensor(
+            runtime.coordinator,
+            entry,
+            description,
+        )
+        for description in NATIVE_SENSORS
     )
 
 
