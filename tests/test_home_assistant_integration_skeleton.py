@@ -17,6 +17,7 @@ def _read_json(path: Path) -> dict[str, object]:
 def test_required_integration_files_exist() -> None:
     expected = {
         "__init__.py",
+        "binary_sensor.py",
         "button.py",
         "config_flow.py",
         "const.py",
@@ -94,7 +95,6 @@ def test_diagnostics_redact_future_connection_secrets() -> None:
 
 def test_no_actuating_platform_or_service_files_are_present() -> None:
     prohibited = {
-        "binary_sensor.py",
         "switch.py",
         "number.py",
         "select.py",

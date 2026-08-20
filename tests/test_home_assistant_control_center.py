@@ -51,7 +51,7 @@ def test_observation_health_exposes_actionable_snapshot_diagnostics() -> None:
 def test_integration_forwards_only_control_center_platforms() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")
     init = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("sensor", "button")' in const
+    assert 'PLATFORMS = ("sensor", "binary_sensor", "button")' in const
     assert "async_forward_entry_setups(entry, PLATFORMS)" in init
     assert "async_unload_platforms(entry, PLATFORMS)" in init
 
