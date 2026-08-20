@@ -634,6 +634,7 @@ def test_body_state_change_refreshes_stale_spa_target_read_only(
                         "keys": [
                             "LOTMP",
                             "SETPT",
+                            "SETTMP",
                             "HEATER",
                             "HTMODE",
                             "STATUS",
@@ -1886,3 +1887,76 @@ def test_setpt_update_triggers_body_refresh(
         await transport.async_stop()
 
     asyncio.run(exercise())
+
+
+def test_copy_body_prefers_settmp_over_setpt_and_lotmp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use SETTMP when it is the newest configured target."""
+    module = _load_module(monkeypatch)
+
+    model = FakePoolModel({"BODY": set(), "HEATER": set()})
+    body = model.add_object(
+        "B1202",
+        {
+            "OBJTYP": "BODY",
+            "SUBTYP": "SPA",
+            "SNAME": "Spa",
+            "STATUS": "OFF",
+            "HTMODE": "0",
+            "LSTTMP": "89",
+            "LOTMP": "98",
+            "SETPT": "98",
+            "SETTMP": "102",
+            "HEATER": "H0001",
+        },
+    )
+    assert body is not None
+
+    controller = FakeModelController(
+        "192.0.2.10",
+        model,
+        keepalive_interval=90.0,
+        transport="tcp",
+    )
+
+    copied = module._copy_body(body, controller)
+
+    assert copied is not None
+    assert copied.target_temperature == 102.0
+
+
+def test_copy_body_falls_back_from_settmp_to_setpt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use SETPT when SETTMP is unavailable."""
+    module = _load_module(monkeypatch)
+
+    model = FakePoolModel({"BODY": set(), "HEATER": set()})
+    body = model.add_object(
+        "B1202",
+        {
+            "OBJTYP": "BODY",
+            "SUBTYP": "SPA",
+            "SNAME": "Spa",
+            "STATUS": "ON",
+            "HTMODE": "1",
+            "LSTTMP": "95",
+            "LOTMP": "98",
+            "SETPT": "99",
+            "HEATER": "H0001",
+        },
+    )
+    assert body is not None
+
+    controller = FakeModelController(
+        "192.0.2.10",
+        model,
+        keepalive_interval=90.0,
+        transport="tcp",
+    )
+
+    copied = module._copy_body(body, controller)
+
+    assert copied is not None
+    assert copied.target_temperature == 99.0
