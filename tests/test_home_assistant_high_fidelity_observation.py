@@ -218,3 +218,63 @@ def test_shadow_runtime_tolerates_partial_startup_snapshot() -> None:
     assert "ShadowRuntimeResult | None" in source
     assert "if any(key not in facts or facts[key] is None for key in required):" in source
     assert "return None" in source
+
+
+def test_native_intellicenter_push_propagation_contract() -> None:
+    """Native snapshots must have an immediate coordinator propagation path."""
+    coordinator = (
+        Path("custom_components/poolos/coordinator.py")
+        .read_text()
+    )
+
+    assert "self._native_intellicenter_refresh_task" in coordinator
+    assert "transport._set_snapshot_update_callback(" in coordinator
+    assert "self._async_schedule_native_intellicenter_refresh" in coordinator
+    assert (
+        "async def _async_native_intellicenter_snapshot_updated(self)"
+        in coordinator
+    )
+    assert 'trigger="native_intellicenter_update"' in coordinator
+    assert "self.async_set_updated_data(snapshot)" in coordinator
+
+
+def test_native_intellicenter_push_propagation_uses_observation_lock() -> None:
+    """Native propagation must serialize with all other observations."""
+    coordinator = (
+        Path("custom_components/poolos/coordinator.py")
+        .read_text()
+    )
+
+    method = coordinator.split(
+        "async def _async_native_intellicenter_snapshot_updated(self)",
+        1,
+    )[1].split(
+        "async def async_stop_independent_intellicenter",
+        1,
+    )[0]
+
+    assert "async with self._observation_lock:" in method
+    assert "self._event_refresh_count += 1" in method
+    assert "await self._async_observe(" in method
+    assert 'trigger="native_intellicenter_update"' in method
+    assert "self.async_set_updated_data(snapshot)" in method
+
+
+def test_native_intellicenter_push_callback_is_removed_on_stop() -> None:
+    """Unload must detach the transport callback and cancel propagation work."""
+    coordinator = (
+        Path("custom_components/poolos/coordinator.py")
+        .read_text()
+    )
+
+    method = coordinator.split(
+        "async def async_stop_independent_intellicenter(self)",
+        1,
+    )[1].split(
+        "def async_start_event_observation",
+        1,
+    )[0]
+
+    assert "transport._set_snapshot_update_callback(None)" in method
+    assert "refresh_task.cancel()" in method
+    assert "await refresh_task" in method

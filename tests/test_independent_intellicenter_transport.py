@@ -1960,3 +1960,29 @@ def test_copy_body_falls_back_from_settmp_to_setpt(
 
     assert copied is not None
     assert copied.target_temperature == 99.0
+
+
+def test_native_update_notifies_snapshot_update_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native model update must notify the owner after snapshot publication."""
+
+    module = _load_module(monkeypatch)
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+
+    notifications: list[object] = []
+    transport._set_snapshot_update_callback(  # noqa: SLF001
+        lambda: notifications.append(transport.latest_snapshot)
+    )
+
+    transport._state = module.IndependentIntelliCenterTransportState.AVAILABLE
+    transport._running = True
+
+    transport._on_updated({})  # noqa: SLF001
+
+    assert len(notifications) == 1
+    assert notifications[0] is transport.latest_snapshot
+    assert transport.latest_snapshot is not None
