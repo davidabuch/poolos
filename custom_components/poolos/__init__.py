@@ -27,6 +27,7 @@ _enable_local_vendored_core()
 
 from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
 from .coordinator import PoolOSCoordinator  # noqa: E402
+from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,7 @@ class PoolOSRuntimeData:
     coordinator: PoolOSCoordinator
     loaded_at: str
     operating_mode: str
+    manual_intellicenter: ManualIntelliCenterControl | None
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
@@ -55,10 +57,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             coordinator.async_handle_homeassistant_stop,
         )
     )
+    configured = {**dict(entry.data), **dict(entry.options)}
+    manual_host = str(configured.get("intellicenter_host", "")).strip()
+    manual_intellicenter = (
+        None
+        if not manual_host
+        else ManualIntelliCenterControl(
+            host=manual_host,
+            transport=str(configured.get("intellicenter_transport", "tcp")),
+        )
+    )
+    if manual_intellicenter is not None:
+        await manual_intellicenter.async_start()
+
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
+        manual_intellicenter=manual_intellicenter,
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
@@ -77,5 +93,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> b
 
     await entry.runtime_data.coordinator.async_prepare_unload()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if entry.runtime_data.manual_intellicenter is not None:
+        await entry.runtime_data.manual_intellicenter.async_stop()
     await entry.runtime_data.coordinator.async_stop_independent_intellicenter()
     return unloaded

@@ -20,12 +20,14 @@ def test_required_integration_files_exist() -> None:
         "authoritative.py",
         "binary_sensor.py",
         "button.py",
+        "climate.py",
         "config_flow.py",
         "const.py",
         "coordinator.py",
         "diagnostics.py",
         "independent_intellicenter.py",
         "manifest.json",
+        "manual_intellicenter.py",
         "native_intellicenter.py",
         "observation.py",
         "shadow.py",
@@ -99,7 +101,6 @@ def test_no_actuating_platform_or_service_files_are_present() -> None:
         "switch.py",
         "number.py",
         "select.py",
-        "climate.py",
         "services.yaml",
     }
     assert not any((COMPONENT / name).exists() for name in prohibited)
