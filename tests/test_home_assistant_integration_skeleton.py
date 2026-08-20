@@ -17,6 +17,7 @@ def _read_json(path: Path) -> dict[str, object]:
 def test_required_integration_files_exist() -> None:
     expected = {
         "__init__.py",
+        "authoritative.py",
         "binary_sensor.py",
         "button.py",
         "config_flow.py",

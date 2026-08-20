@@ -112,9 +112,10 @@ def test_native_shadow_cannot_affect_authoritative_commissioning_inputs() -> Non
         "def _refresh_native_intellicenter_parity", 1
     )[0]
 
-    assert "snapshot = build_snapshot(" in observe
+    assert "ha_shadow_snapshot = build_snapshot(" in observe
     assert "self._refresh_native_intellicenter_parity(" in observe
-    assert "snapshot, observed_at=observed_at" in observe
+    assert "ha_shadow_snapshot, observed_at=observed_at" in observe
+    assert "snapshot = build_authoritative_snapshot(" in observe
     assert "self.shadow_runtime.evaluate(snapshot)" in observe
     assert "observations=snapshot.observations" in observe
     assert '"healthy": snapshot.healthy' in observe

@@ -199,6 +199,10 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
         "unavailable_entities": diagnostics.get("unavailable_entities", []),
         "stale_entities": diagnostics.get("stale_entities", []),
         "freshness_warning": diagnostics.get("freshness_warning", False),
+        "authoritative_source": diagnostics.get(
+            "authoritative_source",
+            "unknown",
+        ),
         "startup_grace_active": coordinator.in_startup_health_grace(),
         "startup_grace_until": coordinator.health_incident_diagnostics()["startup_grace_until"],
         "generated_at": diagnostics.get("generated_at"),

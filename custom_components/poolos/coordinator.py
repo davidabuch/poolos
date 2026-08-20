@@ -51,6 +51,7 @@ from poolos.observation_parity import (
     TemperatureParityEligibilityTracker,
 )
 
+from .authoritative import build_authoritative_snapshot
 from .const import (
     CONF_INTELLICENTER_HOST,
     CONF_INTELLICENTER_TRANSPORT,
@@ -266,7 +267,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         observed_at: datetime,
         trigger: str,
     ) -> ObservationSnapshot:
-        """Build, evaluate, and durably record one read-only HA observation."""
+        """Build, evaluate, and durably record one authoritative observation."""
 
         configured = {**dict(self.config_entry.data), **dict(self.config_entry.options)}
         states: dict[str, HomeAssistantState] = {}
@@ -282,14 +283,16 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 last_reported=getattr(state, "last_reported", state.last_updated),
                 attributes=state.attributes,
             )
-        snapshot = build_snapshot(
+        # Preserve the HA-derived snapshot only as an independent parity
+        # comparison source. It is no longer authoritative for controller facts.
+        ha_shadow_snapshot = build_snapshot(
             options=configured,
             states=states,
             now=observed_at,
         )
         try:
             self._refresh_native_intellicenter_parity(
-                snapshot, observed_at=observed_at
+                ha_shadow_snapshot, observed_at=observed_at
             )
         except Exception:  # Defensive isolation for a non-authoritative shadow source.
             LOGGER.exception("PoolOS native IntelliCenter shadow refresh failed")
@@ -300,6 +303,16 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 )
             )
             self.native_intellicenter_parity_report = None
+
+        # Native IntelliCenter is authoritative for controller-owned facts.
+        # Home Assistant contributes only genuinely external observations.
+        # There is intentionally no legacy Pentair HA fallback.
+        snapshot = build_authoritative_snapshot(
+            native_snapshot=self.native_intellicenter_snapshot,
+            options=configured,
+            states=states,
+            now=observed_at,
+        )
         try:
             await self._async_record_native_parity_commissioning(observed_at)
         except (OSError, TypeError, ValueError):
