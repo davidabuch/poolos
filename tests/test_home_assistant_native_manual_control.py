@@ -25,11 +25,12 @@ def test_manual_gateway_is_separate_from_read_only_transport() -> None:
     assert "class ManualIntelliCenterControl" not in readonly
 
 
-def test_manual_gateway_exposes_only_pool_spa_climate_operations() -> None:
+def test_manual_gateway_exposes_only_explicit_manual_operations() -> None:
     source = _source()
 
     assert "async def async_set_body_active(" in source
     assert "async def async_set_heating_setpoint(" in source
+    assert "async def async_set_circuit_state(" in source
 
     for prohibited in (
         "async_set_light_effect",
@@ -47,6 +48,13 @@ def test_manual_gateway_allows_only_known_pool_and_spa_body_ids() -> None:
 
     assert '_ALLOWED_BODY_IDS = frozenset({"B1101", "B1202"})' in source
     assert "unsupported manual-control body" in source
+
+
+def test_manual_gateway_allows_only_known_feature_circuit_ids() -> None:
+    source = _source()
+
+    assert '_ALLOWED_CIRCUIT_IDS = frozenset({"C0002", "C0003", "C0004", "FTR01"})' in source
+    assert "unsupported manual-control circuit" in source
 
 
 def test_manual_gateway_has_explicit_temperature_bounds() -> None:
@@ -70,6 +78,7 @@ def test_manual_gateway_uses_pyintellicenter_supported_write_methods() -> None:
     assert "self._controller.request_changes(" in source
     assert "STATUS_ATTR: STATUS_ON if active else STATUS_OFF" in source
     assert "self._controller.set_heating_setpoint(" in source
+    assert "self._controller.set_circuit_state(" in source
 
 
 def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
@@ -88,6 +97,7 @@ def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
         "async_stop",
         "async_set_body_active",
         "async_set_heating_setpoint",
+        "async_set_circuit_state",
     }
 
 

@@ -8,7 +8,7 @@ COMPONENT = ROOT / "custom_components" / "poolos"
 
 def test_poolos_loads_binary_sensor_platform() -> None:
     const_text = (COMPONENT / "const.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate")' in const_text
+    assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light")' in const_text
 
 
 def test_native_sensor_surface_uses_independent_snapshot() -> None:

@@ -26,12 +26,14 @@ def test_required_integration_files_exist() -> None:
         "coordinator.py",
         "diagnostics.py",
         "independent_intellicenter.py",
+        "light.py",
         "manifest.json",
         "manual_intellicenter.py",
         "native_intellicenter.py",
         "observation.py",
         "shadow.py",
         "sensor.py",
+        "switch.py",
         "system_health.py",
         "translations/en.json",
     }
@@ -98,7 +100,6 @@ def test_diagnostics_redact_future_connection_secrets() -> None:
 
 def test_no_actuating_platform_or_service_files_are_present() -> None:
     prohibited = {
-        "switch.py",
         "number.py",
         "select.py",
         "services.yaml",
