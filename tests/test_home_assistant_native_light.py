@@ -79,3 +79,50 @@ def test_manual_gateway_explicitly_allows_pool_light_circuit() -> None:
         'frozenset({"C0002", "C0003", "C0004", "FTR01"})'
         in source
     )
+
+
+def test_pool_light_declares_20_second_transition_lockout() -> None:
+    source = _source()
+
+    assert "_POOL_LIGHT_TRANSITION_SECONDS = 20" in source
+    assert '"transition_lockout_seconds": _POOL_LIGHT_TRANSITION_SECONDS' in source
+    assert '"transitioning": self._transitioning' in source
+
+
+def test_pool_light_becomes_temporarily_unavailable_during_transition() -> None:
+    source = _source()
+
+    assert "not self._transitioning" in source
+    assert "self._transitioning = True" in source
+    assert "self._transitioning = False" in source
+    assert "async_call_later(" in source
+
+
+def test_pool_light_lockout_begins_only_after_successful_on_command() -> None:
+    source = _source()
+
+    command = (
+        "await manual.async_set_circuit_state(\n"
+        "            _POOL_LIGHT_OBJNAM,\n"
+        "            True,\n"
+        "        )"
+    )
+    lockout = "self._begin_transition_lockout()"
+
+    assert command in source
+    assert lockout in source
+    assert source.index(command) < source.index(lockout)
+
+
+def test_pool_light_off_does_not_start_transition_lockout() -> None:
+    source = _source()
+
+    off_block = source.split(
+        "async def async_turn_off",
+        1,
+    )[1].split(
+        "def _begin_transition_lockout",
+        1,
+    )[0]
+
+    assert "_begin_transition_lockout()" not in off_block

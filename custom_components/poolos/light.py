@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from homeassistant.components.light import ColorMode, LightEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import PoolOSRuntimeData
@@ -17,6 +19,7 @@ from .manual_intellicenter import ManualIntelliCenterCommandError
 
 _POOL_LIGHT_OBJNAM = "C0002"
 _POOL_LIGHT_CONCEPT = "pool_light.active"
+_POOL_LIGHT_TRANSITION_SECONDS = 20
 
 
 def _native_observation(
@@ -61,6 +64,8 @@ class PoolOSNativeIntelliCenterPoolLight(
     ) -> None:
         super().__init__(coordinator)
         self._runtime = entry.runtime_data
+        self._cancel_transition_timer: Callable[[], None] | None = None
+        self._transitioning = False
 
         self._attr_unique_id = (
             f"{entry.entry_id}_native_intellicenter_pool_light"
@@ -81,7 +86,8 @@ class PoolOSNativeIntelliCenterPoolLight(
         manual = self._runtime.manual_intellicenter
 
         return (
-            snapshot is not None
+            not self._transitioning
+            and snapshot is not None
             and bool(getattr(snapshot, "available", False))
             and _native_observation(
                 self.coordinator,
@@ -118,6 +124,8 @@ class PoolOSNativeIntelliCenterPoolLight(
             True,
         )
 
+        self._begin_transition_lockout()
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the Pool Light circuit off."""
 
@@ -133,6 +141,38 @@ class PoolOSNativeIntelliCenterPoolLight(
             _POOL_LIGHT_OBJNAM,
             False,
         )
+
+    def _begin_transition_lockout(self) -> None:
+        """Temporarily disable interaction while IntelliCenter engages the scene."""
+
+        if self._cancel_transition_timer is not None:
+            self._cancel_transition_timer()
+            self._cancel_transition_timer = None
+
+        self._transitioning = True
+        self.async_write_ha_state()
+
+        self._cancel_transition_timer = async_call_later(
+            self.hass,
+            _POOL_LIGHT_TRANSITION_SECONDS,
+            self._async_transition_complete,
+        )
+
+    async def _async_transition_complete(self, _now: Any) -> None:
+        """Re-enable the entity after the controller transition window."""
+
+        self._cancel_transition_timer = None
+        self._transitioning = False
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel the transition timer when the entity is removed."""
+
+        if self._cancel_transition_timer is not None:
+            self._cancel_transition_timer()
+            self._cancel_transition_timer = None
+
+        await super().async_will_remove_from_hass()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -151,6 +191,8 @@ class PoolOSNativeIntelliCenterPoolLight(
             "autonomous_command_delivery_enabled": False,
             "effect_control_enabled": False,
             "optimistic": False,
+            "transitioning": self._transitioning,
+            "transition_lockout_seconds": _POOL_LIGHT_TRANSITION_SECONDS,
         }
 
 
