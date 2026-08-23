@@ -9,6 +9,7 @@ exposes a deliberately tiny mutation surface:
 
 * turn Pool/Spa body circulation on or off
 * change Pool/Spa heating setpoint
+* turn explicitly allow-listed Jets, Slide, and Spillway circuits on or off
 
 No generic SETPARAMLIST interface is exposed to Home Assistant entities.
 """
@@ -33,6 +34,7 @@ from pyintellicenter import (
 )
 
 _ALLOWED_BODY_IDS = frozenset({"B1101", "B1202"})
+_ALLOWED_CIRCUIT_IDS = frozenset({"C0002", "C0003", "C0004", "FTR01"})
 _MIN_TARGET_TEMPERATURE = 40
 _MAX_TARGET_TEMPERATURE = 104
 
@@ -216,6 +218,39 @@ class ManualIntelliCenterControl:
             value=active,
         )
 
+    async def async_set_circuit_state(
+        self,
+        circuit_objnam: str,
+        active: bool,
+    ) -> ManualCommandReceipt:
+        """Turn one explicitly allow-listed IntelliCenter circuit on or off."""
+
+        self._require_circuit(circuit_objnam)
+
+        if not isinstance(active, bool):
+            raise ValueError("circuit active state must be boolean")
+
+        await self._require_available()
+
+        async with self._command_lock:
+            try:
+                await self._controller.set_circuit_state(
+                    circuit_objnam,
+                    active,
+                )
+            except Exception as exc:
+                self._last_error_code = type(exc).__name__.upper()
+                raise ManualIntelliCenterCommandError(
+                    f"failed to set {circuit_objnam} circuit state"
+                ) from exc
+
+        self._last_error_code = None
+        return ManualCommandReceipt(
+            body_objnam=circuit_objnam,
+            operation="circuit_active",
+            value=active,
+        )
+
     async def async_set_heating_setpoint(
         self,
         body_objnam: str,
@@ -271,8 +306,10 @@ class ManualIntelliCenterControl:
                 "allowed_operations": [
                     "body_active",
                     "heating_setpoint",
+                    "circuit_active",
                 ],
                 "allowed_body_ids": sorted(_ALLOWED_BODY_IDS),
+                "allowed_circuit_ids": sorted(_ALLOWED_CIRCUIT_IDS),
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
                 "target_temperature_max": _MAX_TARGET_TEMPERATURE,
                 "last_error_code": self._last_error_code,
@@ -293,6 +330,13 @@ class ManualIntelliCenterControl:
         if body_objnam not in _ALLOWED_BODY_IDS:
             raise ValueError(
                 f"unsupported manual-control body: {body_objnam}"
+            )
+
+    @staticmethod
+    def _require_circuit(circuit_objnam: str) -> None:
+        if circuit_objnam not in _ALLOWED_CIRCUIT_IDS:
+            raise ValueError(
+                f"unsupported manual-control circuit: {circuit_objnam}"
             )
 
     def _on_connected(self, *, reconnected: bool) -> None:

@@ -65,6 +65,18 @@ class FakePoolModel:
     def get_by_type(self, object_type: str) -> list[FakePoolObject]:
         return [item for item in self if item.objtype == object_type]
 
+    def attributes_to_track(self) -> list[dict[str, object]]:
+        """Build the RequestParamList entries used by ICModelController.start()."""
+
+        return [
+            {
+                "objnam": item.objnam,
+                "keys": sorted(self.attribute_map[item.objtype]),
+            }
+            for item in self
+            if item.objtype in self.attribute_map
+        ]
+
 
 class FakeModelController:
     initial_objects: tuple[tuple[str, dict[str, Any]], ...] = ()
@@ -202,8 +214,11 @@ def _objects() -> tuple[tuple[str, dict[str, Any]], ...]:
                     "SNAME": "Pool",
                     "STATUS": "ON",
                     "HTMODE": "1",
+                    "HITMP": "104",
                     "LSTTMP": "82",
                     "LOTMP": "86",
+                    "MODE": "0",
+                    "VOL": "15000",
                     "HEATER": "H0001",
                 }
             )
@@ -229,9 +244,11 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
         "GPM_ATTR": "GPM",
         "HEATER_ATTR": "HEATER",
         "HEATER_TYPE": "HEATER",
+        "HITMP_ATTR": "HITMP",
         "HTMODE_ATTR": "HTMODE",
         "LOTMP_ATTR": "LOTMP",
         "LSTTMP_ATTR": "LSTTMP",
+        "MODE_ATTR": "MODE",
         "OBJTYP_ATTR": "OBJTYP",
         "PARENT_ATTR": "PARENT",
         "PMPCIRC_TYPE": "PMPCIRC",
@@ -245,6 +262,7 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
         "STATUS_ATTR": "STATUS",
         "STATUS_OFF": "OFF",
         "SUBTYP_ATTR": "SUBTYP",
+        "VOL_ATTR": "VOL",
     }
     for name, value in constants.items():
         setattr(pyic, name, value)
@@ -273,6 +291,21 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
         str(params["OBJTYP"]): {"SNAME", "PARENT", "SUBTYP", "STATUS"}
         for _, params in _objects()
         if params["OBJTYP"] != "FUTURE_TYPE"
+    }
+    attributes.ALL_ATTRIBUTES_BY_TYPE["SENSE"] = {
+        "CALIB",
+        "HNAME",
+        "LISTORD",
+        "MODE",
+        "NAME",
+        "PARENT",
+        "PROBE",
+        "READY",
+        "SNAME",
+        "SOURCE",
+        "STATIC",
+        "STATUS",
+        "SUBTYP",
     }
     monkeypatch.setitem(sys.modules, "pyintellicenter", pyic)
     monkeypatch.setitem(sys.modules, "pyintellicenter.attributes", attributes)
@@ -316,6 +349,213 @@ def test_independent_construction_discovery_and_unknown_retention(
         "FUTURE_TYPE",
     } == object_types
     assert "runtime_data" not in MODULE_PATH.read_text(encoding="utf-8")
+
+
+def test_body_monitoring_matches_working_narrow_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BODY NotifyList monitoring must request prompt canonical LOTMP evidence."""
+
+    module = _load_module(monkeypatch)
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+
+    assert transport._model.attribute_map["BODY"] == {
+        "SNAME",
+        "HEATER",
+        "HITMP",
+        "HTMODE",
+        "LOTMP",
+        "LSTTMP",
+        "MODE",
+        "STATUS",
+        "VOL",
+    }
+    assert "SETTMP" not in transport._model.attribute_map["BODY"]
+    assert "SETPT" not in transport._model.attribute_map["BODY"]
+
+    asyncio.run(transport.async_start())
+    body_request = next(
+        item
+        for item in transport._model.attributes_to_track()
+        if item["objnam"] == "B1101"
+    )
+    assert body_request == {
+        "objnam": "B1101",
+        "keys": [
+            "HEATER",
+            "HITMP",
+            "HTMODE",
+            "LOTMP",
+            "LSTTMP",
+            "MODE",
+            "SNAME",
+            "STATUS",
+            "VOL",
+        ],
+    }
+
+    # Narrowing BODY must not reduce any other known object's monitoring map.
+    assert transport._model.attribute_map["PUMP"] == {
+        "SNAME",
+        "PARENT",
+        "SUBTYP",
+        "STATUS",
+    }
+    assert transport._model.attribute_map["SENSE"] == {"SNAME", "SOURCE"}
+
+    body_inventory = next(
+        item
+        for item in transport.read_snapshot().raw_inventory
+        if item.native_id == "B1101"
+    )
+    raw_names = {item.name for item in body_inventory.attributes}
+    assert transport._model.attribute_map["BODY"] <= raw_names
+    asyncio.run(transport.async_stop())
+
+
+def test_startup_requests_exact_narrow_sense_monitoring_for_every_sensor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real controller startup must send only calibrated SENSE evidence keys."""
+
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects() + (
+        (
+            "SSS11",
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": "SOLAR",
+                "SNAME": "Solar",
+                "SOURCE": "64",
+            },
+        ),
+        (
+            "SSW11",
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": "POOL",
+                "SNAME": "Water",
+                "SOURCE": "79",
+            },
+        ),
+    )
+    original_start = FakeModelController.start
+
+    async def start_with_monitoring(self: FakeModelController) -> None:
+        await original_start(self)
+        await self.send_cmd(
+            "RequestParamList",
+            {"objectList": self.model.attributes_to_track()},
+        )
+
+    monkeypatch.setattr(FakeModelController, "start", start_with_monitoring)
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+
+    asyncio.run(transport.async_start())
+
+    startup_request = transport._controller.sent_requests[0]
+    assert startup_request[0] == "RequestParamList"
+    object_list = startup_request[1]["objectList"]
+    sense_requests = [
+        item
+        for item in object_list
+        if str(item["objnam"]).startswith("S")
+        and transport._model[str(item["objnam"])].objtype == "SENSE"
+    ]
+    assert sense_requests == [
+        {"objnam": "S0001", "keys": ["SNAME", "SOURCE"]},
+        {"objnam": "SSS11", "keys": ["SNAME", "SOURCE"]},
+        {"objnam": "SSW11", "keys": ["SNAME", "SOURCE"]},
+    ]
+    assert all(
+        not ({"PROBE", "CALIB", "STATUS", "READY"} & set(item["keys"]))
+        for item in sense_requests
+    )
+
+    body_request = next(item for item in object_list if item["objnam"] == "B1101")
+    assert body_request["keys"] == [
+        "HEATER",
+        "HITMP",
+        "HTMODE",
+        "LOTMP",
+        "LSTTMP",
+        "MODE",
+        "SNAME",
+        "STATUS",
+        "VOL",
+    ]
+    pump_request = next(item for item in object_list if item["objnam"] == "P0001")
+    assert pump_request["keys"] == ["PARENT", "SNAME", "STATUS", "SUBTYP"]
+
+
+def test_reconnect_and_dynamic_discovery_retain_narrow_sense_monitoring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every regenerated or newly discovered SENSE request uses one contract."""
+
+    module = _load_module(monkeypatch)
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+
+    initial = next(
+        item
+        for item in transport._model.attributes_to_track()
+        if item["objnam"] == "S0001"
+    )
+    transport._on_disconnected(ConnectionError("test reconnect"))
+    transport._on_connected(reconnected=True)
+    regenerated = next(
+        item
+        for item in transport._model.attributes_to_track()
+        if item["objnam"] == "S0001"
+    )
+
+    transport._model.add_object(
+        "S-DYNAMIC",
+        {
+            "OBJTYP": "SENSE",
+            "SUBTYP": "SOLAR",
+            "SNAME": "New Solar Sensor",
+            "SOURCE": "101",
+        },
+    )
+    dynamic = next(
+        item
+        for item in transport._model.attributes_to_track()
+        if item["objnam"] == "S-DYNAMIC"
+    )
+
+    asyncio.run(
+        transport._controller.send_cmd(
+            "RequestParamList",
+            {"objectList": [regenerated]},
+        )
+    )
+    asyncio.run(
+        transport._controller.send_cmd(
+            "RequestParamList",
+            {"objectList": [dynamic]},
+        )
+    )
+
+    assert initial == regenerated == {
+        "objnam": "S0001",
+        "keys": ["SNAME", "SOURCE"],
+    }
+    assert dynamic == {
+        "objnam": "S-DYNAMIC",
+        "keys": ["SNAME", "SOURCE"],
+    }
+    assert transport._controller.sent_requests[-2:] == [
+        ("RequestParamList", {"objectList": [regenerated]}),
+        ("RequestParamList", {"objectList": [dynamic]}),
+    ]
 
 
 def test_snapshot_is_defensive_and_feeds_existing_normalization_and_parity(
@@ -408,6 +648,111 @@ def test_sense_mapping_uses_documented_subtype_and_calibrated_source_only(
     )
     assert unknown_raw.subtype == "OTHER"
     assert dict((item.name, item.value) for item in unknown_raw.attributes)["SOURCE"] == 88
+
+
+@pytest.mark.parametrize(
+    ("native_id", "subtype", "initial", "updated", "concept"),
+    (
+        ("SSS11", "SOLAR", "64", "139", "solar.temperature"),
+        ("_A135", "AIR", "70", "85", "air.temperature"),
+        ("SSW11", "POOL", "79", "90", "water.temperature"),
+    ),
+)
+def test_sense_source_update_reaches_canonical_native_surface(
+    monkeypatch: pytest.MonkeyPatch,
+    native_id: str,
+    subtype: str,
+    initial: str,
+    updated: str,
+    concept: str,
+) -> None:
+    """A current calibrated SOURCE update reaches the HA-facing native snapshot."""
+
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = (
+        (
+            native_id,
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": subtype,
+                "SNAME": subtype.title(),
+                "SOURCE": initial,
+                "PROBE": "999",
+            },
+        ),
+    )
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+
+    def canonical_value() -> object:
+        snapshot = transport.read_snapshot()
+        canonical = NativeIntelliCenterReadAdapter().map_snapshot(
+            snapshot,
+            generated_at=snapshot.observed_at,
+        )
+        return next(
+            item.value
+            for item in canonical.observations
+            if item.observation_id == concept
+        )
+
+    assert canonical_value() == float(initial)
+
+    transport._controller._apply_updates(
+        [{"objnam": native_id, "params": {"SOURCE": updated}}]
+    )
+
+    temperature = next(
+        item
+        for item in transport.read_snapshot().temperatures
+        if item.native_id == native_id
+    )
+    assert temperature.temperature == float(updated)
+    assert canonical_value() == float(updated)
+
+
+def test_probe_only_change_never_replaces_calibrated_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Historical broad-model PROBE churn cannot become canonical evidence."""
+
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = (
+        (
+            "SSS11",
+            {
+                "OBJTYP": "SENSE",
+                "SUBTYP": "SOLAR",
+                "SNAME": "Solar",
+                "SOURCE": "64",
+                "PROBE": "100",
+            },
+        ),
+    )
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+
+    transport._controller._apply_updates(
+        [{"objnam": "SSS11", "params": {"PROBE": "139"}}]
+    )
+
+    snapshot = transport.read_snapshot()
+    solar = next(item for item in snapshot.temperatures if item.native_id == "SSS11")
+    canonical = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=snapshot.observed_at,
+    )
+    solar_value = next(
+        item.value
+        for item in canonical.observations
+        if item.observation_id == "solar.temperature"
+    )
+    assert solar.temperature == 64.0
+    assert solar_value == 64.0
 
 
 def test_disconnect_reconnect_and_clean_stop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -632,13 +977,15 @@ def test_body_state_change_refreshes_stale_spa_target_read_only(
                     {
                         "objnam": "B1202",
                         "keys": [
-                            "LOTMP",
-                            "SETPT",
-                            "SETTMP",
+                            "SNAME",
                             "HEATER",
+                            "HITMP",
                             "HTMODE",
-                            "STATUS",
+                            "LOTMP",
                             "LSTTMP",
+                            "MODE",
+                            "STATUS",
+                            "VOL",
                         ],
                     }
                 ]
@@ -1708,34 +2055,39 @@ def test_old_generation_body_response_is_rejected_after_reconnect(
     asyncio.run(exercise())
 
 
-def test_source_prefers_setpt_for_body_target_temperature() -> None:
-    """SETPT is the user-facing target even while LOTMP remains stale."""
+def test_source_uses_lotmp_for_body_target_temperature() -> None:
+    """LOTMP is the pyintellicenter heating setpoint contract."""
     source = (
         Path("custom_components/poolos/independent_intellicenter.py")
         .read_text(encoding="utf-8")
     )
 
-    assert '_SETPT_ATTR = "SETPT"' in source
-    assert "_number(item[_SETPT_ATTR])" in source
-    assert "else _number(item[LOTMP_ATTR])" in source
+    lotmp_index = source.index("_number(item[LOTMP_ATTR])", source.index("def _copy_body("))
+    settmp_index = source.index("_number(item[_SETTMP_ATTR])", lotmp_index)
+    setpt_index = source.index("_number(item[_SETPT_ATTR])", settmp_index)
+
+    assert lotmp_index < settmp_index < setpt_index
 
 
-def test_source_refreshes_body_when_setpt_changes() -> None:
-    """SETPT changes must participate in BODY reconciliation."""
+def test_source_never_continuously_monitors_auxiliary_body_targets() -> None:
+    """SETTMP/SETPT must remain fallbacks, not NotifyList subscriptions."""
     source = (
         Path("custom_components/poolos/independent_intellicenter.py")
         .read_text(encoding="utf-8")
     )
 
-    assert "_SETPT_ATTR," in source
-    assert "LOTMP_ATTR," in source
-    assert "trigger_attributes = {" in source
+    contract = source[source.index("_BODY_MONITOR_ATTRIBUTES = (") :]
+    contract = contract[: contract.index(")")]
+
+    assert "LOTMP_ATTR" in contract
+    assert "_SETTMP_ATTR" not in contract
+    assert "_SETPT_ATTR" not in contract
 
 
-def test_copy_body_prefers_setpt_over_stale_lotmp(
+def test_copy_body_prefers_lotmp_over_stale_setpt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Use SETPT as the user-facing target when LOTMP is stale."""
+    """A stale auxiliary SETPT must not mask the LOTMP heating target."""
     module = _load_module(monkeypatch)
 
     model = FakePoolModel({"BODY": set(), "HEATER": set()})
@@ -1765,7 +2117,7 @@ def test_copy_body_prefers_setpt_over_stale_lotmp(
     copied = module._copy_body(body, controller)
 
     assert copied is not None
-    assert copied.target_temperature == 101.0
+    assert copied.target_temperature == 98.0
 
 
 def test_copy_body_falls_back_to_lotmp_when_setpt_missing(
@@ -1803,96 +2155,10 @@ def test_copy_body_falls_back_to_lotmp_when_setpt_missing(
     assert copied.target_temperature == 98.0
 
 
-def test_setpt_update_triggers_body_refresh(
+def test_copy_body_prefers_lotmp_over_stale_settmp_and_setpt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A SETPT update should trigger one BODY metadata refresh."""
-    module = _load_module(monkeypatch)
-    FakeModelController.initial_objects = _objects()
-
-    async def exercise() -> None:
-        transport = module.IndependentIntelliCenterReadOnlyTransport(
-            host="192.0.2.10"
-        )
-        await transport.async_start()
-
-        transport._controller.sent_operations.clear()
-        transport._controller.sent_requests.clear()
-
-        transport._controller.command_response_queues["RequestParamList"] = [
-            {
-                "objectList": [
-                    {
-                        "objnam": "B1101",
-                        "params": {
-                            "LOTMP": "86",
-                            "SETPT": "91",
-                            "HEATER": "H0001",
-                            "HTMODE": "1",
-                            "STATUS": "ON",
-                            "LSTTMP": "82",
-                        },
-                    }
-                ]
-            },
-            {
-                "objectList": [
-                    {
-                        "objnam": "H0001",
-                        "params": {
-                            "OBJTYP": "HEATER",
-                            "SUBTYP": "HEATER",
-                            "SNAME": "Gas Heater",
-                        },
-                    }
-                ]
-            },
-        ]
-
-        body = transport._controller.model["B1101"]
-        assert body is not None
-        body.properties["SETPT"] = "91"
-
-        transport._on_updated(
-            {
-                "B1101": {
-                    "SETPT": "91",
-                }
-            }
-        )
-
-        for _ in range(20):
-            await asyncio.sleep(0)
-            if not transport._body_metadata_refresh_tasks:
-                break
-
-        body_requests = [
-            request
-            for request in transport._controller.sent_requests
-            if request[0] == "RequestParamList"
-            and request[1]
-            and request[1].get("objectList")
-            and request[1]["objectList"][0].get("objnam") == "B1101"
-        ]
-
-        assert len(body_requests) == 1
-        assert "SETPT" in body_requests[0][1]["objectList"][0]["keys"]
-
-        snapshot = transport.read_snapshot()
-        pool_body = next(
-            item for item in snapshot.bodies if item.native_id == "B1101"
-        )
-        assert pool_body.target_temperature == 91.0
-
-        await transport.async_stop()
-
-    asyncio.run(exercise())
-
-
-def test_copy_body_prefers_settmp_over_setpt_and_lotmp(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Use SETTMP when it is the newest configured target."""
+    """A stale SETTMP/SETPT pair must not mask the LOTMP heating target."""
     module = _load_module(monkeypatch)
 
     model = FakePoolModel({"BODY": set(), "HEATER": set()})
@@ -1905,9 +2171,9 @@ def test_copy_body_prefers_settmp_over_setpt_and_lotmp(
             "STATUS": "OFF",
             "HTMODE": "0",
             "LSTTMP": "89",
-            "LOTMP": "98",
+            "LOTMP": "97",
             "SETPT": "98",
-            "SETTMP": "102",
+            "SETTMP": "98",
             "HEATER": "H0001",
         },
     )
@@ -1923,13 +2189,13 @@ def test_copy_body_prefers_settmp_over_setpt_and_lotmp(
     copied = module._copy_body(body, controller)
 
     assert copied is not None
-    assert copied.target_temperature == 102.0
+    assert copied.target_temperature == 97.0
 
 
-def test_copy_body_falls_back_from_settmp_to_setpt(
+def test_copy_body_falls_back_to_settmp_when_lotmp_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Use SETPT when SETTMP is unavailable."""
+    """Use SETTMP only as compatibility evidence when LOTMP is unavailable."""
     module = _load_module(monkeypatch)
 
     model = FakePoolModel({"BODY": set(), "HEATER": set()})
@@ -1942,8 +2208,8 @@ def test_copy_body_falls_back_from_settmp_to_setpt(
             "STATUS": "ON",
             "HTMODE": "1",
             "LSTTMP": "95",
-            "LOTMP": "98",
-            "SETPT": "99",
+            "SETPT": "98",
+            "SETTMP": "99",
             "HEATER": "H0001",
         },
     )
@@ -1960,6 +2226,40 @@ def test_copy_body_falls_back_from_settmp_to_setpt(
 
     assert copied is not None
     assert copied.target_temperature == 99.0
+
+
+def test_copy_body_falls_back_to_setpt_when_lotmp_and_settmp_are_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain SETPT only as the final missing-value compatibility fallback."""
+
+    module = _load_module(monkeypatch)
+    model = FakePoolModel({"BODY": set(), "HEATER": set()})
+    body = model.add_object(
+        "B1202",
+        {
+            "OBJTYP": "BODY",
+            "SUBTYP": "SPA",
+            "SNAME": "Spa",
+            "STATUS": "OFF",
+            "HTMODE": "0",
+            "LSTTMP": "95",
+            "SETPT": "98",
+            "HEATER": "H0001",
+        },
+    )
+    assert body is not None
+    controller = FakeModelController(
+        "192.0.2.10",
+        model,
+        keepalive_interval=90.0,
+        transport="tcp",
+    )
+
+    copied = module._copy_body(body, controller)
+
+    assert copied is not None
+    assert copied.target_temperature == 98.0
 
 
 def test_native_update_notifies_snapshot_update_callback(

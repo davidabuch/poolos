@@ -124,6 +124,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         )
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
+        self._native_intellicenter_refresh_dirty = False
         self.native_intellicenter_inventory: Mapping[str, object] | None = None
         self.native_intellicenter_parity_engine = ObservationParityEngine()
         self.native_temperature_parity_eligibility = (
@@ -206,6 +207,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         if self._unloading:
             return
+        self._publish_latest_native_intellicenter_snapshot()
+        self._native_intellicenter_refresh_dirty = True
         task = self._native_intellicenter_refresh_task
         if task is not None and not task.done():
             return
@@ -214,21 +217,48 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "PoolOS native IntelliCenter snapshot propagation",
         )
 
+    def _publish_latest_native_intellicenter_snapshot(self) -> None:
+        """Publish canonical native state without awaiting durable observation work."""
+
+        if self._unloading:
+            return
+        transport = self.independent_intellicenter_transport
+        transport_snapshot = None if transport is None else transport.latest_snapshot
+        if transport_snapshot is None:
+            return
+        try:
+            mapped = self.native_intellicenter_adapter.map_snapshot(
+                transport_snapshot,
+                generated_at=datetime.now(UTC),
+            )
+        except (AttributeError, TypeError, ValueError):
+            LOGGER.exception(
+                "PoolOS fast native IntelliCenter snapshot publication rejected"
+            )
+            return
+        self.native_intellicenter_snapshot = mapped
+        self.async_update_listeners()
+
     async def _async_native_intellicenter_snapshot_updated(self) -> None:
-        """Publish a native transport update without waiting for reconciliation."""
+        """Publish the latest native snapshot until no callback remains pending."""
 
         try:
-            if self._unloading:
-                return
-            async with self._observation_lock:
+            while self._native_intellicenter_refresh_dirty:
+                # Clear before the pass so a callback during any await marks a
+                # required rerun. Multiple callbacks safely coalesce because
+                # every pass reads the transport's latest immutable snapshot.
+                self._native_intellicenter_refresh_dirty = False
                 if self._unloading:
                     return
-                self._event_refresh_count += 1
-                snapshot = await self._async_observe(
-                    observed_at=datetime.now(UTC),
-                    trigger="native_intellicenter_update",
-                )
-                self.async_set_updated_data(snapshot)
+                async with self._observation_lock:
+                    if self._unloading:
+                        return
+                    self._event_refresh_count += 1
+                    snapshot = await self._async_observe(
+                        observed_at=datetime.now(UTC),
+                        trigger="native_intellicenter_update",
+                    )
+                    self.async_set_updated_data(snapshot)
         finally:
             self._native_intellicenter_refresh_task = None
 
@@ -241,6 +271,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         refresh_task = self._native_intellicenter_refresh_task
         self._native_intellicenter_refresh_task = None
+        self._native_intellicenter_refresh_dirty = False
         if refresh_task is not None and not refresh_task.done():
             refresh_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -282,6 +313,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         """Stop new observations and wait for any active observation to finish."""
 
         self._unloading = True
+        self._native_intellicenter_refresh_dirty = False
         self.async_stop_event_observation()
         async with self._observation_lock:
             pass

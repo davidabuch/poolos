@@ -73,4 +73,4 @@ MULTIDAY_COMMISSIONING_WINDOW_DAYS = 14
 OPERATING_MODE_OBSERVE = "OBSERVE"
 DEFAULT_OPERATING_MODE = OPERATING_MODE_OBSERVE
 
-PLATFORMS = ("sensor", "binary_sensor", "button", "climate")
+PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light")

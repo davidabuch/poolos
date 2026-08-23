@@ -22,12 +22,14 @@ from pyintellicenter import (
     CIRCUIT_TYPE,
     GPM_ATTR,
     HEATER_ATTR,
+    HITMP_ATTR,
     HTMODE_ATTR,
     ICBaseController,
     ICConnectionHandler,
     ICModelController,
     LOTMP_ATTR,
     LSTTMP_ATTR,
+    MODE_ATTR,
     OBJTYP_ATTR,
     PARENT_ATTR,
     PUMP_STATUS_ON,
@@ -40,6 +42,7 @@ from pyintellicenter import (
     STATUS_ATTR,
     STATUS_OFF,
     SUBTYP_ATTR,
+    VOL_ATTR,
     PoolModel,
     PoolObject,
 )
@@ -60,12 +63,38 @@ from poolos.intellicenter_readonly import (
     NativeTemperatureState,
 )
 
-# IntelliCenter BODY target fields can converge at different times.
-# SETTMP updates promptly to the configured/requested target on this system,
-# while SETPT and LOTMP may lag before converging.
+# IntelliCenter and pyintellicenter define LOTMP as the heating setpoint.
+# Some firmware also exposes SETTMP and SETPT, but those values can remain stale
+# after a successful LOTMP command. They are compatibility fallbacks only.
 # pyintellicenter 0.1.20 does not export these constants at package top level.
 _SETTMP_ATTR = "SETTMP"
 _SETPT_ATTR = "SETPT"
+
+# IntelliCenter notification semantics depend on the BODY RequestParamList
+# subscription shape.  This is the proven attribute set used by the working
+# IntelliCenter integration: it yields prompt canonical LOTMP notifications.
+# Discovery identities remain broad, and every non-BODY object type retains
+# pyintellicenter's full monitoring map.
+_BODY_MONITOR_ATTRIBUTES = (
+    SNAME_ATTR,
+    HEATER_ATTR,
+    HITMP_ATTR,
+    HTMODE_ATTR,
+    LOTMP_ATTR,
+    LSTTMP_ATTR,
+    MODE_ATTR,
+    STATUS_ATTR,
+    VOL_ATTR,
+)
+
+# IntelliCenter notification semantics are also subscription-sensitive for
+# calibrated temperature sensors.  Broad SENSE monitoring can leave SOURCE
+# stale while PROBE continues changing.  Match the proven working integration:
+# SOURCE remains the canonical calibrated reading and SNAME preserves identity.
+_SENSE_MONITOR_ATTRIBUTES = (
+    SNAME_ATTR,
+    SOURCE_ATTR,
+)
 
 ALLOWED_READ_ONLY_PROTOCOL_OPERATIONS = frozenset(
     {"GetParamList", "RequestParamList"}
@@ -139,13 +168,15 @@ class ReadOnlyProtocolGuard:
 
 
 class _DiscoveryPoolModel(PoolModel):
-    """PoolModel variant that retains unknown identities instead of dropping them."""
+    """Retain broad discovery with narrow canonical BODY and SENSE monitoring."""
 
     def __init__(self) -> None:
         self._discovery_attribute_map = {
             name: set(attributes)
             for name, attributes in ALL_ATTRIBUTES_BY_TYPE.items()
         }
+        self._discovery_attribute_map[BODY_TYPE] = set(_BODY_MONITOR_ATTRIBUTES)
+        self._discovery_attribute_map[SENSE_TYPE] = set(_SENSE_MONITOR_ATTRIBUTES)
         super().__init__(self._discovery_attribute_map)
 
     def add_object(self, objnam: str, params: dict[str, Any]) -> PoolObject | None:
@@ -219,15 +250,11 @@ class _ReadOnlyModelController(ICModelController):
                 "objectList": [
                     {
                         "objnam": objnam,
-                        "keys": [
-                            LOTMP_ATTR,
-                            _SETPT_ATTR,
-                            _SETTMP_ATTR,
-                            HEATER_ATTR,
-                            HTMODE_ATTR,
-                            STATUS_ATTR,
-                            LSTTMP_ATTR,
-                        ],
+                        # RequestParamList also controls future NotifyList
+                        # semantics. Never broaden BODY monitoring here: broad
+                        # subscriptions cause this firmware to emit SETTMP while
+                        # leaving canonical LOTMP stale.
+                        "keys": list(_BODY_MONITOR_ATTRIBUTES),
                     }
                 ]
             },
@@ -663,8 +690,6 @@ class IndependentIntelliCenterReadOnlyTransport:
             HTMODE_ATTR,
             HEATER_ATTR,
             LSTTMP_ATTR,
-            _SETPT_ATTR,
-            _SETTMP_ATTR,
         }
 
         for objnam, changed in updates.items():
@@ -841,16 +866,16 @@ def _copy_body(
         active=str(status).upper() != STATUS_OFF,
         heating_active=controller.is_body_heating(item.objnam),
         current_temperature=_number(item[LSTTMP_ATTR]),
-        # SETTMP is the prompt configured/requested target on this IntelliCenter
-        # and can update well before SETPT/LOTMP converge. Prefer SETTMP, then
-        # SETPT, then LOTMP for compatibility with systems/firmware that omit it.
+        # LOTMP is the value written by pyintellicenter.set_heating_setpoint(),
+        # tracked by NotifyList, and used by the working IntelliCenter climate
+        # integration. Never let stale auxiliary fields mask a current LOTMP.
         target_temperature=(
-            _number(item[_SETTMP_ATTR])
-            if _number(item[_SETTMP_ATTR]) is not None
+            _number(item[LOTMP_ATTR])
+            if _number(item[LOTMP_ATTR]) is not None
             else (
-                _number(item[_SETPT_ATTR])
-                if _number(item[_SETPT_ATTR]) is not None
-                else _number(item[LOTMP_ATTR])
+                _number(item[_SETTMP_ATTR])
+                if _number(item[_SETTMP_ATTR]) is not None
+                else _number(item[_SETPT_ATTR])
             )
         ),
         active_heat_source=_heater_source(selected_heater),
