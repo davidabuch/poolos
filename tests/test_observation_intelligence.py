@@ -240,7 +240,6 @@ def test_solar_transition_is_enriched_and_episode_is_closed() -> None:
                 "spa.active": False,
                 "pool.active": True,
                 "heater.active": False,
-                "solar_preferred.active": True,
                 "pump.rpm": 2400,
                 "pump.gpm": 52.0,
                 "pump.power": 1350.0,
@@ -266,7 +265,7 @@ def test_solar_transition_is_enriched_and_episode_is_closed() -> None:
     assert transition.attributes["roof_to_water_differential_f"] == 13.5
     assert transition.attributes["pool_target_temperature_f"] == 86.0
     assert transition.attributes["pool_heating_demand_active"] is True
-    assert transition.attributes["solar_preferred_active"] is True
+    assert "solar_preferred_active" not in transition.attributes
     assert transition.attributes["pump_gpm"] == 52.0
     assert transition.attributes["pump_power"] == 1350.0
     with pytest.raises(TypeError):

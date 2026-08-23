@@ -5,12 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from homeassistant.components.light import ColorMode, LightEntity
+from homeassistant.components.light import ATTR_EFFECT, ColorMode, LightEntity, LightEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pyintellicenter import LIGHT_EFFECTS
 
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
@@ -19,6 +20,7 @@ from .manual_intellicenter import ManualIntelliCenterCommandError
 
 _POOL_LIGHT_OBJNAM = "C0002"
 _POOL_LIGHT_CONCEPT = "pool_light.active"
+_POOL_LIGHT_EFFECT_CONCEPT = "pool_light.effect"
 _POOL_LIGHT_TRANSITION_SECONDS = 20
 
 
@@ -56,6 +58,8 @@ class PoolOSNativeIntelliCenterPoolLight(
     _attr_icon = "mdi:pool"
     _attr_supported_color_modes = {ColorMode.ONOFF}
     _attr_color_mode = ColorMode.ONOFF
+    _attr_supported_features = LightEntityFeature.EFFECT
+    _attr_effect_list = list(LIGHT_EFFECTS.values())
 
     def __init__(
         self,
@@ -108,15 +112,48 @@ class PoolOSNativeIntelliCenterPoolLight(
         )
         return value if isinstance(value, bool) else None
 
+    @property
+    def effect(self) -> str | None:
+        """Return confirmed native IntelliBrite effect."""
+
+        effect_code = _native_value(
+            self.coordinator,
+            _POOL_LIGHT_EFFECT_CONCEPT,
+        )
+        if not isinstance(effect_code, str):
+            return None
+        return LIGHT_EFFECTS.get(effect_code)
+
+    @property
+    def native_effect_code(self) -> str | None:
+        """Return confirmed native IntelliBrite controller effect code."""
+
+        value = _native_value(
+            self.coordinator,
+            _POOL_LIGHT_EFFECT_CONCEPT,
+        )
+        return value if isinstance(value, str) else None
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the Pool Light circuit on."""
 
-        del kwargs
+        effect = kwargs.get(ATTR_EFFECT)
 
         manual = self._runtime.manual_intellicenter
         if manual is None:
             raise ManualIntelliCenterCommandError(
                 "manual IntelliCenter command connection is not configured"
+            )
+
+        if effect is not None:
+            reverse_effects = {name: code for code, name in LIGHT_EFFECTS.items()}
+            effect_code = reverse_effects.get(str(effect))
+            if effect_code is None:
+                raise ValueError(f"unsupported Pool Light effect: {effect}")
+
+            await manual.async_set_light_effect(
+                _POOL_LIGHT_OBJNAM,
+                effect_code,
             )
 
         await manual.async_set_circuit_state(
@@ -189,7 +226,9 @@ class PoolOSNativeIntelliCenterPoolLight(
                 manual is not None and manual.available
             ),
             "autonomous_command_delivery_enabled": False,
-            "effect_control_enabled": False,
+            "effect_control_enabled": True,
+            "effect_observation_concept": _POOL_LIGHT_EFFECT_CONCEPT,
+            "effect_code": self.native_effect_code,
             "optimistic": False,
             "transitioning": self._transitioning,
             "transition_lockout_seconds": _POOL_LIGHT_TRANSITION_SECONDS,

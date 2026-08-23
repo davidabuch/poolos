@@ -31,9 +31,9 @@ def test_manual_gateway_exposes_only_explicit_manual_operations() -> None:
     assert "async def async_set_body_active(" in source
     assert "async def async_set_heating_setpoint(" in source
     assert "async def async_set_circuit_state(" in source
+    assert "async def async_set_light_effect(" in source
 
     for prohibited in (
-        "async_set_light_effect",
         "async_set_pump_speed",
         "async_set_chlorinator",
         "async_set_heater_mode",
@@ -79,6 +79,7 @@ def test_manual_gateway_uses_pyintellicenter_supported_write_methods() -> None:
     assert "STATUS_ATTR: STATUS_ON if active else STATUS_OFF" in source
     assert "self._controller.set_heating_setpoint(" in source
     assert "self._controller.set_circuit_state(" in source
+    assert "self._controller.set_light_effect(" in source
 
 
 def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
@@ -98,6 +99,7 @@ def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
         "async_set_body_active",
         "async_set_heating_setpoint",
         "async_set_circuit_state",
+        "async_set_light_effect",
     }
 
 

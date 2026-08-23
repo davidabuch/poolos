@@ -329,7 +329,6 @@ def test_behavior_optional_native_features_can_be_absent_and_remain_healthy() ->
 
     for optional in (
         "pump.gpm",
-        "solar_preferred.active",
         "waterfall.active",
         "jets.active",
         "slide.active",

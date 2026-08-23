@@ -240,12 +240,36 @@ class PoolOSNativeClimate(
             temperature,
         )
 
+    def _native_body_value(self, concept_suffix: str) -> Any:
+        """Return one native-authoritative body observation value."""
+
+        concept = f"{self._description.key}.{concept_suffix}"
+        return _native_value(self.coordinator, concept)
+
+    @property
+    def _native_status_attribute(self) -> bool | None:
+        value = self._native_body_value("active")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def _native_heater_attribute(self) -> str | None:
+        value = self._native_body_value("raw_heater_id")
+        return value if isinstance(value, str) else None
+
+    @property
+    def _native_htmode_attribute(self) -> str | None:
+        value = self._native_body_value("raw_htmode")
+        return value if isinstance(value, str) else None
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose bounded authority and command-path diagnostics."""
 
         manual = self._runtime.manual_intellicenter
         return {
+            "Status": self._native_status_attribute,
+            "HEATER": self._native_heater_attribute,
+            "HTMODE": self._native_htmode_attribute,
             "body_objnam": self._description.body_objnam,
             "observation_source": "poolos.independent_intellicenter",
             "observation_authority": "native_intellicenter",

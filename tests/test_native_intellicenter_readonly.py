@@ -76,7 +76,11 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
             NativeCircuitState("C06", "Jets", False),
             NativeCircuitState("C07", "Slide", True),
             NativeCircuitState(
-                "C0002", "Pool Light", False, subtype="INTELLI"
+                "C0002",
+                "Pool Light",
+                False,
+                use="MAGNTAR",
+                subtype="INTELLI",
             ),
         ),
     )
@@ -110,7 +114,6 @@ def test_maps_supported_concepts_with_distinct_native_provenance() -> None:
     assert values["pump.gpm"].value == 42.0
     assert values["pump.power"].value == 1234.0
     assert values["solar.temperature"].value == 101.0
-    assert values["solar_preferred.active"].value is True
     assert values["slide.active"].value is True
     assert values["heater.active"].value is True
     assert values["pool.raw_heater_id"].value == "HTR01"
@@ -118,8 +121,8 @@ def test_maps_supported_concepts_with_distinct_native_provenance() -> None:
     assert values["spa.raw_heater_id"].value == "HTR02"
     assert values["spa.raw_htmode"].value == "0"
     assert values["pool_light.active"].value is False
+    assert values["pool_light.effect"].value == "MAGNTAR"
     assert "pool_light.color_mode" not in values
-    assert "pool_light.effect" not in values
     assert all(item.quality is ObservationQuality.GOOD for item in values.values())
     assert all(
         item.source_id is not None
@@ -288,7 +291,7 @@ def test_explicit_body_heat_source_distinguishes_heater_solar_and_preference() -
     assert values["pool.heating_demand_active"] is True
     assert values["solar.active"] is True
     assert values["heater.active"] is False
-    assert values["solar_preferred.active"] is True
+    assert "solar_preferred.active" not in values
 
 
 def test_active_heating_without_source_evidence_does_not_fabricate_heat_type() -> None:

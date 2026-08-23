@@ -67,11 +67,6 @@ NATIVE_BINARY_SENSORS: tuple[PoolOSNativeBinarySensorDescription, ...] = (
         "mdi:solar-power",
     ),
     PoolOSNativeBinarySensorDescription(
-        "solar_preferred.active",
-        "Solar Preferred",
-        "mdi:white-balance-sunny",
-    ),
-    PoolOSNativeBinarySensorDescription(
         "spa.active",
         "Spa Active",
         "mdi:hot-tub",

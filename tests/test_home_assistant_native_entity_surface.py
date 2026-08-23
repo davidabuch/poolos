@@ -29,7 +29,7 @@ def test_native_binary_sensor_surface_uses_independent_snapshot() -> None:
     assert '"PoolOS Native IntelliCenter"' in binary_text
 
 
-def test_native_surface_exposes_all_27_canonical_concepts_once() -> None:
+def test_native_surface_exposes_all_26_canonical_concepts_once() -> None:
     sensor_text = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
     binary_text = (COMPONENT / "binary_sensor.py").read_text(encoding="utf-8")
 
@@ -67,7 +67,6 @@ def test_native_surface_exposes_all_27_canonical_concepts_once() -> None:
         "slide.active",
         "solar.active",
         "solar.temperature",
-        "solar_preferred.active",
         "spa.active",
         "spa.command_active",
         "spa.heating_demand_active",
@@ -85,7 +84,7 @@ def test_native_surface_exposes_all_27_canonical_concepts_once() -> None:
         assert native_blocks.count(f'"{concept}"') == 1
 
     assert sensor_block.count("PoolOSNativeSensorDescription(") == 14
-    assert binary_block.count("PoolOSNativeBinarySensorDescription(") == 13
+    assert binary_block.count("PoolOSNativeBinarySensorDescription(") == 12
 
 
 def test_native_entity_names_do_not_duplicate_device_name() -> None:

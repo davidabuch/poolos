@@ -297,13 +297,13 @@ NATIVE_TARGET_CONCEPTS = (
     "pool.target_temperature",
     "pool.temperature",
     "pool_light.active",
+    "pool_light.effect",
     "pump.gpm",
     "pump.power",
     "pump.rpm",
     "slide.active",
     "solar.active",
     "solar.temperature",
-    "solar_preferred.active",
     "spa.active",
     "spa.command_active",
     "spa.heating_demand_active",
@@ -448,20 +448,19 @@ class NativeIntelliCenterReadAdapter:
                 None,
                 pool_light.native_id,
             )
+            _put(
+                values,
+                "pool_light.effect",
+                pool_light.use,
+                None,
+                pool_light.native_id,
+            )
 
         bodies = tuple(item for item in (pool, spa) if item is not None)
         heater_active = _active_heat_source_value(bodies, expected_source="gas")
         solar_active = _active_heat_source_value(bodies, expected_source="solar")
-        solar_preferred = _solar_preferred_value(bodies)
         _put(values, "heater.active", heater_active, None, "body-heat-source")
         _put(values, "solar.active", solar_active, None, "body-heat-source")
-        _put(
-            values,
-            "solar_preferred.active",
-            solar_preferred,
-            None,
-            "body-selected-heat-mode",
-        )
 
         observations = tuple(
             PoolObservation(
@@ -581,17 +580,6 @@ def _active_heat_source_value(
     return None
 
 
-def _solar_preferred_value(bodies: tuple[NativeBodyState, ...]) -> bool | None:
-    modes = tuple(
-        mode
-        for body in bodies
-        if (mode := _normalized_token(body.selected_heat_mode)) not in {None, "unknown"}
-    )
-    if not modes:
-        return None
-    return "solar preferred" in modes
-
-
 def _normalized_token(value: str | None) -> str | None:
     if value is None:
         return None
@@ -614,7 +602,6 @@ _CIRCUIT_ALIASES: Mapping[str, frozenset[str]] = MappingProxyType(
         "pool.command_active": frozenset({"pool", "pool circuit"}),
         "spa.command_active": frozenset({"spa", "spa circuit"}),
         "solar.active": frozenset({"solar", "solar heat"}),
-        "solar_preferred.active": frozenset({"solar preferred", "solarpref"}),
         "waterfall.active": frozenset({"waterfall", "water fall"}),
         "jets.active": frozenset({"jets", "spa jets"}),
         "slide.active": frozenset({"slide", "pool slide"}),
