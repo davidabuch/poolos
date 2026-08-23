@@ -187,7 +187,6 @@ def test_dashboard_uses_concise_operator_facing_entity_names() -> None:
         "name: Gas Heater",
         "name: Pool Heating Demand",
         "name: Spa Heating Demand",
-        "name: Solar Preferred",
         "name: Waterfall",
         "name: Jets",
         "name: Slide",

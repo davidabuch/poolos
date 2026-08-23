@@ -37,7 +37,7 @@ def test_learning_critical_sources_are_required() -> None:
         "CONF_SPA_COMMAND_ENTITY",
     ):
         assert token in const
-    assert "CONF_SOLAR_PREFERRED_ENTITY" in const
+    assert "CONF_SOLAR_PREFERRED_ENTITY" not in const
     assert "CONF_WATERFALL_ACTIVE_ENTITY" in const
     assert "CONF_JETS_ACTIVE_ENTITY" in const
     assert "CONF_SLIDE_ACTIVE_ENTITY" in const
@@ -202,7 +202,7 @@ def test_pool_light_optional_metadata_does_not_fail_observation_health() -> None
     source = (COMPONENT / "observation.py").read_text(encoding="utf-8")
     assert "quality_required: bool = True" in source
     assert 'ObservationConcept.POOL_LIGHT_COLOR_MODE, HomeAssistantValueType.STRING, None, True, "color_mode", quality_required=False' in source
-    assert 'ObservationConcept.POOL_LIGHT_EFFECT, HomeAssistantValueType.STRING, None, True, "effect", quality_required=False' in source
+    assert 'ObservationConcept.POOL_LIGHT_EFFECT, HomeAssistantValueType.STRING, None, True, "effect_code", quality_required=False' in source
 
 
 def test_stale_available_values_are_warning_not_global_health_failure() -> None:

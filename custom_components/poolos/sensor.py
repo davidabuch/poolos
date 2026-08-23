@@ -640,7 +640,6 @@ TELEMETRY = (
     ("heater_active", "Gas Heater Active", "heater.active", "mdi:fire"),
     ("pool_heating_demand", "Pool Heating Demand", "pool.heating_demand_active", "mdi:heat-wave"),
     ("spa_heating_demand", "Spa Heating Demand", "spa.heating_demand_active", "mdi:heat-wave"),
-    ("solar_preferred_active", "Solar Preferred", "solar_preferred.active", "mdi:sun-compass"),
     ("waterfall_active", "Waterfall Active", "waterfall.active", "mdi:waterfall"),
     ("jets_active", "Jets Active", "jets.active", "mdi:weather-windy"),
     ("slide_active", "Slide Active", "slide.active", "mdi:slide"),

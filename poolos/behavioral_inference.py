@@ -413,9 +413,6 @@ def _solar_transition_attributes(
         "spa_active": _boolean(frame.values.get("spa.active")),
         "pool_active": _boolean(frame.values.get("pool.active")),
         "heater_active": _boolean(frame.values.get("heater.active")),
-        "solar_preferred_active": _boolean(
-            frame.values.get("solar_preferred.active")
-        ),
         "pump_rpm": rpm,
         "pump_gpm": _number(frame.values.get("pump.gpm")),
         "pump_power": _number(frame.values.get("pump.power")),

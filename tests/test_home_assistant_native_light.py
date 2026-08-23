@@ -46,6 +46,7 @@ def test_pool_light_uses_only_narrow_manual_gateway_for_writes() -> None:
     source = _source()
 
     assert "manual.async_set_circuit_state(" in source
+    assert "manual.async_set_light_effect(" in source
     assert "_POOL_LIGHT_OBJNAM" in source
 
     for prohibited in (
@@ -54,19 +55,22 @@ def test_pool_light_uses_only_narrow_manual_gateway_for_writes() -> None:
         "SETPARAMLIST",
         "ACT_ATTR",
         "USE_ATTR",
-        "async_set_light_effect",
     ):
         assert prohibited not in source
 
 
-def test_pool_light_is_on_off_only_for_first_milestone() -> None:
+def test_pool_light_exposes_native_intellibrite_effects() -> None:
     source = _source()
 
     assert "_attr_supported_color_modes = {ColorMode.ONOFF}" in source
     assert "_attr_color_mode = ColorMode.ONOFF" in source
-    assert '"effect_control_enabled": False' in source
-    assert "effect_list" not in source
-    assert "async_set_effect" not in source
+    assert "_attr_supported_features = LightEntityFeature.EFFECT" in source
+    assert "_attr_effect_list = list(LIGHT_EFFECTS.values())" in source
+    assert '_POOL_LIGHT_EFFECT_CONCEPT = "pool_light.effect"' in source
+    assert "def effect(self)" in source
+    assert "LIGHT_EFFECTS.get(effect_code)" in source
+    assert "manual.async_set_light_effect(" in source
+    assert '"effect_control_enabled": True' in source
 
 
 def test_manual_gateway_explicitly_allows_pool_light_circuit() -> None:
@@ -126,3 +130,55 @@ def test_pool_light_off_does_not_start_transition_lockout() -> None:
     )[0]
 
     assert "_begin_transition_lockout()" not in off_block
+
+
+def test_pool_light_effect_selection_uses_narrow_gateway_before_turn_on() -> None:
+    source = _source()
+
+    effect_call = "await manual.async_set_light_effect("
+    on_call = "await manual.async_set_circuit_state("
+
+    assert effect_call in source
+    assert on_call in source
+    assert source.index(effect_call) < source.index(on_call)
+
+
+def test_pool_light_effect_change_uses_same_transition_lockout() -> None:
+    source = _source()
+
+    turn_on = source.split(
+        "async def async_turn_on",
+        1,
+    )[1].split(
+        "async def async_turn_off",
+        1,
+    )[0]
+
+    assert "manual.async_set_light_effect(" in turn_on
+    assert "self._begin_transition_lockout()" in turn_on
+
+
+def test_pool_light_effect_state_remains_native_authoritative() -> None:
+    source = _source()
+
+    assert '_POOL_LIGHT_EFFECT_CONCEPT = "pool_light.effect"' in source
+    assert "_native_value(" in source
+    assert "LIGHT_EFFECTS.get(effect_code)" in source
+    assert '"optimistic": False' in source
+
+
+def test_pool_light_exposes_native_effect_code_for_parity() -> None:
+    source = _source()
+
+    assert "def native_effect_code(self)" in source
+    assert '"effect_code": self.native_effect_code' in source
+    assert "_POOL_LIGHT_EFFECT_CONCEPT" in source
+
+
+def test_pool_light_ui_effect_remains_friendly_while_parity_uses_native_code() -> None:
+    source = _source()
+    observation = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+
+    assert "return LIGHT_EFFECTS.get(effect_code)" in source
+    assert '"effect_code", quality_required=False' in observation
+    assert '"effect", quality_required=False' not in observation

@@ -19,7 +19,7 @@ CSV_FIELDS = (
     "pump.rpm", "pump.gpm", "pump.power", "pool.temperature", "pool.target_temperature",
     "spa.temperature", "spa.target_temperature", "water.temperature", "solar.temperature",
     "air.temperature", "solar.active", "heater.active", "pool.heating_demand_active",
-    "spa.heating_demand_active", "solar_preferred.active", "waterfall.active", "jets.active", "slide.active",
+    "spa.heating_demand_active", "waterfall.active", "jets.active", "slide.active",
     "grid.available", "grid.outage_active", "pool_light.active", "pool_light.color_mode",
     "pool_light.effect",
 )

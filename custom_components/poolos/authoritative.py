@@ -42,8 +42,8 @@ from .observation import (
 
 # Native concepts required for PoolOS controller observation health.
 #
-# Optional installed features such as GPM, Solar Preferred, waterfall,
-# jets and slide remain useful native observations when present, but their
+# Optional installed features such as GPM, waterfall, jets and slide
+# remain useful native observations when present, but their
 # absence must not make an otherwise healthy controller installation fail.
 AUTHORITATIVE_REQUIRED_NATIVE_CONCEPTS = frozenset(
     {

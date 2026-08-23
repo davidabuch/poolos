@@ -470,3 +470,24 @@ def test_behavior_unavailable_manual_transport_disables_control() -> None:
         )
 
     assert manual.calls == []
+
+
+def test_native_climate_exposes_parity_body_context_attributes() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert '"Status": self._native_status_attribute' in source
+    assert '"HEATER": self._native_heater_attribute' in source
+    assert '"HTMODE": self._native_htmode_attribute' in source
+
+    assert 'self._native_body_value("active")' in source
+    assert 'self._native_body_value("raw_heater_id")' in source
+    assert 'self._native_body_value("raw_htmode")' in source
+
+
+def test_native_climate_body_context_remains_native_authoritative() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert "_native_value(self.coordinator, concept)" in source
+    assert "_native_status_attribute" in source
+    assert "_native_heater_attribute" in source
+    assert "_native_htmode_attribute" in source

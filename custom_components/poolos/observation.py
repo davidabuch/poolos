@@ -30,7 +30,6 @@ from .const import (
     CONF_PUMP_RPM_ENTITY,
     CONF_SLIDE_ACTIVE_ENTITY,
     CONF_SOLAR_ACTIVE_ENTITY,
-    CONF_SOLAR_PREFERRED_ENTITY,
     CONF_SOLAR_TEMPERATURE_ENTITY,
     CONF_SPA_COMMAND_ENTITY,
     CONF_SPA_THERMOSTAT_ENTITY,
@@ -68,7 +67,6 @@ class ObservationConcept(str, Enum):
 
     HEATER_ACTIVE = "heater.active"
     SOLAR_ACTIVE = "solar.active"
-    SOLAR_PREFERRED_ACTIVE = "solar_preferred.active"
     WATERFALL_ACTIVE = "waterfall.active"
     JETS_ACTIVE = "jets.active"
     SLIDE_ACTIVE = "slide.active"
@@ -147,11 +145,9 @@ MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
     EntityMappingSpec(CONF_GRID_STATUS_ENTITY, ObservationConcept.GRID_OUTAGE_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True, boolean_map=GRID_OUTAGE_MAP),
     EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_ACTIVE, HomeAssistantValueType.BOOLEAN, None, True),
     EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_COLOR_MODE, HomeAssistantValueType.STRING, None, True, "color_mode", quality_required=False),
-    EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_EFFECT, HomeAssistantValueType.STRING, None, True, "effect", quality_required=False),
+    EntityMappingSpec(CONF_POOL_LIGHT_ENTITY, ObservationConcept.POOL_LIGHT_EFFECT, HomeAssistantValueType.STRING, None, True, "effect_code", quality_required=False),
 
-    # Optional explanatory/hydraulic context.  Solar Preferred is recorded only
-    # to explain Pentair behavior during learning; PoolOS does not depend on it.
-    EntityMappingSpec(CONF_SOLAR_PREFERRED_ENTITY, ObservationConcept.SOLAR_PREFERRED_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
+    # Optional hydraulic feature context.
     EntityMappingSpec(CONF_WATERFALL_ACTIVE_ENTITY, ObservationConcept.WATERFALL_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
     EntityMappingSpec(CONF_JETS_ACTIVE_ENTITY, ObservationConcept.JETS_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
     EntityMappingSpec(CONF_SLIDE_ACTIVE_ENTITY, ObservationConcept.SLIDE_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),

@@ -9,7 +9,8 @@ exposes a deliberately tiny mutation surface:
 
 * turn Pool/Spa body circulation on or off
 * change Pool/Spa heating setpoint
-* turn explicitly allow-listed Jets, Slide, and Spillway circuits on or off
+* turn explicitly allow-listed Jets, Slide, Spillway, and Pool Light circuits on or off
+* change the Pool Light IntelliBrite effect on C0002
 
 No generic SETPARAMLIST interface is exposed to Home Assistant entities.
 """
@@ -27,6 +28,7 @@ from pyintellicenter import (
     ICBaseController,
     ICConnectionHandler,
     ICModelController,
+    LIGHT_EFFECTS,
     STATUS_ATTR,
     STATUS_OFF,
     STATUS_ON,
@@ -35,6 +37,7 @@ from pyintellicenter import (
 
 _ALLOWED_BODY_IDS = frozenset({"B1101", "B1202"})
 _ALLOWED_CIRCUIT_IDS = frozenset({"C0002", "C0003", "C0004", "FTR01"})
+_POOL_LIGHT_OBJNAM = "C0002"
 _MIN_TARGET_TEMPERATURE = 40
 _MAX_TARGET_TEMPERATURE = 104
 
@@ -60,7 +63,7 @@ class ManualCommandReceipt:
 
     body_objnam: str
     operation: str
-    value: bool | int
+    value: bool | int | str
 
 
 class _ManualConnectionHandler(ICConnectionHandler):
@@ -251,6 +254,45 @@ class ManualIntelliCenterControl:
             value=active,
         )
 
+
+    async def async_set_light_effect(
+        self,
+        circuit_objnam: str,
+        effect: str,
+    ) -> ManualCommandReceipt:
+        """Set the IntelliBrite effect for the Pool Light circuit."""
+
+        if circuit_objnam != _POOL_LIGHT_OBJNAM:
+            raise ValueError(
+                f"unsupported manual-control light circuit: {circuit_objnam}"
+            )
+
+        if effect not in LIGHT_EFFECTS:
+            raise ValueError(
+                f"unsupported Pool Light effect: {effect}"
+            )
+
+        await self._require_available()
+
+        async with self._command_lock:
+            try:
+                await self._controller.set_light_effect(
+                    circuit_objnam,
+                    effect,
+                )
+            except Exception as exc:
+                self._last_error_code = type(exc).__name__.upper()
+                raise ManualIntelliCenterCommandError(
+                    f"failed to set {circuit_objnam} light effect"
+                ) from exc
+
+        self._last_error_code = None
+        return ManualCommandReceipt(
+            body_objnam=circuit_objnam,
+            operation="light_effect",
+            value=effect,
+        )
+
     async def async_set_heating_setpoint(
         self,
         body_objnam: str,
@@ -307,6 +349,7 @@ class ManualIntelliCenterControl:
                     "body_active",
                     "heating_setpoint",
                     "circuit_active",
+                    "light_effect",
                 ],
                 "allowed_body_ids": sorted(_ALLOWED_BODY_IDS),
                 "allowed_circuit_ids": sorted(_ALLOWED_CIRCUIT_IDS),
