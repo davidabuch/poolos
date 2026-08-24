@@ -43,7 +43,6 @@ from poolos.operator_recommendation import OperatorRecommendation
 from poolos.observations import (
     ObservationQuality,
     PersistentObservationRecorder,
-    PoolObservation,
 )
 from poolos.observation_parity import (
     ObservationParityEngine,
@@ -125,6 +124,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_dirty = False
+        self._analysis_task: asyncio.Task[None] | None = None
+        self._analysis_dirty = False
+        self._analysis_requested_at: datetime | None = None
         self.native_intellicenter_inventory: Mapping[str, object] | None = None
         self.native_intellicenter_parity_engine = ObservationParityEngine()
         self.native_temperature_parity_eligibility = (
@@ -262,6 +264,81 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         finally:
             self._native_intellicenter_refresh_task = None
 
+    def _async_schedule_analysis(self, recorded_at: datetime) -> None:
+        """Coalesce expensive derived analysis outside observation serialization."""
+
+        if self._unloading:
+            return
+
+        if (
+            self._analysis_requested_at is None
+            or recorded_at > self._analysis_requested_at
+        ):
+            self._analysis_requested_at = recorded_at
+
+        self._analysis_dirty = True
+
+        task = self._analysis_task
+        if task is not None and not task.done():
+            return
+
+        self._analysis_task = self.hass.async_create_task(
+            self._async_analysis_worker(),
+            "PoolOS durable observation analysis",
+        )
+
+    async def _async_analysis_worker(self) -> None:
+        """Run expensive durable-history analysis serially and coalesce refreshes."""
+
+        try:
+            while self._analysis_dirty:
+                self._analysis_dirty = False
+                recorded_at = self._analysis_requested_at
+
+                if recorded_at is None:
+                    return
+
+                recommendation = self.operator_recommendation
+                recommendation_published_at = (
+                    self.operator_recommendation_published_at
+                )
+
+                try:
+                    result = await self.hass.async_add_executor_job(
+                        partial(
+                            self._infer_and_retro,
+                            recorded_at=recorded_at,
+                            recommendation=recommendation,
+                            recommendation_published_at=(
+                                recommendation_published_at
+                            ),
+                        )
+                    )
+                except (OSError, TypeError, ValueError):
+                    LOGGER.exception(
+                        "PoolOS persistent inference/retrospective update failed"
+                    )
+                    continue
+
+                (
+                    inference,
+                    current_retro,
+                    completed_retro,
+                    multiday_report,
+                    latest_acknowledgment,
+                ) = result
+
+                self.behavioral_inference_report = inference
+                self.current_daily_retrospective = current_retro
+                self.latest_completed_daily_retrospective = completed_retro
+                self.multiday_commissioning_report = multiday_report
+                self.latest_expected_outage_acknowledgment = (
+                    latest_acknowledgment
+                )
+                self.async_update_listeners()
+        finally:
+            self._analysis_task = None
+
     async def async_stop_independent_intellicenter(self) -> None:
         """Stop the independent connection and any in-flight startup."""
 
@@ -317,6 +394,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.async_stop_event_observation()
         async with self._observation_lock:
             pass
+
+        analysis_task = self._analysis_task
+        if analysis_task is not None and not analysis_task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await analysis_task
 
     async def async_handle_homeassistant_stop(self, _event: Event) -> None:
         """Quiesce PoolOS before Home Assistant reaches final-write shutdown."""
@@ -417,31 +499,19 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "stale_entities": list(snapshot.stale_entities),
         }
         try:
-            result = await self.hass.async_add_executor_job(
+            wrote = await self.hass.async_add_executor_job(
                 partial(
-                    self._record_infer_and_retro,
+                    self.observation_recorder.record_snapshot,
                     recorded_at=snapshot.generated_at,
                     observations=snapshot.observations,
                     health=health,
-                    recommendation=self.operator_recommendation,
-                    recommendation_published_at=self.operator_recommendation_published_at,
                 )
             )
-            if result is not None:
-                (
-                    inference,
-                    current_retro,
-                    completed_retro,
-                    multiday_report,
-                    latest_acknowledgment,
-                ) = result
-                self.behavioral_inference_report = inference
-                self.current_daily_retrospective = current_retro
-                self.latest_completed_daily_retrospective = completed_retro
-                self.multiday_commissioning_report = multiday_report
-                self.latest_expected_outage_acknowledgment = latest_acknowledgment
         except (OSError, TypeError, ValueError):
-            LOGGER.exception("PoolOS persistent observation/inference/retrospective update failed")
+            LOGGER.exception("PoolOS persistent observation update failed")
+        else:
+            if wrote:
+                self._async_schedule_analysis(snapshot.generated_at)
         return snapshot
 
     def _refresh_native_intellicenter_parity(
@@ -573,35 +643,28 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             )
         )
 
-    def _record_infer_and_retro(
+    def _infer_and_retro(
         self,
         *,
         recorded_at: datetime,
-        observations: tuple[PoolObservation, ...],
-        health: dict[str, object],
         recommendation: OperatorRecommendation | None,
         recommendation_published_at: datetime | None,
-        force_analysis: bool = False,
+        export_evidence: bool = True,
     ) -> tuple[
         BehavioralInferenceReport,
         DailyOperationalRetrospective,
         DailyOperationalRetrospective,
         MultiDayCommissioningReport | None,
         ExpectedOutageAcknowledgment | None,
-    ] | None:
-        """Persist evidence and refresh inference/retrospective only on durable writes."""
+    ]:
+        """Refresh derived analysis from already-durable observation evidence."""
 
-        wrote = self.observation_recorder.record_snapshot(
-            recorded_at=recorded_at,
-            observations=observations,
-            health=health,
-        )
-        if not wrote and not force_analysis:
-            return None
-
-        if wrote:
+        if export_evidence:
             try:
-                self.evidence_exporter.export_day(self.observation_recorder, recorded_at)
+                self.evidence_exporter.export_day(
+                    self.observation_recorder,
+                    recorded_at,
+                )
             except (OSError, TypeError, ValueError):
                 self.evidence_exporter.last_error = "daily evidence export failed"
                 LOGGER.exception("PoolOS daily evidence export failed")
@@ -817,21 +880,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.latest_expected_outage_acknowledgment = acknowledgment
         snapshot = self.data
         if snapshot is not None:
-            health = {
-                "healthy": snapshot.healthy,
-                "missing_required": list(snapshot.missing_required),
-                "unavailable_entities": list(snapshot.unavailable_entities),
-                "stale_entities": list(snapshot.stale_entities),
-            }
             result = await self.hass.async_add_executor_job(
                 partial(
-                    self._record_infer_and_retro,
+                    self._infer_and_retro,
                     recorded_at=at,
-                    observations=snapshot.observations,
-                    health=health,
                     recommendation=self.operator_recommendation,
                     recommendation_published_at=self.operator_recommendation_published_at,
-                    force_analysis=True,
+                    export_evidence=False,
                 )
             )
             if result is not None:

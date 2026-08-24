@@ -20,7 +20,8 @@ def test_expected_outage_button_persists_annotation_without_equipment_service() 
     assert '"Acknowledge Expected Pentair Outage"' in button
     assert "await self.coordinator.async_acknowledge_expected_outage()" in button
     assert "record_expected_outage_acknowledgment" in coordinator
-    assert "force_analysis=True" in coordinator
+    assert "self._infer_and_retro" in coordinator
+    assert "export_evidence=False" in coordinator
     assert "self._completed_history_for_date = None" in coordinator
     for prohibited in (
         "hass.services",

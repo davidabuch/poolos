@@ -30,7 +30,9 @@ def test_retrospective_runs_from_durable_history_off_event_loop() -> None:
     assert "DailyOperationalRetrospectiveEngine" in source
     assert "current_daily_retrospective" in source
     assert "latest_completed_daily_retrospective" in source
-    assert "self._record_infer_and_retro" in source
+    assert "self._infer_and_retro" in source
+    assert "self._async_schedule_analysis" in source
+    assert "self._async_analysis_worker" in source
     assert "async_add_executor_job" in source
     assert "self.observation_recorder.query" in source
     assert "PersistentRecommendationRecorder" in source
