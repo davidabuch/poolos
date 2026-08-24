@@ -85,6 +85,39 @@ def test_event_driven_observation_and_periodic_reconciliation_coexist() -> None:
     assert '"periodic_reconciliation_enabled": True' in coordinator
 
 
+def test_expensive_analysis_is_decoupled_from_observation_critical_path() -> None:
+    """Derived history analysis must not block serialized observation cadence."""
+
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    observe = coordinator.split(
+        "async def _async_observe(",
+        1,
+    )[1].split(
+        "def _refresh_native_intellicenter_parity(",
+        1,
+    )[0]
+
+    worker = coordinator.split(
+        "async def _async_analysis_worker(",
+        1,
+    )[1].split(
+        "async def async_stop_independent_intellicenter(",
+        1,
+    )[0]
+
+    # Primary observation still persists significant evidence.
+    assert "self.observation_recorder.record_snapshot" in observe
+
+    # Expensive derived analysis is only scheduled from the observation path.
+    assert "self._async_schedule_analysis(snapshot.generated_at)" in observe
+    assert "self._infer_and_retro" not in observe
+
+    # The separate serialized worker owns derived inference/retrospective work.
+    assert "self._infer_and_retro" in worker
+    assert "async_add_executor_job" in worker
+
+
 def test_significance_policy_bounds_high_frequency_numeric_noise() -> None:
     source = (ROOT / "poolos" / "observations" / "persistent.py").read_text(encoding="utf-8")
     assert '"pump.rpm": 25.0' in source

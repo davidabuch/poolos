@@ -30,7 +30,9 @@ def test_inference_runs_from_durable_history_off_event_loop() -> None:
     source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
     assert "BehavioralInferenceEngine" in source
     assert "behavioral_inference_report" in source
-    assert "self._record_infer_and_retro" in source
+    assert "self._infer_and_retro" in source
+    assert "self._async_schedule_analysis" in source
+    assert "self._async_analysis_worker" in source
     assert "async_add_executor_job" in source
     assert "timedelta(days=7)" in source
     assert "self.observation_recorder.query" in source
