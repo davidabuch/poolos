@@ -554,3 +554,79 @@ def test_current_incomplete_run_beyond_gap_breaks_continuity(tmp_path) -> None:
     summary = _record(store, NOW + timedelta(minutes=7), available=False)
 
     assert summary.continuous_evidence_seconds == 0
+
+
+def test_retired_historical_concept_does_not_degrade_current_readiness() -> None:
+    """A retired concept remains historical evidence but cannot degrade current readiness."""
+    from types import SimpleNamespace
+
+    from poolos.native_parity_commissioning import (
+        NativeParityCommissioningStatus,
+        summarize_native_parity,
+    )
+    from poolos.observation_parity import ObservationParityStatus
+
+    def detail(concept: str, status: ObservationParityStatus) -> SimpleNamespace:
+        return SimpleNamespace(
+            concept=concept,
+            status=status,
+            absolute_delta=None,
+        )
+
+    def record(at: datetime, details: tuple[SimpleNamespace, ...]) -> SimpleNamespace:
+        return SimpleNamespace(
+            generated_at=at,
+            details=details,
+            native_transport_available=True,
+            reconnect_count=0,
+            discovery_generation=1,
+            missing_native_count=0,
+            missing_ha_count=0,
+            stale_native_count=0,
+            stale_ha_count=0,
+        )
+
+    historical = tuple(
+        record(
+            NOW + timedelta(seconds=index),
+            (
+                detail(
+                    "solar_preferred.active",
+                    ObservationParityStatus.MISSING_NATIVE,
+                ),
+                detail(
+                    "pool.temperature",
+                    ObservationParityStatus.MATCH,
+                ),
+            ),
+        )
+        for index in range(5)
+    )
+
+    latest = record(
+        NOW + timedelta(seconds=5),
+        (
+            detail(
+                "pool.temperature",
+                ObservationParityStatus.MATCH,
+            ),
+        ),
+    )
+
+    summary = summarize_native_parity(
+        historical + (latest,),
+        target_duration=timedelta(seconds=1),
+    )
+
+    retired = next(
+        item
+        for item in summary.concept_statistics
+        if item.concept == "solar_preferred.active"
+    )
+
+    assert retired.current_consecutive_mismatch_count == 5
+    assert "solar_preferred.active" in summary.concepts_with_any_mismatch
+
+    assert summary.minimum_duration_reached is True
+    assert summary.persistent_mismatch_concepts == ()
+    assert summary.status is NativeParityCommissioningStatus.READY_FOR_REVIEW

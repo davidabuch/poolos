@@ -595,10 +595,17 @@ def summarize_native_parity(
     )
     total_comparisons = sum(status_totals.values())
     matches = status_totals[ObservationParityStatus.MATCH.value]
+    latest_concepts = (
+        {detail.concept for detail in ordered[-1].details}
+        if ordered
+        else set()
+    )
     persistent = tuple(
         item.concept
         for item in concept_stats
-        if item.current_consecutive_mismatch_count >= PERSISTENT_MISMATCH_CYCLE_COUNT
+        if item.concept in latest_concepts
+        and item.current_consecutive_mismatch_count
+        >= PERSISTENT_MISMATCH_CYCLE_COUNT
     )
     any_mismatch = tuple(
         item.concept for item in concept_stats if item.match_count < item.observation_count
