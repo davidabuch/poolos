@@ -79,7 +79,10 @@ def test_event_driven_observation_and_periodic_reconciliation_coexist() -> None:
     assert 'trigger="state_change_event"' in coordinator
     assert 'trigger="periodic_reconciliation"' in coordinator
     assert "self._observation_lock = asyncio.Lock()" in coordinator
-    assert "coordinator.async_start_event_observation()" in setup
+    assert "coordinator.async_activate_post_start()" in setup
+    assert "async_handle_homeassistant_started" in setup
+    assert "await async_activate_poolos_post_start()" in setup
+    assert "self.async_start_event_observation()" in coordinator
     assert "entry.async_on_unload(coordinator.async_stop_event_observation)" in setup
     assert '"event_driven_observation_enabled"' in coordinator
     assert '"periodic_reconciliation_enabled": True' in coordinator

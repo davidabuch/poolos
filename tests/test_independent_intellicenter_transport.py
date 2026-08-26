@@ -882,7 +882,10 @@ def test_production_path_has_no_ha_control_or_direct_socket_write() -> None:
     assert '{"getparamlist", "requestparamlist"}' in source
     assert 'require_allowed("setparamlist")' in source
     assert 'async_entries("intellicenter")' not in coordinator
-    assert "async_start_independent_intellicenter" in lifecycle
+    assert "def async_start_independent_intellicenter" in coordinator
+    assert "self.async_start_independent_intellicenter()" in coordinator
+    assert "async_activate_poolos_post_start" in lifecycle
+    assert "coordinator.async_activate_post_start()" in lifecycle
     assert "async_stop_independent_intellicenter" in lifecycle
 
 

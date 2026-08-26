@@ -199,6 +199,7 @@ def _harness() -> Any:
         def __init__(self) -> None:
             self.hass = _FakeHass()
             self._unloading = False
+            self._post_start_active = True
             self._native_intellicenter_refresh_task = None
             self._native_intellicenter_refresh_dirty = False
             self._independent_intellicenter_start_task = None
