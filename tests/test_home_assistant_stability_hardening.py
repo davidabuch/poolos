@@ -90,6 +90,124 @@ def test_lifecycle_diagnostics_uses_cached_parity_summary() -> None:
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
     assert "self.native_parity_commissioning_store.diagnostics(\n                    summary=self.native_parity_commissioning_summary" in coordinator
 
+
+def test_cold_start_defers_reactive_poolos_background_work_until_ha_started() -> None:
+    init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    first_refresh = init_source.index(
+        "await coordinator.async_config_entry_first_refresh()"
+    )
+    platforms = init_source.index(
+        "await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)"
+    )
+    startup_branch = init_source.index("if hass.is_running:")
+
+    assert first_refresh < platforms < startup_branch
+    assert "EVENT_HOMEASSISTANT_STARTED" in init_source
+    assert "async_handle_homeassistant_started" in init_source
+    assert "await async_activate_poolos_post_start()" in init_source
+
+    cold_setup = init_source[first_refresh:startup_branch]
+    assert "coordinator.async_start_event_observation()" not in cold_setup
+    assert "coordinator.async_start_independent_intellicenter()" not in cold_setup
+
+    schedule = coordinator.split(
+        "def _async_schedule_analysis", 1
+    )[1].split(
+        "async def _async_analysis_worker", 1
+    )[0]
+    assert "self._analysis_dirty = True" in schedule
+    assert "self._async_start_analysis_if_ready()" in schedule
+    assert "not self._post_start_active" in schedule
+
+
+def test_post_start_activation_starts_deferred_poolos_facilities_once() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    body = coordinator.split(
+        "def async_activate_post_start", 1
+    )[1].split(
+        "async def async_handle_homeassistant_started", 1
+    )[0]
+
+    assert "if self._unloading or self._post_start_active:" in body
+    assert "self._post_start_active = True" in body
+    assert "self.async_start_event_observation()" in body
+    assert "self.async_start_independent_intellicenter()" in body
+    assert "self._async_start_analysis_if_ready()" in body
+    assert "self._async_start_native_intellicenter_refresh_if_ready()" in body
+
+
+def test_running_reload_activates_without_waiting_for_started_event() -> None:
+    init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+
+    branch = init_source.split("if hass.is_running:", 1)[1].split(
+        "return True", 1
+    )[0]
+
+    assert "await async_activate_poolos_post_start()" in branch
+    assert "EVENT_HOMEASSISTANT_STARTED" in branch
+
+
+def test_startup_analysis_coalescing_preserves_latest_request() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    schedule = coordinator.split(
+        "def _async_schedule_analysis", 1
+    )[1].split(
+        "def _async_start_analysis_if_ready", 1
+    )[0]
+
+    assert "recorded_at > self._analysis_requested_at" in schedule
+    assert "self._analysis_requested_at = recorded_at" in schedule
+    assert "self._analysis_dirty = True" in schedule
+
+    worker = coordinator.split(
+        "async def _async_analysis_worker", 1
+    )[1].split(
+        "async def async_stop_independent_intellicenter", 1
+    )[0]
+
+    assert "recorded_at = self._analysis_requested_at" in worker
+    assert "while self._analysis_dirty:" in worker
+
+
+def test_unload_prevents_deferred_post_start_work_from_starting() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    unload = coordinator.split(
+        "async def async_prepare_unload", 1
+    )[1].split(
+        "async def async_handle_homeassistant_stop", 1
+    )[0]
+
+    activation = coordinator.split(
+        "def async_activate_post_start", 1
+    )[1].split(
+        "async def async_handle_homeassistant_started", 1
+    )[0]
+
+    assert "self._unloading = True" in unload
+    assert "self._post_start_active = False" in unload
+    assert "if self._unloading or self._post_start_active:" in activation
+
+
+def test_native_snapshot_propagation_is_deferred_during_cold_start() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    schedule = coordinator.split(
+        "def _async_schedule_native_intellicenter_refresh", 1
+    )[1].split(
+        "def _publish_latest_native_intellicenter_snapshot", 1
+    )[0]
+
+    assert "self._native_intellicenter_refresh_dirty = True" in schedule
+    assert "if not self._post_start_active:" in schedule
+    assert "PoolOS native IntelliCenter snapshot propagation" in schedule
+
+
+
 def test_home_assistant_stop_quiesces_poolos_before_final_shutdown() -> None:
     init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")

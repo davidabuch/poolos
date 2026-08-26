@@ -8,7 +8,10 @@ from pathlib import Path
 import sys
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STARTED,
+    EVENT_HOMEASSISTANT_STOP,
+)
 from homeassistant.core import HomeAssistant
 
 
@@ -49,7 +52,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     coordinator = PoolOSCoordinator(hass, entry)
     await coordinator.async_initialize_persistence()
     await coordinator.async_config_entry_first_refresh()
-    coordinator.async_start_event_observation()
     entry.async_on_unload(coordinator.async_stop_event_observation)
     entry.async_on_unload(
         hass.bus.async_listen_once(
@@ -67,8 +69,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             transport=str(configured.get("intellicenter_transport", "tcp")),
         )
     )
-    if manual_intellicenter is not None:
-        await manual_intellicenter.async_start()
 
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
@@ -78,7 +78,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
-    coordinator.async_start_independent_intellicenter()
+
+    async def async_activate_poolos_post_start() -> None:
+        """Start deferred PoolOS facilities after Home Assistant startup."""
+
+        if coordinator._unloading:
+            return
+
+        if manual_intellicenter is not None:
+            await manual_intellicenter.async_start()
+
+        if coordinator._unloading:
+            return
+
+        coordinator.async_activate_post_start()
+
+    if hass.is_running:
+        await async_activate_poolos_post_start()
+    else:
+        async def async_handle_homeassistant_started(_event: object) -> None:
+            """Activate deferred PoolOS work after Home Assistant is operational."""
+
+            await async_activate_poolos_post_start()
+
+        entry.async_on_unload(
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED,
+                async_handle_homeassistant_started,
+            )
+        )
+
     return True
 
 

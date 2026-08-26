@@ -579,11 +579,9 @@ def summarize_native_parity(
     start = ordered[0].generated_at if ordered else None
     latest = ordered[-1].generated_at if ordered else None
     elapsed = 0.0 if start is None or latest is None else (latest - start).total_seconds()
-    continuous_start, maximum_gap = _continuous_start(ordered, maximum_continuous_gap)
-    continuous = (
-        0.0
-        if continuous_start is None or latest is None
-        else (latest - continuous_start).total_seconds()
+    continuous, maximum_gap = _continuous_evidence_seconds(
+        ordered,
+        maximum_continuous_gap,
     )
     by_concept: dict[str, list[tuple[datetime, NativeParityEvidenceDetail]]] = {}
     status_totals = {status.value: 0 for status in ObservationParityStatus}
@@ -597,10 +595,17 @@ def summarize_native_parity(
     )
     total_comparisons = sum(status_totals.values())
     matches = status_totals[ObservationParityStatus.MATCH.value]
+    latest_concepts = (
+        {detail.concept for detail in ordered[-1].details}
+        if ordered
+        else set()
+    )
     persistent = tuple(
         item.concept
         for item in concept_stats
-        if item.current_consecutive_mismatch_count >= PERSISTENT_MISMATCH_CYCLE_COUNT
+        if item.concept in latest_concepts
+        and item.current_consecutive_mismatch_count
+        >= PERSISTENT_MISMATCH_CYCLE_COUNT
     )
     any_mismatch = tuple(
         item.concept for item in concept_stats if item.match_count < item.observation_count
@@ -710,44 +715,106 @@ def _concept_statistics(
     )
 
 
-def _continuous_start(
-    records: tuple[NativeParityEvidenceRecord, ...], maximum_gap: timedelta
-) -> tuple[datetime | None, float]:
-    start: datetime | None = None
-    previous_record: datetime | None = None
-    previous_complete: datetime | None = None
+def _continuous_evidence_seconds(
+    records: tuple[NativeParityEvidenceRecord, ...],
+    maximum_gap: timedelta,
+) -> tuple[float, float]:
+    """Accrue supported commissioning evidence across tolerated interruptions.
+
+    Recorder silence longer than the evidence window pauses accumulation but
+    does not erase previously earned evidence.
+
+    Observed incomplete evidence is different from recorder silence. A short
+    incomplete run may be bridged when complete evidence resumes inside the
+    allowed window. If an observed incomplete run extends beyond that window,
+    the current commissioning epoch is reset.
+
+    Explicit transport identity discontinuities are hard resets:
+    - reconnect counter increase
+    - discovery generation change
+    """
+
+    accrued = 0.0
     largest = 0.0
     maximum_gap_seconds = maximum_gap.total_seconds()
 
+    previous_record: NativeParityEvidenceRecord | None = None
+    previous_complete: NativeParityEvidenceRecord | None = None
+    incomplete_seen_since_complete = False
+
     for record in records:
-        record_gap = (
-            0.0
-            if previous_record is None
-            else (record.generated_at - previous_record).total_seconds()
-        )
-        largest = max(largest, record_gap)
-        previous_record = record.generated_at
+        if previous_record is not None:
+            record_gap = (
+                record.generated_at - previous_record.generated_at
+            ).total_seconds()
+            largest = max(largest, record_gap)
 
-        if not _record_has_complete_comparison_evidence(record):
-            continue
+            explicit_transport_break = (
+                record.reconnect_count > previous_record.reconnect_count
+                or record.discovery_generation
+                != previous_record.discovery_generation
+            )
 
-        if (
-            start is None
-            or previous_complete is None
-            or (record.generated_at - previous_complete).total_seconds()
-            > maximum_gap_seconds
-        ):
-            start = record.generated_at
-        previous_complete = record.generated_at
+            if explicit_transport_break:
+                accrued = 0.0
+                previous_complete = None
+                incomplete_seen_since_complete = False
 
-    if not records or previous_complete is None:
-        return None, largest
+        complete = _record_has_complete_comparison_evidence(record)
 
-    latest = records[-1].generated_at
-    if (latest - previous_complete).total_seconds() > maximum_gap_seconds:
-        return None, largest
+        if complete:
+            if previous_complete is not None:
+                evidence_gap = (
+                    record.generated_at - previous_complete.generated_at
+                ).total_seconds()
 
-    return start, largest
+                if evidence_gap <= maximum_gap_seconds:
+                    # Complete evidence resumed inside the tolerated window.
+                    # This also bridges a short observed incomplete interval.
+                    accrued += max(0.0, evidence_gap)
+                elif incomplete_seen_since_complete:
+                    # Positive incomplete/unavailable evidence persisted across
+                    # more than the tolerated commissioning window.
+                    accrued = 0.0
+                # Otherwise this was recorder silence only. The unsupported
+                # interval contributes no time but does not erase prior credit.
+
+            previous_complete = record
+            incomplete_seen_since_complete = False
+
+        else:
+            if previous_complete is not None:
+                incomplete_seen_since_complete = True
+
+                incomplete_duration = (
+                    record.generated_at - previous_complete.generated_at
+                ).total_seconds()
+
+                if incomplete_duration > maximum_gap_seconds:
+                    # The observed incomplete state itself has now exceeded
+                    # tolerance; terminate the current commissioning epoch.
+                    accrued = 0.0
+                    previous_complete = None
+                    incomplete_seen_since_complete = False
+
+        previous_record = record
+
+    # While an observed incomplete state is still inside the tolerated window,
+    # preserve the existing commissioning semantics by carrying the clock to
+    # the timestamp of that most recent incomplete observation.
+    if (
+        records
+        and previous_complete is not None
+        and incomplete_seen_since_complete
+    ):
+        tail = (
+            records[-1].generated_at - previous_complete.generated_at
+        ).total_seconds()
+
+        if 0.0 <= tail <= maximum_gap_seconds:
+            accrued += tail
+
+    return accrued, largest
 
 
 def _record_has_complete_comparison_evidence(

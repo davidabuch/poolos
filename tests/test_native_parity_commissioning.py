@@ -432,6 +432,73 @@ def test_incomplete_trailing_append_preserves_valid_prefix_and_repairs(
         item["generated_at"] for item in repaired
     )
 
+def test_healthy_recorder_gap_pauses_without_erasing_prior_evidence(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=1))
+
+    # No evidence is available for this six-minute interval. The gap itself
+    # must not erase the already earned minute of valid evidence.
+    summary = _record(store, NOW + timedelta(minutes=7))
+
+    assert summary.maximum_evidence_gap_seconds == 6 * 60
+    assert summary.continuous_evidence_seconds == 1 * 60
+
+
+def test_healthy_recorder_gap_resumes_accrual_after_pause(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+
+    _record(store, NOW)
+    _record(store, NOW + timedelta(minutes=1))
+    _record(store, NOW + timedelta(minutes=7))
+    summary = _record(store, NOW + timedelta(minutes=8))
+
+    # 12:00-12:01 counts; 12:01-12:07 is unsupported and counts zero;
+    # 12:07-12:08 counts.
+    assert summary.continuous_evidence_seconds == 2 * 60
+
+
+def test_reconnect_is_a_hard_commissioning_epoch_reset(tmp_path) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+
+    _record(store, NOW, reconnects=0)
+    _record(store, NOW + timedelta(minutes=1), reconnects=0)
+    _record(store, NOW + timedelta(minutes=2), reconnects=1)
+    summary = _record(store, NOW + timedelta(minutes=3), reconnects=1)
+
+    assert summary.continuous_evidence_seconds == 1 * 60
+
+
+def test_discovery_generation_change_is_a_hard_commissioning_epoch_reset(
+    tmp_path,
+) -> None:
+    store = NativeParityCommissioningStore(
+        tmp_path,
+        target_duration=timedelta(minutes=10),
+        maximum_continuous_gap=timedelta(minutes=5),
+    )
+
+    _record(store, NOW, generation=1)
+    _record(store, NOW + timedelta(minutes=1), generation=1)
+    _record(store, NOW + timedelta(minutes=2), generation=2)
+    summary = _record(store, NOW + timedelta(minutes=3), generation=2)
+
+    assert summary.continuous_evidence_seconds == 1 * 60
+
+
 def test_transient_incomplete_cycle_within_gap_preserves_continuity(tmp_path) -> None:
     store = NativeParityCommissioningStore(
         tmp_path,
@@ -487,3 +554,79 @@ def test_current_incomplete_run_beyond_gap_breaks_continuity(tmp_path) -> None:
     summary = _record(store, NOW + timedelta(minutes=7), available=False)
 
     assert summary.continuous_evidence_seconds == 0
+
+
+def test_retired_historical_concept_does_not_degrade_current_readiness() -> None:
+    """A retired concept remains historical evidence but cannot degrade current readiness."""
+    from types import SimpleNamespace
+
+    from poolos.native_parity_commissioning import (
+        NativeParityCommissioningStatus,
+        summarize_native_parity,
+    )
+    from poolos.observation_parity import ObservationParityStatus
+
+    def detail(concept: str, status: ObservationParityStatus) -> SimpleNamespace:
+        return SimpleNamespace(
+            concept=concept,
+            status=status,
+            absolute_delta=None,
+        )
+
+    def record(at: datetime, details: tuple[SimpleNamespace, ...]) -> SimpleNamespace:
+        return SimpleNamespace(
+            generated_at=at,
+            details=details,
+            native_transport_available=True,
+            reconnect_count=0,
+            discovery_generation=1,
+            missing_native_count=0,
+            missing_ha_count=0,
+            stale_native_count=0,
+            stale_ha_count=0,
+        )
+
+    historical = tuple(
+        record(
+            NOW + timedelta(seconds=index),
+            (
+                detail(
+                    "solar_preferred.active",
+                    ObservationParityStatus.MISSING_NATIVE,
+                ),
+                detail(
+                    "pool.temperature",
+                    ObservationParityStatus.MATCH,
+                ),
+            ),
+        )
+        for index in range(5)
+    )
+
+    latest = record(
+        NOW + timedelta(seconds=5),
+        (
+            detail(
+                "pool.temperature",
+                ObservationParityStatus.MATCH,
+            ),
+        ),
+    )
+
+    summary = summarize_native_parity(
+        historical + (latest,),
+        target_duration=timedelta(seconds=1),
+    )
+
+    retired = next(
+        item
+        for item in summary.concept_statistics
+        if item.concept == "solar_preferred.active"
+    )
+
+    assert retired.current_consecutive_mismatch_count == 5
+    assert "solar_preferred.active" in summary.concepts_with_any_mismatch
+
+    assert summary.minimum_duration_reached is True
+    assert summary.persistent_mismatch_concepts == ()
+    assert summary.status is NativeParityCommissioningStatus.READY_FOR_REVIEW

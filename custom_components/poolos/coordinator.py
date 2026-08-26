@@ -124,6 +124,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_dirty = False
+        self._post_start_active = False
         self._analysis_task: asyncio.Task[None] | None = None
         self._analysis_dirty = False
         self._analysis_requested_at: datetime | None = None
@@ -209,11 +210,29 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         if self._unloading:
             return
-        self._publish_latest_native_intellicenter_snapshot()
+
         self._native_intellicenter_refresh_dirty = True
+
+        if not self._post_start_active:
+            return
+
+        self._publish_latest_native_intellicenter_snapshot()
+        self._async_start_native_intellicenter_refresh_if_ready()
+
+    def _async_start_native_intellicenter_refresh_if_ready(self) -> None:
+        """Start deferred native propagation only after HA startup completes."""
+
+        if (
+            self._unloading
+            or not self._post_start_active
+            or not self._native_intellicenter_refresh_dirty
+        ):
+            return
+
         task = self._native_intellicenter_refresh_task
         if task is not None and not task.done():
             return
+
         self._native_intellicenter_refresh_task = self.hass.async_create_task(
             self._async_native_intellicenter_snapshot_updated(),
             "PoolOS native IntelliCenter snapshot propagation",
@@ -277,9 +296,19 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             self._analysis_requested_at = recorded_at
 
         self._analysis_dirty = True
+        self._async_start_analysis_if_ready()
+
+    def _async_start_analysis_if_ready(self) -> None:
+        """Start deferred analysis only after Home Assistant startup completes."""
+
+        if self._unloading or not self._post_start_active:
+            return
 
         task = self._analysis_task
         if task is not None and not task.done():
+            return
+
+        if not self._analysis_dirty or self._analysis_requested_at is None:
             return
 
         self._analysis_task = self.hass.async_create_task(
@@ -363,6 +392,27 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         if self.independent_intellicenter_transport is not None:
             await self.independent_intellicenter_transport.async_stop()
 
+    def async_activate_post_start(self) -> None:
+        """Activate reactive PoolOS facilities after Home Assistant startup."""
+
+        if self._unloading or self._post_start_active:
+            return
+
+        self._post_start_active = True
+        self.async_start_event_observation()
+        self.async_start_independent_intellicenter()
+
+        if self._native_intellicenter_refresh_dirty:
+            self._publish_latest_native_intellicenter_snapshot()
+            self._async_start_native_intellicenter_refresh_if_ready()
+
+        self._async_start_analysis_if_ready()
+
+    async def async_handle_homeassistant_started(self, _event: Event) -> None:
+        """Activate deferred PoolOS work after Home Assistant is operational."""
+
+        self.async_activate_post_start()
+
     def async_start_event_observation(self) -> None:
         """Subscribe to mapped HA state changes for immediate observation."""
 
@@ -390,6 +440,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         """Stop new observations and wait for any active observation to finish."""
 
         self._unloading = True
+        self._post_start_active = False
         self._native_intellicenter_refresh_dirty = False
         self.async_stop_event_observation()
         async with self._observation_lock:
