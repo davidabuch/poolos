@@ -103,7 +103,6 @@ def test_runtime_translation_is_present_without_core_build_strings() -> None:
 
 def test_no_control_platform_or_service_is_added() -> None:
     prohibited = {
-        "number.py",
         "select.py",
         "services.yaml",
     }

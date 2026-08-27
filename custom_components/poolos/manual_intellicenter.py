@@ -11,6 +11,7 @@ exposes a deliberately tiny mutation surface:
 * change Pool/Spa heating setpoint
 * turn explicitly allow-listed Jets, Slide, Spillway, and Pool Light circuits on or off
 * change the Pool Light IntelliBrite effect on C0002
+* change the explicitly allow-listed Pool PMPCIRC RPM setpoint on p0102
 
 No generic SETPARAMLIST interface is exposed to Home Assistant entities.
 """
@@ -29,6 +30,13 @@ from pyintellicenter import (
     ICConnectionHandler,
     ICModelController,
     LIGHT_EFFECTS,
+    MAX_ATTR,
+    MIN_ATTR,
+    PARENT_ATTR,
+    PMPCIRC_TYPE,
+    PUMP_TYPE,
+    SELECT_ATTR,
+    SPEED_ATTR,
     STATUS_ATTR,
     STATUS_OFF,
     STATUS_ON,
@@ -38,6 +46,13 @@ from pyintellicenter import (
 _ALLOWED_BODY_IDS = frozenset({"B1101", "B1202"})
 _ALLOWED_CIRCUIT_IDS = frozenset({"C0002", "C0003", "C0004", "FTR01"})
 _POOL_LIGHT_OBJNAM = "C0002"
+
+# p0102 is the native IntelliCenter PMPCIRC backing the existing
+# number.buch_family_rpm_pool entity. This is a circuit speed setpoint,
+# not the physical pump RPM telemetry value.
+_ALLOWED_PUMP_CIRCUIT_IDS = frozenset({"p0102"})
+_PUMP_RPM_MODE = "RPM"
+
 _MIN_TARGET_TEMPERATURE = 40
 _MAX_TARGET_TEMPERATURE = 104
 
@@ -337,6 +352,58 @@ class ManualIntelliCenterControl:
             value=target,
         )
 
+
+    async def async_set_pump_circuit_speed(
+        self,
+        pump_circuit_objnam: str,
+        rpm: int | float,
+    ) -> ManualCommandReceipt:
+        """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
+
+        self._require_pump_circuit_id(pump_circuit_objnam)
+
+        if isinstance(rpm, bool) or not isinstance(rpm, (int, float)):
+            raise ValueError("pump RPM must be numeric")
+
+        numeric = float(rpm)
+        target = int(round(numeric))
+
+        if numeric != float(target):
+            raise ValueError("pump RPM must be a whole number")
+
+        await self._require_available()
+
+        minimum, maximum = self._pump_circuit_rpm_limits(
+            pump_circuit_objnam
+        )
+
+        if not minimum <= target <= maximum:
+            raise ValueError(
+                f"pump RPM must be between {minimum} and {maximum}"
+            )
+
+        async with self._command_lock:
+            try:
+                await self._controller.request_changes(
+                    pump_circuit_objnam,
+                    {
+                        SPEED_ATTR: str(target),
+                    },
+                )
+            except Exception as exc:
+                self._last_error_code = type(exc).__name__.upper()
+                raise ManualIntelliCenterCommandError(
+                    f"failed to set {pump_circuit_objnam} pump circuit speed"
+                ) from exc
+
+        self._last_error_code = None
+
+        return ManualCommandReceipt(
+            body_objnam=pump_circuit_objnam,
+            operation="pump_circuit_speed",
+            value=target,
+        )
+
     def diagnostics(self) -> Mapping[str, Any]:
         """Return bounded diagnostics without exposing a generic command API."""
 
@@ -350,9 +417,15 @@ class ManualIntelliCenterControl:
                     "heating_setpoint",
                     "circuit_active",
                     "light_effect",
+                    "pump_circuit_speed",
                 ],
                 "allowed_body_ids": sorted(_ALLOWED_BODY_IDS),
                 "allowed_circuit_ids": sorted(_ALLOWED_CIRCUIT_IDS),
+                "allowed_pump_circuit_ids": sorted(
+                    _ALLOWED_PUMP_CIRCUIT_IDS
+                ),
+                "pump_rpm_requires_native_limits": True,
+                "pump_rpm_requires_explicit_rpm_mode": True,
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
                 "target_temperature_max": _MAX_TARGET_TEMPERATURE,
                 "last_error_code": self._last_error_code,
@@ -381,6 +454,77 @@ class ManualIntelliCenterControl:
             raise ValueError(
                 f"unsupported manual-control circuit: {circuit_objnam}"
             )
+
+
+    @staticmethod
+    def _require_pump_circuit_id(pump_circuit_objnam: str) -> None:
+        if pump_circuit_objnam not in _ALLOWED_PUMP_CIRCUIT_IDS:
+            raise ValueError(
+                "unsupported manual-control pump circuit: "
+                f"{pump_circuit_objnam}"
+            )
+
+    @staticmethod
+    def _coerce_positive_int(value: object) -> int | None:
+        if isinstance(value, bool) or value is None:
+            return None
+
+        try:
+            numeric = int(str(value))
+        except (TypeError, ValueError):
+            return None
+
+        return numeric if numeric > 0 else None
+
+    def _pump_circuit_rpm_limits(
+        self,
+        pump_circuit_objnam: str,
+    ) -> tuple[int, int]:
+        """Validate PMPCIRC identity/mode and return parent pump limits."""
+
+        item = self._model[pump_circuit_objnam]
+
+        if item is None or str(item.objtype).upper() != str(PMPCIRC_TYPE).upper():
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} is not a live PMPCIRC object"
+            )
+
+        mode = item[SELECT_ATTR]
+
+        if mode is None or str(mode).upper() != _PUMP_RPM_MODE:
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} is not configured for RPM control"
+            )
+
+        parent_id = item[PARENT_ATTR]
+
+        if parent_id is None or not str(parent_id).strip():
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} has no parent pump"
+            )
+
+        parent = self._model[str(parent_id)]
+
+        if parent is None or str(parent.objtype).upper() != str(PUMP_TYPE).upper():
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} parent is not a live pump object"
+            )
+
+        minimum = self._coerce_positive_int(parent[MIN_ATTR])
+        maximum = self._coerce_positive_int(parent[MAX_ATTR])
+
+        if minimum is None or maximum is None:
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} parent pump native RPM limits "
+                "are unavailable"
+            )
+
+        if minimum > maximum:
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} parent pump RPM limits are invalid"
+            )
+
+        return minimum, maximum
 
     def _on_connected(self, *, reconnected: bool) -> None:
         self._state = ManualIntelliCenterState.AVAILABLE

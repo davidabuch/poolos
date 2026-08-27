@@ -53,7 +53,7 @@ def test_diagnostics_include_shadow_status_without_control() -> None:
 
 
 def test_no_control_platform_or_service_is_added() -> None:
-    prohibited = {"number.py", "select.py", "services.yaml"}
+    prohibited = {"select.py", "services.yaml"}
     assert not any((COMPONENT / name).exists() for name in prohibited)
 
 
