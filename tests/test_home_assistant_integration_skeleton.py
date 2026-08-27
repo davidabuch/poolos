@@ -29,6 +29,7 @@ def test_required_integration_files_exist() -> None:
         "light.py",
         "manifest.json",
         "manual_intellicenter.py",
+        "number.py",
         "native_intellicenter.py",
         "observation.py",
         "shadow.py",
@@ -100,7 +101,6 @@ def test_diagnostics_redact_future_connection_secrets() -> None:
 
 def test_no_actuating_platform_or_service_files_are_present() -> None:
     prohibited = {
-        "number.py",
         "select.py",
         "services.yaml",
     }

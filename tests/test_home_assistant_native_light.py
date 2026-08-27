@@ -18,7 +18,7 @@ def test_light_platform_is_enabled() -> None:
 
     assert (
         'PLATFORMS = '
-        '("sensor", "binary_sensor", "button", "climate", "switch", "light")'
+        '("sensor", "binary_sensor", "button", "climate", "switch", "light", "number")'
         in const
     )
 

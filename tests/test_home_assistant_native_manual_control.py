@@ -32,6 +32,7 @@ def test_manual_gateway_exposes_only_explicit_manual_operations() -> None:
     assert "async def async_set_heating_setpoint(" in source
     assert "async def async_set_circuit_state(" in source
     assert "async def async_set_light_effect(" in source
+    assert "async def async_set_pump_circuit_speed(" in source
 
     for prohibited in (
         "async_set_pump_speed",
@@ -80,6 +81,8 @@ def test_manual_gateway_uses_pyintellicenter_supported_write_methods() -> None:
     assert "self._controller.set_heating_setpoint(" in source
     assert "self._controller.set_circuit_state(" in source
     assert "self._controller.set_light_effect(" in source
+    assert "SPEED_ATTR: str(target)" in source
+    assert '"p0102"' in source
 
 
 def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
@@ -100,6 +103,7 @@ def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
         "async_set_heating_setpoint",
         "async_set_circuit_state",
         "async_set_light_effect",
+        "async_set_pump_circuit_speed",
     }
 
 
