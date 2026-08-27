@@ -82,6 +82,125 @@ def _native_value(
     return None if observation is None else observation.value
 
 
+class PoolOSNativeIntelliCenterSolarSwitch(
+    CoordinatorEntity[PoolOSCoordinator],
+    SwitchEntity,
+):
+    """Represent explicit native Pool Solar heat-source selection."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Solar"
+    _attr_icon = "mdi:solar-power"
+
+    def __init__(
+        self,
+        coordinator: PoolOSCoordinator,
+        entry: ConfigEntry[PoolOSRuntimeData],
+    ) -> None:
+        super().__init__(coordinator)
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = (
+            f"{entry.entry_id}_native_intellicenter_pool_solar_switch"
+        )
+        self._attr_device_info = {
+            "identifiers": {
+                (DOMAIN, f"{entry.entry_id}_native_intellicenter")
+            },
+            "name": "PoolOS Native IntelliCenter",
+            "manufacturer": "PoolOS",
+            "model": "Native IntelliCenter Manual Solar Control",
+            "sw_version": INTEGRATION_VERSION,
+        }
+
+    @property
+    def available(self) -> bool:
+        """Require native Solar truth and manual command delivery."""
+
+        snapshot = self.coordinator.native_intellicenter_snapshot
+        manual = self._runtime.manual_intellicenter
+
+        return (
+            snapshot is not None
+            and bool(getattr(snapshot, "available", False))
+            and _native_observation(
+                self.coordinator,
+                "solar.active",
+            )
+            is not None
+            and manual is not None
+            and manual.available
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return confirmed native Solar state."""
+
+        value = _native_value(
+            self.coordinator,
+            "solar.active",
+        )
+        return value if isinstance(value, bool) else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Explicitly select Solar for the active Pool body."""
+
+        del kwargs
+
+        manual = self._runtime.manual_intellicenter
+        if manual is None:
+            raise ManualIntelliCenterCommandError(
+                "manual IntelliCenter command connection is not configured"
+            )
+
+        pool_active = _native_value(
+            self.coordinator,
+            "pool.active",
+        )
+
+        if pool_active is not True:
+            raise ManualIntelliCenterCommandError(
+                "Solar cannot be turned on unless Pool is active"
+            )
+
+        await manual.async_set_pool_solar_active(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Explicitly deselect Solar without changing Pool circulation."""
+
+        del kwargs
+
+        manual = self._runtime.manual_intellicenter
+        if manual is None:
+            raise ManualIntelliCenterCommandError(
+                "manual IntelliCenter command connection is not configured"
+            )
+
+        await manual.async_set_pool_solar_active(False)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose bounded native Solar command semantics."""
+
+        manual = self._runtime.manual_intellicenter
+
+        return {
+            "pool_body_objnam": "B1101",
+            "solar_heater_objnam": "H0002",
+            "off_heater_objnam": "00000",
+            "canonical_concept": "solar.active",
+            "observation_source": "poolos.independent_intellicenter",
+            "observation_authority": "native_intellicenter",
+            "manual_command_delivery_enabled": (
+                manual is not None and manual.available
+            ),
+            "autonomous_command_delivery_enabled": False,
+            "optimistic": False,
+            "required_parent_concept": "pool.active",
+            "direct_htmode_write_enabled": False,
+            "arbitrary_heater_selection_enabled": False,
+        }
+
+
 class PoolOSNativeIntelliCenterSwitch(
     CoordinatorEntity[PoolOSCoordinator],
     SwitchEntity,
@@ -301,10 +420,18 @@ async def async_setup_entry(
     runtime = entry.runtime_data
 
     async_add_entities(
-        PoolOSNativeIntelliCenterSwitch(
-            runtime.coordinator,
-            entry,
-            description,
-        )
-        for description in SWITCH_DESCRIPTIONS
+        [
+            *(
+                PoolOSNativeIntelliCenterSwitch(
+                    runtime.coordinator,
+                    entry,
+                    description,
+                )
+                for description in SWITCH_DESCRIPTIONS
+            ),
+            PoolOSNativeIntelliCenterSolarSwitch(
+                runtime.coordinator,
+                entry,
+            ),
+        ]
     )

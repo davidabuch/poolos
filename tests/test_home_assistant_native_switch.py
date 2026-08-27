@@ -44,11 +44,18 @@ def test_exact_feature_switch_contract() -> None:
     assert 'objnam="FTR01"' in source
     assert 'active_concept="waterfall.active"' in source
 
+    assert "class PoolOSNativeIntelliCenterSolarSwitch" in source
+    assert '"solar.active"' in source
+    assert '"B1101"' in source
+    assert '"H0002"' in source
+    assert '"00000"' in source
+
 
 def test_switches_use_only_manual_gateway_for_writes() -> None:
     source = _source()
 
     assert "manual.async_set_circuit_state(" in source
+    assert "manual.async_set_pool_solar_active(" in source
 
     for prohibited in (
         "request_changes(",
@@ -262,6 +269,7 @@ class _Manual:
 
     def __init__(self) -> None:
         self.async_set_circuit_state = AsyncMock()
+        self.async_set_pool_solar_active = AsyncMock()
 
 
 class _Entry:
@@ -679,5 +687,97 @@ def test_interlock_does_not_repeat_off_before_native_confirmation() -> None:
         await jets._async_enforce_parent_interlock()
 
         assert jets._safety_interlock_off_pending is False
+
+    asyncio.run(run())
+
+def test_solar_switch_exact_manual_commands_and_native_state() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+
+        coordinator = _Coordinator(
+            {
+                "solar.active": True,
+                "pool.active": True,
+            }
+        )
+        manual = _Manual()
+        entry = _Entry(coordinator, manual)
+
+        solar = module.PoolOSNativeIntelliCenterSolarSwitch(
+            coordinator,
+            entry,
+        )
+
+        assert solar.is_on is True
+
+        await solar.async_turn_off()
+        manual.async_set_pool_solar_active.assert_awaited_once_with(False)
+
+        manual.async_set_pool_solar_active.reset_mock()
+
+        coordinator.native_intellicenter_snapshot = _Snapshot(
+            {
+                "solar.active": False,
+                "pool.active": True,
+            }
+        )
+
+        assert solar.is_on is False
+
+        await solar.async_turn_on()
+        manual.async_set_pool_solar_active.assert_awaited_once_with(True)
+
+    asyncio.run(run())
+
+
+def test_solar_on_fails_closed_when_pool_is_off() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+
+        coordinator = _Coordinator(
+            {
+                "solar.active": False,
+                "pool.active": False,
+            }
+        )
+        manual = _Manual()
+        entry = _Entry(coordinator, manual)
+
+        solar = module.PoolOSNativeIntelliCenterSolarSwitch(
+            coordinator,
+            entry,
+        )
+
+        with pytest.raises(
+            module.ManualIntelliCenterCommandError,
+            match="unless Pool is active",
+        ):
+            await solar.async_turn_on()
+
+        manual.async_set_pool_solar_active.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_solar_off_remains_allowed_when_pool_is_off() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+
+        coordinator = _Coordinator(
+            {
+                "solar.active": True,
+                "pool.active": False,
+            }
+        )
+        manual = _Manual()
+        entry = _Entry(coordinator, manual)
+
+        solar = module.PoolOSNativeIntelliCenterSolarSwitch(
+            coordinator,
+            entry,
+        )
+
+        await solar.async_turn_off()
+        manual.async_set_pool_solar_active.assert_awaited_once_with(False)
 
     asyncio.run(run())

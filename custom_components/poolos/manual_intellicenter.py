@@ -9,6 +9,7 @@ exposes a deliberately tiny mutation surface:
 
 * turn Pool/Spa body circulation on or off
 * change Pool/Spa heating setpoint
+* explicitly select/deselect Solar for the Pool body
 * turn explicitly allow-listed Jets, Slide, Spillway, and Pool Light circuits on or off
 * change the Pool Light IntelliBrite effect on C0002
 * change the explicitly allow-listed Pool PMPCIRC RPM setpoint on p0102
@@ -29,6 +30,7 @@ from pyintellicenter import (
     ICBaseController,
     ICConnectionHandler,
     ICModelController,
+    HEATER_ATTR,
     LIGHT_EFFECTS,
     MAX_ATTR,
     MIN_ATTR,
@@ -46,6 +48,9 @@ from pyintellicenter import (
 _ALLOWED_BODY_IDS = frozenset({"B1101", "B1202"})
 _ALLOWED_CIRCUIT_IDS = frozenset({"C0002", "C0003", "C0004", "FTR01"})
 _POOL_LIGHT_OBJNAM = "C0002"
+_POOL_BODY_OBJNAM = "B1101"
+_POOL_SOLAR_HEATER_OBJNAM = "H0002"
+_NO_HEATER_OBJNAM = "00000"
 
 # p0102 is the native IntelliCenter PMPCIRC backing the existing
 # number.buch_family_rpm_pool entity. This is a circuit speed setpoint,
@@ -308,6 +313,45 @@ class ManualIntelliCenterControl:
             value=effect,
         )
 
+    async def async_set_pool_solar_active(
+        self,
+        active: bool,
+    ) -> ManualCommandReceipt:
+        """Select or deselect Solar as the Pool heat source."""
+
+        if not isinstance(active, bool):
+            raise ValueError("pool solar active state must be boolean")
+
+        await self._require_available()
+
+        heater_objnam = (
+            _POOL_SOLAR_HEATER_OBJNAM
+            if active
+            else _NO_HEATER_OBJNAM
+        )
+
+        async with self._command_lock:
+            try:
+                await self._controller.request_changes(
+                    _POOL_BODY_OBJNAM,
+                    {
+                        HEATER_ATTR: heater_objnam,
+                    },
+                )
+            except Exception as exc:
+                self._last_error_code = type(exc).__name__.upper()
+                raise ManualIntelliCenterCommandError(
+                    "failed to set Pool solar heat-source state"
+                ) from exc
+
+        self._last_error_code = None
+
+        return ManualCommandReceipt(
+            body_objnam=_POOL_BODY_OBJNAM,
+            operation="pool_solar_active",
+            value=active,
+        )
+
     async def async_set_heating_setpoint(
         self,
         body_objnam: str,
@@ -415,6 +459,7 @@ class ManualIntelliCenterControl:
                 "allowed_operations": [
                     "body_active",
                     "heating_setpoint",
+                    "pool_solar_active",
                     "circuit_active",
                     "light_effect",
                     "pump_circuit_speed",

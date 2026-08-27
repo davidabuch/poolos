@@ -524,6 +524,19 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             states=states,
             now=observed_at,
         )
+
+        # Publish event-driven authoritative state immediately after it is
+        # built, before commissioning persistence, inventory export, or
+        # recorder I/O. This keeps Control Center state aligned with the
+        # already-published native IntelliCenter truth.
+        #
+        # Periodic reconciliation is excluded because DataUpdateCoordinator
+        # publishes the returned snapshot itself.
+        if trigger in {
+            "state_change_event",
+            "native_intellicenter_update",
+        }:
+            self.async_set_updated_data(snapshot)
         try:
             await self._async_record_native_parity_commissioning(observed_at)
         except (OSError, TypeError, ValueError):
@@ -543,6 +556,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             self._last_unhealthy_missing_required = snapshot.missing_required
             self._last_unhealthy_unavailable_entities = snapshot.unavailable_entities
         self.shadow_runtime.evaluate(snapshot)
+
         health = {
             "healthy": snapshot.healthy,
             "missing_required": list(snapshot.missing_required),
