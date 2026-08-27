@@ -48,6 +48,7 @@ private_pyintellicenter.ICModelController = _StubModelController
 private_pyintellicenter.PoolModel = _StubPoolModel
 
 private_pyintellicenter.LIGHT_EFFECTS = {}
+private_pyintellicenter.HEATER_ATTR = "HEATER"
 private_pyintellicenter.MAX_ATTR = "MAX"
 private_pyintellicenter.MIN_ATTR = "MIN"
 private_pyintellicenter.PARENT_ATTR = "PARENT"

@@ -30,6 +30,7 @@ def test_manual_gateway_exposes_only_explicit_manual_operations() -> None:
 
     assert "async def async_set_body_active(" in source
     assert "async def async_set_heating_setpoint(" in source
+    assert "async def async_set_pool_solar_active(" in source
     assert "async def async_set_circuit_state(" in source
     assert "async def async_set_light_effect(" in source
     assert "async def async_set_pump_circuit_speed(" in source
@@ -79,6 +80,10 @@ def test_manual_gateway_uses_pyintellicenter_supported_write_methods() -> None:
     assert "self._controller.request_changes(" in source
     assert "STATUS_ATTR: STATUS_ON if active else STATUS_OFF" in source
     assert "self._controller.set_heating_setpoint(" in source
+    assert "HEATER_ATTR: heater_objnam" in source
+    assert '"B1101"' in source
+    assert '"H0002"' in source
+    assert '"00000"' in source
     assert "self._controller.set_circuit_state(" in source
     assert "self._controller.set_light_effect(" in source
     assert "SPEED_ATTR: str(target)" in source
@@ -101,6 +106,7 @@ def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
         "async_stop",
         "async_set_body_active",
         "async_set_heating_setpoint",
+        "async_set_pool_solar_active",
         "async_set_circuit_state",
         "async_set_light_effect",
         "async_set_pump_circuit_speed",
