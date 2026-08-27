@@ -1,11 +1,4 @@
-"""Deterministic command-free solar-heating eligibility policy for PoolOS.
-
-This module evaluates whether observed pool conditions support a
-MAXIMIZE_SOLAR operational intent.
-
-It performs no command generation, Home Assistant I/O, execution planning,
-or equipment actuation.
-"""
+"""Deterministic command-free physical pool-solar eligibility policy."""
 
 from __future__ import annotations
 
@@ -16,34 +9,38 @@ import math
 
 
 class SolarEligibilityDisposition(str, Enum):
-    """Current result of solar-heating eligibility evaluation."""
-
     BLOCKED = "blocked"
-    QUALIFYING = "qualifying"
     ELIGIBLE = "eligible"
 
 
 @dataclass(frozen=True, slots=True)
 class SolarEligibilityPolicy:
-    """Installation-specific solar eligibility thresholds."""
+    """Initial physical thresholds; values remain configurable policy."""
 
     activation_differential_f: float = 7.0
     deactivation_differential_f: float = 7.0
-    activation_hold: timedelta = timedelta(minutes=10)
+    minimum_collector_temperature_f: float = 90.0
+    deactivation_hold: timedelta = timedelta(minutes=10)
+    target_satisfaction_hold: timedelta = timedelta(minutes=10)
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.activation_differential_f):
-            raise ValueError("activation_differential_f must be finite")
-        if not math.isfinite(self.deactivation_differential_f):
-            raise ValueError("deactivation_differential_f must be finite")
-        if self.activation_hold < timedelta(0):
-            raise ValueError("activation_hold must not be negative")
+        for name in (
+            "activation_differential_f",
+            "deactivation_differential_f",
+            "minimum_collector_temperature_f",
+        ):
+            if not math.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite")
+        for name in (
+            "deactivation_hold",
+            "target_satisfaction_hold",
+        ):
+            if getattr(self, name) < timedelta(0):
+                raise ValueError(f"{name} must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
 class SolarEligibilityInput:
-    """One normalized observation used for solar eligibility."""
-
     evaluated_at: datetime
     pool_active: bool
     spa_active: bool
@@ -55,7 +52,6 @@ class SolarEligibilityInput:
     def __post_init__(self) -> None:
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
             raise ValueError("evaluated_at must be timezone-aware")
-
         for name in (
             "water_temperature_f",
             "collector_temperature_f",
@@ -68,15 +64,14 @@ class SolarEligibilityInput:
 
 @dataclass(frozen=True, slots=True)
 class SolarEligibilityAssessment:
-    """Read-only result of one solar eligibility evaluation."""
-
     evaluated_at: datetime
     disposition: SolarEligibilityDisposition
     eligible: bool
     differential_f: float | None
-    qualifying_since: datetime | None
-    qualifying_seconds: float
     rationale: tuple[str, ...]
+    reason_code: str = ""
+    differential_below_since: datetime | None = None
+    target_satisfied_since: datetime | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -84,12 +79,9 @@ class SolarEligibilityAssessment:
             "disposition": self.disposition.value,
             "eligible": self.eligible,
             "differential_f": self.differential_f,
-            "qualifying_since": (
-                None
-                if self.qualifying_since is None
-                else self.qualifying_since.isoformat()
-            ),
-            "qualifying_seconds": self.qualifying_seconds,
+            "differential_below_since": _iso(self.differential_below_since),
+            "target_satisfied_since": _iso(self.target_satisfied_since),
+            "reason_code": self.reason_code,
             "rationale": list(self.rationale),
             "authority": "none",
             "command_delivery_enabled": False,
@@ -97,187 +89,105 @@ class SolarEligibilityAssessment:
 
 
 class SolarEligibilityTracker:
-    """Track deterministic 7 F / 10 minute solar eligibility.
+    """Apply immediate activation and independent ten-minute shutdown debounce."""
 
-    Starting solar requires the activation differential to remain satisfied
-    continuously for the configured hold period.
-
-    Once solar is already active, the activation hold is not re-applied.
-    Solar remains thermally eligible while the deactivation differential is
-    satisfied and the other eligibility conditions remain true.
-
-    Pump RPM is deliberately not an input to this policy.
-    """
-
-    def __init__(
-        self,
-        policy: SolarEligibilityPolicy = SolarEligibilityPolicy(),
-    ) -> None:
+    def __init__(self, policy: SolarEligibilityPolicy = SolarEligibilityPolicy()) -> None:
         self._policy = policy
-        self._qualifying_since: datetime | None = None
+        self._differential_below_since: datetime | None = None
+        self._target_satisfied_since: datetime | None = None
         self._last_evaluated_at: datetime | None = None
 
     @property
     def policy(self) -> SolarEligibilityPolicy:
         return self._policy
 
-    @property
-    def qualifying_since(self) -> datetime | None:
-        return self._qualifying_since
-
     def reset(self) -> None:
-        """Clear temporal qualification state."""
-
-        self._qualifying_since = None
+        self._differential_below_since = None
+        self._target_satisfied_since = None
         self._last_evaluated_at = None
 
-    def _blocked(
+    def _result(
         self,
         observation: SolarEligibilityInput,
         *,
-        differential_f: float | None,
-        reason: str,
+        disposition: SolarEligibilityDisposition,
+        differential: float | None,
+        reason_code: str,
+        rationale: str,
     ) -> SolarEligibilityAssessment:
-        self._qualifying_since = None
         return SolarEligibilityAssessment(
             evaluated_at=observation.evaluated_at,
-            disposition=SolarEligibilityDisposition.BLOCKED,
-            eligible=False,
-            differential_f=differential_f,
-            qualifying_since=None,
-            qualifying_seconds=0.0,
-            rationale=(reason,),
+            disposition=disposition,
+            eligible=disposition is SolarEligibilityDisposition.ELIGIBLE,
+            differential_f=differential,
+            rationale=(rationale,),
+            reason_code=reason_code,
+            differential_below_since=self._differential_below_since,
+            target_satisfied_since=self._target_satisfied_since,
         )
 
-    def evaluate(
+    def _block(
         self,
         observation: SolarEligibilityInput,
+        *,
+        differential: float | None,
+        reason_code: str,
+        rationale: str,
     ) -> SolarEligibilityAssessment:
-        """Evaluate one observation without creating or delivering commands."""
+        self._differential_below_since = None
+        self._target_satisfied_since = None
+        return self._result(
+            observation,
+            disposition=SolarEligibilityDisposition.BLOCKED,
+            differential=differential,
+            reason_code=reason_code,
+            rationale=rationale,
+        )
 
-        if (
-            self._last_evaluated_at is not None
-            and observation.evaluated_at < self._last_evaluated_at
-        ):
+    def evaluate(self, observation: SolarEligibilityInput) -> SolarEligibilityAssessment:
+        if self._last_evaluated_at is not None and observation.evaluated_at < self._last_evaluated_at:
             raise ValueError("solar eligibility observations must be chronological")
-
         self._last_evaluated_at = observation.evaluated_at
 
         water = observation.water_temperature_f
         collector = observation.collector_temperature_f
         target = observation.target_temperature_f
-
         if water is None or collector is None or target is None:
-            return self._blocked(
-                observation,
-                differential_f=None,
-                reason="Required solar eligibility temperature telemetry is unavailable.",
-            )
-
+            return self._block(observation, differential=None, reason_code="required_temperature_unavailable", rationale="Required trusted solar temperature evidence is unavailable.")
         differential = collector - water
-
         if not observation.pool_active:
-            return self._blocked(
-                observation,
-                differential_f=differential,
-                reason="Pool circulation is not active.",
-            )
-
+            return self._block(observation, differential=differential, reason_code="pool_circulation_inactive", rationale="Pool circulation is not active.")
         if observation.spa_active:
-            return self._blocked(
-                observation,
-                differential_f=differential,
-                reason="Spa operation suppresses pool solar-heating eligibility.",
-            )
+            return self._block(observation, differential=differential, reason_code="spa_priority", rationale="Active spa operation suppresses pool solar.")
+        if collector < self._policy.minimum_collector_temperature_f:
+            return self._block(observation, differential=differential, reason_code="collector_below_minimum", rationale="Collector temperature is below the configured minimum.")
 
+        if not observation.solar_active:
+            self._differential_below_since = None
+            self._target_satisfied_since = None
+            if water >= target:
+                return self._block(observation, differential=differential, reason_code="target_satisfied", rationale="Pool target is already satisfied.")
+            if differential < self._policy.activation_differential_f:
+                return self._block(observation, differential=differential, reason_code="activation_differential_insufficient", rationale="Collector differential is below the activation threshold.")
+            return self._result(observation, disposition=SolarEligibilityDisposition.ELIGIBLE, differential=differential, reason_code="physically_eligible", rationale="Physical solar eligibility is satisfied immediately.")
+
+        if differential < self._policy.deactivation_differential_f:
+            if self._differential_below_since is None:
+                self._differential_below_since = observation.evaluated_at
+        else:
+            self._differential_below_since = None
         if water >= target:
-            return self._blocked(
-                observation,
-                differential_f=differential,
-                reason=(
-                    f"Pool temperature {water:.1f} F has reached "
-                    f"the {target:.1f} F target."
-                ),
-            )
+            if self._target_satisfied_since is None:
+                self._target_satisfied_since = observation.evaluated_at
+        else:
+            self._target_satisfied_since = None
 
-        if observation.solar_active:
-            self._qualifying_since = None
+        if self._differential_below_since is not None and observation.evaluated_at - self._differential_below_since >= self._policy.deactivation_hold:
+            return self._block(observation, differential=differential, reason_code="differential_low_sustained", rationale="Collector differential stayed below threshold for the shutdown hold.")
+        if self._target_satisfied_since is not None and observation.evaluated_at - self._target_satisfied_since >= self._policy.target_satisfaction_hold:
+            return self._block(observation, differential=differential, reason_code="target_satisfied_sustained", rationale="Pool target stayed satisfied for the shutdown hold.")
+        return self._result(observation, disposition=SolarEligibilityDisposition.ELIGIBLE, differential=differential, reason_code="active_shutdown_debounce", rationale="Active solar remains eligible while shutdown conditions debounce.")
 
-            if differential < self._policy.deactivation_differential_f:
-                return SolarEligibilityAssessment(
-                    evaluated_at=observation.evaluated_at,
-                    disposition=SolarEligibilityDisposition.BLOCKED,
-                    eligible=False,
-                    differential_f=differential,
-                    qualifying_since=None,
-                    qualifying_seconds=0.0,
-                    rationale=(
-                        f"Solar is active but collector differential "
-                        f"{differential:.1f} F is below the "
-                        f"{self._policy.deactivation_differential_f:.1f} F "
-                        "thermal hold threshold.",
-                    ),
-                )
 
-            return SolarEligibilityAssessment(
-                evaluated_at=observation.evaluated_at,
-                disposition=SolarEligibilityDisposition.ELIGIBLE,
-                eligible=True,
-                differential_f=differential,
-                qualifying_since=None,
-                qualifying_seconds=0.0,
-                rationale=(
-                    "Solar is already active and all thermal eligibility "
-                    "conditions remain satisfied.",
-                ),
-            )
-
-        if differential < self._policy.activation_differential_f:
-            return self._blocked(
-                observation,
-                differential_f=differential,
-                reason=(
-                    f"Collector differential {differential:.1f} F is below "
-                    f"the {self._policy.activation_differential_f:.1f} F "
-                    "solar activation threshold."
-                ),
-            )
-
-        if self._qualifying_since is None:
-            self._qualifying_since = observation.evaluated_at
-
-        qualifying_seconds = max(
-            0.0,
-            (observation.evaluated_at - self._qualifying_since).total_seconds(),
-        )
-        required_seconds = self._policy.activation_hold.total_seconds()
-
-        if qualifying_seconds < required_seconds:
-            return SolarEligibilityAssessment(
-                evaluated_at=observation.evaluated_at,
-                disposition=SolarEligibilityDisposition.QUALIFYING,
-                eligible=False,
-                differential_f=differential,
-                qualifying_since=self._qualifying_since,
-                qualifying_seconds=qualifying_seconds,
-                rationale=(
-                    f"Collector differential is at least "
-                    f"{self._policy.activation_differential_f:.1f} F; "
-                    f"qualification has persisted for "
-                    f"{qualifying_seconds:.0f} of {required_seconds:.0f} seconds.",
-                ),
-            )
-
-        return SolarEligibilityAssessment(
-            evaluated_at=observation.evaluated_at,
-            disposition=SolarEligibilityDisposition.ELIGIBLE,
-            eligible=True,
-            differential_f=differential,
-            qualifying_since=self._qualifying_since,
-            qualifying_seconds=qualifying_seconds,
-            rationale=(
-                f"Collector differential has remained at least "
-                f"{self._policy.activation_differential_f:.1f} F for the "
-                "required solar activation hold period.",
-            ),
-        )
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat()

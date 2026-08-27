@@ -1062,3 +1062,37 @@ Status: current pending review.
 `READY_FOR_REVIEW` means only that the current continuous evidence run has
 reached 72 hours without persistent adverse evidence. It does not approve or
 grant native authority.
+
+## Command-Free Thermal and Flexible Operation Policy Foundation
+
+Status: implemented pending review.
+
+- removes the superseded pool-solar activation delay: trusted water, roof ≥90°F,
+  differential ≥7°F, target demand, mode, permission, and predictive eligibility
+  permit immediate solar recommendation;
+- adds a demand-driven 1500-RPM plumbing-temperature probe with two-minute
+  minimum, rolling settling evidence, five-minute failure limit, and 30-minute
+  trusted-result reuse;
+- preserves independent ten-minute active-solar shutdown debounce for sustained
+  low differential and sustained target satisfaction;
+- adds mutually exclusive Pool Solar Only, Solar Preferred, and Gas Only modes,
+  a separate Solar Only forecast override, and hard Solar/Gas Allowed gates;
+- adds the simple five-day Solar Only forecast gate while falling back to
+  physical rules when forecast evidence is absent or stale;
+- treats HA, ICP, and OCP as equal user spa sources; adds two-minute 130°F
+  heat-up switching, latched 120°F maintenance behavior, and Gas Only;
+- adds 1–6 PM debt-aware solar-only opportunistic spa heating, useful-heat hold
+  down to 120°F, isolated heat preservation until 10 PM, and no pool reprobe;
+- represents the supplied LADWP weekday tariff as generic timezone-aware
+  day-of-week profile data, with weekends defaulting to Base;
+- preserves two days of oldest-first filtration debt using configurable trusted-
+  temperature targets and pool-route runtime credit, including confirmed grid-
+  outage two-thirds credit;
+- reports scoped native Solar Preferred, RPM, and schedule conflicts without
+  fighting or rewriting IntelliCenter;
+- expresses known-good 1500/1500/2600/2900/3000 RPM installation baselines through
+  existing canonical pump constraints and the unchanged pump optimizer;
+- excludes pump GPM from policy inputs because it is not authoritative measured
+  flow for this installation; and
+- remains recommendation-only with authority NONE and command delivery
+  disabled, as documented by ADR-101.
