@@ -33,6 +33,7 @@ def test_required_integration_files_exist() -> None:
         "native_intellicenter.py",
         "observation.py",
         "shadow.py",
+        "select.py",
         "sensor.py",
         "switch.py",
         "system_health.py",
@@ -101,7 +102,6 @@ def test_diagnostics_redact_future_connection_secrets() -> None:
 
 def test_no_actuating_platform_or_service_files_are_present() -> None:
     prohibited = {
-        "select.py",
         "services.yaml",
     }
     assert not any((COMPONENT / name).exists() for name in prohibited)

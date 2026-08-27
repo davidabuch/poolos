@@ -430,3 +430,103 @@ def test_unavailable_manual_transport_rejects_before_delivery(
         )
 
     assert recorder.calls == []
+
+
+def test_body_heat_source_accepts_only_commissioned_matrix() -> None:
+    gateway, recorder = _gateway([])
+
+    for body in ("B1101", "B1202"):
+        for heater in ("00000", "H0001", "H0002"):
+            receipt = _run(
+                gateway.async_set_body_heat_source(
+                    body,
+                    heater,
+                )
+            )
+
+            assert recorder.calls[-1] == (
+                body,
+                {"HEATER": heater},
+            )
+            assert receipt.body_objnam == body
+            assert receipt.operation == "body_heat_source"
+            assert receipt.value == heater
+
+
+def test_body_heat_source_rejects_unknown_body_or_heater() -> None:
+    gateway, recorder = _gateway([])
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported manual-control body",
+    ):
+        _run(
+            gateway.async_set_body_heat_source(
+                "B9999",
+                "H0002",
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported manual-control heat source",
+    ):
+        _run(
+            gateway.async_set_body_heat_source(
+                "B1101",
+                "HXSLR",
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported manual-control heat source",
+    ):
+        _run(
+            gateway.async_set_body_heat_source(
+                "B1202",
+                "H9999",
+            )
+        )
+
+    assert recorder.calls == []
+
+
+def test_body_heat_source_never_writes_htmode() -> None:
+    gateway, recorder = _gateway([])
+
+    _run(
+        gateway.async_set_body_heat_source(
+            "B1202",
+            "H0001",
+        )
+    )
+
+    assert recorder.calls == [
+        (
+            "B1202",
+            {"HEATER": "H0001"},
+        )
+    ]
+    assert "HTMODE" not in recorder.calls[0][1]
+
+
+def test_body_heat_source_transport_failure_is_not_success() -> None:
+    recorder = _RecordingController()
+    recorder.error = RuntimeError("synthetic transport failure")
+
+    gateway, recorder = _gateway([], recorder)
+
+    with pytest.raises(
+        ManualIntelliCenterCommandError,
+        match="failed to set B1101 heat source",
+    ):
+        _run(
+            gateway.async_set_body_heat_source(
+                "B1101",
+                "H0001",
+            )
+        )
+
+    assert recorder.calls == []
+    assert gateway._last_error_code == "RUNTIMEERROR"

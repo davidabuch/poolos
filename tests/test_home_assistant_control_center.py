@@ -51,7 +51,7 @@ def test_observation_health_exposes_actionable_snapshot_diagnostics() -> None:
 def test_integration_forwards_only_control_center_platforms() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")
     init = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light", "number")' in const
+    assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light", "number", "select")' in const
     assert "async_forward_entry_setups(entry, PLATFORMS)" in init
     assert "async_unload_platforms(entry, PLATFORMS)" in init
 
@@ -98,7 +98,7 @@ def test_dashboard_is_valid_and_read_only() -> None:
 
 
 def test_control_center_adds_no_equipment_actuating_platform() -> None:
-    prohibited = {"select.py", "services.yaml"}
+    prohibited = {"services.yaml"}
     assert not any((COMPONENT / name).exists() for name in prohibited)
 
 
