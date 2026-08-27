@@ -96,17 +96,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     if hass.is_running:
         await async_activate_poolos_post_start()
     else:
+        startup_unsub = None
+
         async def async_handle_homeassistant_started(_event: object) -> None:
             """Activate deferred PoolOS work after Home Assistant is operational."""
-
+            nonlocal startup_unsub
+            startup_unsub = None
             await async_activate_poolos_post_start()
 
-        entry.async_on_unload(
-            hass.bus.async_listen_once(
-                EVENT_HOMEASSISTANT_STARTED,
-                async_handle_homeassistant_started,
-            )
+        startup_unsub = hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            async_handle_homeassistant_started,
         )
+
+        def async_remove_startup_listener() -> None:
+            """Remove the pending startup listener at most once."""
+            nonlocal startup_unsub
+            if startup_unsub is None:
+                return
+            unsubscribe = startup_unsub
+            startup_unsub = None
+            unsubscribe()
+
+        entry.async_on_unload(async_remove_startup_listener)
 
     return True
 
