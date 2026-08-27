@@ -24,11 +24,21 @@ def test_event_observations_publish_before_durable_recording() -> None:
         early_publish,
     )
 
+    parity_persistence = source.index(
+        "await self._async_record_native_parity_commissioning",
+        publish,
+    )
+    inventory_export = source.index(
+        "await self._async_export_native_intellicenter_inventory",
+        publish,
+    )
     durable_record = source.index(
         "self.observation_recorder.record_snapshot",
         publish,
     )
 
+    assert publish < parity_persistence
+    assert publish < inventory_export
     assert publish < durable_record
 
 
