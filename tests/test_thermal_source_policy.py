@@ -145,3 +145,25 @@ def test_tou_and_gpm_are_not_thermal_control_inputs() -> None:
     fields = ThermalSourceInput.__dataclass_fields__
     assert "pump_gpm" not in fields
     assert "tou_tier" not in fields
+
+
+def test_inactive_body_configuration_does_not_bypass_physical_execution_gate() -> None:
+    configured_solar = ThermalSourceInput(
+        NOW,
+        False,
+        False,
+        False,
+        86,
+        90,
+        100,
+        PoolHeatingMode.SOLAR_ONLY,
+    )
+
+    result = ThermalSourceSelector().evaluate(configured_solar)
+
+    assert configured_solar.heating_mode is PoolHeatingMode.SOLAR_ONLY
+    assert result.heat_source is ThermalHeatSource.NONE
+    assert result.recommended_pump_rpm is None
+    assert result.intent is None
+    assert result.solar_assessment.reason_code == "pool_circulation_inactive"
+    assert "htmode" not in ThermalSourceInput.__dataclass_fields__

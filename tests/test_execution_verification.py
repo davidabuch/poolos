@@ -13,7 +13,13 @@ from poolos.execution_verification import (
     ExecutionVerificationRequest,
     VerificationEvidenceDisposition,
 )
-from poolos.integration import StartPump
+from poolos.integration import (
+    PhysicalHeatMode,
+    PoolOperation,
+    SetHeatMode,
+    SetPumpSpeed,
+    StartPump,
+)
 from poolos.observations import (
     FreshnessPolicy,
     ObservationQuality,
@@ -30,17 +36,24 @@ def step(
     *,
     verification_required: bool = True,
     expected: dict[str, object] | None = None,
+    metadata: dict[str, str] | None = None,
+    operation: PoolOperation | None = None,
 ) -> ExecutionStep:
     return ExecutionStep(
         step_id="step-1",
         sequence=1,
-        operation=StartPump(equipment_id="main-pump", operation_id="op-1"),
+        operation=(
+            StartPump(equipment_id="main-pump", operation_id="op-1")
+            if operation is None
+            else operation
+        ),
         verification_required=verification_required,
         expected_observations=(
             expected
             if expected is not None
             else {"pump.main-pump.running": True}
         ),
+        metadata={} if metadata is None else metadata,
     )
 
 
@@ -104,6 +117,106 @@ def test_nonmatching_fresh_observation_fails_before_timeout() -> None:
     assert result.status is VerificationStatus.FAILED
     assert result.reason == "fresh_observations_do_not_match_expectations"
     assert result.evidence[0].disposition is VerificationEvidenceDisposition.MISMATCHED
+
+
+def test_explicit_numeric_tolerance_verifies_authoritative_pump_rpm() -> None:
+    store = ObservationStore()
+    store.put(observation("pump.rpm", 2880))
+    execution_step = step(
+        expected={"pump.rpm": 2900},
+        metadata={"numeric_tolerance:pump.rpm": "25"},
+        operation=SetPumpSpeed(
+            equipment_id="main-pump",
+            rpm=2900,
+            operation_id="op-1",
+        ),
+    )
+
+    result = ExecutionVerificationEngine().verify(request(execution_step, store))
+
+    assert result.status is VerificationStatus.VERIFIED
+    assert result.evidence[0].reason == "observation_within_numeric_tolerance"
+
+
+def test_thermal_transient_mismatch_waits_for_convergence_until_deadline() -> None:
+    store = ObservationStore()
+    store.put(observation("pump.rpm", 2600))
+    execution_step = step(
+        expected={"pump.rpm": 2900},
+        metadata={"numeric_tolerance:pump.rpm": "25"},
+        operation=SetPumpSpeed(
+            equipment_id="main-pump",
+            rpm=2900,
+            operation_id="op-1",
+        ),
+    )
+
+    pending = ExecutionVerificationEngine().verify(request(execution_step, store))
+    store.put(
+        observation(
+            "pump.rpm",
+            2900,
+            observed_at=NOW + timedelta(seconds=1),
+        )
+    )
+    verified = ExecutionVerificationEngine().verify(
+        request(execution_step, store, evaluated_at=NOW + timedelta(seconds=1))
+    )
+
+    assert pending.status is VerificationStatus.PENDING
+    assert pending.reason == "transient_observation_mismatch_pending"
+    assert verified.status is VerificationStatus.VERIFIED
+
+
+def test_arbitrary_metadata_cannot_enable_transient_mismatch_settling() -> None:
+    store = ObservationStore()
+    store.put(observation("pump.main-pump.running", False))
+    execution_step = step(metadata={"transient_mismatch_pending": "true"})
+
+    result = ExecutionVerificationEngine().verify(request(execution_step, store))
+
+    assert result.status is VerificationStatus.FAILED
+    assert result.reason == "fresh_observations_do_not_match_expectations"
+
+
+def test_heat_source_mismatch_fails_fast_and_never_verifies() -> None:
+    store = ObservationStore()
+    store.put(observation("pool.raw_heater_id", "H0001"))
+    execution_step = step(
+        expected={"pool.raw_heater_id": "H0002"},
+        metadata={"transient_mismatch_pending": "true"},
+        operation=SetHeatMode(
+            equipment_id="pool",
+            mode=PhysicalHeatMode.SOLAR,
+            operation_id="op-1",
+        ),
+    )
+
+    failed = ExecutionVerificationEngine().verify(request(execution_step, store))
+    timed_out = ExecutionVerificationEngine().verify(
+        request(
+            execution_step,
+            store,
+            evaluated_at=NOW + timedelta(seconds=25),
+            timeout=timedelta(seconds=20),
+        )
+    )
+
+    assert failed.status is VerificationStatus.FAILED
+    assert timed_out.status is VerificationStatus.TIMED_OUT
+
+
+def test_numeric_tolerance_metadata_is_ignored_for_unrelated_operations() -> None:
+    store = ObservationStore()
+    store.put(observation("pump.rpm", 2880))
+    execution_step = step(
+        expected={"pump.rpm": 2900},
+        metadata={"numeric_tolerance:pump.rpm": "25"},
+    )
+
+    result = ExecutionVerificationEngine().verify(request(execution_step, store))
+
+    assert result.status is VerificationStatus.FAILED
 
 
 def test_missing_evidence_is_pending_before_deadline() -> None:

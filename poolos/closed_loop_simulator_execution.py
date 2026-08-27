@@ -86,7 +86,7 @@ class SimulatedEquipmentState:
                 f"hydraulics.{operation.equipment_id}.return_body_id": operation.return_body_id,
             }
         elif isinstance(operation, SetHeatMode):
-            changed = {f"heat.{operation.equipment_id}.mode": operation.mode}
+            changed = {f"heat.{operation.equipment_id}.mode": operation.mode.value}
         else:
             raise TypeError(f"unsupported simulated operation: {type(operation).__name__}")
         self.values.update(changed)

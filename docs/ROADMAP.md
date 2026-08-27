@@ -1090,9 +1090,42 @@ Status: implemented pending review.
   outage two-thirds credit;
 - reports scoped native Solar Preferred, RPM, and schedule conflicts without
   fighting or rewriting IntelliCenter;
-- expresses known-good 1500/1500/2600/2900/3000 RPM installation baselines through
-  existing canonical pump constraints and the unchanged pump optimizer;
+- expresses known-good 1500/1500/2600/2900/2900/3000 RPM installation
+  baselines for temperature probing, grid outage, filtration, Solar,
+  Spillway/Waterfall, and Gas through existing canonical pump constraints and
+  the unchanged pump optimizer;
 - excludes pump GPM from policy inputs because it is not authoritative measured
   flow for this installation; and
 - remains recommendation-only with authority NONE and command delivery
   disabled, as documented by ADR-101.
+
+## Phase 1 Coupled Thermal Execution Foundation
+
+Status: implemented pending review.
+
+- preserves existing Pool and Hot Tub policy semantics while adapting each
+  assessment into one auditable desired body/source/RPM state;
+- creates deterministic proposal-ready `SetHeatMode` and `SetPumpSpeed`
+  operations with explicit ordering and native convergence evidence;
+- uses the same inclusive 25-RPM convergence tolerance in planning and
+  verification, blocks active thermal plans when authoritative RPM is absent,
+  and limits bounded settling behavior to typed pump-speed verification;
+- translates only the commissioned B1101/B1202 and 00000/H0001/H0002 Pentair
+  matrix, with the physical endpoint independently enforcing that matrix;
+  never translates `HXSLR`, arbitrary bodies, arbitrary heaters, or `HTMODE`;
+- separates requested mode, persistent native source selection, and active
+  physical execution so either body can be preconfigured while inactive without
+  implicitly starting circulation;
+- blocks plans on unusable required evidence or permission veto and emits no
+  operations when native state is already converged;
+- permits policy-selected safe heat-source de-selection despite irrelevant
+  missing collector evidence, without stopping circulation;
+- expands read-only native RPM conflict classification for filtration,
+  temperature probing, grid outage, spillway, and otherwise unclassified native
+  assignments; and
+- records the commissioned Spillway/Waterfall baseline as 2900 RPM; current
+  manual Spillway control switches only `FTR01`, so its native RPM assignment
+  remains until coupled RPM/circuit planning and restoration are implemented
+  and live-commissioned; and
+- remains command-disabled and simulator-only under the unchanged execution
+  authorizers, as documented by ADR-102.

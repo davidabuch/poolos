@@ -16,12 +16,14 @@ from .exceptions import (
 )
 from .handler import OperationTranslationHandler, TranslationContextProvider
 from .operations import (
+    PhysicalHeatMode,
     PoolOperation,
     SetHeatMode,
     SetHydraulicRoute,
     SetPumpSpeed,
     StartPump,
     StopPump,
+    ThermalBody,
 )
 from .registry import TranslatorRegistry
 from .response import TranslationResult
@@ -34,6 +36,7 @@ __all__ = [
     "IntegrationError",
     "MissingCapabilityError",
     "OperationTranslationHandler",
+    "PhysicalHeatMode",
     "PoolOperation",
     "SetHeatMode",
     "SetHydraulicRoute",
@@ -41,6 +44,7 @@ __all__ = [
     "SetpointOutOfRangeError",
     "StartPump",
     "StopPump",
+    "ThermalBody",
     "TranslationConfigurationError",
     "TranslationContext",
     "TranslationContextProvider",

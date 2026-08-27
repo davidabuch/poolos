@@ -17,6 +17,10 @@ class AutonomousCapability(str, Enum):
     SOLAR_PUMP_BASELINE = "solar_pump_baseline"
     GAS_PUMP_BASELINE = "gas_pump_baseline"
     FILTRATION_SCHEDULING = "filtration_scheduling"
+    TEMPERATURE_PROBE_PUMP_BASELINE = "temperature_probe_pump_baseline"
+    GRID_OUTAGE_PUMP_BASELINE = "grid_outage_pump_baseline"
+    SPILLWAY_PUMP_BASELINE = "spillway_pump_baseline"
+    GENERAL_PUMP_RPM_OWNERSHIP = "general_pump_rpm_ownership"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +71,16 @@ class NativeConfigurationGuard:
                 affected = (AutonomousCapability.SOLAR_PUMP_BASELINE,)
             elif "gas" in purpose or "heater" in purpose or "spa" in purpose:
                 affected = (AutonomousCapability.GAS_PUMP_BASELINE,)
+            elif "filtration" in purpose or "filter" in purpose:
+                affected = (AutonomousCapability.FILTRATION_SCHEDULING,)
+            elif "probe" in purpose or "temperature" in purpose:
+                affected = (AutonomousCapability.TEMPERATURE_PROBE_PUMP_BASELINE,)
+            elif "outage" in purpose or "grid" in purpose:
+                affected = (AutonomousCapability.GRID_OUTAGE_PUMP_BASELINE,)
+            elif "spillway" in purpose:
+                affected = (AutonomousCapability.SPILLWAY_PUMP_BASELINE,)
             else:
-                continue
+                affected = (AutonomousCapability.GENERAL_PUMP_RPM_OWNERSHIP,)
             conflicts.append(
                 NativeConfigurationConflict(
                     "native_rpm_assignment_conflict",

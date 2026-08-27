@@ -50,7 +50,6 @@ class PoolOSHeatModeDescription:
     key: str
     name: str
     body_objnam: str
-    active_concept: str
     heater_id_concept: str
     default_mode: str
     icon: str
@@ -61,7 +60,6 @@ HEAT_MODE_DESCRIPTIONS = (
         key="pool",
         name="Pool Heat Mode",
         body_objnam="B1101",
-        active_concept="pool.active",
         heater_id_concept="pool.raw_heater_id",
         default_mode=HEAT_MODE_SOLAR,
         icon="mdi:pool-thermometer",
@@ -70,7 +68,6 @@ HEAT_MODE_DESCRIPTIONS = (
         key="hot_tub",
         name="Hot Tub Heat Mode",
         body_objnam="B1202",
-        active_concept="spa.active",
         heater_id_concept="spa.raw_heater_id",
         default_mode=HEAT_MODE_SOLAR_PREFERRED,
         icon="mdi:hot-tub",
@@ -220,18 +217,6 @@ class PoolOSHeatModeSelect(
                 "manual IntelliCenter command connection is unavailable"
             )
 
-        if option != HEAT_MODE_OFF:
-            active = _native_value(
-                self.coordinator,
-                self._description.active_concept,
-            )
-
-            if active is not True:
-                raise ManualIntelliCenterCommandError(
-                    f"{self._description.name} cannot select {option} "
-                    "unless its body is active"
-                )
-
         heater_objnam = _NATIVE_HEATER_BY_DIRECT_MODE[option]
 
         await manual.async_set_body_heat_source(
@@ -265,6 +250,8 @@ class PoolOSHeatModeSelect(
             "pentair_solar_preferred_used": False,
             "solar_preferred_autonomous_delivery_enabled": False,
             "direct_htmode_write_enabled": False,
+            "configuration_independent_of_body_activity": True,
+            "configuration_activates_body": False,
             "allowed_native_heater_ids": (
                 "00000",
                 "H0001",

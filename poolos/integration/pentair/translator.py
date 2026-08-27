@@ -19,10 +19,20 @@ from ..exceptions import (
     UnsupportedOperationError,
     VendorMismatchError,
 )
-from ..operations import PoolOperation, SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump
+from ..operations import (
+    PhysicalHeatMode,
+    PoolOperation,
+    SetHeatMode,
+    SetHydraulicRoute,
+    SetPumpSpeed,
+    StartPump,
+    StopPump,
+    ThermalBody,
+)
 from ..response import TranslationResult
 from .capabilities import (
     PENTAIR_HYDRAULIC_ROUTING,
+    PENTAIR_HEAT_MODE,
     PENTAIR_SHARED_EQUIPMENT_ROUTING,
     PENTAIR_START_STOP,
     PENTAIR_VARIABLE_SPEED,
@@ -36,7 +46,17 @@ class PentairTranslator:
 
     vendor: str = "pentair"
 
-    _supported_types = (SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump)
+    _supported_types = (SetHeatMode, SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump)
+
+    _body_ids = {
+        ThermalBody.POOL: "B1101",
+        ThermalBody.HOT_TUB: "B1202",
+    }
+    _heater_ids = {
+        PhysicalHeatMode.OFF: "00000",
+        PhysicalHeatMode.GAS: "H0001",
+        PhysicalHeatMode.SOLAR: "H0002",
+    }
 
     def supports(self, operation: PoolOperation) -> bool:
         return isinstance(operation, self._supported_types)
@@ -52,6 +72,8 @@ class PentairTranslator:
 
         if isinstance(operation, SetHydraulicRoute):
             return self._translate_hydraulic_route(operation, context)
+        if isinstance(operation, SetHeatMode):
+            return self._translate_heat_mode(operation, context)
 
         pump = self._resolve_equipment(operation.equipment_id, context, PentairPump)
         if isinstance(operation, SetPumpSpeed):
@@ -61,6 +83,31 @@ class PentairTranslator:
         if isinstance(operation, StopPump):
             return self._translate_stop(operation, pump)
         raise UnsupportedOperationError(self.vendor, type(operation))
+
+    def _translate_heat_mode(
+        self,
+        operation: SetHeatMode,
+        context: TranslationContext,
+    ) -> TranslationResult:
+        if PENTAIR_HEAT_MODE not in context.capabilities:
+            raise MissingCapabilityError(operation.equipment_id, PENTAIR_HEAT_MODE)
+        body = ThermalBody(operation.equipment_id)
+        command = VendorCommand(
+            vendor=self.vendor,
+            operation=PentairCommandOperation.SET_BODY_HEATER,
+            target=self._body_ids[body],
+            parameters={
+                PentairCommandParameter.HEATER_ID: self._heater_ids[operation.mode],
+            },
+            metadata=self._operation_metadata(operation, object_kind="body"),
+        )
+        return TranslationResult(
+            commands=(command,),
+            metadata={
+                "source_operation": type(operation).__name__,
+                "translation_capability": PENTAIR_HEAT_MODE,
+            },
+        )
 
     def _validate_vendor(self, context: TranslationContext) -> None:
         actual = context.vendor.strip().lower()

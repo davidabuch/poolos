@@ -100,6 +100,64 @@ def test_endpoint_adapts_vendor_command_to_client_request() -> None:
     }
 
 
+def test_endpoint_accepts_bounded_body_heater_command_without_policy_inference() -> None:
+    client = RecordingPentairClient(
+        PentairCommandResponse(accepted=True, acknowledged=True)
+    )
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    heat_command = VendorCommand(
+        vendor="pentair",
+        operation="body.set_heater",
+        target="B1202",
+        parameters={"heater_id": "H0002"},
+    )
+
+    receipt = endpoint.deliver(
+        heat_command,
+        correlation_id="thermal-plan-1",
+    )
+
+    request, _timeout = client.calls[0]
+    assert request.operation == "body.set_heater"
+    assert request.target == "B1202"
+    assert request.parameters == {"heater_id": "H0002"}
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert receipt.verification_required
+
+
+@pytest.mark.parametrize(
+    ("target", "parameters", "message"),
+    (
+        ("B9999", {"heater_id": "H0001"}, "commissioned body"),
+        ("B1101", {"heater_id": "H9999"}, "heater_id is not commissioned"),
+        ("B1101", {}, "exactly one heater_id"),
+        (
+            "B1101",
+            {"heater_id": "H0001", "HTMODE": "1"},
+            "exactly one heater_id",
+        ),
+    ),
+)
+def test_endpoint_rejects_unbounded_direct_body_heater_commands(
+    target: str,
+    parameters: dict[str, str],
+    message: str,
+) -> None:
+    client = RecordingPentairClient(PentairCommandResponse(accepted=True))
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    heat_command = VendorCommand(
+        vendor="pentair",
+        operation="body.set_heater",
+        target=target,
+        parameters=parameters,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        endpoint.deliver(heat_command, correlation_id="thermal-plan-invalid")
+
+    assert client.calls == []
+
+
 @pytest.mark.parametrize(
     ("response", "expected_status"),
     [

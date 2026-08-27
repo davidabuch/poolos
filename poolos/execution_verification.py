@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 from .clock import FixedClock
 from .execution_models import ExecutionStep, VerificationStatus
+from .integration import SetPumpSpeed
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -226,6 +227,7 @@ class ExecutionVerificationEngine:
             for item in evidence
         )
         unresolved = len(evidence) - matched - mismatched
+        bounded_pump_settling = _is_bounded_pump_settling_step(step)
 
         if matched == len(evidence):
             status = VerificationStatus.VERIFIED
@@ -233,6 +235,9 @@ class ExecutionVerificationEngine:
         elif request.evaluated_at >= request.deadline:
             status = VerificationStatus.TIMED_OUT
             reason = "verification_deadline_reached"
+        elif mismatched and unresolved == 0 and bounded_pump_settling:
+            status = VerificationStatus.PENDING
+            reason = "transient_observation_mismatch_pending"
         elif mismatched and unresolved == 0:
             status = VerificationStatus.FAILED
             reason = "fresh_observations_do_not_match_expectations"
@@ -316,11 +321,23 @@ class ExecutionVerificationEngine:
                 disposition=VerificationEvidenceDisposition.LOW_CONFIDENCE,
                 reason="observation_confidence_below_minimum",
             )
-        if observation.value == expected_value:
+        tolerance = _numeric_tolerance(request.step, observation_id)
+        exact_match = observation.value == expected_value
+        tolerance_match = (
+            tolerance is not None
+            and _is_number(observation.value)
+            and _is_number(expected_value)
+            and abs(float(observation.value) - float(expected_value)) <= tolerance
+        )
+        if exact_match or tolerance_match:
             return ExecutionVerificationEvidence(
                 **common,
                 disposition=VerificationEvidenceDisposition.MATCHED,
-                reason="observation_matches_expectation",
+                reason=(
+                    "observation_matches_expectation"
+                    if exact_match
+                    else "observation_within_numeric_tolerance"
+                ),
             )
         return ExecutionVerificationEvidence(
             **common,
@@ -400,6 +417,32 @@ def _freeze_value(value: Any) -> Any:
     if isinstance(value, set):
         return frozenset(_freeze_value(item) for item in value)
     return value
+
+
+def _numeric_tolerance(step: ExecutionStep, observation_id: str) -> float | None:
+    if not _is_bounded_pump_settling_step(step) or observation_id != "pump.rpm":
+        return None
+    raw = step.metadata.get(f"numeric_tolerance:{observation_id}")
+    if raw is None:
+        return None
+    try:
+        tolerance = float(raw)
+    except ValueError as exc:
+        raise ValueError("numeric observation tolerance must be a number") from exc
+    if tolerance < 0:
+        raise ValueError("numeric observation tolerance must not be negative")
+    return tolerance
+
+
+def _is_bounded_pump_settling_step(step: ExecutionStep) -> bool:
+    return (
+        isinstance(step.operation, SetPumpSpeed)
+        and set(step.expected_observations) == {"pump.rpm"}
+    )
+
+
+def _is_number(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float))
 
 
 def _json_value(value: Any) -> Any:

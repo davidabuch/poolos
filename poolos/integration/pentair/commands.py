@@ -12,6 +12,7 @@ class PentairCommandOperation(StrEnum):
     STOP_PUMP = "pump.stop"
     SET_PUMP_SPEED = "pump.set_speed"
     SET_HYDRAULIC_ROUTE = "hydraulics.set_route"
+    SET_BODY_HEATER = "body.set_heater"
 
 
 class PentairCommandParameter(StrEnum):
@@ -27,6 +28,7 @@ class PentairCommandParameter(StrEnum):
     SHARED_EQUIPMENT_GROUP = "shared_equipment_group"
     INTAKE_VALVE_ID = "intake_valve_id"
     RETURN_VALVE_ID = "return_valve_id"
+    HEATER_ID = "heater_id"
 
 
 __all__ = ["PentairCommandOperation", "PentairCommandParameter"]

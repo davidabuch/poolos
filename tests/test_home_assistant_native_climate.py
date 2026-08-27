@@ -288,8 +288,9 @@ def _build_executable_spa_entity(
     current_temperature: float = 86.0,
     target_temperature: float = 98.0,
     manual_available: bool = True,
+    key: str = "spa",
 ):
-    """Build a real PoolOSNativeClimate instance around fake boundaries."""
+    """Build a real body climate entity around fake boundaries."""
 
     from types import SimpleNamespace
 
@@ -297,19 +298,19 @@ def _build_executable_spa_entity(
 
     observations = (
         SimpleNamespace(
-            observation_id="spa.active",
+            observation_id=f"{key}.active",
             value=active,
         ),
         SimpleNamespace(
-            observation_id="spa.temperature",
+            observation_id=f"{key}.temperature",
             value=current_temperature,
         ),
         SimpleNamespace(
-            observation_id="spa.target_temperature",
+            observation_id=f"{key}.target_temperature",
             value=target_temperature,
         ),
         SimpleNamespace(
-            observation_id="spa.heating_demand_active",
+            observation_id=f"{key}.heating_demand_active",
             value=heating,
         ),
     )
@@ -364,7 +365,7 @@ def _build_executable_spa_entity(
     description = next(
         item
         for item in module.CLIMATE_DESCRIPTIONS
-        if item.key == "spa"
+        if item.key == key
     )
 
     entity = module.PoolOSNativeClimate(
@@ -420,6 +421,37 @@ def test_behavior_siri_style_101_degree_command_targets_spa() -> None:
     assert manual.calls == [
         ("heating_setpoint", "B1202", 101)
     ]
+
+
+def test_inactive_pool_and_hot_tub_targets_are_configuration_only() -> None:
+    import asyncio
+
+    pool_module, pool, pool_manual = _build_executable_spa_entity(
+        key="pool",
+        active=False,
+        heating=False,
+        target_temperature=90.0,
+    )
+    spa_module, spa, spa_manual = _build_executable_spa_entity(
+        key="spa",
+        active=False,
+        heating=False,
+        target_temperature=101.0,
+    )
+
+    asyncio.run(
+        pool.async_set_temperature(**{pool_module.ATTR_TEMPERATURE: 91})
+    )
+    asyncio.run(
+        spa.async_set_temperature(**{spa_module.ATTR_TEMPERATURE: 102})
+    )
+
+    assert pool_manual.calls == [("heating_setpoint", "B1101", 91)]
+    assert spa_manual.calls == [("heating_setpoint", "B1202", 102)]
+    assert all(call[0] != "body_active" for call in pool_manual.calls)
+    assert all(call[0] != "body_active" for call in spa_manual.calls)
+    assert pool.hvac_mode is pool_module.HVACMode.OFF
+    assert spa.hvac_mode is spa_module.HVACMode.OFF
 
 
 def test_behavior_homekit_heat_and_off_control_spa_body() -> None:
