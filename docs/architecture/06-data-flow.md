@@ -101,6 +101,21 @@ A decision cycle assembles the facts needed for one evaluation:
 
 The context is an immutable snapshot. Later external changes do not retroactively alter it.
 
+Command-free operating policy may derive immutable thermal-source, filtration-
+obligation, and time-of-use assessments from explicit observations,
+configuration, authorization evidence, and evaluation time before planning.
+Those assessments may create canonical intents with known-good pump baseline
+constraints. Existing intent arbitration and pump optimization remain the only
+composition path; price never becomes execution authority, and the policy layer
+cannot create or deliver commands (ADR-101).
+
+Plumbing water temperature is admitted as bulk-water evidence only during
+meaningful pool circulation, within its 30-minute trusted reuse interval, or
+after a bounded demand-driven settling probe. Native HA/ICP/OCP spa transitions
+and current IntelliCenter equipment state are first-class evidence; after
+restart, current physical state overrides stale session metadata. Native
+configuration conflicts are reported and scoped rather than silently fought.
+
 ## 3. Planning produces alternatives
 
 Planning converts goals and current facts into candidate plans or alternatives. Alternatives describe possible outcomes and trade-offs without yet authorizing equipment work.

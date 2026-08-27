@@ -46,7 +46,7 @@ def eligible_assessment():
 
 def test_ineligible_assessment_produces_no_intent() -> None:
     assessment = SolarEligibilityTracker().evaluate(
-        observation(at=NOW)
+        observation(at=NOW, collector=92.0)
     )
 
     result = SolarEligibilityIntentAdapter().create_intent(assessment)
