@@ -4,6 +4,9 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
+import pytest
+
+from poolos.integration import PhysicalHeatMode, SetHeatMode, SetPumpSpeed
 from poolos.native_configuration_policy import (
     NativeConfigurationGuard,
     NativeConfigurationInput,
@@ -241,3 +244,179 @@ def test_phase_three_module_has_no_execution_or_delivery_driver() -> None:
     assert "deliver_current_step" not in source
     assert ".begin(" not in source
     assert "ManualIntelliCenter" not in source
+
+
+def live_values(
+    *,
+    pool_active: bool,
+    pool_heater: str,
+    pump_rpm: int,
+    solar_temperature: float = 67.0,
+    solar_active: bool = False,
+    spa_active: bool = False,
+    spa_heater: str = "H0001",
+) -> dict[str, object]:
+    return {
+        "pool.active": pool_active,
+        "pool.temperature": 86.0,
+        "pool.target_temperature": 90.0,
+        "pool.raw_heater_id": pool_heater,
+        "pool.raw_htmode": "0",
+        "spa.active": spa_active,
+        "spa.temperature": 98.0,
+        "spa.target_temperature": 97.0,
+        "spa.raw_heater_id": spa_heater,
+        "spa.raw_htmode": "0",
+        "pump.rpm": pump_rpm,
+        "solar.temperature": solar_temperature,
+        "solar.active": solar_active,
+    }
+
+
+def test_live_cold_roof_inactive_pool_produces_valid_off_assessment() -> None:
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=False,
+                pool_heater="H0002",
+                pump_rpm=0,
+            ),
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert result.pool.plan.desired.required_pump_rpm is None
+    assert result.pool.plan.desired.reason_code == "solar_only_not_selected"
+
+
+def test_live_cold_roof_active_filtration_rpm_requests_source_off_only() -> None:
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=True,
+                pool_heater="H0002",
+                pump_rpm=2600,
+            ),
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+    plan = result.pool.plan
+
+    assert plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert plan.desired.required_pump_rpm is None
+    assert len(plan.operations) == 1
+    assert isinstance(plan.operations[0], SetHeatMode)
+    assert plan.operations[0].mode is PhysicalHeatMode.OFF
+    assert not any(isinstance(operation, SetPumpSpeed) for operation in plan.operations)
+    assert plan.current.pump_rpm == 2600
+
+
+def test_live_solar_and_gas_plans_retain_thermal_rpm_and_ordering() -> None:
+    solar = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=True,
+                pool_heater="00000",
+                pump_rpm=2600,
+                solar_temperature=100.0,
+            ),
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    ).pool.plan
+    gas = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=True,
+                pool_heater="H0002",
+                pump_rpm=2600,
+            ),
+            pool_mode=ThermalRequestedMode.GAS,
+        ),
+        live_policy=disabled_policy(),
+    ).pool.plan
+
+    assert solar.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert solar.desired.required_pump_rpm == 2900
+    assert [type(operation) for operation in solar.operations] == [
+        SetPumpSpeed,
+        SetHeatMode,
+    ]
+    assert gas.desired.selected_source is PhysicalHeatMode.GAS
+    assert gas.desired.required_pump_rpm == 3000
+    assert [type(operation) for operation in gas.operations] == [
+        SetPumpSpeed,
+        SetHeatMode,
+    ]
+
+
+def test_live_already_off_preserves_nonthermal_rpm_without_operations() -> None:
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=True,
+                pool_heater="00000",
+                pump_rpm=2600,
+            ),
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    ).pool.plan
+
+    assert result.desired.selected_source is PhysicalHeatMode.OFF
+    assert result.desired.required_pump_rpm is None
+    assert result.operations == ()
+    assert result.current.pump_rpm == 2600
+
+
+def test_live_hot_tub_gas_behavior_remains_unchanged() -> None:
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=False,
+                pool_heater="00000",
+                pump_rpm=3000,
+                spa_active=True,
+                spa_heater="H0001",
+            ),
+            spa_mode=ThermalRequestedMode.GAS,
+        ),
+        live_policy=disabled_policy(),
+    ).hot_tub.plan
+
+    assert result.desired.selected_source is PhysicalHeatMode.GAS
+    assert result.desired.required_pump_rpm == 3000
+    assert result.operations == ()
+
+
+def test_stateful_evaluator_rejects_timestamp_regression_with_exact_reason() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    native = live_values(
+        pool_active=True,
+        pool_heater="H0002",
+        pump_rpm=2600,
+    )
+    evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="solar eligibility observations must be chronological",
+    ):
+        evaluator.evaluate(
+            evidence(
+                at=NOW,
+                native_values=native,
+                pool_mode=ThermalRequestedMode.SOLAR,
+            ),
+            live_policy=disabled_policy(),
+        )
