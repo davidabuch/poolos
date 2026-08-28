@@ -17,6 +17,7 @@ class PumpOperatingBaselines:
     grid_outage_rpm: int = 1500
     filtration_rpm: int = 2600
     solar_heating_rpm: int = 2900
+    spillway_rpm: int = 2900
     gas_heating_rpm: int = 3000
 
     def __post_init__(self) -> None:
@@ -25,6 +26,7 @@ class PumpOperatingBaselines:
             "grid_outage_rpm",
             "filtration_rpm",
             "solar_heating_rpm",
+            "spillway_rpm",
             "gas_heating_rpm",
         ):
             value = getattr(self, name)

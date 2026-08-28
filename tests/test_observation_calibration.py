@@ -192,7 +192,7 @@ def test_unhealthy_stale_and_unavailable_failure_outside_grace_still_counts() ->
     }
 
 
-def test_failure_crossing_grace_boundary_is_suppressed_only_until_boundary() -> None:
+def test_failure_during_grace_does_not_seed_post_grace_incident() -> None:
     records = (
         event("baseline", 0, kind="baseline"),
         event(
@@ -216,7 +216,7 @@ def test_failure_crossing_grace_boundary_is_suppressed_only_until_boundary() -> 
 
     assert len(result.incidents) == 1
     incident = result.incidents[0]
-    assert incident.started_at == START + timedelta(seconds=60)
+    assert incident.started_at == START + timedelta(seconds=70)
     assert incident.ended_at == START + timedelta(seconds=120)
     assert result.soak_quality.unhealthy_duration_seconds == 60
     assert result.soak_quality.unavailable_duration_seconds == 60

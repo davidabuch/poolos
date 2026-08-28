@@ -51,6 +51,14 @@ _POOL_LIGHT_OBJNAM = "C0002"
 _POOL_BODY_OBJNAM = "B1101"
 _POOL_SOLAR_HEATER_OBJNAM = "H0002"
 _NO_HEATER_OBJNAM = "00000"
+_GAS_HEATER_OBJNAM = "H0001"
+_ALLOWED_HEAT_SOURCE_IDS = frozenset(
+    {
+        _NO_HEATER_OBJNAM,
+        _GAS_HEATER_OBJNAM,
+        _POOL_SOLAR_HEATER_OBJNAM,
+    }
+)
 
 # p0102 is the native IntelliCenter PMPCIRC backing the existing
 # number.buch_family_rpm_pool entity. This is a circuit speed setpoint,
@@ -313,6 +321,44 @@ class ManualIntelliCenterControl:
             value=effect,
         )
 
+    async def async_set_body_heat_source(
+        self,
+        body_objnam: str,
+        heater_objnam: str,
+    ) -> ManualCommandReceipt:
+        """Select one explicitly allow-listed heat source for a Pool/Spa body."""
+
+        self._require_body(body_objnam)
+
+        if heater_objnam not in _ALLOWED_HEAT_SOURCE_IDS:
+            raise ValueError(
+                f"unsupported manual-control heat source: {heater_objnam}"
+            )
+
+        await self._require_available()
+
+        async with self._command_lock:
+            try:
+                await self._controller.request_changes(
+                    body_objnam,
+                    {
+                        HEATER_ATTR: heater_objnam,
+                    },
+                )
+            except Exception as exc:
+                self._last_error_code = type(exc).__name__.upper()
+                raise ManualIntelliCenterCommandError(
+                    f"failed to set {body_objnam} heat source"
+                ) from exc
+
+        self._last_error_code = None
+
+        return ManualCommandReceipt(
+            body_objnam=body_objnam,
+            operation="body_heat_source",
+            value=heater_objnam,
+        )
+
     async def async_set_pool_solar_active(
         self,
         active: bool,
@@ -460,6 +506,7 @@ class ManualIntelliCenterControl:
                     "body_active",
                     "heating_setpoint",
                     "pool_solar_active",
+                    "body_heat_source",
                     "circuit_active",
                     "light_effect",
                     "pump_circuit_speed",

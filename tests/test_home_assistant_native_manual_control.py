@@ -106,6 +106,7 @@ def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
         "async_stop",
         "async_set_body_active",
         "async_set_heating_setpoint",
+        "async_set_body_heat_source",
         "async_set_pool_solar_active",
         "async_set_circuit_state",
         "async_set_light_effect",

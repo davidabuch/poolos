@@ -201,6 +201,41 @@ class PoolOSNativeIntelliCenterSolarSwitch(
         }
 
 
+class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
+    """Effective restart-reset Phase 3 readiness switch; never executes."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Thermal Live Execution"
+    _attr_icon = "mdi:shield-lock-outline"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_thermal_live_execution"
+
+    @property
+    def is_on(self) -> bool:
+        return self._runtime.thermal_runtime.effective_live_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.thermal_runtime.set_effective_live_enabled(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.thermal_runtime.set_effective_live_enabled(False)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "effective_state_resets_off_on_restart": True,
+            "configuration_only": True,
+            "automatic_execution_driver_enabled": False,
+            "command_delivery_performed": False,
+            "manual_controls_unchanged": True,
+            "authority": "none",
+        }
+
+
 class PoolOSNativeIntelliCenterSwitch(
     CoordinatorEntity[PoolOSCoordinator],
     SwitchEntity,
@@ -433,5 +468,6 @@ async def async_setup_entry(
                 runtime.coordinator,
                 entry,
             ),
+            PoolOSThermalLiveExecutionSwitch(entry),
         ]
     )

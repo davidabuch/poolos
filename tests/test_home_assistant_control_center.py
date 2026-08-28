@@ -51,7 +51,7 @@ def test_observation_health_exposes_actionable_snapshot_diagnostics() -> None:
 def test_integration_forwards_only_control_center_platforms() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")
     init = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light", "number")' in const
+    assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light", "number", "select")' in const
     assert "async_forward_entry_setups(entry, PLATFORMS)" in init
     assert "async_unload_platforms(entry, PLATFORMS)" in init
 
@@ -98,7 +98,7 @@ def test_dashboard_is_valid_and_read_only() -> None:
 
 
 def test_control_center_adds_no_equipment_actuating_platform() -> None:
-    prohibited = {"select.py", "services.yaml"}
+    prohibited = {"services.yaml"}
     assert not any((COMPONENT / name).exists() for name in prohibited)
 
 
@@ -131,8 +131,8 @@ def test_health_incident_since_restart_is_latched_and_diagnostic() -> None:
     dashboard = DASHBOARD.read_text(encoding="utf-8")
 
     assert 'self._unhealthy_seen_since_start = False' in coordinator
-    assert 'if not snapshot.healthy and not self.in_startup_health_grace(observed_at):' in coordinator
-    assert 'self._unhealthy_seen_since_start = True' in coordinator
+    assert "evaluate_durable_health_confirmation" in coordinator
+    assert "self._update_durable_health_confirmation(snapshot" in coordinator
     assert 'def health_incident_diagnostics' in coordinator
     assert '"last_unhealthy_at"' in coordinator
     assert '"last_unhealthy_missing_required"' in coordinator
@@ -153,7 +153,7 @@ def test_startup_health_grace_suppresses_transient_incident_latching() -> None:
     assert "def in_startup_health_grace" in coordinator
     assert "def observation_health_state" in coordinator
     assert 'return "INITIALIZING"' in coordinator
-    assert "not self.in_startup_health_grace(observed_at)" in coordinator
+    assert "in_startup_grace=self.in_startup_health_grace(observed_at)" in coordinator
     assert "startup_grace_active" in sensor
 
 

@@ -1090,9 +1090,101 @@ Status: implemented pending review.
   outage two-thirds credit;
 - reports scoped native Solar Preferred, RPM, and schedule conflicts without
   fighting or rewriting IntelliCenter;
-- expresses known-good 1500/1500/2600/2900/3000 RPM installation baselines through
-  existing canonical pump constraints and the unchanged pump optimizer;
+- expresses known-good 1500/1500/2600/2900/2900/3000 RPM installation
+  baselines for temperature probing, grid outage, filtration, Solar,
+  Spillway/Waterfall, and Gas through existing canonical pump constraints and
+  the unchanged pump optimizer;
 - excludes pump GPM from policy inputs because it is not authoritative measured
   flow for this installation; and
 - remains recommendation-only with authority NONE and command delivery
   disabled, as documented by ADR-101.
+
+## Phase 1 Coupled Thermal Execution Foundation
+
+Status: implemented pending review.
+
+- preserves existing Pool and Hot Tub policy semantics while adapting each
+  assessment into one auditable desired body/source/RPM state;
+- creates deterministic proposal-ready `SetHeatMode` and `SetPumpSpeed`
+  operations with explicit ordering and native convergence evidence;
+- uses the same inclusive 25-RPM convergence tolerance in planning and
+  verification, blocks active thermal plans when authoritative RPM is absent,
+  and limits bounded settling behavior to typed pump-speed verification;
+- translates only the commissioned B1101/B1202 and 00000/H0001/H0002 Pentair
+  matrix, with the physical endpoint independently enforcing that matrix;
+  never translates `HXSLR`, arbitrary bodies, arbitrary heaters, or `HTMODE`;
+- separates requested mode, persistent native source selection, and active
+  physical execution so either body can be preconfigured while inactive without
+  implicitly starting circulation;
+- blocks plans on unusable required evidence or permission veto and emits no
+  operations when native state is already converged;
+- permits policy-selected safe heat-source de-selection despite irrelevant
+  missing collector evidence, without stopping circulation;
+- expands read-only native RPM conflict classification for filtration,
+  temperature probing, grid outage, spillway, and otherwise unclassified native
+  assignments; and
+- records the commissioned Spillway/Waterfall baseline as 2900 RPM; current
+  manual Spillway control switches only `FTR01`, so its native RPM assignment
+  remains until coupled RPM/circuit planning and restoration are implemented
+  and live-commissioned; and
+- remains command-disabled and simulator-only under the unchanged execution
+  authorizers, as documented by ADR-102.
+
+## Phase 2 Scoped Live Thermal Execution Capability
+
+Status: implemented, disabled, and awaiting controlled live commissioning.
+
+- preserves the general simulator-only authorization engine and introduces a
+  separate typed exception for ADR-102 thermal plans only;
+- defaults both the thermal kill switch and one-body commissioning scope to
+  disabled;
+- permits only `SetPumpSpeed` for `p0102` at the selected 2900/3000 thermal
+  baseline and `SetHeatMode` for the commissioned Pool/Hot Tub source matrix;
+- re-authorizes each step from current evaluation, plan, transport, health,
+  hydraulic, body-activity, and native-configuration evidence;
+- delivers one step, waits for authoritative native verification, and advances
+  only after the existing coordinator and verifier confirm convergence;
+- blocks stale/superseded plans, interrupted recovery, inactive bodies,
+  conflicting native configuration, unavailable transports, and unusable
+  evidence without retry or restoration commands;
+- exposes an unregistered HA adapter over the existing manual IntelliCenter
+  thermal methods while keeping core PoolOS Home Assistant-independent;
+- adds independent physical endpoint bounds for `p0102` thermal RPM commands;
+  and
+- grants no authority to hydraulic routing, body activation, Spillway,
+  filtration, temperature probing, grid-outage actions, or any other operation,
+  as documented by ADR-103.
+
+## Durable Observation-Health Confirmation
+
+Status: implemented pending review.
+
+- preserves immediate fail-closed observation health while requiring two
+  distinct unhealthy snapshots before setting the durable session latch;
+- ignores repeated publication of the same immutable snapshot, clears pending
+  evidence on recovery, and prevents startup-grace evidence from seeding a
+  later incident;
+- qualifies retrospective incidents from two distinct unhealthy records or a
+  single record supported for the existing 30-second reconciliation cadence,
+  bounded by the existing evidence-gap policy; and
+- retains raw transient evidence without promoting the observed 63-millisecond
+  artifact into commissioning or troubleshooting incident history, as
+  documented by ADR-104.
+
+## Phase 3 Command-Free Thermal Runtime Readiness
+
+Status: implemented, command-free, and pending review.
+
+- assembles authoritative native body/source/RPM evidence, freshness, current
+  health, transport readiness, and native-configuration conflicts into current
+  Pool and Hot Tub ADR-102 plans;
+- exposes actual ADR-103 dry-run authorization separately from a non-authorizing
+  technical preflight that omits only operator enable/scope gates;
+- adds a restart-reset `Thermal Live Execution` configuration switch, a
+  Disabled/Pool/Hot Tub commissioning-scope selector, and direct typed
+  requested-mode integration;
+- publishes bounded global and body-specific HA diagnostics while native and
+  coordinator updates remain event-driven; and
+- contains no automatic execution driver, delivery invocation, command task,
+  nonthermal authority, or Pentair configuration mutation, as documented by
+  ADR-105.

@@ -12,6 +12,7 @@ from poolos.integration import (
     EquipmentNotFoundError,
     EquipmentTypeError,
     MissingCapabilityError,
+    PhysicalHeatMode,
     PoolOperation,
     SetHeatMode,
     SetHydraulicRoute,
@@ -19,11 +20,11 @@ from poolos.integration import (
     SetpointOutOfRangeError,
     StartPump,
     StopPump,
+    ThermalBody,
     TranslationContext,
     TranslationResult,
     TranslatorNotFoundError,
     TranslatorRegistry,
-    UnsupportedOperationError,
     VendorCommand,
     TranslationConfigurationError,
     VendorMismatchError,
@@ -85,14 +86,19 @@ def test_operations_are_typed_validated_and_immutable() -> None:
         SetPumpSpeed(equipment_id="filter_pump", rpm=0)
     with pytest.raises(ValueError, match="equipment_id must not be empty"):
         StartPump(equipment_id=" ")
-    with pytest.raises(ValueError, match="mode must not be empty"):
-        SetHeatMode(equipment_id="spa", mode="")
+    with pytest.raises(ValueError, match="unsupported physical heat mode"):
+        SetHeatMode(equipment_id=ThermalBody.HOT_TUB, mode="")
 
 
 def test_initial_operation_classes_can_be_constructed() -> None:
     assert StartPump(equipment_id="pump").equipment_id == "pump"
     assert StopPump(equipment_id="pump").equipment_id == "pump"
-    assert SetHeatMode(equipment_id="spa", mode="heat").mode == "heat"
+    heat = SetHeatMode(
+        equipment_id=ThermalBody.HOT_TUB,
+        mode=PhysicalHeatMode.GAS,
+    )
+    assert heat.equipment_id == "hot_tub"
+    assert heat.mode is PhysicalHeatMode.GAS
     route = SetHydraulicRoute(
         equipment_id="shared-1",
         suction_body_id="pool",
@@ -231,17 +237,52 @@ def test_pentair_pump_start_stop_and_speed_translate_to_logical_commands() -> No
     assert speed.metadata["source_operation"] == "SetPumpSpeed"
 
 
-def test_pentair_supports_only_implemented_pump_operations() -> None:
+@pytest.mark.parametrize(
+    ("body", "mode", "native_body", "heater_id"),
+    (
+        (ThermalBody.POOL, PhysicalHeatMode.OFF, "B1101", "00000"),
+        (ThermalBody.POOL, PhysicalHeatMode.GAS, "B1101", "H0001"),
+        (ThermalBody.POOL, PhysicalHeatMode.SOLAR, "B1101", "H0002"),
+        (ThermalBody.HOT_TUB, PhysicalHeatMode.OFF, "B1202", "00000"),
+        (ThermalBody.HOT_TUB, PhysicalHeatMode.GAS, "B1202", "H0001"),
+        (ThermalBody.HOT_TUB, PhysicalHeatMode.SOLAR, "B1202", "H0002"),
+    ),
+)
+def test_pentair_translates_only_commissioned_heat_source_matrix(
+    body: ThermalBody,
+    mode: PhysicalHeatMode,
+    native_body: str,
+    heater_id: str,
+) -> None:
+    translator = PentairTranslator()
+    operation = SetHeatMode(equipment_id=body, mode=mode)
+
+    result = translator.translate(
+        operation,
+        TranslationContext(vendor="pentair", capabilities={"pentair.heat_mode"}),
+    )
+
+    assert translator.supports(operation)
+    assert result.commands[0].operation is PentairCommandOperation.SET_BODY_HEATER
+    assert result.commands[0].target == native_body
+    assert result.commands[0].parameters[PentairCommandParameter.HEATER_ID] == heater_id
+    assert "HTMODE" not in result.commands[0].parameters
+    assert "HXSLR" not in repr(result.commands[0])
+
+
+def test_pentair_heat_source_translation_fails_closed() -> None:
     translator = PentairTranslator()
 
-    assert translator.supports(StartPump(equipment_id="pump"))
-    assert translator.supports(StopPump(equipment_id="pump"))
-    assert translator.supports(SetPumpSpeed(equipment_id="pump", rpm=2400))
-    assert not translator.supports(SetHeatMode(equipment_id="spa", mode="heat"))
-
-    with pytest.raises(UnsupportedOperationError):
+    with pytest.raises(ValueError, match="unsupported thermal body"):
+        SetHeatMode(equipment_id="spa", mode=PhysicalHeatMode.GAS)
+    with pytest.raises(ValueError, match="unsupported physical heat mode"):
+        SetHeatMode(equipment_id=ThermalBody.POOL, mode="solar_preferred")
+    with pytest.raises(MissingCapabilityError, match="pentair.heat_mode"):
         translator.translate(
-            SetHeatMode(equipment_id="spa", mode="heat"),
+            SetHeatMode(
+                equipment_id=ThermalBody.POOL,
+                mode=PhysicalHeatMode.SOLAR,
+            ),
             TranslationContext(vendor="pentair"),
         )
 

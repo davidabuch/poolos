@@ -3,9 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping
 from uuid import uuid4
+
+
+class ThermalBody(StrEnum):
+    """Bodies commissioned for bounded thermal-source selection."""
+
+    POOL = "pool"
+    HOT_TUB = "hot_tub"
+
+
+class PhysicalHeatMode(StrEnum):
+    """Explicit physical heat-source selections understood by hardware."""
+
+    OFF = "off"
+    SOLAR = "solar"
+    GAS = "gas"
 
 
 def _require_identifier(value: str, label: str) -> None:
@@ -72,10 +88,19 @@ class SetHydraulicRoute(PoolOperation):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SetHeatMode(PoolOperation):
-    """Request a hardware-independent heat mode for a body or heater."""
+    """Request one commissioned physical heat source for one commissioned body."""
 
-    mode: str
+    mode: PhysicalHeatMode
 
     def __post_init__(self) -> None:
         super(SetHeatMode, self).__post_init__()
-        _require_identifier(self.mode, "mode")
+        try:
+            body = ThermalBody(self.equipment_id)
+        except ValueError as exc:
+            raise ValueError("unsupported thermal body") from exc
+        try:
+            mode = PhysicalHeatMode(self.mode)
+        except ValueError as exc:
+            raise ValueError("unsupported physical heat mode") from exc
+        object.__setattr__(self, "equipment_id", body.value)
+        object.__setattr__(self, "mode", mode)

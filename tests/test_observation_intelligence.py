@@ -161,6 +161,55 @@ def test_real_upstream_failure_is_one_recovered_incident_and_remains_evidence() 
     assert "outage-start" in result.soak_quality.source_evidence_ids
 
 
+def test_sixty_three_millisecond_unhealthy_artifact_is_not_durable_incident() -> None:
+    unhealthy_at = START + timedelta(minutes=5)
+    records = (
+        healthy_checkpoint("healthy-before", 0),
+        event(
+            "transient-unhealthy",
+            unhealthy_at,
+            healthy=False,
+            unavailable=("binary_sensor.grid",),
+            stale=("B1202", "PMP01"),
+        ),
+        event(
+            "recovered-63ms",
+            unhealthy_at + timedelta(milliseconds=63),
+            healthy=True,
+        ),
+        healthy_checkpoint("healthy-after", 10),
+    )
+
+    result = report(records, end=START + timedelta(minutes=20))
+
+    assert result.incidents == ()
+    assert result.soak_quality.incident_count == 0
+
+
+def test_single_sparse_unhealthy_record_qualifies_when_supported_for_cadence() -> None:
+    unhealthy_at = START + timedelta(minutes=5)
+    records = (
+        healthy_checkpoint("healthy-before", 0),
+        event(
+            "sparse-unhealthy",
+            unhealthy_at,
+            healthy=False,
+            unavailable=("sensor.pool",),
+        ),
+        event(
+            "sparse-recovered",
+            unhealthy_at + timedelta(seconds=30),
+            healthy=True,
+        ),
+    )
+
+    incident = report(records, end=START + timedelta(minutes=10)).incidents[0]
+
+    assert incident.started_at == unhealthy_at
+    assert incident.ended_at == unhealthy_at + timedelta(seconds=30)
+    assert incident.source_event_ids == ("sparse-unhealthy", "sparse-recovered")
+
+
 def test_open_incident_has_no_fabricated_recovery_time() -> None:
     records = (
         healthy_checkpoint("healthy", 0),

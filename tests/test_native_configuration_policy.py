@@ -29,3 +29,25 @@ def test_native_rpm_and_schedule_conflicts_are_explicit_and_scoped() -> None:
         AutonomousCapability.FILTRATION_SCHEDULING,
     }
     assert len(result.conflicts) == 3
+
+
+def test_all_native_rpm_assignments_are_classified_for_single_owner_migration() -> None:
+    result = NativeConfigurationGuard().evaluate(
+        NativeConfigurationInput(
+            rpm_assignments=(
+                NativeRpmAssignment("Filtration", 2600),
+                NativeRpmAssignment("Temperature probe", 1500),
+                NativeRpmAssignment("Grid outage", 1500),
+                NativeRpmAssignment("Spillway", 2800),
+                NativeRpmAssignment("Feature circuit", 2400),
+            )
+        )
+    )
+
+    assert set(result.disabled_capabilities) == {
+        AutonomousCapability.FILTRATION_SCHEDULING,
+        AutonomousCapability.TEMPERATURE_PROBE_PUMP_BASELINE,
+        AutonomousCapability.GRID_OUTAGE_PUMP_BASELINE,
+        AutonomousCapability.SPILLWAY_PUMP_BASELINE,
+        AutonomousCapability.GENERAL_PUMP_RPM_OWNERSHIP,
+    }
