@@ -55,8 +55,8 @@ def command(
     return VendorCommand(
         vendor=vendor,
         operation=operation,
-        target="filter-pump",
-        parameters={"rpm": 2200},
+        target="p0102",
+        parameters={"rpm": 2900},
         metadata={"operation_id": "operation-123"},
     )
 
@@ -84,8 +84,8 @@ def test_endpoint_adapts_vendor_command_to_client_request() -> None:
     assert len(client.calls) == 1
     request, timeout = client.calls[0]
     assert request.operation == "pump.set_speed"
-    assert request.target == "filter-pump"
-    assert request.parameters == {"rpm": 2200}
+    assert request.target == "p0102"
+    assert request.parameters == {"rpm": 2900}
     assert request.metadata == {"operation_id": "operation-123"}
     assert request.correlation_id == "correlation-123"
     assert timeout == 3.5
@@ -154,6 +154,35 @@ def test_endpoint_rejects_unbounded_direct_body_heater_commands(
 
     with pytest.raises(ValueError, match=message):
         endpoint.deliver(heat_command, correlation_id="thermal-plan-invalid")
+
+    assert client.calls == []
+
+
+@pytest.mark.parametrize(
+    ("target", "parameters", "message"),
+    (
+        ("other-pump", {"rpm": 2900}, "commissioned pump circuit"),
+        ("p0102", {"rpm": 2600}, "commissioned thermal baseline"),
+        ("p0102", {"rpm": 2900, "mode": "RPM"}, "exactly one rpm"),
+        ("p0102", {"rpm": 2900.5}, "whole number"),
+    ),
+)
+def test_endpoint_rejects_unbounded_direct_pump_speed_commands(
+    target: str,
+    parameters: dict[str, object],
+    message: str,
+) -> None:
+    client = RecordingPentairClient(PentairCommandResponse(accepted=True))
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    pump_command = VendorCommand(
+        vendor="pentair",
+        operation="pump.set_speed",
+        target=target,
+        parameters=parameters,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        endpoint.deliver(pump_command, correlation_id="thermal-pump-invalid")
 
     assert client.calls == []
 

@@ -37,6 +37,7 @@ def test_required_integration_files_exist() -> None:
         "sensor.py",
         "switch.py",
         "system_health.py",
+        "thermal_live_delivery.py",
         "translations/en.json",
     }
     assert {str(path.relative_to(COMPONENT)) for path in COMPONENT.rglob("*") if path.is_file() and "__pycache__" not in path.parts} == expected

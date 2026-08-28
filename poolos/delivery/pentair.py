@@ -121,6 +121,7 @@ class PentairVendorCommandEndpoint:
         self._validate_vendor(command.vendor)
         operation = self._validate_operation(command.operation)
         self._validate_bounded_body_heater_command(command, operation=operation)
+        self._validate_bounded_pump_speed_command(command, operation=operation)
         request = PentairCommandRequest(
             operation=operation,
             target=command.target,
@@ -183,6 +184,25 @@ class PentairVendorCommandEndpoint:
             raise ValueError("body.set_heater requires exactly one heater_id parameter")
         if command.parameters[expected_key] not in {"00000", "H0001", "H0002"}:
             raise ValueError("body.set_heater heater_id is not commissioned")
+
+    @staticmethod
+    def _validate_bounded_pump_speed_command(
+        command: VendorCommand,
+        *,
+        operation: str,
+    ) -> None:
+        if operation != PentairCommandOperation.SET_PUMP_SPEED.value:
+            return
+        if command.target != "p0102":
+            raise ValueError("pump.set_speed target is not the commissioned pump circuit")
+        expected_key = PentairCommandParameter.RPM.value
+        if set(command.parameters) != {expected_key}:
+            raise ValueError("pump.set_speed requires exactly one rpm parameter")
+        rpm = command.parameters[expected_key]
+        if isinstance(rpm, bool) or not isinstance(rpm, int):
+            raise ValueError("pump.set_speed rpm must be a whole number")
+        if rpm not in {2900, 3000}:
+            raise ValueError("pump.set_speed rpm is not a commissioned thermal baseline")
 
     def _receipt_from_response(
         self,

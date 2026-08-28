@@ -1129,3 +1129,28 @@ Status: implemented pending review.
   and live-commissioned; and
 - remains command-disabled and simulator-only under the unchanged execution
   authorizers, as documented by ADR-102.
+
+## Phase 2 Scoped Live Thermal Execution Capability
+
+Status: implemented, disabled, and awaiting controlled live commissioning.
+
+- preserves the general simulator-only authorization engine and introduces a
+  separate typed exception for ADR-102 thermal plans only;
+- defaults both the thermal kill switch and one-body commissioning scope to
+  disabled;
+- permits only `SetPumpSpeed` for `p0102` at the selected 2900/3000 thermal
+  baseline and `SetHeatMode` for the commissioned Pool/Hot Tub source matrix;
+- re-authorizes each step from current evaluation, plan, transport, health,
+  hydraulic, body-activity, and native-configuration evidence;
+- delivers one step, waits for authoritative native verification, and advances
+  only after the existing coordinator and verifier confirm convergence;
+- blocks stale/superseded plans, interrupted recovery, inactive bodies,
+  conflicting native configuration, unavailable transports, and unusable
+  evidence without retry or restoration commands;
+- exposes an unregistered HA adapter over the existing manual IntelliCenter
+  thermal methods while keeping core PoolOS Home Assistant-independent;
+- adds independent physical endpoint bounds for `p0102` thermal RPM commands;
+  and
+- grants no authority to hydraulic routing, body activation, Spillway,
+  filtration, temperature probing, grid-outage actions, or any other operation,
+  as documented by ADR-103.

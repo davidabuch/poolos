@@ -295,7 +295,7 @@ def desired_spa_state(
 class ThermalExecutionPlanBuilder:
     """Create ordered canonical operations without authorizing or delivering them."""
 
-    pump_equipment_id: str = "filter_pump"
+    pump_equipment_id: str = "p0102"
     pump_rpm_tolerance: int = 25
 
     def __post_init__(self) -> None:
