@@ -16,6 +16,9 @@ from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import PoolOSCoordinator
 from .manual_intellicenter import ManualIntelliCenterCommandError
+from poolos.integration import ThermalBody
+from poolos.thermal_live_execution import ThermalLiveCommissioningScope
+from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
 
 HEAT_MODE_OFF = "Off"
@@ -53,6 +56,7 @@ class PoolOSHeatModeDescription:
     heater_id_concept: str
     default_mode: str
     icon: str
+    body: ThermalBody
 
 
 HEAT_MODE_DESCRIPTIONS = (
@@ -63,6 +67,7 @@ HEAT_MODE_DESCRIPTIONS = (
         heater_id_concept="pool.raw_heater_id",
         default_mode=HEAT_MODE_SOLAR,
         icon="mdi:pool-thermometer",
+        body=ThermalBody.POOL,
     ),
     PoolOSHeatModeDescription(
         key="hot_tub",
@@ -71,6 +76,7 @@ HEAT_MODE_DESCRIPTIONS = (
         heater_id_concept="spa.raw_heater_id",
         default_mode=HEAT_MODE_SOLAR_PREFERRED,
         icon="mdi:hot-tub",
+        body=ThermalBody.HOT_TUB,
     ),
 )
 
@@ -149,6 +155,11 @@ class PoolOSHeatModeSelect(
             and previous.state in HEAT_MODE_OPTIONS
         ):
             self._requested_mode = previous.state
+        self._runtime.thermal_runtime.set_requested_mode(
+            self._description.body,
+            ThermalRequestedMode(self._requested_mode),
+            publish=False,
+        )
 
     @property
     def available(self) -> bool:
@@ -207,6 +218,10 @@ class PoolOSHeatModeSelect(
             # This is PoolOS policy intent, not a native Pentair Solar Preferred selection.
             # Autonomous source selection remains intentionally disabled.
             self._requested_mode = option
+            self._runtime.thermal_runtime.set_requested_mode(
+                self._description.body,
+                ThermalRequestedMode(option),
+            )
             self.async_write_ha_state()
             return
 
@@ -227,6 +242,10 @@ class PoolOSHeatModeSelect(
         # Requested mode is PoolOS operator intent. Effective heat source
         # remains native-authoritative and is never optimistically mutated.
         self._requested_mode = option
+        self._runtime.thermal_runtime.set_requested_mode(
+            self._description.body,
+            ThermalRequestedMode(option),
+        )
         self.async_write_ha_state()
 
     @property
@@ -260,6 +279,57 @@ class PoolOSHeatModeSelect(
         }
 
 
+_COMMISSIONING_SCOPE_OPTION = {
+    "Disabled": ThermalLiveCommissioningScope.DISABLED,
+    "Pool": ThermalLiveCommissioningScope.POOL,
+    "Hot Tub": ThermalLiveCommissioningScope.HOT_TUB,
+}
+
+
+class PoolOSThermalCommissioningScopeSelect(RestoreEntity, SelectEntity):
+    """Configure one-body dry-run scope without executing any plan."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Thermal Commissioning Scope"
+    _attr_icon = "mdi:shield-account-outline"
+    _attr_options = list(_COMMISSIONING_SCOPE_OPTION)
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_thermal_commissioning_scope"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if previous is not None and previous.state in _COMMISSIONING_SCOPE_OPTION:
+            self._runtime.thermal_runtime.set_commissioning_scope(
+                _COMMISSIONING_SCOPE_OPTION[previous.state]
+            )
+
+    @property
+    def current_option(self) -> str:
+        scope = self._runtime.thermal_runtime.commissioning_scope
+        return next(
+            label for label, value in _COMMISSIONING_SCOPE_OPTION.items() if value is scope
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in _COMMISSIONING_SCOPE_OPTION:
+            raise ValueError(f"unsupported thermal commissioning scope: {option}")
+        self._runtime.thermal_runtime.set_commissioning_scope(
+            _COMMISSIONING_SCOPE_OPTION[option]
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "configuration_only": True,
+            "automatic_execution_driver_enabled": False,
+            "command_delivery_performed": False,
+            "authority": "none",
+        }
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry[PoolOSRuntimeData],
@@ -271,10 +341,15 @@ async def async_setup_entry(
     runtime = entry.runtime_data
 
     async_add_entities(
-        PoolOSHeatModeSelect(
-            runtime.coordinator,
-            entry,
-            description,
-        )
-        for description in HEAT_MODE_DESCRIPTIONS
+        [
+            *(
+                PoolOSHeatModeSelect(
+                    runtime.coordinator,
+                    entry,
+                    description,
+                )
+                for description in HEAT_MODE_DESCRIPTIONS
+            ),
+            PoolOSThermalCommissioningScopeSelect(entry),
+        ]
     )

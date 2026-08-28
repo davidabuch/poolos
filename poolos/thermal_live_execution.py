@@ -317,6 +317,35 @@ class ThermalLiveAuthorizationEngine:
             },
         )
 
+    def technical_preflight_blocking_reasons(
+        self,
+        assessment: ThermalExecutionPlanAssessment,
+        *,
+        step_index: int,
+        policy: ThermalLiveExecutionPolicy,
+        evidence: ThermalLiveSafetyEvidence,
+    ) -> tuple[str, ...]:
+        """Return technical blockers without creating delivery authorization.
+
+        Only the operator enable and commissioning-scope gates are omitted.
+        The returned tuple is diagnostic evidence and cannot be passed to the
+        execution engine as authorization.
+        """
+
+        operation = (
+            assessment.operations[step_index]
+            if 0 <= step_index < len(assessment.operations)
+            else None
+        )
+        return self._blocking_reasons(
+            assessment,
+            operation=operation,
+            step_index=step_index,
+            policy=policy,
+            evidence=evidence,
+            include_operator_gates=False,
+        )
+
     def _blocking_reasons(
         self,
         assessment: ThermalExecutionPlanAssessment,
@@ -325,14 +354,16 @@ class ThermalLiveAuthorizationEngine:
         step_index: int,
         policy: ThermalLiveExecutionPolicy,
         evidence: ThermalLiveSafetyEvidence,
+        include_operator_gates: bool = True,
     ) -> tuple[str, ...]:
         reasons: list[str] = []
-        if not policy.thermal_live_execution_enabled:
-            reasons.append("thermal_live_kill_switch_disabled")
-        if policy.commissioning_scope is ThermalLiveCommissioningScope.DISABLED:
-            reasons.append("thermal_live_commissioning_scope_disabled")
-        elif policy.commissioning_scope.value != assessment.desired.body.value:
-            reasons.append("body_outside_commissioning_scope")
+        if include_operator_gates:
+            if not policy.thermal_live_execution_enabled:
+                reasons.append("thermal_live_kill_switch_disabled")
+            if policy.commissioning_scope is ThermalLiveCommissioningScope.DISABLED:
+                reasons.append("thermal_live_commissioning_scope_disabled")
+            elif policy.commissioning_scope.value != assessment.desired.body.value:
+                reasons.append("body_outside_commissioning_scope")
         if assessment.disposition is not ThermalPlanDisposition.READY:
             reasons.append("thermal_plan_not_ready")
         if operation is None:

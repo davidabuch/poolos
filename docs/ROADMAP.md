@@ -1154,3 +1154,37 @@ Status: implemented, disabled, and awaiting controlled live commissioning.
 - grants no authority to hydraulic routing, body activation, Spillway,
   filtration, temperature probing, grid-outage actions, or any other operation,
   as documented by ADR-103.
+
+## Durable Observation-Health Confirmation
+
+Status: implemented pending review.
+
+- preserves immediate fail-closed observation health while requiring two
+  distinct unhealthy snapshots before setting the durable session latch;
+- ignores repeated publication of the same immutable snapshot, clears pending
+  evidence on recovery, and prevents startup-grace evidence from seeding a
+  later incident;
+- qualifies retrospective incidents from two distinct unhealthy records or a
+  single record supported for the existing 30-second reconciliation cadence,
+  bounded by the existing evidence-gap policy; and
+- retains raw transient evidence without promoting the observed 63-millisecond
+  artifact into commissioning or troubleshooting incident history, as
+  documented by ADR-104.
+
+## Phase 3 Command-Free Thermal Runtime Readiness
+
+Status: implemented, command-free, and pending review.
+
+- assembles authoritative native body/source/RPM evidence, freshness, current
+  health, transport readiness, and native-configuration conflicts into current
+  Pool and Hot Tub ADR-102 plans;
+- exposes actual ADR-103 dry-run authorization separately from a non-authorizing
+  technical preflight that omits only operator enable/scope gates;
+- adds a restart-reset `Thermal Live Execution` configuration switch, a
+  Disabled/Pool/Hot Tub commissioning-scope selector, and direct typed
+  requested-mode integration;
+- publishes bounded global and body-specific HA diagnostics while native and
+  coordinator updates remain event-driven; and
+- contains no automatic execution driver, delivery invocation, command task,
+  nonthermal authority, or Pentair configuration mutation, as documented by
+  ADR-105.

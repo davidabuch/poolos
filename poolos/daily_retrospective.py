@@ -635,11 +635,19 @@ class DailyOperationalRetrospectiveEngine:
         self,
         *,
         maximum_evidence_gap: timedelta = timedelta(minutes=15),
+        incident_confirmation_interval: timedelta = timedelta(seconds=30),
         soak_quality_policy: SoakQualityPolicy | None = None,
     ) -> None:
         if maximum_evidence_gap <= timedelta(0):
             raise ValueError("maximum_evidence_gap must be positive")
+        if incident_confirmation_interval <= timedelta(0):
+            raise ValueError("incident_confirmation_interval must be positive")
+        if incident_confirmation_interval > maximum_evidence_gap:
+            raise ValueError(
+                "incident_confirmation_interval cannot exceed maximum_evidence_gap"
+            )
         self.maximum_evidence_gap = maximum_evidence_gap
+        self.incident_confirmation_interval = incident_confirmation_interval
         self.soak_quality_policy = soak_quality_policy or SoakQualityPolicy()
         self._behavioral = BehavioralInferenceEngine()
 
@@ -682,6 +690,7 @@ class DailyOperationalRetrospectiveEngine:
             window_end=window_end,
             maximum_evidence_gap=self.maximum_evidence_gap,
             startup_health_grace=self.soak_quality_policy.startup_health_grace,
+            confirmation_interval=self.incident_confirmation_interval,
         )
         incidents = _classify_expected_outages(
             raw_incidents,
@@ -931,6 +940,7 @@ def _observation_incidents(
     window_end: datetime,
     maximum_evidence_gap: timedelta,
     startup_health_grace: timedelta,
+    confirmation_interval: timedelta,
 ) -> tuple[ObservationIncident, ...]:
     relevant = _relevant_records(
         records,
@@ -957,25 +967,27 @@ def _observation_incidents(
         issue_reasons = _health_reasons(record)
         if not issue_reasons:
             if active is not None and bool(record.health.get("healthy", False)):
-                active["source_ids"].append(record.event_id)
-                incidents.append(
-                    _build_incident(
-                        active,
-                        ended_at=record.recorded_at,
-                        window_end=window_end,
+                if _durable_incident_qualified(
+                    active,
+                    evidence_end=record.recorded_at,
+                    confirmation_interval=confirmation_interval,
+                ):
+                    active["source_ids"].append(record.event_id)
+                    incidents.append(
+                        _build_incident(
+                            active,
+                            ended_at=record.recorded_at,
+                            window_end=window_end,
+                        )
                     )
-                )
                 active = None
             continue
         issue_start = max(record.recorded_at, window_start)
         grace_end = _containing_grace_end(record.recorded_at, grace_intervals)
         if grace_end is not None:
-            supported_end = supported_end_by_event.get(
-                record.event_id, record.recorded_at
-            )
-            if supported_end <= grace_end:
-                continue
-            issue_start = max(grace_end, window_start)
+            # Evidence generated during startup grace is never allowed to seed
+            # a candidate that later confirms after grace.
+            continue
         if active is None:
             active = {
                 "started_at": issue_start,
@@ -984,6 +996,7 @@ def _observation_incidents(
                 "unavailable": set(),
                 "stale": set(),
                 "source_ids": [],
+                "unhealthy_source_ids": set(),
                 "unhealthy": False,
             }
         active["reasons"].update(issue_reasons)
@@ -993,12 +1006,40 @@ def _observation_incidents(
         )
         active["stale"].update(_health_values(record, "stale_entities"))
         active["source_ids"].append(record.event_id)
+        active["unhealthy_source_ids"].add(record.event_id)
         active["unhealthy"] = active["unhealthy"] or not bool(
             record.health.get("healthy", False)
         )
     if active is not None:
-        incidents.append(_build_incident(active, ended_at=None, window_end=window_end))
+        supported_end = max(
+            (
+                supported_end_by_event.get(event_id, active["started_at"])
+                for event_id in active["unhealthy_source_ids"]
+            ),
+            default=active["started_at"],
+        )
+        if _durable_incident_qualified(
+            active,
+            evidence_end=supported_end,
+            confirmation_interval=confirmation_interval,
+        ):
+            incidents.append(
+                _build_incident(active, ended_at=None, window_end=window_end)
+            )
     return tuple(incidents)
+
+
+def _durable_incident_qualified(
+    evidence: dict[str, Any],
+    *,
+    evidence_end: datetime,
+    confirmation_interval: timedelta,
+) -> bool:
+    """Require distinct records or one supported cadence-length interval."""
+
+    if len(evidence["unhealthy_source_ids"]) >= 2:
+        return True
+    return evidence_end - evidence["started_at"] >= confirmation_interval
 
 
 def _build_incident(

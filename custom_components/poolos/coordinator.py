@@ -40,6 +40,11 @@ from poolos.multiday_commissioning import (
     MultiDayCommissioningReport,
 )
 from poolos.operator_recommendation import OperatorRecommendation
+from poolos.observation_health_confirmation import (
+    DurableHealthConfirmationState,
+    evaluate_durable_health_confirmation,
+    reset_durable_health_confirmation,
+)
 from poolos.observations import (
     ObservationQuality,
     PersistentObservationRecorder,
@@ -165,6 +170,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._last_unhealthy_at: datetime | None = None
         self._last_unhealthy_missing_required: tuple[str, ...] = ()
         self._last_unhealthy_unavailable_entities: tuple[str, ...] = ()
+        self._durable_health_confirmation = DurableHealthConfirmationState()
+        self._thermal_runtime_refresh: Callable[[ObservationSnapshot], None] | None = None
 
     async def async_initialize_persistence(self) -> None:
         """Load disk-backed commissioning state without blocking HA's event loop."""
@@ -442,6 +449,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._unloading = True
         self._post_start_active = False
         self._native_intellicenter_refresh_dirty = False
+        self._thermal_runtime_refresh = None
         self.async_stop_event_observation()
         async with self._observation_lock:
             pass
@@ -524,6 +532,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             states=states,
             now=observed_at,
         )
+        if self._thermal_runtime_refresh is not None:
+            self._thermal_runtime_refresh(snapshot)
 
         # Publish event-driven authoritative state immediately after it is
         # built, before commissioning persistence, inventory export, or
@@ -550,11 +560,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             self.native_inventory_exporter.last_error = "native inventory export failed"
             LOGGER.exception("PoolOS native IntelliCenter inventory export failed")
         self._last_observation_trigger = trigger
-        if not snapshot.healthy and not self.in_startup_health_grace(observed_at):
-            self._unhealthy_seen_since_start = True
-            self._last_unhealthy_at = snapshot.generated_at
-            self._last_unhealthy_missing_required = snapshot.missing_required
-            self._last_unhealthy_unavailable_entities = snapshot.unavailable_entities
+        self._update_durable_health_confirmation(snapshot, observed_at=observed_at)
         self.shadow_runtime.evaluate(snapshot)
 
         health = {
@@ -1028,6 +1034,37 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             return "INITIALIZING"
         return "UNHEALTHY"
 
+    def set_thermal_runtime_refresh(
+        self,
+        callback: Callable[[ObservationSnapshot], None] | None,
+    ) -> None:
+        """Attach one side-effect-free Phase 3 diagnostic evaluator."""
+
+        self._thermal_runtime_refresh = callback
+
+    def _update_durable_health_confirmation(
+        self,
+        snapshot: ObservationSnapshot,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        """Confirm only distinct unhealthy cycles for durable diagnostics."""
+
+        state = evaluate_durable_health_confirmation(
+            self._durable_health_confirmation,
+            healthy=snapshot.healthy,
+            snapshot_generated_at=snapshot.generated_at,
+            in_startup_grace=self.in_startup_health_grace(observed_at),
+            missing_required=snapshot.missing_required,
+            unavailable_entities=snapshot.unavailable_entities,
+            stale_entities=snapshot.stale_entities,
+        )
+        self._durable_health_confirmation = state
+        self._unhealthy_seen_since_start = state.confirmed
+        self._last_unhealthy_at = state.confirmed_started_at
+        self._last_unhealthy_missing_required = state.missing_required
+        self._last_unhealthy_unavailable_entities = state.unavailable_entities
+
     def reset_health_incident_latch(self) -> bool:
         """Clear acknowledged health-incident history without affecting equipment."""
 
@@ -1039,6 +1076,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._last_unhealthy_at = None
         self._last_unhealthy_missing_required = ()
         self._last_unhealthy_unavailable_entities = ()
+        self._durable_health_confirmation = reset_durable_health_confirmation()
         self.async_update_listeners()
         return True
 
@@ -1047,6 +1085,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return {
             "unhealthy_seen_since_start": self._unhealthy_seen_since_start,
+            "pending_confirmation": self._durable_health_confirmation.pending,
+            "pending_snapshot_generated_at": (
+                None
+                if self._durable_health_confirmation.pending_snapshot_generated_at
+                is None
+                else self._durable_health_confirmation.pending_snapshot_generated_at.isoformat()
+            ),
             "tracking_since": self._health_incident_tracking_since.isoformat(),
             "startup_grace_active": self.in_startup_health_grace(),
             "startup_grace_until": self._startup_health_grace_until.isoformat(),
@@ -1056,6 +1101,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "last_unhealthy_missing_required": list(self._last_unhealthy_missing_required),
             "last_unhealthy_unavailable_entities": list(
                 self._last_unhealthy_unavailable_entities
+            ),
+            "last_unhealthy_stale_entities": list(
+                self._durable_health_confirmation.stale_entities
             ),
         }
 

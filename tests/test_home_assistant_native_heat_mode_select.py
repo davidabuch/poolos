@@ -263,8 +263,21 @@ def _build_select_entities(*, pool_active: bool, spa_active: bool):
             self.calls.append(("body_heat_source", body_objnam, heater_objnam))
 
     manual = FakeManual()
+
+    class FakeThermalRuntime:
+        def __init__(self):
+            self.requested_modes = {}
+
+        def set_requested_mode(self, body, mode, *, publish=True):
+            del publish
+            self.requested_modes[body] = mode
+
+    thermal_runtime = FakeThermalRuntime()
     entry = types.SimpleNamespace(
-        runtime_data=types.SimpleNamespace(manual_intellicenter=manual),
+        runtime_data=types.SimpleNamespace(
+            manual_intellicenter=manual,
+            thermal_runtime=thermal_runtime,
+        ),
         entry_id="test-entry",
     )
     entities = {

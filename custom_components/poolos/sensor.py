@@ -17,6 +17,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import PoolOSCoordinator
+from poolos.integration import ThermalBody
+from poolos.solar_recorder_diagnostics import (
+    solar_learning_quality_state,
+    solar_learning_recorder_attributes,
+    solar_transitions_recorder_attributes,
+    solar_transitions_state,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,20 +508,22 @@ def _incidents_attributes(
     }
 
 
+def _solar_transitions_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    del runtime
+    return solar_transitions_recorder_attributes(
+        coordinator.current_daily_retrospective
+    )
+
+
 def _solar_learning_attributes(
     coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
 ) -> dict[str, Any]:
-    report = coordinator.current_daily_retrospective
-    if report is None:
-        return {"available": False, "authority": "none"}
-    return {
-        "available": True,
-        "report_id": report.report_id,
-        "report_date": report.report_date,
-        **report.solar_learning.to_dict(),
-        "authority": "none",
-        "command_delivery_enabled": False,
-    }
+    del runtime
+    return solar_learning_recorder_attributes(
+        coordinator.current_daily_retrospective
+    )
 
 
 def _multiday_commissioning_attributes(
@@ -652,6 +661,48 @@ TELEMETRY = (
 
 
 SENSORS = (
+    PoolOSControlCenterSensorDescription(
+        "thermal_execution_readiness",
+        "Thermal Execution Readiness",
+        lambda coordinator, runtime: (
+            "UNAVAILABLE"
+            if runtime.thermal_runtime.assessment is None
+            else (
+                "WOULD_AUTHORIZE"
+                if runtime.thermal_runtime.assessment.pool.actual_authorization.authorized
+                or runtime.thermal_runtime.assessment.hot_tub.actual_authorization.authorized
+                else "WOULD_DENY"
+            )
+        ),
+        lambda coordinator, runtime: runtime.thermal_runtime.global_diagnostics(),
+        "mdi:shield-search",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "pool_thermal_plan",
+        "Pool Thermal Plan",
+        lambda coordinator, runtime: (
+            "UNAVAILABLE"
+            if runtime.thermal_runtime.assessment is None
+            else runtime.thermal_runtime.assessment.pool.plan.disposition.value.upper()
+        ),
+        lambda coordinator, runtime: runtime.thermal_runtime.body_diagnostics(
+            ThermalBody.POOL
+        ),
+        "mdi:pool-thermometer",
+    ),
+    PoolOSControlCenterSensorDescription(
+        "hot_tub_thermal_plan",
+        "Hot Tub Thermal Plan",
+        lambda coordinator, runtime: (
+            "UNAVAILABLE"
+            if runtime.thermal_runtime.assessment is None
+            else runtime.thermal_runtime.assessment.hot_tub.plan.disposition.value.upper()
+        ),
+        lambda coordinator, runtime: runtime.thermal_runtime.body_diagnostics(
+            ThermalBody.HOT_TUB
+        ),
+        "mdi:hot-tub",
+    ),
     PoolOSControlCenterSensorDescription(
         "operating_mode",
         "Operating Mode",
@@ -859,24 +910,17 @@ SENSORS = (
     PoolOSControlCenterSensorDescription(
         "solar_transitions_today",
         "Solar Transitions Today",
-        lambda coordinator, runtime: (
-            None
-            if coordinator.current_daily_retrospective is None
-            else (
-                coordinator.current_daily_retrospective.solar_learning.activation_count
-                + coordinator.current_daily_retrospective.solar_learning.deactivation_count
-            )
+        lambda coordinator, runtime: solar_transitions_state(
+            coordinator.current_daily_retrospective
         ),
-        _solar_learning_attributes,
+        _solar_transitions_attributes,
         "mdi:solar-panel-large",
     ),
     PoolOSControlCenterSensorDescription(
         "solar_learning_quality",
         "Solar Learning Quality",
-        lambda coordinator, runtime: (
-            "NOT_AVAILABLE"
-            if coordinator.current_daily_retrospective is None
-            else coordinator.current_daily_retrospective.solar_learning.learning_quality.value
+        lambda coordinator, runtime: solar_learning_quality_state(
+            coordinator.current_daily_retrospective
         ),
         _solar_learning_attributes,
         "mdi:book-check-outline",
