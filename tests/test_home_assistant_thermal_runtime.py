@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import importlib.util
 from pathlib import Path
 import sys
@@ -205,3 +205,42 @@ def test_ha_entities_expose_exact_safe_configuration_contracts() -> None:
     assert '"Disabled": ThermalLiveCommissioningScope.DISABLED' in select
     assert '"Pool": ThermalLiveCommissioningScope.POOL' in select
     assert '"Hot Tub": ThermalLiveCommissioningScope.HOT_TUB' in select
+
+
+def test_configuration_refresh_never_regresses_stateful_policy_timestamp() -> None:
+    runtime, coordinator, manual = runtime_fixture()
+    newer = SimpleNamespace(
+        generated_at=NOW + timedelta(seconds=1),
+        healthy=True,
+        stale_entities=(),
+    )
+
+    runtime.refresh(newer)
+    runtime.set_commissioning_scope(ThermalLiveCommissioningScope.POOL)
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.generated_at == newer.generated_at
+    assert runtime.last_error is None
+    assert manual.command_calls == []
+    assert coordinator.listener_updates == 1
+
+
+def test_runtime_evaluation_error_retains_bounded_sanitized_reason() -> None:
+    runtime, _, manual = runtime_fixture()
+
+    class FailingEvaluator:
+        def evaluate(self, evidence, *, live_policy):
+            del evidence, live_policy
+            raise ValueError("unsafe\nreason " + "x" * 2000)
+
+    runtime.evaluator = FailingEvaluator()
+    runtime.refresh()
+
+    assert runtime.assessment is None
+    assert runtime.last_error is not None
+    assert runtime.last_error.startswith(
+        "thermal_runtime_evaluation_failed:ValueError:unsafe reason"
+    )
+    assert "\n" not in runtime.last_error
+    assert len(runtime.last_error) <= 320
+    assert manual.command_calls == []

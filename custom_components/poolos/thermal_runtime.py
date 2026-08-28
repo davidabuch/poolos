@@ -29,6 +29,9 @@ if TYPE_CHECKING:
     from .manual_intellicenter import ManualIntelliCenterControl
 
 
+_EVALUATION_ERROR_MESSAGE_LIMIT = 256
+
+
 @dataclass(slots=True)
 class PoolOSThermalRuntime:
     """Own operator configuration and publish pure current readiness evidence."""
@@ -46,6 +49,11 @@ class PoolOSThermalRuntime:
     )
     assessment: ThermalRuntimeAssessment | None = None
     last_error: str | None = None
+    _latest_authoritative_snapshot: ObservationSnapshot | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
 
     def set_effective_live_enabled(self, enabled: bool) -> None:
         """Change readiness configuration only; never execute a plan."""
@@ -84,7 +92,7 @@ class PoolOSThermalRuntime:
     ) -> None:
         """Recompute plans and dry-run readiness from current immutable evidence."""
 
-        authoritative = snapshot or self.coordinator.data
+        authoritative = self._select_authoritative_snapshot(snapshot)
         native = self.coordinator.native_intellicenter_snapshot
         if authoritative is None:
             self.assessment = None
@@ -156,11 +164,26 @@ class PoolOSThermalRuntime:
             )
         except (TypeError, ValueError) as exc:
             self.assessment = None
-            self.last_error = f"thermal_runtime_evaluation_failed:{type(exc).__name__}"
+            self.last_error = _bounded_evaluation_error(exc)
         else:
             self.last_error = None
         if publish:
             self.coordinator.async_update_listeners()
+
+    def _select_authoritative_snapshot(
+        self,
+        snapshot: ObservationSnapshot | None,
+    ) -> ObservationSnapshot | None:
+        """Never regress stateful policy trackers to older evidence."""
+
+        latest = self._latest_authoritative_snapshot
+        for candidate in (self.coordinator.data, snapshot):
+            if candidate is None:
+                continue
+            if latest is None or candidate.generated_at >= latest.generated_at:
+                latest = candidate
+        self._latest_authoritative_snapshot = latest
+        return latest
 
     def _native_configuration_input(self) -> NativeConfigurationInput:
         transport = self.coordinator.independent_intellicenter_transport
@@ -227,6 +250,15 @@ def _integer(value: Any) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _bounded_evaluation_error(exc: TypeError | ValueError) -> str:
+    prefix = f"thermal_runtime_evaluation_failed:{type(exc).__name__}"
+    printable = "".join(
+        character if character.isprintable() else " " for character in str(exc)
+    )
+    message = " ".join(printable.split())[:_EVALUATION_ERROR_MESSAGE_LIMIT]
+    return prefix if not message else f"{prefix}:{message}"
 
 
 __all__ = ["PoolOSThermalRuntime"]
