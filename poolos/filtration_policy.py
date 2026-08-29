@@ -143,6 +143,7 @@ class FiltrationDebtLedger:
 class FiltrationDisposition(str, Enum):
     EVIDENCE_UNAVAILABLE = "evidence_unavailable"
     SATISFIED = "satisfied"
+    CREDITING = "crediting"
     RUN_NOW = "run_now"
     DEFERRED_TOU = "deferred_tou"
     DEFERRED_HIGHER_PRIORITY = "deferred_higher_priority"
@@ -180,6 +181,7 @@ class FiltrationPolicy:
         evaluated_at: datetime,
         safely_deferrable: bool,
         higher_priority_requirement: bool = False,
+        filtration_in_progress: bool = False,
     ) -> FiltrationAssessment:
         tier = self._tou_profile.classify(evaluated_at)
         remaining = obligation.remaining_runtime
@@ -192,6 +194,25 @@ class FiltrationPolicy:
                 None,
                 None,
                 ("Daily filtration obligation is already satisfied.",),
+            )
+
+        if filtration_in_progress:
+            rationale = (
+                "Valid Pool circulation is actively earning filtration credit."
+                if not higher_priority_requirement
+                else (
+                    "Valid Pool circulation is actively earning filtration credit "
+                    "while serving another operational requirement."
+                )
+            )
+            return FiltrationAssessment(
+                evaluated_at,
+                FiltrationDisposition.CREDITING,
+                remaining,
+                tier,
+                None,
+                None,
+                (rationale,),
             )
 
         if higher_priority_requirement:
@@ -296,6 +317,7 @@ class FiltrationAccountingSnapshot:
     reason_code: str
     rationale: tuple[str, ...]
     debt_days: tuple[date, ...]
+    currently_earning_credit: bool
     restored_from_history: bool
     temporal_regressions_ignored: int
     authority: str = "none"
@@ -329,6 +351,7 @@ class FiltrationAccountingSnapshot:
                 "disposition": self.disposition.value,
                 "tou_tier": self.tou_tier.name.lower(),
                 "reason_code": self.reason_code,
+                "currently_earning_credit": self.currently_earning_credit,
                 "rationale": list(self.rationale[:4]),
                 "next_suitable_at": (
                     None
@@ -442,6 +465,7 @@ class FiltrationAccountingTracker:
             local_day,
             safely_deferrable=safely_deferrable,
             higher_priority_requirement=higher_priority_requirement,
+            filtration_in_progress=observation.valid_pool_circulation,
         )
         return self._current
 
@@ -473,6 +497,7 @@ class FiltrationAccountingTracker:
         *,
         safely_deferrable: bool,
         higher_priority_requirement: bool,
+        filtration_in_progress: bool,
     ) -> FiltrationAccountingSnapshot:
         current = next(
             (item for item in self._ledger.debts if item.day == local_day),
@@ -498,6 +523,7 @@ class FiltrationAccountingTracker:
                     "Trusted Pool temperature is unavailable for the daily requirement.",
                 ),
                 debt_days=tuple(item.day for item in self._ledger.debts),
+                currently_earning_credit=False,
                 restored_from_history=self._restored_from_history,
                 temporal_regressions_ignored=self._temporal_regressions_ignored,
             )
@@ -513,9 +539,15 @@ class FiltrationAccountingTracker:
             evaluated_at=evaluated_at,
             safely_deferrable=safely_deferrable,
             higher_priority_requirement=higher_priority_requirement,
+            filtration_in_progress=filtration_in_progress,
         )
         reason_code = {
             FiltrationDisposition.SATISFIED: "filtration_obligation_satisfied",
+            FiltrationDisposition.CREDITING: (
+                "filtration_crediting_during_other_operation"
+                if higher_priority_requirement
+                else "filtration_crediting_active_pool_circulation"
+            ),
             FiltrationDisposition.RUN_NOW: "outstanding_filtration_run_now",
             FiltrationDisposition.DEFERRED_TOU: "filtration_deferred_high_peak",
             FiltrationDisposition.DEFERRED_HIGHER_PRIORITY: (
@@ -548,6 +580,9 @@ class FiltrationAccountingTracker:
             reason_code=reason_code,
             rationale=policy.rationale,
             debt_days=tuple(item.day for item in self._ledger.debts),
+            currently_earning_credit=(
+                policy.disposition is FiltrationDisposition.CREDITING
+            ),
             restored_from_history=self._restored_from_history,
             temporal_regressions_ignored=self._temporal_regressions_ignored,
         )
@@ -571,6 +606,7 @@ class FiltrationAccountingTracker:
             reason_code=snapshot.reason_code,
             rationale=snapshot.rationale,
             debt_days=snapshot.debt_days,
+            currently_earning_credit=snapshot.currently_earning_credit,
             restored_from_history=snapshot.restored_from_history,
             temporal_regressions_ignored=self._temporal_regressions_ignored,
         )

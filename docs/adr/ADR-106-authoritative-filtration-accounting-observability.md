@@ -40,6 +40,13 @@ required, credited, remaining, prior-day debt, total remaining, disposition,
 TOU tier, rationale, next suitable time, and ordinary filtration baseline.
 These attributes are a view of the core tracker and are not a ledger.
 
+Disposition describes the current relationship to the obligation. Valid Pool
+circulation with remaining debt is `CREDITING`, including circulation that is
+simultaneously serving Pool Solar or gas heating. `DEFERRED_HIGHER_PRIORITY`
+is reserved for an operation such as Spa hydraulic mode that prevents Pool
+filtration credit, while `DEFERRED_TOU` requires both outstanding debt and no
+current valid Pool circulation. A completed obligation remains `SATISFIED`.
+
 The authoritative total remaining debt now supplies ADR-101 opportunistic Spa
 eligibility. Unknown accounting evidence is not treated as zero debt.
 

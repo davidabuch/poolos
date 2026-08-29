@@ -65,14 +65,16 @@ def snapshot(
     rpm: int = 2600,
     temperature: float = 88.0,
     stale: tuple[str, ...] = (),
+    solar_active: bool = False,
+    heater_active: bool = False,
 ) -> object:
     observations = (
         item("pool.active", pool_active, at),
         item("spa.active", spa_active, at),
         item("pump.rpm", rpm, at),
         item("pool.temperature", temperature, at),
-        item("solar.active", False, at),
-        item("heater.active", False, at),
+        item("solar.active", solar_active, at),
+        item("heater.active", heater_active, at),
         item("grid.outage_active", False, at),
     )
     return SimpleNamespace(
@@ -207,6 +209,87 @@ def test_restore_failure_is_isolated_and_live_accounting_can_recover() -> None:
     assert runtime.diagnostics()["persistence_source"] == (
         "authoritative_observation_history"
     )
+
+
+def test_pool_solar_circulation_is_crediting_not_deferred() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 28, 11, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, pool_active=True, solar_active=True))
+    runtime.refresh(
+        snapshot(
+            start + timedelta(hours=1),
+            pool_active=True,
+            solar_active=True,
+        )
+    )
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "crediting"
+    assert diagnostics["currently_earning_credit"] is True
+    assert diagnostics["credited_runtime_seconds"] == 60 * 60
+    assert diagnostics["reason_code"] == (
+        "filtration_crediting_during_other_operation"
+    )
+
+
+def test_pool_gas_circulation_is_crediting_not_deferred() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 28, 11, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, pool_active=True, heater_active=True))
+    runtime.refresh(
+        snapshot(
+            start + timedelta(minutes=45),
+            pool_active=True,
+            heater_active=True,
+        )
+    )
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "crediting"
+    assert diagnostics["currently_earning_credit"] is True
+    assert diagnostics["credited_runtime_seconds"] == 45 * 60
+
+
+def test_spa_mode_genuinely_defers_pool_filtration_credit() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 28, 11, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, pool_active=False, spa_active=True, rpm=3000))
+    runtime.refresh(
+        snapshot(
+            start + timedelta(hours=1),
+            pool_active=False,
+            spa_active=True,
+            rpm=3000,
+        )
+    )
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "deferred_higher_priority"
+    assert diagnostics["currently_earning_credit"] is False
+    assert diagnostics["credited_runtime_seconds"] == 0
+
+
+def test_high_peak_without_pool_circulation_is_true_tou_deferral() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    high_peak = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+
+    runtime.refresh(snapshot(high_peak, pool_active=False, rpm=0))
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "deferred_tou"
+    assert diagnostics["currently_earning_credit"] is False
+
+
+def test_completed_obligation_is_satisfied_even_if_pool_remains_active() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 28, 8, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, pool_active=True))
+    runtime.refresh(snapshot(start + timedelta(hours=10), pool_active=True))
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "satisfied"
+    assert diagnostics["currently_earning_credit"] is False
+    assert diagnostics["remaining_runtime_seconds"] == 0
 
 
 def test_ha_surface_is_one_diagnostic_view_not_a_command_or_second_ledger() -> None:
