@@ -27,13 +27,23 @@ unusable or stale interval breaks credit continuity. Elapsed time is calculated
 in UTC so DST transitions preserve real duration. Restart never credits the
 unobserved restart gap.
 
+Broad system health and filtration-specific evidence sufficiency are distinct.
+Circulation credit requires present, individually `GOOD`, fresh Pool activity,
+Spa activity, and observed pump RPM evidence. Daily target selection separately
+requires usable Pool temperature evidence. A confirmed outage affects credit
+only when its own evidence is usable. Unrelated missing, unavailable, or stale
+observations do not erase otherwise provable filtration work, while uncertainty
+in any filtration-critical concept fails closed and breaks interval continuity.
+
 The existing persistent observation recorder remains the durable evidence
 owner. Home Assistant startup replays at most the current and prior local day
 from that append-only history off the event loop, then breaks continuity before
 accepting a live snapshot. No second persistence file, Home Assistant restore
 attribute, or parallel ledger is created. If the final pre-failure interval was
 not durably recorded, replay may conservatively under-credit it; it never
-invents completed work.
+invents completed work. Live snapshots and recorded events use the same
+filtration-specific qualification function; recorded per-observation quality,
+source identity, and stale-source evidence are sufficient for equivalent replay.
 
 One bounded Control Center diagnostic exposes the current obligation day,
 required, credited, remaining, prior-day debt, total remaining, disposition,
