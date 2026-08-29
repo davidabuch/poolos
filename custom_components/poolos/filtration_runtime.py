@@ -104,7 +104,6 @@ def _observation_from_snapshot(snapshot: ObservationSnapshot) -> FiltrationObser
         observed_at=snapshot.generated_at,
         by_id=by_id,
         stale_sources=stale_sources,
-        snapshot_healthy=snapshot.healthy,
     )
 
 
@@ -124,7 +123,6 @@ def _observation_from_event(
         observed_at=event.recorded_at,
         by_id=by_id,
         stale_sources=stale_sources,
-        snapshot_healthy=bool(health.get("healthy", False)),
     )
 
 
@@ -133,15 +131,13 @@ def _filtration_observation(
     observed_at: datetime,
     by_id: Mapping[str, Any],
     stale_sources: set[str],
-    snapshot_healthy: bool,
 ) -> FiltrationObservation:
     circulation_concepts = ("pool.active", "spa.active", "pump.rpm")
-    circulation_usable = snapshot_healthy and all(
+    circulation_usable = all(
         _usable(by_id.get(concept), stale_sources) for concept in circulation_concepts
     )
-    temperature_usable = snapshot_healthy and _usable(
-        by_id.get("pool.temperature"), stale_sources
-    )
+    temperature_usable = _usable(by_id.get("pool.temperature"), stale_sources)
+    outage = by_id.get("grid.outage_active")
     return FiltrationObservation(
         observed_at=observed_at,
         pool_active=_boolean(_value(by_id.get("pool.active"))),
@@ -151,7 +147,7 @@ def _filtration_observation(
         circulation_evidence_usable=circulation_usable,
         temperature_evidence_usable=temperature_usable,
         confirmed_grid_outage=(
-            _value(by_id.get("grid.outage_active")) is True
+            _usable(outage, stale_sources) and _value(outage) is True
         ),
     )
 

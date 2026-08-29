@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Mapping
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from poolos.observations import (
     ObservationQuality,
@@ -46,14 +49,20 @@ def _load_runtime_class():
 PoolOSFiltrationRuntime = _load_runtime_class()
 
 
-def item(concept: str, value: object, at: datetime) -> PoolObservation:
+def item(
+    concept: str,
+    value: object,
+    at: datetime,
+    *,
+    quality: ObservationQuality = ObservationQuality.GOOD,
+) -> PoolObservation:
     return PoolObservation(
         concept,
         value,
         observed_at=at,
         source_kind=ObservationSourceKind.LIVE,
         source_id=f"native:{concept}",
-        quality=ObservationQuality.GOOD,
+        quality=quality,
     )
 
 
@@ -67,21 +76,36 @@ def snapshot(
     stale: tuple[str, ...] = (),
     solar_active: bool = False,
     heater_active: bool = False,
+    outage_active: bool = False,
+    healthy: bool = True,
+    omitted: tuple[str, ...] = (),
+    qualities: Mapping[str, ObservationQuality] | None = None,
 ) -> object:
-    observations = (
-        item("pool.active", pool_active, at),
-        item("spa.active", spa_active, at),
-        item("pump.rpm", rpm, at),
-        item("pool.temperature", temperature, at),
-        item("solar.active", solar_active, at),
-        item("heater.active", heater_active, at),
-        item("grid.outage_active", False, at),
+    values = (
+        ("pool.active", pool_active),
+        ("spa.active", spa_active),
+        ("pump.rpm", rpm),
+        ("pool.temperature", temperature),
+        ("solar.active", solar_active),
+        ("heater.active", heater_active),
+        ("grid.outage_active", outage_active),
+    )
+    quality_by_concept = qualities or {}
+    observations = tuple(
+        item(
+            concept,
+            value,
+            at,
+            quality=quality_by_concept.get(concept, ObservationQuality.GOOD),
+        )
+        for concept, value in values
+        if concept not in omitted
     )
     return SimpleNamespace(
         generated_at=at,
         observations=observations,
         stale_entities=stale,
-        healthy=True,
+        healthy=healthy,
     )
 
 
@@ -112,24 +136,36 @@ class FakeCoordinator:
     local_timezone: ZoneInfo = LOCAL
 
 
-def recorded(at: datetime, *, pool_active: bool) -> RecordedObservationEvent:
-    values = {
-        "pool.active": pool_active,
-        "spa.active": False,
-        "pump.rpm": 2600 if pool_active else 0,
-        "pool.temperature": 88.0,
-        "solar.active": False,
-        "heater.active": False,
-        "grid.outage_active": False,
-    }
+def recorded(
+    at: datetime,
+    *,
+    pool_active: bool,
+    spa_active: bool = False,
+    rpm: int | None = None,
+    global_healthy: bool = True,
+    stale: tuple[str, ...] = (),
+    omitted: tuple[str, ...] = (),
+    qualities: Mapping[str, ObservationQuality] | None = None,
+) -> RecordedObservationEvent:
+    observations = snapshot(
+        at,
+        pool_active=pool_active,
+        spa_active=spa_active,
+        rpm=(2600 if pool_active else 0) if rpm is None else rpm,
+        healthy=global_healthy,
+        stale=stale,
+        omitted=omitted,
+        qualities=qualities,
+    ).observations
     observations = tuple(
         {
-            "observation_id": concept,
-            "value": value,
-            "quality": "good",
-            "source_id": f"native:{concept}",
+            "observation_id": observation.observation_id,
+            "value": observation.value,
+            "observed_at": observation.observed_at.isoformat(),
+            "quality": observation.quality.value,
+            "source_id": observation.source_id,
         }
-        for concept, value in sorted(values.items())
+        for observation in observations
     )
     return RecordedObservationEvent(
         event_id=f"event-{at.isoformat()}",
@@ -137,7 +173,7 @@ def recorded(at: datetime, *, pool_active: bool) -> RecordedObservationEvent:
         kind="checkpoint",
         changed_observation_ids=(),
         observations=observations,
-        health={"healthy": True, "stale_entities": []},
+        health={"healthy": global_healthy, "stale_entities": list(stale)},
     )
 
 
@@ -290,6 +326,238 @@ def test_completed_obligation_is_satisfied_even_if_pool_remains_active() -> None
     assert diagnostics["disposition"] == "satisfied"
     assert diagnostics["currently_earning_credit"] is False
     assert diagnostics["remaining_runtime_seconds"] == 0
+
+
+def test_unrelated_global_health_failure_does_not_break_filtration_credit() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, pool_active=True, healthy=False))
+    runtime.refresh(
+        snapshot(start + timedelta(hours=1), pool_active=True, healthy=False)
+    )
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "crediting"
+    assert diagnostics["currently_earning_credit"] is True
+    assert diagnostics["required_runtime_seconds"] == 10 * 60 * 60
+    assert diagnostics["credited_runtime_seconds"] == 60 * 60
+    assert diagnostics["remaining_runtime_seconds"] == 9 * 60 * 60
+
+
+def test_unusable_pool_temperature_cannot_create_daily_requirement() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    at = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+
+    runtime.refresh(
+        snapshot(
+            at,
+            pool_active=True,
+            stale=("native:pool.temperature",),
+        )
+    )
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["disposition"] == "evidence_unavailable"
+    assert diagnostics["reason_code"] == "daily_requirement_temperature_unavailable"
+    assert diagnostics["required_runtime_seconds"] == 0
+
+
+@pytest.mark.parametrize(
+    "snapshot_kwargs",
+    (
+        {"pool_active": True, "stale": ("native:pump.rpm",)},
+        {"pool_active": True, "stale": ("native:pool.active",)},
+        {"pool_active": True, "stale": ("native:spa.active",)},
+        {"pool_active": True, "omitted": ("pump.rpm",)},
+        {
+            "pool_active": True,
+            "qualities": {"pump.rpm": ObservationQuality.DEGRADED},
+        },
+        {"pool_active": False, "rpm": 2600},
+        {"pool_active": True, "spa_active": True, "rpm": 2600},
+        {"pool_active": True, "rpm": 0},
+    ),
+    ids=(
+        "stale-pump",
+        "stale-pool-activity",
+        "stale-spa-activity",
+        "missing-pump",
+        "bad-pump-quality",
+        "pool-inactive",
+        "spa-active",
+        "zero-rpm",
+    ),
+)
+def test_filtration_critical_uncertainty_or_inactivity_earns_no_credit(
+    snapshot_kwargs: dict[str, object],
+) -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, **snapshot_kwargs))
+    runtime.refresh(snapshot(start + timedelta(hours=1), **snapshot_kwargs))
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.credited_runtime == timedelta(0)
+    assert runtime.assessment.currently_earning_credit is False
+
+
+def test_live_credit_remains_monotonic_through_unrelated_health_failures() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    samples = (
+        snapshot(start, pool_active=False, rpm=0),
+        snapshot(
+            start + timedelta(seconds=30),
+            pool_active=True,
+            rpm=3000,
+            healthy=False,
+        ),
+        snapshot(start + timedelta(minutes=1), pool_active=True, rpm=2600),
+        snapshot(
+            start + timedelta(minutes=1, seconds=30),
+            pool_active=True,
+            rpm=2600,
+            healthy=False,
+        ),
+        snapshot(start + timedelta(minutes=2), pool_active=True, rpm=2600),
+        snapshot(
+            start + timedelta(minutes=2, seconds=30),
+            pool_active=True,
+            rpm=2600,
+            healthy=False,
+        ),
+        snapshot(start + timedelta(minutes=3), pool_active=True, rpm=2600),
+    )
+
+    credited: list[float] = []
+    dispositions: list[str] = []
+    for sample in samples:
+        runtime.refresh(sample)
+        diagnostics = runtime.diagnostics()
+        credited.append(float(diagnostics["credited_runtime_seconds"]))
+        dispositions.append(str(diagnostics["disposition"]))
+
+    assert credited == [0, 0, 30, 60, 90, 120, 150]
+    assert credited == sorted(credited)
+    assert dispositions[1:] == ["crediting"] * 6
+
+
+def test_long_replay_credits_all_provable_intervals_despite_global_health() -> None:
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    events = tuple(
+        recorded(
+            start + timedelta(hours=offset),
+            pool_active=True,
+            global_healthy=(offset % 2 == 0),
+        )
+        for offset in range(9)
+    )
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(events)))
+
+    asyncio.run(
+        runtime.async_restore(restored_at=start + timedelta(hours=8, minutes=1))
+    )
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.credited_runtime == timedelta(hours=8)
+    assert runtime.assessment.remaining_runtime == timedelta(hours=2)
+    assert runtime.assessment.currently_earning_credit is True
+
+
+def test_replay_breaks_only_intervals_affected_by_critical_staleness() -> None:
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    events = (
+        recorded(start, pool_active=True),
+        recorded(start + timedelta(hours=1), pool_active=True),
+        recorded(
+            start + timedelta(hours=2),
+            pool_active=True,
+            stale=("native:pump.rpm",),
+        ),
+        recorded(start + timedelta(hours=3), pool_active=True),
+        recorded(start + timedelta(hours=4), pool_active=True),
+    )
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(events)))
+
+    asyncio.run(
+        runtime.async_restore(restored_at=start + timedelta(hours=4, minutes=1))
+    )
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.credited_runtime == timedelta(hours=2)
+    assert runtime.assessment.remaining_runtime == timedelta(hours=8)
+
+
+def test_live_and_replay_use_equivalent_filtration_evidence_qualification() -> None:
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    logical = (
+        (start, False, 0, True),
+        (start + timedelta(hours=1), True, 3000, True),
+        (start + timedelta(hours=2), True, 2600, False),
+        (start + timedelta(hours=3), False, 0, False),
+    )
+    live = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    for at, pool_active, rpm, healthy in logical:
+        live.refresh(
+            snapshot(at, pool_active=pool_active, rpm=rpm, healthy=healthy)
+        )
+
+    events = tuple(
+        recorded(
+            at,
+            pool_active=pool_active,
+            rpm=rpm,
+            global_healthy=healthy,
+        )
+        for at, pool_active, rpm, healthy in logical
+    )
+    replay = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(events)))
+    asyncio.run(
+        replay.async_restore(restored_at=start + timedelta(hours=3, minutes=1))
+    )
+
+    assert live.assessment is not None
+    assert replay.assessment is not None
+    assert (
+        replay.assessment.required_runtime,
+        replay.assessment.credited_runtime,
+        replay.assessment.remaining_runtime,
+        replay.assessment.total_remaining_runtime,
+        replay.assessment.disposition,
+        replay.assessment.currently_earning_credit,
+    ) == (
+        live.assessment.required_runtime,
+        live.assessment.credited_runtime,
+        live.assessment.remaining_runtime,
+        live.assessment.total_remaining_runtime,
+        live.assessment.disposition,
+        live.assessment.currently_earning_credit,
+    )
+
+
+def test_stale_confirmed_outage_evidence_does_not_reduce_credit() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    stale_outage = ("native:grid.outage_active",)
+    runtime.refresh(
+        snapshot(
+            start,
+            pool_active=True,
+            outage_active=True,
+            stale=stale_outage,
+        )
+    )
+    runtime.refresh(
+        snapshot(
+            start + timedelta(hours=1),
+            pool_active=True,
+            outage_active=True,
+            stale=stale_outage,
+        )
+    )
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.credited_runtime == timedelta(hours=1)
 
 
 def test_ha_surface_is_one_diagnostic_view_not_a_command_or_second_ledger() -> None:
