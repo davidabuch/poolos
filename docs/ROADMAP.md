@@ -1188,3 +1188,24 @@ Status: implemented, command-free, and pending review.
 - contains no automatic execution driver, delivery invocation, command task,
   nonthermal authority, or Pentair configuration mutation, as documented by
   ADR-105.
+
+## Post-Shadow Filtration Accounting and Observability
+
+Status: implemented pending review.
+
+- adds one chronological two-day filtration ledger derived from authoritative
+  Pool activity, Spa activity, pump RPM, trusted Pool temperature, outage, and
+  freshness evidence;
+- restores the ledger by replaying the existing persistent observation history
+  without crediting restart gaps or creating a second persistence owner;
+- rejects duplicate and regressive timestamps, breaks credit continuity on
+  unusable evidence, handles local-day rollover and DST using explicit zoned
+  time, and retains oldest-first repayment;
+- publishes one bounded Control Center diagnostic for required, credited,
+  remaining, prior-day debt, disposition, TOU tier, reason, next suitable time,
+  and the 2600-RPM ordinary filtration baseline;
+- supplies authoritative remaining debt to opportunistic Spa policy instead of
+  the former constant-zero placeholder;
+- preserves inactive-Hot-Tub hydraulic/body-activity execution blockers and
+  the accepted Spa maintenance source thresholds; and
+- remains command-free with authority NONE, as documented by ADR-106.

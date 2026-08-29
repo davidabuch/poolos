@@ -25,6 +25,7 @@ def test_required_integration_files_exist() -> None:
         "const.py",
         "coordinator.py",
         "diagnostics.py",
+        "filtration_runtime.py",
         "independent_intellicenter.py",
         "light.py",
         "manifest.json",
