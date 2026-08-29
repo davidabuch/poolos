@@ -40,6 +40,15 @@ baseline, so the unobserved restart gap is never credited. After that one-time
 handoff, ordinary duplicate and temporal-regression protection applies
 unchanged.
 
+The coordinator is the single owner of live chronological advancement. All
+periodic, native-event, and mapped-entity triggers serialize current-state
+sampling through the observation lock. Aggregate `generated_at` is captured
+after that lock is acquired. A mapped Home Assistant event's `time_fired` is
+trigger provenance, not aggregate evidence time: a queued event may execute
+after a newer native refresh, while the snapshot it builds reads current state.
+Presentation publication, including delayed publication of an older coordinator
+result, does not reapply evidence to the filtration tracker.
+
 Broad system health and filtration-specific evidence sufficiency are distinct.
 Circulation credit requires present, individually `GOOD`, fresh Pool activity,
 Spa activity, and observed pump RPM evidence. Daily target selection separately

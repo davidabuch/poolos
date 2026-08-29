@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from poolos.filtration_policy import FiltrationDisposition
 from poolos.observations import (
     ObservationQuality,
     ObservationSourceKind,
@@ -658,6 +659,125 @@ def test_obligation_day_uses_aggregate_time_across_midnight() -> None:
 
     assert runtime.assessment is not None
     assert runtime.assessment.obligation_day.isoformat() == "2026-08-30"
+
+
+def test_long_lifecycle_preserves_credit_through_restart_and_midnight() -> None:
+    start = datetime(2026, 8, 29, 22, 0, tzinfo=LOCAL)
+    logical = (
+        (start, False, False, 0, True, (), False),
+        (start + timedelta(minutes=5), True, False, 3000, True, (), False),
+        (start + timedelta(minutes=6), True, False, 2600, True, (), False),
+        (
+            start + timedelta(minutes=60),
+            True,
+            False,
+            2900,
+            False,
+            ("native:pool_light.active",),
+            True,
+        ),
+        (start + timedelta(minutes=90), True, False, 2600, True, (), False),
+        (start + timedelta(minutes=105), False, True, 3015, True, (), False),
+        (start + timedelta(minutes=135), False, True, 3015, True, (), False),
+        (start + timedelta(minutes=150), True, False, 2600, True, (), False),
+        (start + timedelta(minutes=210), True, False, 2600, True, (), False),
+        (
+            start + timedelta(minutes=225),
+            True,
+            False,
+            2600,
+            True,
+            ("native:pump.rpm",),
+            False,
+        ),
+        (start + timedelta(minutes=240), True, False, 2600, True, (), False),
+        (start + timedelta(minutes=270), True, False, 2600, True, (), False),
+    )
+    live = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    total_credited: list[timedelta] = []
+    spa_disposition = None
+    stale_disposition = None
+    for at, pool_active, spa_active, rpm, healthy, stale, solar_active in logical:
+        live.refresh(
+            snapshot(
+                at,
+                pool_active=pool_active,
+                spa_active=spa_active,
+                rpm=rpm,
+                healthy=healthy,
+                stale=stale,
+                solar_active=solar_active,
+            )
+        )
+        total_credited.append(
+            sum(
+                (item.credited_runtime for item in live.tracker.ledger.debts),
+                timedelta(0),
+            )
+        )
+        if spa_active:
+            spa_disposition = live.assessment.disposition
+        if stale == ("native:pump.rpm",):
+            stale_disposition = live.assessment.disposition
+
+    assert total_credited == sorted(total_credited)
+    assert total_credited[-1] == timedelta(hours=3, minutes=10)
+    assert total_credited[3] - total_credited[2] == timedelta(minutes=54)
+    assert total_credited[4] - total_credited[3] == timedelta(minutes=30)
+    assert total_credited[6] == total_credited[5]
+    assert total_credited[9] == total_credited[8]
+    assert total_credited[10] == total_credited[9]
+    assert spa_disposition is FiltrationDisposition.DEFERRED_HIGHER_PRIORITY
+    assert stale_disposition is FiltrationDisposition.RUN_NOW
+    assert live.assessment is not None
+    assert live.assessment.obligation_day.isoformat() == "2026-08-30"
+    assert live.assessment.disposition is FiltrationDisposition.CREDITING
+    assert live.assessment.authority == "none"
+    assert live.assessment.command_delivery_enabled is False
+
+    events = tuple(
+        recorded(
+            at,
+            pool_active=pool_active,
+            spa_active=spa_active,
+            rpm=rpm,
+            global_healthy=healthy,
+            stale=stale,
+        )
+        for at, pool_active, spa_active, rpm, healthy, stale, _ in logical
+    )
+    restarted = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(events)))
+    high_water = logical[-1][0]
+    asyncio.run(
+        restarted.async_restore(restored_at=high_water + timedelta(seconds=1))
+    )
+    assert restarted.assessment is not None
+    assert restarted.assessment.total_remaining_runtime == (
+        live.assessment.total_remaining_runtime
+    )
+
+    restarted.refresh(
+        snapshot(high_water - timedelta(seconds=5), pool_active=True, rpm=2600)
+    )
+    restarted.refresh(
+        snapshot(high_water + timedelta(minutes=30), pool_active=True, rpm=2600)
+    )
+    after_handoff = restarted.assessment
+    assert after_handoff is not None
+    assert sum(
+        (item.credited_runtime for item in restarted.tracker.ledger.debts),
+        timedelta(0),
+    ) == timedelta(hours=3, minutes=40)
+    restarted.refresh(
+        snapshot(high_water + timedelta(minutes=30), pool_active=True, rpm=2600)
+    )
+    assert restarted.assessment == after_handoff
+
+    restarted.refresh(
+        snapshot(high_water + timedelta(minutes=29), pool_active=True, rpm=2600)
+    )
+    assert restarted.assessment is not None
+    assert restarted.assessment.temporal_regressions_ignored == 1
 
 
 def test_stale_confirmed_outage_evidence_does_not_reduce_credit() -> None:

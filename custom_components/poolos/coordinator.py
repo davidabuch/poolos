@@ -466,7 +466,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         await self.async_prepare_unload()
 
-    async def _async_mapped_state_changed(self, event: Event) -> None:
+    async def _async_mapped_state_changed(self, _event: Event) -> None:
         """Capture a mapped HA state/attribute change without waiting for polling."""
 
         if self._unloading:
@@ -475,7 +475,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             if self._unloading:
                 return
             self._event_refresh_count += 1
-            timestamp = event.time_fired.astimezone(UTC)
+            # The event timestamp is trigger provenance, not the time at which
+            # this serialized callback samples current authoritative state.
+            # A queued event may run after a newer native observation; using
+            # its historical time would regress stateful accounting.
+            timestamp = datetime.now(UTC)
             snapshot = await self._async_observe(
                 observed_at=timestamp,
                 trigger="state_change_event",
