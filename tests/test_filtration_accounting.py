@@ -160,6 +160,134 @@ def test_restore_replays_history_but_never_credits_the_restart_gap() -> None:
     assert continued.credited_runtime == timedelta(hours=1, minutes=30)
 
 
+def test_restore_live_overlap_credits_only_time_after_replay_high_water() -> None:
+    high_water = datetime(2026, 8, 28, 13, 47, 40, tzinfo=LOCAL)
+    tracker = accounting()
+    restored = tracker.restore(
+        (
+            observation(high_water - timedelta(hours=1), pool_active=True, rpm=2600),
+            observation(high_water, pool_active=True, rpm=2600),
+        )
+    )
+
+    overlap = tracker.observe(
+        observation(high_water - timedelta(seconds=5), pool_active=True, rpm=2600)
+    )
+    continued = tracker.observe(
+        observation(high_water + timedelta(seconds=25), pool_active=True, rpm=2600)
+    )
+
+    assert restored is not None
+    assert restored.credited_runtime == timedelta(hours=1)
+    assert overlap is not None
+    assert overlap.credited_runtime == timedelta(hours=1)
+    assert overlap.temporal_regressions_ignored == 0
+    assert continued is not None
+    assert continued.credited_runtime == timedelta(hours=1, seconds=25)
+    assert continued.temporal_regressions_ignored == 0
+
+
+def test_restore_live_large_gap_uses_first_live_sample_as_zero_credit_baseline() -> None:
+    high_water = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+    tracker = accounting()
+    tracker.restore((observation(high_water, pool_active=True, rpm=2600),))
+
+    baseline = tracker.observe(
+        observation(high_water + timedelta(minutes=10), pool_active=True, rpm=2600)
+    )
+    continued = tracker.observe(
+        observation(
+            high_water + timedelta(minutes=10, seconds=30),
+            pool_active=True,
+            rpm=2600,
+        )
+    )
+
+    assert baseline is not None and baseline.credited_runtime == timedelta(0)
+    assert continued is not None
+    assert continued.credited_runtime == timedelta(seconds=30)
+
+
+def test_restore_live_nonoverlap_does_not_credit_short_restart_gap() -> None:
+    high_water = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+    tracker = accounting()
+    tracker.restore((observation(high_water, pool_active=True, rpm=2600),))
+
+    tracker.observe(
+        observation(high_water + timedelta(seconds=10), pool_active=True, rpm=2600)
+    )
+    continued = tracker.observe(
+        observation(high_water + timedelta(seconds=40), pool_active=True, rpm=2600)
+    )
+
+    assert continued is not None
+    assert continued.credited_runtime == timedelta(seconds=30)
+
+
+def test_equal_restore_live_timestamp_is_idempotent_then_credits_forward() -> None:
+    high_water = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+    tracker = accounting()
+    tracker.restore((observation(high_water, pool_active=True, rpm=2600),))
+
+    equal = tracker.observe(observation(high_water, pool_active=True, rpm=2600))
+    continued = tracker.observe(
+        observation(high_water + timedelta(seconds=30), pool_active=True, rpm=2600)
+    )
+
+    assert equal is not None and equal.credited_runtime == timedelta(0)
+    assert equal.temporal_regressions_ignored == 0
+    assert continued is not None
+    assert continued.credited_runtime == timedelta(seconds=30)
+
+
+def test_true_regression_after_restore_live_handoff_remains_rejected() -> None:
+    high_water = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+    tracker = accounting()
+    tracker.restore((observation(high_water, pool_active=True, rpm=2600),))
+    tracker.observe(
+        observation(high_water + timedelta(minutes=10), pool_active=True, rpm=2600)
+    )
+    accepted = tracker.observe(
+        observation(
+            high_water + timedelta(minutes=10, seconds=30),
+            pool_active=True,
+            rpm=2600,
+        )
+    )
+    regressive = tracker.observe(
+        observation(
+            high_water + timedelta(minutes=10, seconds=20),
+            pool_active=True,
+            rpm=2600,
+        )
+    )
+
+    assert accepted is not None
+    assert accepted.credited_runtime == timedelta(seconds=30)
+    assert regressive is not None
+    assert regressive.credited_runtime == timedelta(seconds=30)
+    assert regressive.temporal_regressions_ignored == 1
+
+
+def test_duplicate_after_restore_live_handoff_remains_idempotent() -> None:
+    high_water = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+    tracker = accounting()
+    tracker.restore((observation(high_water, pool_active=True, rpm=2600),))
+    baseline_at = high_water + timedelta(minutes=10)
+    tracker.observe(observation(baseline_at, pool_active=True, rpm=2600))
+    accepted = tracker.observe(
+        observation(baseline_at + timedelta(seconds=30), pool_active=True, rpm=2600)
+    )
+    duplicate = tracker.observe(
+        observation(baseline_at + timedelta(seconds=30), pool_active=True, rpm=2600)
+    )
+
+    assert accepted is not None
+    assert duplicate is not None
+    assert duplicate.credited_runtime == accepted.credited_runtime
+    assert duplicate.temporal_regressions_ignored == 0
+
+
 def test_midnight_rollover_retains_prior_debt_and_repays_oldest_first() -> None:
     tracker = accounting()
     before = datetime(2026, 8, 28, 23, 30, tzinfo=LOCAL)

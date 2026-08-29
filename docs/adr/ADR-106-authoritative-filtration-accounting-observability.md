@@ -22,10 +22,23 @@ confirmed Pool-routed circulation with positive observed RPM, applies the
 existing confirmed-outage credit rule, repays the oldest retained debt first,
 and uses the existing LADWP profile and 2600-RPM filtration baseline.
 
+The tracker uses aggregate evaluation time as its canonical chronology: live
+accounting uses the authoritative snapshot `generated_at`, while replay uses
+the recorder event `recorded_at`. The coordinator passes that same aggregate
+snapshot time into the recorder; `recorded_at` is therefore evidence evaluation
+time, not filesystem-write time. Individual observation timestamps remain
+source-freshness evidence and are not substituted for the coherent aggregate
+sample time.
+
 The tracker rejects duplicate timestamps and ignores temporal regressions. An
 unusable or stale interval breaks credit continuity. Elapsed time is calculated
-in UTC so DST transitions preserve real duration. Restart never credits the
-unobserved restart gap.
+in UTC so DST transitions preserve real duration. Replay retains an explicit
+accounted-through high-water mark. An overlapping first live sample may
+establish continuity only at that mark, so previously replayed seconds cannot
+be credited twice. Without overlap, the first newer live sample is a zero-credit
+baseline, so the unobserved restart gap is never credited. After that one-time
+handoff, ordinary duplicate and temporal-regression protection applies
+unchanged.
 
 Broad system health and filtration-specific evidence sufficiency are distinct.
 Circulation credit requires present, individually `GOOD`, fresh Pool activity,

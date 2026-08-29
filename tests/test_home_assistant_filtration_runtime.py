@@ -80,6 +80,7 @@ def snapshot(
     healthy: bool = True,
     omitted: tuple[str, ...] = (),
     qualities: Mapping[str, ObservationQuality] | None = None,
+    evidence_at: datetime | None = None,
 ) -> object:
     values = (
         ("pool.active", pool_active),
@@ -95,7 +96,7 @@ def snapshot(
         item(
             concept,
             value,
-            at,
+            evidence_at or at,
             quality=quality_by_concept.get(concept, ObservationQuality.GOOD),
         )
         for concept, value in values
@@ -146,6 +147,7 @@ def recorded(
     stale: tuple[str, ...] = (),
     omitted: tuple[str, ...] = (),
     qualities: Mapping[str, ObservationQuality] | None = None,
+    evidence_at: datetime | None = None,
 ) -> RecordedObservationEvent:
     observations = snapshot(
         at,
@@ -156,6 +158,7 @@ def recorded(
         stale=stale,
         omitted=omitted,
         qualities=qualities,
+        evidence_at=evidence_at,
     ).observations
     observations = tuple(
         {
@@ -533,6 +536,128 @@ def test_live_and_replay_use_equivalent_filtration_evidence_qualification() -> N
         live.assessment.disposition,
         live.assessment.currently_earning_credit,
     )
+
+
+def test_live_and_replay_use_aggregate_sample_time_not_source_observation_time() -> None:
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    evidence_start = start - timedelta(seconds=3)
+    evidence_end = start + timedelta(minutes=59, seconds=57)
+    live = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    live.refresh(
+        snapshot(start, evidence_at=evidence_start, pool_active=True)
+    )
+    live.refresh(
+        snapshot(
+            start + timedelta(hours=1),
+            evidence_at=evidence_end,
+            pool_active=True,
+        )
+    )
+
+    events = (
+        recorded(start, evidence_at=evidence_start, pool_active=True),
+        recorded(
+            start + timedelta(hours=1),
+            evidence_at=evidence_end,
+            pool_active=True,
+        ),
+    )
+    replay = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(events)))
+    asyncio.run(
+        replay.async_restore(restored_at=start + timedelta(hours=1, seconds=1))
+    )
+
+    assert live.assessment is not None
+    assert replay.assessment is not None
+    assert live.assessment.credited_runtime == timedelta(hours=1)
+    assert replay.assessment.credited_runtime == timedelta(hours=1)
+    assert replay.assessment.evaluated_at == start + timedelta(hours=1)
+
+
+def test_runtime_restore_live_overlap_matches_continuous_provable_timeline() -> None:
+    high_water = datetime(2026, 8, 29, 14, 47, 40, tzinfo=LOCAL)
+    events = (
+        recorded(high_water - timedelta(hours=1), pool_active=True),
+        recorded(high_water, pool_active=True),
+    )
+    handoff = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(events)))
+    asyncio.run(
+        handoff.async_restore(restored_at=high_water + timedelta(seconds=1))
+    )
+    handoff.refresh(
+        snapshot(high_water - timedelta(seconds=5), pool_active=True)
+    )
+    handoff.refresh(
+        snapshot(high_water + timedelta(seconds=25), pool_active=True)
+    )
+
+    live = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    for at in (
+        high_water - timedelta(hours=1),
+        high_water,
+        high_water + timedelta(seconds=25),
+    ):
+        live.refresh(snapshot(at, pool_active=True))
+
+    replay_events = (
+        *events,
+        recorded(high_water + timedelta(seconds=25), pool_active=True),
+    )
+    replay = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder(replay_events)))
+    asyncio.run(
+        replay.async_restore(restored_at=high_water + timedelta(seconds=26))
+    )
+
+    assert handoff.assessment is not None
+    assert live.assessment is not None
+    assert replay.assessment is not None
+    assert handoff.assessment.credited_runtime == timedelta(hours=1, seconds=25)
+    assert (
+        handoff.assessment.required_runtime,
+        handoff.assessment.credited_runtime,
+        handoff.assessment.remaining_runtime,
+        handoff.assessment.carried_prior_day_debt,
+        handoff.assessment.total_remaining_runtime,
+        handoff.assessment.obligation_day,
+        handoff.assessment.disposition,
+        handoff.assessment.temporal_regressions_ignored,
+    ) == (
+        live.assessment.required_runtime,
+        live.assessment.credited_runtime,
+        live.assessment.remaining_runtime,
+        live.assessment.carried_prior_day_debt,
+        live.assessment.total_remaining_runtime,
+        live.assessment.obligation_day,
+        live.assessment.disposition,
+        live.assessment.temporal_regressions_ignored,
+    ) == (
+        replay.assessment.required_runtime,
+        replay.assessment.credited_runtime,
+        replay.assessment.remaining_runtime,
+        replay.assessment.carried_prior_day_debt,
+        replay.assessment.total_remaining_runtime,
+        replay.assessment.obligation_day,
+        replay.assessment.disposition,
+        replay.assessment.temporal_regressions_ignored,
+    )
+
+
+def test_obligation_day_uses_aggregate_time_across_midnight() -> None:
+    aggregate_at = datetime(2026, 8, 30, 0, 0, 1, tzinfo=LOCAL)
+    evidence_at = aggregate_at - timedelta(seconds=2)
+    event = recorded(
+        aggregate_at,
+        evidence_at=evidence_at,
+        pool_active=False,
+    )
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder((event,))))
+
+    asyncio.run(
+        runtime.async_restore(restored_at=aggregate_at + timedelta(seconds=1))
+    )
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.obligation_day.isoformat() == "2026-08-30"
 
 
 def test_stale_confirmed_outage_evidence_does_not_reduce_credit() -> None:

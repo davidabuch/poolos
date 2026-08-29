@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum
 from types import MappingProxyType
@@ -390,6 +390,8 @@ class FiltrationAccountingTracker:
         self._current: FiltrationAccountingSnapshot | None = None
         self._restored_from_history = False
         self._temporal_regressions_ignored = 0
+        self._restore_high_water: datetime | None = None
+        self._restore_overlap_baseline: FiltrationObservation | None = None
 
     @property
     def current(self) -> FiltrationAccountingSnapshot | None:
@@ -411,11 +413,14 @@ class FiltrationAccountingTracker:
         self._current = None
         self._temporal_regressions_ignored = 0
         self._restored_from_history = True
+        self._restore_high_water = None
+        self._restore_overlap_baseline = None
         for observation in sorted(
             observations,
             key=lambda item: item.observed_at.astimezone(UTC),
         ):
             self.observe(observation)
+        self._restore_high_water = self._last_evaluated_at
         self._previous = None
         return self._current
 
@@ -429,6 +434,14 @@ class FiltrationAccountingTracker:
         """Apply one observation at most once and return current bounded state."""
 
         observed_instant = observation.observed_at.astimezone(UTC)
+        handoff = self._observe_restore_handoff(
+            observation,
+            safely_deferrable=safely_deferrable,
+            higher_priority_requirement=higher_priority_requirement,
+        )
+        if handoff is not None:
+            return handoff
+
         last_instant = (
             None
             if self._last_evaluated_at is None
@@ -466,6 +479,75 @@ class FiltrationAccountingTracker:
             safely_deferrable=safely_deferrable,
             higher_priority_requirement=higher_priority_requirement,
             filtration_in_progress=observation.valid_pool_circulation,
+        )
+        return self._current
+
+    def _observe_restore_handoff(
+        self,
+        observation: FiltrationObservation,
+        *,
+        safely_deferrable: bool,
+        higher_priority_requirement: bool,
+    ) -> FiltrationAccountingSnapshot | None:
+        """Join restored and live timelines without overlap or restart-gap credit."""
+
+        high_water = self._restore_high_water
+        if high_water is None:
+            return None
+
+        observed_instant = observation.observed_at.astimezone(UTC)
+        high_water_instant = high_water.astimezone(UTC)
+        if observed_instant <= high_water_instant:
+            overlap = self._restore_overlap_baseline
+            if (
+                overlap is None
+                or observed_instant > overlap.observed_at.astimezone(UTC)
+            ):
+                self._restore_overlap_baseline = observation
+                return self._establish_baseline(
+                    observation,
+                    effective_at=high_water,
+                    safely_deferrable=safely_deferrable,
+                    higher_priority_requirement=higher_priority_requirement,
+                )
+            return self._current
+
+        overlap = self._restore_overlap_baseline
+        self._restore_high_water = None
+        self._restore_overlap_baseline = None
+        if overlap is None:
+            return self._establish_baseline(
+                observation,
+                effective_at=observation.observed_at,
+                safely_deferrable=safely_deferrable,
+                higher_priority_requirement=higher_priority_requirement,
+            )
+
+        self._previous = replace(overlap, observed_at=high_water)
+        self._last_evaluated_at = high_water
+        return None
+
+    def _establish_baseline(
+        self,
+        observation: FiltrationObservation,
+        *,
+        effective_at: datetime,
+        safely_deferrable: bool,
+        higher_priority_requirement: bool,
+    ) -> FiltrationAccountingSnapshot:
+        """Accept one live baseline while deliberately earning no new credit."""
+
+        baseline = replace(observation, observed_at=effective_at)
+        local_day = effective_at.astimezone(self._timezone).date()
+        self._ensure_daily_requirement(local_day, baseline)
+        self._previous = baseline
+        self._last_evaluated_at = effective_at
+        self._current = self._assessment(
+            effective_at,
+            local_day,
+            safely_deferrable=safely_deferrable,
+            higher_priority_requirement=higher_priority_requirement,
+            filtration_in_progress=baseline.valid_pool_circulation,
         )
         return self._current
 
