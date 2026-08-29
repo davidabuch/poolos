@@ -116,6 +116,13 @@ and current IntelliCenter equipment state are first-class evidence; after
 restart, current physical state overrides stale session metadata. Native
 configuration conflicts are reported and scoped rather than silently fought.
 
+Authoritative filtration accounting consumes the same immutable observation
+snapshots. One chronological tracker credits only usable Pool-routed
+circulation, preserves the current and prior local day's oldest-first debt, and
+publishes a bounded diagnostic view. Restart reconstructs that tracker from the
+existing persistent observation history; Home Assistant attributes are never a
+second ledger (ADR-106).
+
 ## 3. Planning produces alternatives
 
 Planning converts goals and current facts into candidate plans or alternatives. Alternatives describe possible outcomes and trade-offs without yet authorizing equipment work.

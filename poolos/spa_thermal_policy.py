@@ -60,7 +60,7 @@ class SpaPolicyInput:
     permissions: HeatSourcePermissions = HeatSourcePermissions()
     opportunistic_allowed: bool = True
     pool_demand_satisfied: bool = False
-    filtration_debt: timedelta = timedelta(0)
+    filtration_debt: timedelta | None = timedelta(0)
     higher_priority_conflict: bool = False
 
 
@@ -179,6 +179,7 @@ class SpaThermalPolicyTracker:
             and observation.heating_mode is not SpaHeatingMode.GAS_ONLY
             and observation.permissions.solar_allowed
             and observation.pool_demand_satisfied
+            and observation.filtration_debt is not None
             and observation.filtration_debt <= timedelta(0)
             and not observation.higher_priority_conflict
         )

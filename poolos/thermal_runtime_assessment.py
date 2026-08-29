@@ -67,6 +67,7 @@ class ThermalRuntimeEvidence:
     stale_native_concepts: tuple[str, ...]
     missing_native_concepts: tuple[str, ...]
     native_configuration: NativeConfigurationAssessment
+    filtration_debt: timedelta | None = None
     pending_durable_incident_confirmation: bool = False
     durable_incident_confirmed: bool = False
 
@@ -432,7 +433,7 @@ class ThermalRuntimeEvaluator:
                 and pool_target is not None
                 and pool_temperature >= pool_target
             ),
-            filtration_debt=timedelta(0),
+            filtration_debt=evidence.filtration_debt,
         )
         return desired_spa_state(
             spa_input,

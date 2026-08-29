@@ -30,6 +30,7 @@ _enable_local_vendored_core()
 
 from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
 from .coordinator import PoolOSCoordinator  # noqa: E402
+from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 
@@ -42,6 +43,7 @@ class PoolOSRuntimeData:
     loaded_at: str
     operating_mode: str
     manual_intellicenter: ManualIntelliCenterControl | None
+    filtration_runtime: PoolOSFiltrationRuntime
     thermal_runtime: PoolOSThermalRuntime
 
 
@@ -53,6 +55,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
 
     coordinator = PoolOSCoordinator(hass, entry)
     await coordinator.async_initialize_persistence()
+    filtration_runtime = PoolOSFiltrationRuntime(coordinator=coordinator)
+    await filtration_runtime.async_restore(restored_at=datetime.now(UTC))
+    coordinator.set_filtration_runtime_refresh(filtration_runtime.refresh)
     await coordinator.async_config_entry_first_refresh()
     entry.async_on_unload(coordinator.async_stop_event_observation)
     entry.async_on_unload(
@@ -75,12 +80,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     thermal_runtime = PoolOSThermalRuntime(
         coordinator=coordinator,
         manual_intellicenter=manual_intellicenter,
+        filtration_runtime=filtration_runtime,
     )
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
         manual_intellicenter=manual_intellicenter,
+        filtration_runtime=filtration_runtime,
         thermal_runtime=thermal_runtime,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)

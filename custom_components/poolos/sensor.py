@@ -662,6 +662,17 @@ TELEMETRY = (
 
 SENSORS = (
     PoolOSControlCenterSensorDescription(
+        "filtration_obligation",
+        "Filtration Obligation",
+        lambda coordinator, runtime: (
+            "UNAVAILABLE"
+            if runtime.filtration_runtime.assessment is None
+            else runtime.filtration_runtime.assessment.disposition.value.upper()
+        ),
+        lambda coordinator, runtime: runtime.filtration_runtime.diagnostics(),
+        "mdi:filter-clock-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
         "thermal_execution_readiness",
         "Thermal Execution Readiness",
         lambda coordinator, runtime: (

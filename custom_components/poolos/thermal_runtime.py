@@ -26,6 +26,7 @@ from .observation import ObservationSnapshot
 
 if TYPE_CHECKING:
     from .coordinator import PoolOSCoordinator
+    from .filtration_runtime import PoolOSFiltrationRuntime
     from .manual_intellicenter import ManualIntelliCenterControl
 
 
@@ -38,6 +39,7 @@ class PoolOSThermalRuntime:
 
     coordinator: PoolOSCoordinator
     manual_intellicenter: ManualIntelliCenterControl | None
+    filtration_runtime: PoolOSFiltrationRuntime | None = None
     evaluator: ThermalRuntimeEvaluator = field(default_factory=ThermalRuntimeEvaluator)
     effective_live_enabled: bool = False
     commissioning_scope: ThermalLiveCommissioningScope = (
@@ -133,6 +135,11 @@ class PoolOSThermalRuntime:
             thermal_live_execution_enabled=self.effective_live_enabled,
             commissioning_scope=self.commissioning_scope,
         )
+        filtration = (
+            None
+            if self.filtration_runtime is None
+            else self.filtration_runtime.assessment
+        )
         try:
             self.assessment = self.evaluator.evaluate(
                 ThermalRuntimeEvidence(
@@ -152,6 +159,11 @@ class PoolOSThermalRuntime:
                     missing_native_concepts=tuple(missing),
                     native_configuration=NativeConfigurationGuard().evaluate(
                         self._native_configuration_input()
+                    ),
+                    filtration_debt=(
+                        None
+                        if filtration is None
+                        else filtration.total_remaining_runtime
                     ),
                     pending_durable_incident_confirmation=bool(
                         health.get("pending_confirmation", False)

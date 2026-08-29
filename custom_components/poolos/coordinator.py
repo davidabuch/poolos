@@ -171,6 +171,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._last_unhealthy_missing_required: tuple[str, ...] = ()
         self._last_unhealthy_unavailable_entities: tuple[str, ...] = ()
         self._durable_health_confirmation = DurableHealthConfirmationState()
+        self._filtration_runtime_refresh: Callable[[ObservationSnapshot], None] | None = None
         self._thermal_runtime_refresh: Callable[[ObservationSnapshot], None] | None = None
 
     async def async_initialize_persistence(self) -> None:
@@ -449,6 +450,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._unloading = True
         self._post_start_active = False
         self._native_intellicenter_refresh_dirty = False
+        self._filtration_runtime_refresh = None
         self._thermal_runtime_refresh = None
         self.async_stop_event_observation()
         async with self._observation_lock:
@@ -532,6 +534,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             states=states,
             now=observed_at,
         )
+        if self._filtration_runtime_refresh is not None:
+            self._filtration_runtime_refresh(snapshot)
         if self._thermal_runtime_refresh is not None:
             self._thermal_runtime_refresh(snapshot)
 
@@ -1041,6 +1045,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         """Attach one side-effect-free Phase 3 diagnostic evaluator."""
 
         self._thermal_runtime_refresh = callback
+
+    def set_filtration_runtime_refresh(
+        self,
+        callback: Callable[[ObservationSnapshot], None] | None,
+    ) -> None:
+        """Attach one command-free authoritative filtration ledger evaluator."""
+
+        self._filtration_runtime_refresh = callback
 
     def _update_durable_health_confirmation(
         self,

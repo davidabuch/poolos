@@ -57,6 +57,7 @@ def evidence(
     stale: tuple[str, ...] = (),
     missing: tuple[str, ...] = (),
     configuration: NativeConfigurationInput = NativeConfigurationInput(),
+    filtration_debt: timedelta | None = None,
     pending: bool = False,
     confirmed: bool = False,
 ) -> ThermalRuntimeEvidence:
@@ -71,6 +72,7 @@ def evidence(
         stale_native_concepts=stale,
         missing_native_concepts=missing,
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
+        filtration_debt=filtration_debt,
         pending_durable_incident_confirmation=pending,
         durable_incident_confirmed=confirmed,
     )
@@ -420,3 +422,55 @@ def test_stateful_evaluator_rejects_timestamp_regression_with_exact_reason() -> 
             ),
             live_policy=disabled_policy(),
         )
+
+
+def test_authoritative_filtration_debt_blocks_opportunistic_spa_policy() -> None:
+    native = live_values(
+        pool_active=True,
+        pool_heater="00000",
+        pump_rpm=2600,
+        solar_temperature=140.0,
+    )
+    native["pool.temperature"] = 90.0
+    native["spa.temperature"] = 90.0
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(native_values=native, filtration_debt=timedelta(hours=1)),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.hot_tub.plan.desired.reason_code == "opportunistic_ineligible"
+    assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
+
+
+def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> None:
+    native = live_values(
+        pool_active=True,
+        pool_heater="00000",
+        pump_rpm=2600,
+        solar_temperature=140.0,
+    )
+    native["pool.temperature"] = 90.0
+    native["spa.temperature"] = 90.0
+    evaluator = ThermalRuntimeEvaluator()
+    evaluator.evaluate(
+        evidence(native_values=native, filtration_debt=timedelta(0)),
+        live_policy=disabled_policy(),
+    )
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2),
+            native_values=native,
+            filtration_debt=timedelta(0),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert (
+        result.hot_tub.plan.desired.reason_code
+        == "opportunistic_started_or_resumed"
+    )
+    assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert "target_body_inactive" in result.hot_tub.technical_preflight.blocking_reasons
+    assert "hydraulic_safety_model_not_satisfied" in (
+        result.hot_tub.technical_preflight.blocking_reasons
+    )

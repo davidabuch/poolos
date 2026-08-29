@@ -280,7 +280,11 @@ def desired_spa_state(
             "spa_active": observation.spa_active,
             "spa_in_use": assessment.spa_in_use,
             "pool_demand_satisfied": observation.pool_demand_satisfied,
-            "filtration_debt_seconds": observation.filtration_debt.total_seconds(),
+            "filtration_debt_seconds": (
+                None
+                if observation.filtration_debt is None
+                else observation.filtration_debt.total_seconds()
+            ),
             "higher_priority_conflict": observation.higher_priority_conflict,
         },
         fallback_reason=(
