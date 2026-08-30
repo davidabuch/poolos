@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import importlib.util
 from pathlib import Path
+import random
 import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -16,6 +17,11 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterReadAdapter,
     NativeIntelliCenterTransportSnapshot,
 )
+from poolos.filtration_policy import (
+    FiltrationAccountingTracker,
+    FiltrationObservation,
+)
+from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -251,6 +257,100 @@ def _harness() -> Any:
             )
 
     return Harness()
+
+
+class _ControlledCoordinatorDateTime(datetime):
+    current = datetime(2026, 8, 29, 22, 50, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz: object = None) -> datetime:
+        value = cls.current
+        return value if tz is not None else value.replace(tzinfo=None)
+
+
+def _filtration_observation(
+    at: datetime,
+    *,
+    pool_active: bool,
+    spa_active: bool,
+    rpm: int,
+    circulation_usable: bool = True,
+) -> FiltrationObservation:
+    return FiltrationObservation(
+        observed_at=at,
+        pool_active=pool_active,
+        spa_active=spa_active,
+        pump_rpm=rpm,
+        water_temperature_f=86.0,
+        circulation_evidence_usable=circulation_usable,
+        temperature_evidence_usable=True,
+    )
+
+
+def _filtration_ordering_harness() -> tuple[ModuleType, Any]:
+    module = _load_coordinator_module()
+
+    class Harness(module.PoolOSCoordinator):
+        def __init__(self) -> None:
+            self._unloading = False
+            self._observation_lock = asyncio.Lock()
+            self._native_intellicenter_refresh_dirty = False
+            self._native_intellicenter_refresh_task = None
+            self._event_refresh_count = 0
+            self._reconciliation_refresh_count = 0
+            self.data = None
+            self.calls: list[tuple[str, datetime]] = []
+            self.publications: list[datetime] = []
+            self.pool_active = False
+            self.spa_active = True
+            self.rpm = 3015
+            self.circulation_usable = True
+            self.tracker = FiltrationAccountingTracker(
+                tou_profile=LADWP_INITIAL_PROFILE
+            )
+
+        def restore_through(self, high_water: datetime) -> None:
+            self.tracker.restore(
+                (
+                    _filtration_observation(
+                        high_water - timedelta(minutes=1),
+                        pool_active=self.pool_active,
+                        spa_active=self.spa_active,
+                        rpm=self.rpm,
+                    ),
+                    _filtration_observation(
+                        high_water,
+                        pool_active=self.pool_active,
+                        spa_active=self.spa_active,
+                        rpm=self.rpm,
+                    ),
+                )
+            )
+
+        async def _async_observe(
+            self,
+            *,
+            observed_at: datetime,
+            trigger: str,
+        ) -> object:
+            self.calls.append((trigger, observed_at))
+            self.tracker.observe(
+                _filtration_observation(
+                    observed_at,
+                    pool_active=self.pool_active,
+                    spa_active=self.spa_active,
+                    rpm=self.rpm,
+                    circulation_usable=self.circulation_usable,
+                ),
+                higher_priority_requirement=self.spa_active,
+            )
+            return SimpleNamespace(generated_at=observed_at)
+
+        def async_set_updated_data(self, snapshot: object) -> None:
+            self.data = snapshot
+            self.publications.append(snapshot.generated_at)
+
+    return module, Harness()
 
 
 def _attach_transport(harness: Any, target: float) -> SimpleNamespace:
@@ -549,5 +649,215 @@ def test_live_equivalent_target_transition_needs_no_periodic_reconciliation() ->
         assert climate.target_temperature == 95
         assert harness._event_refresh_count == 2
         assert not hasattr(harness, "_reconciliation_refresh_count")
+
+    asyncio.run(exercise())
+
+
+def test_native_then_delayed_mapped_events_do_not_regress_filtration_time() -> None:
+    """Normal coordinator caller ordering must not feed historical trigger time."""
+
+    async def exercise() -> None:
+        module, harness = _filtration_ordering_harness()
+        restored_at = _ControlledCoordinatorDateTime.current - timedelta(minutes=2)
+        harness.restore_through(restored_at)
+        harness.tracker.observe(
+            _filtration_observation(
+                restored_at,
+                pool_active=False,
+                spa_active=True,
+                rpm=3015,
+            )
+        )
+        harness.tracker.observe(
+            _filtration_observation(
+                restored_at + timedelta(seconds=1),
+                pool_active=False,
+                spa_active=True,
+                rpm=3015,
+            )
+        )
+        real_datetime = module.datetime
+        module.datetime = _ControlledCoordinatorDateTime
+        delayed_event_times = (
+            datetime(2026, 8, 29, 22, 49, 56, tzinfo=UTC),
+            datetime(2026, 8, 29, 22, 50, 1, tzinfo=UTC),
+            datetime(2026, 8, 29, 22, 50, 12, tzinfo=UTC),
+            datetime(2026, 8, 29, 22, 50, 23, tzinfo=UTC),
+            datetime(2026, 8, 29, 22, 50, 34, tzinfo=UTC),
+            datetime(2026, 8, 29, 22, 50, 45, tzinfo=UTC),
+            datetime(2026, 8, 29, 22, 50, 56, tzinfo=UTC),
+        )
+        try:
+            for delayed_event_at in delayed_event_times:
+                _ControlledCoordinatorDateTime.current = (
+                    delayed_event_at + timedelta(seconds=10)
+                )
+                harness._native_intellicenter_refresh_dirty = True
+                await harness._async_native_intellicenter_snapshot_updated()
+                await harness._async_mapped_state_changed(
+                    SimpleNamespace(time_fired=delayed_event_at)
+                )
+        finally:
+            module.datetime = real_datetime
+
+        assert [trigger for trigger, _ in harness.calls] == [
+            item
+            for _ in delayed_event_times
+            for item in ("native_intellicenter_update", "state_change_event")
+        ]
+        assert harness.tracker.current is not None
+        assert harness.tracker.current.temporal_regressions_ignored == 0
+
+    asyncio.run(exercise())
+
+
+def test_periodic_native_and_mapped_refreshes_share_monotonic_sampling_time() -> None:
+    async def exercise() -> None:
+        module, harness = _filtration_ordering_harness()
+        harness.pool_active = True
+        harness.spa_active = False
+        harness.rpm = 2600
+        start = datetime(2026, 8, 29, 23, 0, tzinfo=UTC)
+        real_datetime = module.datetime
+        module.datetime = _ControlledCoordinatorDateTime
+        try:
+            _ControlledCoordinatorDateTime.current = start
+            await harness._async_update_data()
+
+            _ControlledCoordinatorDateTime.current = start + timedelta(minutes=2)
+            harness._native_intellicenter_refresh_dirty = True
+            await harness._async_native_intellicenter_snapshot_updated()
+
+            _ControlledCoordinatorDateTime.current = start + timedelta(
+                minutes=2, seconds=1
+            )
+            await harness._async_mapped_state_changed(
+                SimpleNamespace(time_fired=start + timedelta(minutes=1))
+            )
+
+            calls_before_stale_publication = len(harness.calls)
+            harness.async_set_updated_data(
+                SimpleNamespace(generated_at=start + timedelta(minutes=1))
+            )
+            assert len(harness.calls) == calls_before_stale_publication
+
+            _ControlledCoordinatorDateTime.current = start + timedelta(minutes=3)
+            await harness._async_update_data()
+        finally:
+            module.datetime = real_datetime
+
+        assert [trigger for trigger, _ in harness.calls] == [
+            "periodic_reconciliation",
+            "native_intellicenter_update",
+            "state_change_event",
+            "periodic_reconciliation",
+        ]
+        assert [at for _, at in harness.calls] == sorted(
+            at for _, at in harness.calls
+        )
+        assert harness.tracker.current is not None
+        assert harness.tracker.current.credited_runtime == timedelta(minutes=3)
+        assert harness.tracker.current.temporal_regressions_ignored == 0
+
+    asyncio.run(exercise())
+
+
+def test_restore_mixed_refresh_handoff_suppresses_only_stale_publication() -> None:
+    async def exercise() -> None:
+        module, harness = _filtration_ordering_harness()
+        harness.pool_active = True
+        harness.spa_active = False
+        harness.rpm = 2600
+        high_water = datetime(2026, 8, 29, 23, 30, tzinfo=UTC)
+        harness.restore_through(high_water)
+        restored_credit = harness.tracker.current.credited_runtime
+        real_datetime = module.datetime
+        module.datetime = _ControlledCoordinatorDateTime
+        try:
+            _ControlledCoordinatorDateTime.current = high_water - timedelta(seconds=5)
+            await harness._async_mapped_state_changed(
+                SimpleNamespace(time_fired=high_water - timedelta(seconds=15))
+            )
+
+            _ControlledCoordinatorDateTime.current = high_water + timedelta(seconds=25)
+            harness._native_intellicenter_refresh_dirty = True
+            await harness._async_native_intellicenter_snapshot_updated()
+
+            calls_before_stale_publication = len(harness.calls)
+            harness.async_set_updated_data(
+                SimpleNamespace(generated_at=high_water - timedelta(seconds=10))
+            )
+            assert len(harness.calls) == calls_before_stale_publication
+
+            _ControlledCoordinatorDateTime.current = high_water + timedelta(seconds=55)
+            await harness._async_update_data()
+        finally:
+            module.datetime = real_datetime
+
+        assert restored_credit is not None
+        assert harness.tracker.current is not None
+        assert harness.tracker.current.credited_runtime == (
+            restored_credit + timedelta(seconds=55)
+        )
+        assert harness.tracker.current.temporal_regressions_ignored == 0
+
+        regression = harness.tracker.observe(
+            _filtration_observation(
+                high_water + timedelta(seconds=40),
+                pool_active=True,
+                spa_active=False,
+                rpm=2600,
+            )
+        )
+        assert regression is not None
+        assert regression.temporal_regressions_ignored == 1
+
+    asyncio.run(exercise())
+
+
+def test_seeded_internal_refresh_interleavings_preserve_ledger_monotonicity() -> None:
+    async def exercise() -> None:
+        module, harness = _filtration_ordering_harness()
+        harness.pool_active = True
+        harness.spa_active = False
+        harness.rpm = 2600
+        start = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
+        generator = random.Random(105)
+        credited: list[timedelta] = []
+        real_datetime = module.datetime
+        module.datetime = _ControlledCoordinatorDateTime
+        try:
+            for index in range(200):
+                current = start + timedelta(seconds=index // 2)
+                _ControlledCoordinatorDateTime.current = current
+                choice = generator.randrange(3)
+                if choice == 0:
+                    await harness._async_update_data()
+                elif choice == 1:
+                    harness._native_intellicenter_refresh_dirty = True
+                    await harness._async_native_intellicenter_snapshot_updated()
+                else:
+                    await harness._async_mapped_state_changed(
+                        SimpleNamespace(
+                            time_fired=current
+                            - timedelta(seconds=generator.randrange(1, 31))
+                        )
+                    )
+                if index % 7 == 0:
+                    harness.async_set_updated_data(
+                        SimpleNamespace(
+                            generated_at=current - timedelta(seconds=30)
+                        )
+                    )
+                assert harness.tracker.current is not None
+                credited.append(harness.tracker.current.credited_runtime)
+        finally:
+            module.datetime = real_datetime
+
+        assert credited == sorted(credited)
+        assert credited[-1] == timedelta(seconds=99)
+        assert harness.tracker.current is not None
+        assert harness.tracker.current.remaining_runtime >= timedelta(0)
+        assert harness.tracker.current.temporal_regressions_ignored == 0
 
     asyncio.run(exercise())
