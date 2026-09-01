@@ -48,12 +48,16 @@ private_pyintellicenter.ICModelController = _StubModelController
 private_pyintellicenter.PoolModel = _StubPoolModel
 
 private_pyintellicenter.LIGHT_EFFECTS = {}
+private_pyintellicenter.BODY_ATTR = "BODY"
+private_pyintellicenter.CHEM_TYPE = "CHEM"
 private_pyintellicenter.HEATER_ATTR = "HEATER"
 private_pyintellicenter.MAX_ATTR = "MAX"
 private_pyintellicenter.MIN_ATTR = "MIN"
 private_pyintellicenter.PARENT_ATTR = "PARENT"
 private_pyintellicenter.PMPCIRC_TYPE = "PMPCIRC"
 private_pyintellicenter.PUMP_TYPE = "PUMP"
+private_pyintellicenter.PRIM_ATTR = "PRIM"
+private_pyintellicenter.SEC_ATTR = "SEC"
 private_pyintellicenter.SELECT_ATTR = "SELECT"
 private_pyintellicenter.SPEED_ATTR = "SPEED"
 private_pyintellicenter.STATUS_ATTR = "STATUS"
@@ -101,6 +105,13 @@ class _Model:
     def __getitem__(self, objnam: str) -> Any:
         return self._objects.get(objnam)
 
+    def get_by_type(self, objtype: str) -> list[Any]:
+        return [
+            item
+            for item in self._objects.values()
+            if item.objtype == objtype
+        ]
+
 
 class _RecordingController:
     def __init__(self) -> None:
@@ -121,6 +132,17 @@ class _RecordingController:
                 dict(changes),
             )
         )
+
+    async def set_chlorinator_output(
+        self,
+        objnam: str,
+        primary: int,
+        secondary: int | None = None,
+    ) -> None:
+        changes = {"PRIM": str(primary)}
+        if secondary is not None:
+            changes["SEC"] = str(secondary)
+        await self.request_changes(objnam, changes)
 
 
 def _gateway(
@@ -530,3 +552,128 @@ def test_body_heat_source_transport_failure_is_not_success() -> None:
 
     assert recorder.calls == []
     assert gateway._last_error_code == "RUNTIMEERROR"
+
+
+@pytest.mark.parametrize(
+    ("body_objnam", "percent", "expected"),
+    (
+        ("B1101", 0, ("CHR01", {"PRIM": "0"})),
+        ("B1101", 100, ("CHR01", {"PRIM": "100"})),
+        ("B1202", 0, ("CHR01", {"PRIM": "52", "SEC": "0"})),
+        ("B1202", 100, ("CHR01", {"PRIM": "52", "SEC": "100"})),
+    ),
+)
+def test_intellichlor_output_uses_proven_body_ordered_payload(
+    chemistry_object_factory,
+    body_objnam: str,
+    percent: int,
+    expected: tuple[str, dict[str, str]],
+) -> None:
+    chlorinator = chemistry_object_factory(
+        objnam="CHR01",
+        name="IntelliChlor",
+        subtype="ICHLOR",
+        body_ids="B1101 B1202",
+        primary_output=52,
+        secondary_output=4,
+    )
+    gateway, recorder = _gateway([chlorinator])
+
+    receipt = _run(
+        gateway.async_set_intellichlor_output(body_objnam, percent)
+    )
+
+    assert recorder.calls == [expected]
+    assert receipt.body_objnam == body_objnam
+    assert receipt.operation == "intellichlor_output"
+    assert receipt.value == percent
+
+
+@pytest.mark.parametrize("value", (-1, 101, True, 52.5, "52"))
+def test_intellichlor_output_rejects_invalid_values_before_delivery(
+    chemistry_object_factory,
+    value: object,
+) -> None:
+    chlorinator = chemistry_object_factory(
+        objnam="CHR01",
+        subtype="ICHLOR",
+        body_ids="B1101 B1202",
+        primary_output=52,
+        secondary_output=4,
+    )
+    gateway, recorder = _gateway([chlorinator])
+
+    with pytest.raises(ValueError):
+        _run(gateway.async_set_intellichlor_output("B1101", value))
+
+    assert recorder.calls == []
+
+
+def test_intellichlor_output_fails_closed_on_missing_or_ambiguous_object(
+    chemistry_object_factory,
+) -> None:
+    first = chemistry_object_factory(
+        objnam="CHR01",
+        subtype="ICHLOR",
+        body_ids="B1101 B1202",
+        primary_output=52,
+        secondary_output=4,
+    )
+    second = chemistry_object_factory(
+        objnam="CHR02",
+        subtype="ICHLOR",
+        body_ids="B1101 B1202",
+        primary_output=50,
+        secondary_output=5,
+    )
+
+    for objects in ([], [first, second]):
+        gateway, recorder = _gateway(objects)
+        with pytest.raises(
+            ManualIntelliCenterCommandError,
+            match="exactly one commissioned IntelliChlor",
+        ):
+            _run(gateway.async_set_intellichlor_output("B1101", 50))
+        assert recorder.calls == []
+
+
+def test_spa_output_fails_closed_when_primary_readback_is_unknown(
+    chemistry_object_factory,
+) -> None:
+    chlorinator = chemistry_object_factory(
+        objnam="CHR01",
+        subtype="ICHLOR",
+        body_ids="B1101 B1202",
+        primary_output=None,
+        secondary_output=4,
+    )
+    gateway, recorder = _gateway([chlorinator])
+
+    with pytest.raises(
+        ManualIntelliCenterCommandError,
+        match="Pool output is unavailable",
+    ):
+        _run(gateway.async_set_intellichlor_output("B1202", 5))
+
+    assert recorder.calls == []
+
+
+def test_intellichlor_body_order_not_primary_secondary_words_controls_mapping(
+    chemistry_object_factory,
+) -> None:
+    chlorinator = chemistry_object_factory(
+        objnam="CHR01",
+        subtype="ICHLOR",
+        body_ids="B1202 B1101",
+        primary_output=4,
+        secondary_output=52,
+    )
+    gateway, recorder = _gateway([chlorinator])
+
+    _run(gateway.async_set_intellichlor_output("B1202", 8))
+    _run(gateway.async_set_intellichlor_output("B1101", 60))
+
+    assert recorder.calls == [
+        ("CHR01", {"PRIM": "8"}),
+        ("CHR01", {"PRIM": "4", "SEC": "60"}),
+    ]

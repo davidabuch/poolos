@@ -55,7 +55,8 @@ def test_switches_use_only_manual_gateway_for_writes() -> None:
     source = _source()
 
     assert "manual.async_set_circuit_state(" in source
-    assert "manual.async_set_pool_solar_active(" in source
+    assert "async_request_heat_mode(" in source
+    assert "manual.async_set_pool_solar_active(" not in source
 
     for prohibited in (
         "request_changes(",
@@ -269,7 +270,25 @@ class _Manual:
 
     def __init__(self) -> None:
         self.async_set_circuit_state = AsyncMock()
-        self.async_set_pool_solar_active = AsyncMock()
+        self.async_set_body_heat_source = AsyncMock()
+
+
+class _ThermalRuntime:
+    def __init__(self) -> None:
+        from poolos.thermal_runtime_assessment import ThermalRequestedMode
+
+        self.pool_requested_mode = ThermalRequestedMode.SOLAR
+        self.hot_tub_requested_mode = ThermalRequestedMode.SOLAR_PREFERRED
+
+    def set_requested_mode(self, body, mode, *, publish=True) -> None:
+        del publish
+        from poolos.integration import ThermalBody
+        from poolos.thermal_runtime_assessment import ThermalRequestedMode
+
+        if body is ThermalBody.POOL:
+            self.pool_requested_mode = ThermalRequestedMode(mode)
+        else:
+            self.hot_tub_requested_mode = ThermalRequestedMode(mode)
 
 
 class _Entry:
@@ -283,6 +302,7 @@ class _Entry:
         self.runtime_data = SimpleNamespace(
             coordinator=coordinator,
             manual_intellicenter=manual,
+            thermal_runtime=_ThermalRuntime(),
         )
 
 
@@ -690,7 +710,7 @@ def test_interlock_does_not_repeat_off_before_native_confirmation() -> None:
 
     asyncio.run(run())
 
-def test_solar_switch_exact_manual_commands_and_native_state() -> None:
+def test_solar_switch_delegates_to_canonical_requested_mode_path() -> None:
     async def run() -> None:
         module = _load_executable_switch_module()
 
@@ -698,6 +718,7 @@ def test_solar_switch_exact_manual_commands_and_native_state() -> None:
             {
                 "solar.active": True,
                 "pool.active": True,
+                "pool.raw_heater_id": "H0002",
             }
         )
         manual = _Manual()
@@ -711,21 +732,30 @@ def test_solar_switch_exact_manual_commands_and_native_state() -> None:
         assert solar.is_on is True
 
         await solar.async_turn_off()
-        manual.async_set_pool_solar_active.assert_awaited_once_with(False)
+        manual.async_set_body_heat_source.assert_awaited_once_with(
+            "B1101",
+            "00000",
+        )
+        assert entry.runtime_data.thermal_runtime.pool_requested_mode.value == "Off"
 
-        manual.async_set_pool_solar_active.reset_mock()
+        manual.async_set_body_heat_source.reset_mock()
 
         coordinator.native_intellicenter_snapshot = _Snapshot(
             {
                 "solar.active": False,
                 "pool.active": True,
+                "pool.raw_heater_id": "00000",
             }
         )
 
         assert solar.is_on is False
 
         await solar.async_turn_on()
-        manual.async_set_pool_solar_active.assert_awaited_once_with(True)
+        manual.async_set_body_heat_source.assert_awaited_once_with(
+            "B1101",
+            "H0002",
+        )
+        assert entry.runtime_data.thermal_runtime.pool_requested_mode.value == "Solar"
 
     asyncio.run(run())
 
@@ -754,12 +784,12 @@ def test_solar_on_fails_closed_when_pool_is_off() -> None:
         ):
             await solar.async_turn_on()
 
-        manual.async_set_pool_solar_active.assert_not_awaited()
+        manual.async_set_body_heat_source.assert_not_awaited()
 
     asyncio.run(run())
 
 
-def test_solar_off_remains_allowed_when_pool_is_off() -> None:
+def test_solar_off_preserves_confirmed_gas_source() -> None:
     async def run() -> None:
         module = _load_executable_switch_module()
 
@@ -767,6 +797,7 @@ def test_solar_off_remains_allowed_when_pool_is_off() -> None:
             {
                 "solar.active": True,
                 "pool.active": False,
+                "pool.raw_heater_id": "H0001",
             }
         )
         manual = _Manual()
@@ -778,6 +809,102 @@ def test_solar_off_remains_allowed_when_pool_is_off() -> None:
         )
 
         await solar.async_turn_off()
-        manual.async_set_pool_solar_active.assert_awaited_once_with(False)
+        manual.async_set_body_heat_source.assert_not_awaited()
+        assert entry.runtime_data.thermal_runtime.pool_requested_mode.value == "Solar"
+
+    asyncio.run(run())
+
+
+def test_solar_off_fails_closed_when_effective_source_is_unknown() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        coordinator = _Coordinator(
+            {
+                "solar.active": True,
+                "pool.active": True,
+                "pool.raw_heater_id": "H9999",
+            }
+        )
+        manual = _Manual()
+        entry = _Entry(coordinator, manual)
+        solar = module.PoolOSNativeIntelliCenterSolarSwitch(
+            coordinator,
+            entry,
+        )
+
+        with pytest.raises(
+            module.ManualIntelliCenterCommandError,
+            match="effective Pool heat source",
+        ):
+            await solar.async_turn_off()
+
+        manual.async_set_body_heat_source.assert_not_awaited()
+        assert entry.runtime_data.thermal_runtime.pool_requested_mode.value == "Solar"
+
+    asyncio.run(run())
+
+
+def test_solar_off_does_not_destroy_solar_preferred_intent() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        coordinator = _Coordinator(
+            {
+                "solar.active": True,
+                "pool.active": True,
+                "pool.raw_heater_id": "H0002",
+            }
+        )
+        manual = _Manual()
+        entry = _Entry(coordinator, manual)
+        from poolos.thermal_runtime_assessment import ThermalRequestedMode
+
+        entry.runtime_data.thermal_runtime.pool_requested_mode = (
+            ThermalRequestedMode.SOLAR_PREFERRED
+        )
+        solar = module.PoolOSNativeIntelliCenterSolarSwitch(
+            coordinator,
+            entry,
+        )
+
+        with pytest.raises(
+            module.ManualIntelliCenterCommandError,
+            match="Solar Preferred",
+        ):
+            await solar.async_turn_off()
+
+        manual.async_set_body_heat_source.assert_not_awaited()
+        assert (
+            entry.runtime_data.thermal_runtime.pool_requested_mode
+            is ThermalRequestedMode.SOLAR_PREFERRED
+        )
+
+    asyncio.run(run())
+
+
+def test_failed_solar_command_does_not_change_requested_mode() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        coordinator = _Coordinator(
+            {
+                "solar.active": False,
+                "pool.active": True,
+                "pool.raw_heater_id": "00000",
+            }
+        )
+        manual = _Manual()
+        manual.async_set_body_heat_source.side_effect = (
+            module.ManualIntelliCenterCommandError("synthetic failure")
+        )
+        entry = _Entry(coordinator, manual)
+        original = entry.runtime_data.thermal_runtime.pool_requested_mode
+        solar = module.PoolOSNativeIntelliCenterSolarSwitch(
+            coordinator,
+            entry,
+        )
+
+        with pytest.raises(module.ManualIntelliCenterCommandError):
+            await solar.async_turn_on()
+
+        assert entry.runtime_data.thermal_runtime.pool_requested_mode is original
 
     asyncio.run(run())

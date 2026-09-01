@@ -9,7 +9,8 @@ exposes a deliberately tiny mutation surface:
 
 * turn Pool/Spa body circulation on or off
 * change Pool/Spa heating setpoint
-* explicitly select/deselect Solar for the Pool body
+* select one commissioned Pool/Spa heat source
+* set one commissioned IntelliChlor Pool/Spa output percentage
 * turn explicitly allow-listed Jets, Slide, Spillway, and Pool Light circuits on or off
 * change the Pool Light IntelliBrite effect on C0002
 * change the explicitly allow-listed Pool PMPCIRC RPM setpoint on p0102
@@ -27,6 +28,8 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from pyintellicenter import (
+    BODY_ATTR,
+    CHEM_TYPE,
     ICBaseController,
     ICConnectionHandler,
     ICModelController,
@@ -36,6 +39,7 @@ from pyintellicenter import (
     MIN_ATTR,
     PARENT_ATTR,
     PMPCIRC_TYPE,
+    PRIM_ATTR,
     PUMP_TYPE,
     SELECT_ATTR,
     SPEED_ATTR,
@@ -48,7 +52,7 @@ from pyintellicenter import (
 _ALLOWED_BODY_IDS = frozenset({"B1101", "B1202"})
 _ALLOWED_CIRCUIT_IDS = frozenset({"C0002", "C0003", "C0004", "FTR01"})
 _POOL_LIGHT_OBJNAM = "C0002"
-_POOL_BODY_OBJNAM = "B1101"
+_INTELLICHLOR_OBJNAM = "CHR01"
 _POOL_SOLAR_HEATER_OBJNAM = "H0002"
 _NO_HEATER_OBJNAM = "00000"
 _GAS_HEATER_OBJNAM = "H0001"
@@ -68,6 +72,16 @@ _PUMP_RPM_MODE = "RPM"
 
 _MIN_TARGET_TEMPERATURE = 40
 _MAX_TARGET_TEMPERATURE = 104
+
+
+def _percentage(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        numeric = int(str(value))
+    except (TypeError, ValueError):
+        return None
+    return numeric if 0 <= numeric <= 100 else None
 
 
 class ManualIntelliCenterState(str, Enum):
@@ -359,43 +373,74 @@ class ManualIntelliCenterControl:
             value=heater_objnam,
         )
 
-    async def async_set_pool_solar_active(
+    async def async_set_intellichlor_output(
         self,
-        active: bool,
+        body_objnam: str,
+        percent: int,
     ) -> ManualCommandReceipt:
-        """Select or deselect Solar as the Pool heat source."""
+        """Set one body output on the commissioned CHR01 IntelliChlor."""
 
-        if not isinstance(active, bool):
-            raise ValueError("pool solar active state must be boolean")
+        self._require_body(body_objnam)
+        if isinstance(percent, bool) or not isinstance(percent, int):
+            raise ValueError("IntelliChlor output must be a whole percentage")
+        if not 0 <= percent <= 100:
+            raise ValueError("IntelliChlor output must be between 0 and 100")
+
+        candidates = [
+            item
+            for item in self._model.get_by_type(CHEM_TYPE)
+            if str(item.subtype or "").upper() == "ICHLOR"
+        ]
+        if (
+            len(candidates) != 1
+            or str(candidates[0].objnam) != _INTELLICHLOR_OBJNAM
+        ):
+            raise ManualIntelliCenterCommandError(
+                "exactly one commissioned IntelliChlor CHR01 is required"
+            )
+
+        chlorinator = candidates[0]
+        body_ids = tuple(str(chlorinator[BODY_ATTR] or "").split())
+        if body_objnam not in body_ids[:2]:
+            raise ManualIntelliCenterCommandError(
+                f"IntelliChlor CHR01 is not associated with {body_objnam}"
+            )
+        output_index = body_ids.index(body_objnam)
 
         await self._require_available()
 
-        heater_objnam = (
-            _POOL_SOLAR_HEATER_OBJNAM
-            if active
-            else _NO_HEATER_OBJNAM
-        )
-
         async with self._command_lock:
             try:
-                await self._controller.request_changes(
-                    _POOL_BODY_OBJNAM,
-                    {
-                        HEATER_ATTR: heater_objnam,
-                    },
-                )
+                if output_index == 0:
+                    await self._controller.set_chlorinator_output(
+                        _INTELLICHLOR_OBJNAM,
+                        percent,
+                    )
+                else:
+                    primary = _percentage(chlorinator[PRIM_ATTR])
+                    if primary is None:
+                        raise ManualIntelliCenterCommandError(
+                            "IntelliChlor Pool output is unavailable; "
+                            "Spa output cannot be changed safely"
+                        )
+                    await self._controller.set_chlorinator_output(
+                        _INTELLICHLOR_OBJNAM,
+                        primary,
+                        percent,
+                    )
+            except ManualIntelliCenterCommandError:
+                raise
             except Exception as exc:
                 self._last_error_code = type(exc).__name__.upper()
                 raise ManualIntelliCenterCommandError(
-                    "failed to set Pool solar heat-source state"
+                    f"failed to set {body_objnam} IntelliChlor output"
                 ) from exc
 
         self._last_error_code = None
-
         return ManualCommandReceipt(
-            body_objnam=_POOL_BODY_OBJNAM,
-            operation="pool_solar_active",
-            value=active,
+            body_objnam=body_objnam,
+            operation="intellichlor_output",
+            value=percent,
         )
 
     async def async_set_heating_setpoint(
@@ -505,8 +550,8 @@ class ManualIntelliCenterControl:
                 "allowed_operations": [
                     "body_active",
                     "heating_setpoint",
-                    "pool_solar_active",
                     "body_heat_source",
+                    "intellichlor_output",
                     "circuit_active",
                     "light_effect",
                     "pump_circuit_speed",

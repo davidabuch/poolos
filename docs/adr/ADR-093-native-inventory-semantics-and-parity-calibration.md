@@ -82,11 +82,35 @@ state. SYSTEM `VER` and `SERVICE` provide firmware and a normalized
 auto/service/timeout mode; unknown future modes remain unavailable rather than
 being invented.
 
-These concepts are observation-first and read-only in PoolOS. The commissioned
-manual command adapter does not expose CHEM, BODY maximum-temperature, SYSTEM,
-or pump-limit mutation, so legacy writable entity domains are not copied merely
-for visual parity. Optional legacy HA mappings exist only as independent parity
-inputs during retirement commissioning.
+These concepts remain observation-first. Salt, BODY maximum temperature,
+SYSTEM state, and pump limits are read-only. IntelliChlor Pool and Spa output
+percentages additionally have bounded manual number controls after audit of
+pyintellicenter 0.1.20 and the working legacy integration proved the native
+`set_chlorinator_output` contract. The command gateway accepts only the single
+commissioned `CHR01` ICHLOR object, derives `PRIM`/`SEC` ownership from its
+ordered `BODY` relationship, accepts whole percentages from zero through 100,
+and fails closed on missing or ambiguous objects. A secondary-output request
+preserves the current authoritative primary output because the library's
+secondary write sends both fields. The entity never changes its displayed value
+from command acceptance; later independent native read-back remains truth.
+Optional legacy HA mappings remain independent parity inputs during retirement
+commissioning.
+
+### Canonical manual thermal intent
+
+The Pool and Hot Tub heat-mode selects own requested operator thermal mode.
+Direct Off, Gas, and Solar requests use one bounded body/HEATER command path;
+Solar Preferred changes PoolOS policy intent only and never writes Pentair's
+legacy Solar Preferred mode. Native HEATER and active-source observations remain
+separate authoritative truth.
+
+The Pool Solar switch is only a convenience proxy into that same Pool requested
+mode path. Solar ON requires current Pool activity and native source evidence,
+then requests direct Solar. Solar OFF is a no-op when native Off or Gas is
+selected, so it cannot accidentally deselect Gas. It may request direct Off only
+when native direct Solar and requested direct Solar agree. Unknown source,
+contradictory requested intent, and Solar Preferred intent fail closed. No Gas
+switch is added because the canonical heat-mode select already represents Gas.
 
 ### Intentional migration boundary
 
@@ -105,6 +129,8 @@ commissioned, will orchestrate a bounded temporary normal Pool-output target
 of 100 percent and then re-evaluate or restore normal output. That policy
 requires explicit duration, restart, recovery, restoration, safety, and
 commissioning semantics and is not part of native observation parity.
+The bounded normal-output numbers do not expose `SUPER`, persist a pending
+boost, or provide autonomous chemistry authority.
 
 ### Complete inventory export
 
