@@ -54,11 +54,13 @@ the session; human OFF returns to opportunistic reevaluation.
 
 ### Filtration, TOU, and pump policy
 
-Daily filtration targets are configurable trusted-temperature bands of
-6/8/9/10/12 hours. Valid pool-routed circulation earns minute-for-minute credit
-at 1500, 2600, 2900, or 3000 RPM. Spa routing earns none. Only confirmed grid-
-outage conservation earns two-thirds credit at 1500 RPM. At most two daily debt
-records persist and are repaid oldest-first.
+Filtration operational days run from 08:00 local time to the next 08:00 and
+always begin with a six-hour minimum. Validated daily maximum Pool temperature
+may raise that obligation through the configurable 6/8/9/10/12-hour bands.
+Valid Pool-routed circulation is credited from actual observed RPM: below 800
+earns none, 800 to below 1200 earns one-half, 1200 to below 1901 earns
+two-thirds, and 1901 or above earns full credit. Spa routing earns none. At most
+two operational-day debt records persist and are repaid oldest-first.
 
 TOU remains generic timezone-aware tariff data. Safety and explicit user demand
 rank first, then perishable thermal opportunity, then price optimization, then

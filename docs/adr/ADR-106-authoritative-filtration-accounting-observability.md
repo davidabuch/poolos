@@ -16,11 +16,38 @@ daily obligation truth.
 
 PoolOS adds one deterministic `FiltrationAccountingTracker` in the filtration
 policy boundary. It consumes explicit timezone-aware authoritative observation
-evidence and owns the derived two-day ledger in memory. It creates each local
-day's obligation from the first usable trusted Pool temperature, credits only
-confirmed Pool-routed circulation with positive observed RPM, applies the
-existing confirmed-outage credit rule, repays the oldest retained debt first,
-and uses the existing LADWP profile and 2600-RPM filtration baseline.
+evidence and owns the derived two-operational-day ledger in memory. A filtration
+operational day begins at 08:00 local time and is labeled by its start date;
+local midnight is not a ledger boundary. Every operational day is immediately
+materialized with a six-hour minimum obligation. Its requirement follows that
+day's highest validated Pool temperature and may only increase. A temperature
+is validated only after at least two continuous minutes
+of usable Pool-routed circulation with Spa inactive and positive observed RPM.
+This bounded timestamp-derived stabilization rejects retained and shared-plumbing
+temperature after an inactive or Spa-routed interval without delaying filtration
+credit itself. The 90 F boundary begins the 12-hour band; lower bands remain 6,
+8, 9, and 10 hours. Existing credit is preserved when a target increases.
+
+The tracker credits only confirmed Pool-routed circulation and derives the
+credit factor solely from actual observed RPM: below 800 earns none, 800 to
+below 1200 earns one-half, 1200 to below 1901 earns two-thirds, and 1901 or
+above earns full credit. The factors use exact rational arithmetic. Outage,
+probe, and requested-mode labels do not independently alter credit. Credit is
+available immediately against the six-hour minimum, including during the
+two-minute temperature-stabilization interval; no provisional credit bucket
+exists. Debt is repaid oldest-first. The 2600-RPM ordinary-filtration baseline
+remains a planning input, not accounting truth. Hydraulic stabilization may
+continue across midnight or 08:00 while routing remains valid, but the daily
+maximum resets at 08:00.
+
+Once the tracker has accepted chronological evidence, advancing across an
+operational-day boundary also materializes the immediately previous retained
+day if it had no observations. Such a missed day receives only its six-hour
+minimum: no temperature maximum, credit, runtime, or stabilization state is
+fabricated. The first-ever accepted observation creates only its own day, so a
+new installation does not invent pre-accounting debt. Replay reads one extra
+operational-day seed window to distinguish an established timeline from first
+initialization while the authoritative ledger remains bounded to two days.
 
 The tracker uses aggregate evaluation time as its canonical chronology: live
 accounting uses the authoritative snapshot `generated_at`, while replay uses
@@ -30,10 +57,11 @@ time, not filesystem-write time. Individual observation timestamps remain
 source-freshness evidence and are not substituted for the coherent aggregate
 sample time.
 
-The tracker rejects duplicate timestamps and ignores temporal regressions. An
-unusable or stale interval breaks credit continuity. Elapsed time is calculated
-in UTC so DST transitions preserve real duration. Replay retains an explicit
-accounted-through high-water mark. An overlapping first live sample may
+The tracker rejects duplicate timestamps and ignores temporal regressions before
+they can mutate stabilization or daily-maximum state. An unusable or stale
+circulation interval breaks credit and hydraulic-stabilization continuity.
+Elapsed time is calculated in UTC so DST transitions preserve real duration.
+Replay retains an explicit accounted-through high-water mark. An overlapping first live sample may
 establish continuity only at that mark, so previously replayed seconds cannot
 be credited twice. Without overlap, the first newer live sample is a zero-credit
 baseline, so the unobserved restart gap is never credited. After that one-time
@@ -52,25 +80,28 @@ result, does not reapply evidence to the filtration tracker.
 Broad system health and filtration-specific evidence sufficiency are distinct.
 Circulation credit requires present, individually `GOOD`, fresh Pool activity,
 Spa activity, and observed pump RPM evidence. Daily target selection separately
-requires usable Pool temperature evidence. A confirmed outage affects credit
-only when its own evidence is usable. Unrelated missing, unavailable, or stale
+requires usable Pool temperature evidence. Unrelated missing, unavailable, or stale
 observations do not erase otherwise provable filtration work, while uncertainty
 in any filtration-critical concept fails closed and breaks interval continuity.
 
 The existing persistent observation recorder remains the durable evidence
 owner. Home Assistant startup replays at most the current and prior local day
-from that append-only history off the event loop, then breaks continuity before
-accepting a live snapshot. No second persistence file, Home Assistant restore
-attribute, or parallel ledger is created. If the final pre-failure interval was
+from that append-only history off the event loop and reconstructs the same
+bounded stabilization and daily-maximum state, then breaks unproven restart
+continuity before accepting a live snapshot. No second persistence file, Home
+Assistant restore attribute, or parallel ledger is created. If the final pre-failure interval was
 not durably recorded, replay may conservatively under-credit it; it never
 invents completed work. Live snapshots and recorded events use the same
 filtration-specific qualification function; recorded per-observation quality,
 source identity, and stale-source evidence are sufficient for equivalent replay.
 
-One bounded Control Center diagnostic exposes the current obligation day,
+One bounded Control Center diagnostic exposes the current operational day and
+its start and next-boundary timestamps,
 required, credited, remaining, prior-day debt, total remaining, disposition,
-TOU tier, rationale, next suitable time, and ordinary filtration baseline.
-These attributes are a view of the core tracker and are not a ledger.
+TOU tier, rationale, next suitable time, ordinary filtration baseline, highest
+validated Pool temperature, actual observed RPM, credit factor/band, and compact
+stabilization state/timing. These
+attributes are a view of the core tracker and are not a ledger.
 
 Disposition describes the current relationship to the obligation. Valid Pool
 circulation with remaining debt is `CREDITING`, including circulation that is
@@ -101,4 +132,4 @@ Operators can audit daily filtration from normal PoolOS state, and policy can
 distinguish real remaining debt from a placeholder. Replay is deterministic,
 bounded, and derived from the same durable observations used elsewhere. The
 two-day retention rule intentionally limits detailed debt attribution to the
-current and immediately prior local day.
+current and immediately prior operational day.

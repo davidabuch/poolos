@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Mapping
 
@@ -11,6 +11,7 @@ from poolos.filtration_policy import (
     FiltrationAccountingSnapshot,
     FiltrationAccountingTracker,
     FiltrationObservation,
+    FiltrationOperationalDayPolicy,
 )
 from poolos.observations import ObservationQuality, RecordedObservationEvent
 from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
@@ -35,15 +36,18 @@ class PoolOSFiltrationRuntime:
     restore_error: str | None = None
 
     async def async_restore(self, *, restored_at: datetime) -> None:
-        """Replay the retained two-day evidence window off the event loop."""
+        """Replay the two-day ledger plus one chronology seed off the event loop."""
 
         if restored_at.tzinfo is None or restored_at.utcoffset() is None:
             raise ValueError("restored_at must be timezone-aware")
-        local = restored_at.astimezone(self.coordinator.local_timezone)
-        start_local = datetime.combine(
-            local.date() - timedelta(days=1),
-            time.min,
-            tzinfo=self.coordinator.local_timezone,
+        day_policy = FiltrationOperationalDayPolicy()
+        operational_day = day_policy.day_for(
+            restored_at,
+            self.coordinator.local_timezone,
+        )
+        start_local = day_policy.starts_at(
+            operational_day - timedelta(days=2),
+            self.coordinator.local_timezone,
         )
         try:
             events = await self.coordinator.hass.async_add_executor_job(
@@ -137,18 +141,14 @@ def _filtration_observation(
         _usable(by_id.get(concept), stale_sources) for concept in circulation_concepts
     )
     temperature_usable = _usable(by_id.get("pool.temperature"), stale_sources)
-    outage = by_id.get("grid.outage_active")
     return FiltrationObservation(
         observed_at=observed_at,
         pool_active=_boolean(_value(by_id.get("pool.active"))),
         spa_active=_boolean(_value(by_id.get("spa.active"))),
-        pump_rpm=_integer(_value(by_id.get("pump.rpm"))),
+        pump_rpm=_number(_value(by_id.get("pump.rpm"))),
         water_temperature_f=_number(_value(by_id.get("pool.temperature"))),
         circulation_evidence_usable=circulation_usable,
         temperature_evidence_usable=temperature_usable,
-        confirmed_grid_outage=(
-            _usable(outage, stale_sources) and _value(outage) is True
-        ),
     )
 
 
@@ -173,12 +173,6 @@ def _usable(item: Any, stale_sources: set[str]) -> bool:
 
 def _boolean(value: Any) -> bool | None:
     return value if isinstance(value, bool) else None
-
-
-def _integer(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return round(value)
 
 
 def _number(value: Any) -> float | None:

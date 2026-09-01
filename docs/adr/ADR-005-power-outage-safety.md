@@ -33,7 +33,8 @@ While active:
 - Slide off
 - Pool light off
 - Normal Decision Engine determines whether circulation is required
-- If circulation is required, limit commanded pump speed to 1800 RPM
+- If circulation is required, use the configured reduced-power baseline
+  (currently 1500 RPM)
 - If circulation is not required, keep the pump off
 
 Observe actual pump speed from:
@@ -43,6 +44,14 @@ sensor.buch_family_vs_rpm
 ```
 
 Do not alter Pentair RPM preset configuration values.
+
+This ADR records the intended safety behavior, not current runtime authority.
+The present HA observation adapter maps the configured grid-status entity
+directly and does not yet implement the required two-second confirmation.
+No production decision/runtime surface currently consumes a confirmed outage
+to create this recommendation. Confirmation, command-free runtime integration,
+and any later physical commissioning must be implemented together before this
+decision can be treated as active PoolOS behavior.
 
 When grid power returns, release safety ownership and immediately reevaluate current conditions. Do not restore a pre-outage snapshot.
 
@@ -68,7 +77,7 @@ When grid power returns, release safety ownership and immediately reevaluate cur
 
 Rejected because they can conflict with normal control and are harder to make restart-safe.
 
-### Force the pool pump on at 1800 RPM
+### Force the pool pump on at a reduced RPM
 
 Rejected because outage mode should constrain required circulation, not create a new circulation requirement.
 
