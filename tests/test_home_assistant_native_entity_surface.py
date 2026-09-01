@@ -29,7 +29,7 @@ def test_native_binary_sensor_surface_uses_independent_snapshot() -> None:
     assert '"PoolOS Native IntelliCenter"' in binary_text
 
 
-def test_native_surface_exposes_all_26_canonical_concepts_once() -> None:
+def test_native_surface_exposes_all_supported_canonical_concepts_once() -> None:
     sensor_text = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
     binary_text = (COMPONENT / "binary_sensor.py").read_text(encoding="utf-8")
 
@@ -51,17 +51,26 @@ def test_native_surface_exposes_all_26_canonical_concepts_once() -> None:
 
     concepts = {
         "air.temperature",
+        "freeze.active",
         "heater.active",
+        "intellicenter.firmware_version",
+        "intellicenter.system_mode",
+        "intellichlor.pool_output_percent",
+        "intellichlor.salt_ppm",
+        "intellichlor.spa_output_percent",
         "jets.active",
         "pool.active",
         "pool.command_active",
         "pool.heating_demand_active",
+        "pool.maximum_temperature",
         "pool.raw_heater_id",
         "pool.raw_htmode",
         "pool.target_temperature",
         "pool.temperature",
         "pool_light.active",
         "pump.gpm",
+        "pump.maximum_rpm",
+        "pump.minimum_rpm",
         "pump.power",
         "pump.rpm",
         "slide.active",
@@ -70,6 +79,7 @@ def test_native_surface_exposes_all_26_canonical_concepts_once() -> None:
         "spa.active",
         "spa.command_active",
         "spa.heating_demand_active",
+        "spa.maximum_temperature",
         "spa.raw_heater_id",
         "spa.raw_htmode",
         "spa.target_temperature",
@@ -83,8 +93,10 @@ def test_native_surface_exposes_all_26_canonical_concepts_once() -> None:
     for concept in concepts:
         assert native_blocks.count(f'"{concept}"') == 1
 
-    assert sensor_block.count("PoolOSNativeSensorDescription(") == 14
-    assert binary_block.count("PoolOSNativeBinarySensorDescription(") == 12
+    assert sensor_block.count("PoolOSNativeSensorDescription(") == 23
+    assert binary_block.count("PoolOSNativeBinarySensorDescription(") == 13
+    assert "super_chlor" not in native_blocks.casefold()
+    assert "superchlor" not in native_blocks.casefold()
 
 
 def test_native_entity_names_do_not_duplicate_device_name() -> None:

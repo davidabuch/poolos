@@ -27,6 +27,11 @@ class PoolOSNativeBinarySensorDescription:
 
 NATIVE_BINARY_SENSORS: tuple[PoolOSNativeBinarySensorDescription, ...] = (
     PoolOSNativeBinarySensorDescription(
+        "freeze.active",
+        "Freeze Protection Active",
+        "mdi:snowflake",
+    ),
+    PoolOSNativeBinarySensorDescription(
         "heater.active",
         "Heater Active",
         "mdi:fire",

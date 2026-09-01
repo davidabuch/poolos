@@ -98,6 +98,7 @@ class NativeBodyState:
     heating_active: bool
     current_temperature: float | None
     target_temperature: float | None
+    maximum_temperature: float | None = None
     active_heat_source: str | None = None
     selected_heat_mode: str | None = None
     raw_heater_id: str | None = None
@@ -112,6 +113,28 @@ class NativePumpState:
     rpm: float | None
     gpm: float | None
     power_watts: float | None
+    minimum_rpm: float | None = None
+    maximum_rpm: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeIntelliChlorState:
+    """Read-only IntelliChlor measurements and configured output evidence."""
+
+    native_id: str
+    name: str
+    salt_ppm: int | None
+    pool_output_percent: int | None
+    spa_output_percent: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeSystemState:
+    """Read-only IntelliCenter controller-wide evidence."""
+
+    native_id: str
+    firmware_version: str | None
+    operating_mode: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +152,7 @@ class NativeCircuitState:
     active: bool
     use: str | None = None
     subtype: str | None = None
+    raw_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +167,8 @@ class NativeIntelliCenterTransportSnapshot:
     pumps: tuple[NativePumpState, ...] = ()
     temperatures: tuple[NativeTemperatureState, ...] = ()
     circuits: tuple[NativeCircuitState, ...] = ()
+    intellichlors: tuple[NativeIntelliChlorState, ...] = ()
+    systems: tuple[NativeSystemState, ...] = ()
     raw_inventory: tuple[NativeRawObject, ...] = ()
 
     def __post_init__(self) -> None:
@@ -154,6 +180,8 @@ class NativeIntelliCenterTransportSnapshot:
         object.__setattr__(self, "pumps", tuple(self.pumps))
         object.__setattr__(self, "temperatures", tuple(self.temperatures))
         object.__setattr__(self, "circuits", tuple(self.circuits))
+        object.__setattr__(self, "intellichlors", tuple(self.intellichlors))
+        object.__setattr__(self, "systems", tuple(self.systems))
         raw_inventory = tuple(
             sorted(
                 self.raw_inventory,
@@ -287,11 +315,18 @@ class NativeIntelliCenterObservationSnapshot:
 
 NATIVE_TARGET_CONCEPTS = (
     "air.temperature",
+    "freeze.active",
     "heater.active",
+    "intellicenter.firmware_version",
+    "intellicenter.system_mode",
+    "intellichlor.pool_output_percent",
+    "intellichlor.salt_ppm",
+    "intellichlor.spa_output_percent",
     "jets.active",
     "pool.active",
     "pool.command_active",
     "pool.heating_demand_active",
+    "pool.maximum_temperature",
     "pool.raw_heater_id",
     "pool.raw_htmode",
     "pool.target_temperature",
@@ -299,6 +334,8 @@ NATIVE_TARGET_CONCEPTS = (
     "pool_light.active",
     "pool_light.effect",
     "pump.gpm",
+    "pump.maximum_rpm",
+    "pump.minimum_rpm",
     "pump.power",
     "pump.rpm",
     "slide.active",
@@ -307,6 +344,7 @@ NATIVE_TARGET_CONCEPTS = (
     "spa.active",
     "spa.command_active",
     "spa.heating_demand_active",
+    "spa.maximum_temperature",
     "spa.raw_heater_id",
     "spa.raw_htmode",
     "spa.target_temperature",
@@ -381,6 +419,54 @@ class NativeIntelliCenterReadAdapter:
             _put(values, "pump.rpm", pump.rpm, "rpm", pump.native_id)
             _put(values, "pump.gpm", pump.gpm, "gpm", pump.native_id)
             _put(values, "pump.power", pump.power_watts, "W", pump.native_id)
+            if (
+                pump.minimum_rpm is not None
+                and pump.maximum_rpm is not None
+                and pump.minimum_rpm <= pump.maximum_rpm
+            ):
+                _put(values, "pump.minimum_rpm", pump.minimum_rpm, "rpm", pump.native_id)
+                _put(values, "pump.maximum_rpm", pump.maximum_rpm, "rpm", pump.native_id)
+
+        intellichlor = _only(transport.intellichlors)
+        if intellichlor is not None:
+            _put(
+                values,
+                "intellichlor.salt_ppm",
+                intellichlor.salt_ppm,
+                "ppm",
+                intellichlor.native_id,
+            )
+            _put(
+                values,
+                "intellichlor.pool_output_percent",
+                intellichlor.pool_output_percent,
+                "%",
+                intellichlor.native_id,
+            )
+            _put(
+                values,
+                "intellichlor.spa_output_percent",
+                intellichlor.spa_output_percent,
+                "%",
+                intellichlor.native_id,
+            )
+
+        system = _only(transport.systems)
+        if system is not None:
+            _put(
+                values,
+                "intellicenter.firmware_version",
+                system.firmware_version,
+                None,
+                system.native_id,
+            )
+            _put(
+                values,
+                "intellicenter.system_mode",
+                system.operating_mode,
+                None,
+                system.native_id,
+            )
 
         for kind, concept in (
             (NativeTemperatureKind.AIR, "air.temperature"),
@@ -438,6 +524,16 @@ class NativeIntelliCenterReadAdapter:
             circuit = _circuit(circuits, aliases)
             if circuit is not None:
                 _put(values, concept, circuit.active, None, circuit.native_id)
+
+        freeze = _freeze_circuit(circuits)
+        if freeze is not None:
+            _put(
+                values,
+                "freeze.active",
+                _freeze_active(freeze),
+                None,
+                freeze.native_id,
+            )
 
         pool_light = _pool_light(circuits)
         if pool_light is not None:
@@ -529,6 +625,19 @@ def _body_values(
         "°F",
         body.native_id,
     )
+    _put(
+        values,
+        f"{prefix}.maximum_temperature",
+        _canonical_temperature(body.maximum_temperature, temperature_unit),
+        "°F",
+        body.native_id,
+    )
+
+
+def _only(items: tuple[Any, ...]) -> Any | None:
+    """Return one unambiguous native object, otherwise fail closed."""
+
+    return items[0] if len(items) == 1 else None
 
 
 def _primary_pump(pumps: tuple[NativePumpState, ...]) -> NativePumpState | None:
@@ -644,6 +753,26 @@ def _pool_light(
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _freeze_circuit(
+    circuits: tuple[NativeCircuitState, ...],
+) -> NativeCircuitState | None:
+    candidates = tuple(
+        circuit
+        for circuit in circuits
+        if _normalized_token(circuit.subtype) == "frz"
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _freeze_active(circuit: NativeCircuitState) -> bool | None:
+    normalized = _normalized_token(circuit.raw_status)
+    if normalized == "on":
+        return True
+    if normalized == "off":
+        return False
+    return None
+
+
 def _put(
     values: dict[str, tuple[Any, str | None, str]],
     concept: str,
@@ -685,12 +814,14 @@ __all__ = [
     "NativeIntelliCenterReadSource",
     "NativeIntelliCenterStatus",
     "NativeIntelliCenterTransportSnapshot",
+    "NativeIntelliChlorState",
     "NativePumpState",
     "NativeRawAttribute",
     "NativeRawObject",
     "NativeRawScalar",
     "NativeTemperatureKind",
     "NativeTemperatureState",
+    "NativeSystemState",
     "RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT",
     "RAW_INVENTORY_DIAGNOSTIC_LIMIT",
 ]

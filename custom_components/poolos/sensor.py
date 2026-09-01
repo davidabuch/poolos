@@ -107,18 +107,27 @@ def _native_observation_attributes(
 
 NATIVE_SENSORS: tuple[PoolOSNativeSensorDescription, ...] = (
     PoolOSNativeSensorDescription("air.temperature", "Air Temperature", "mdi:thermometer", "°F"),
+    PoolOSNativeSensorDescription("intellicenter.firmware_version", "Firmware Version", "mdi:chip", diagnostic=True),
+    PoolOSNativeSensorDescription("intellicenter.system_mode", "System Mode", "mdi:cog", diagnostic=True),
+    PoolOSNativeSensorDescription("intellichlor.pool_output_percent", "IntelliChlor Pool Output", "mdi:percent", "%"),
+    PoolOSNativeSensorDescription("intellichlor.salt_ppm", "IntelliChlor Salt", "mdi:shaker-outline", "ppm"),
+    PoolOSNativeSensorDescription("intellichlor.spa_output_percent", "IntelliChlor Spa Output", "mdi:percent", "%"),
     PoolOSNativeSensorDescription("pool.raw_heater_id", "Pool Heater ID", "mdi:identifier", diagnostic=True),
     PoolOSNativeSensorDescription("pool.raw_htmode", "Pool Heat Mode Raw", "mdi:code-tags", diagnostic=True),
     PoolOSNativeSensorDescription("pool.target_temperature", "Pool Target Temperature", "mdi:thermometer-check", "°F"),
     PoolOSNativeSensorDescription("pool.temperature", "Pool Temperature", "mdi:pool-thermometer", "°F"),
+    PoolOSNativeSensorDescription("pool.maximum_temperature", "Pool Maximum Temperature", "mdi:thermometer-high", "°F", diagnostic=True),
     PoolOSNativeSensorDescription("pump.gpm", "Pump Flow Rate", "mdi:water-pump", "gal/min"),
     PoolOSNativeSensorDescription("pump.power", "Pump Power", "mdi:flash", "W"),
     PoolOSNativeSensorDescription("pump.rpm", "Pump RPM", "mdi:speedometer", "rpm"),
+    PoolOSNativeSensorDescription("pump.maximum_rpm", "Pump Maximum RPM", "mdi:speedometer", "rpm", diagnostic=True),
+    PoolOSNativeSensorDescription("pump.minimum_rpm", "Pump Minimum RPM", "mdi:speedometer-slow", "rpm", diagnostic=True),
     PoolOSNativeSensorDescription("solar.temperature", "Solar Temperature", "mdi:solar-power", "°F"),
     PoolOSNativeSensorDescription("spa.raw_heater_id", "Spa Heater ID", "mdi:identifier", diagnostic=True),
     PoolOSNativeSensorDescription("spa.raw_htmode", "Spa Heat Mode Raw", "mdi:code-tags", diagnostic=True),
     PoolOSNativeSensorDescription("spa.target_temperature", "Spa Target Temperature", "mdi:thermometer-check", "°F"),
     PoolOSNativeSensorDescription("spa.temperature", "Spa Temperature", "mdi:hot-tub", "°F"),
+    PoolOSNativeSensorDescription("spa.maximum_temperature", "Spa Maximum Temperature", "mdi:thermometer-high", "°F", diagnostic=True),
     PoolOSNativeSensorDescription("water.temperature", "Water Temperature", "mdi:thermometer-water", "°F"),
 )
 
