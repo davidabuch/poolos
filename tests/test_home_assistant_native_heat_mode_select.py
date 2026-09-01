@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
@@ -22,7 +24,7 @@ def test_select_platform_is_enabled() -> None:
 
 
 def test_exact_user_heat_mode_options() -> None:
-    source = _source()
+    source = (COMPONENT / "manual_thermal.py").read_text(encoding="utf-8")
 
     assert 'HEAT_MODE_OFF = "Off"' in source
     assert 'HEAT_MODE_SOLAR = "Solar"' in source
@@ -43,7 +45,7 @@ def test_pool_and_hot_tub_defaults_are_body_specific() -> None:
 
 
 def test_direct_modes_map_only_to_empirically_commissioned_ids() -> None:
-    source = _source()
+    source = (COMPONENT / "manual_thermal.py").read_text(encoding="utf-8")
 
     assert 'HEAT_MODE_OFF: "00000"' in source
     assert 'HEAT_MODE_GAS: "H0001"' in source
@@ -55,15 +57,16 @@ def test_direct_modes_map_only_to_empirically_commissioned_ids() -> None:
 
 def test_solar_preferred_is_poolos_policy_not_pentair_mode() -> None:
     source = _source()
+    canonical = (COMPONENT / "manual_thermal.py").read_text(encoding="utf-8")
 
     assert '"solar_preferred_owner": "poolos"' in source
     assert '"pentair_solar_preferred_used": False' in source
     assert '"solar_preferred_autonomous_delivery_enabled": False' in source
 
-    solar_preferred_branch = (
-        "if option == HEAT_MODE_SOLAR_PREFERRED:"
-    )
-    assert solar_preferred_branch in source
+    assert "ThermalRequestedMode.SOLAR_PREFERRED" in canonical
+    assert "async_set_body_heat_source" not in canonical.split(
+        "if mode is ThermalRequestedMode.SOLAR_PREFERRED:", 1
+    )[1].split("manual =", 1)[0]
 
 
 def test_requested_mode_is_restored_without_startup_command() -> None:
@@ -80,7 +83,8 @@ def test_requested_and_effective_state_are_separate() -> None:
     assert '"requested_heat_mode"' in source
     assert '"effective_heat_source"' in source
     assert '"effective_native_heater_id"' in source
-    assert "self._requested_mode = option" in source
+    assert "requested_heat_mode(" in source
+    assert "async_request_heat_mode(" in source
     assert "_native_value(" in source
 
 
@@ -96,7 +100,7 @@ def test_direct_htmode_writes_are_forbidden() -> None:
         "async def async_set_body_heat_source",
         1,
     )[1].split(
-        "async def async_set_pool_solar_active",
+        "async def async_set_intellichlor_output",
         1,
     )[0]
 
@@ -191,6 +195,9 @@ def _load_executable_select_module():
             def __init__(self, coordinator):
                 self.coordinator = coordinator
 
+            async def async_added_to_hass(self):
+                return None
+
         update_coordinator.CoordinatorEntity = CoordinatorEntity
         sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
 
@@ -267,10 +274,18 @@ def _build_select_entities(*, pool_active: bool, spa_active: bool):
     class FakeThermalRuntime:
         def __init__(self):
             self.requested_modes = {}
+            self.pool_requested_mode = module.ThermalRequestedMode.SOLAR
+            self.hot_tub_requested_mode = (
+                module.ThermalRequestedMode.SOLAR_PREFERRED
+            )
 
         def set_requested_mode(self, body, mode, *, publish=True):
             del publish
             self.requested_modes[body] = mode
+            if body is module.ThermalBody.POOL:
+                self.pool_requested_mode = mode
+            else:
+                self.hot_tub_requested_mode = mode
 
     thermal_runtime = FakeThermalRuntime()
     entry = types.SimpleNamespace(
@@ -374,6 +389,60 @@ def test_configuring_one_body_never_optimistically_mutates_the_other() -> None:
     assert entities["pool"].effective_native_heater_id == "00000"
     assert entities["hot_tub"].effective_native_heater_id == "00000"
     assert [item.value for item in observations] == [False, False, "00000", "00000", 90.0, 101.0]
+
+
+def test_restore_updates_requested_intent_without_delivering_command() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    module, entities, manual, _observations = _build_select_entities(
+        pool_active=False,
+        spa_active=False,
+    )
+    entity = entities["pool"]
+
+    async def last_state():
+        return SimpleNamespace(state=module.HEAT_MODE_GAS)
+
+    entity.async_get_last_state = last_state
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity.current_option == module.HEAT_MODE_GAS
+    assert manual.calls == []
+
+
+def test_failed_direct_command_does_not_change_requested_intent() -> None:
+    import asyncio
+
+    module, entities, manual, _observations = _build_select_entities(
+        pool_active=True,
+        spa_active=False,
+    )
+    entity = entities["pool"]
+    original = entity.current_option
+
+    async def fail(body_objnam, heater_objnam):
+        del body_objnam, heater_objnam
+        raise RuntimeError("synthetic failure")
+
+    manual.async_set_body_heat_source = fail
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        asyncio.run(entity.async_select_option(module.HEAT_MODE_GAS))
+
+    assert entity.current_option == original
+    assert entity.effective_native_heater_id == "00000"
+
+
+def test_unknown_native_heater_is_explicit_not_guessed() -> None:
+    _module, entities, _manual, observations = _build_select_entities(
+        pool_active=True,
+        spa_active=False,
+    )
+    observations[2].value = "H9999"
+
+    assert entities["pool"].effective_native_heater_id == "H9999"
+    assert entities["pool"].effective_heat_source == "Unknown (H9999)"
 
 
 def test_selector_has_no_activity_prerequisite_but_reports_no_implicit_activation() -> None:

@@ -15,6 +15,14 @@ from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import PoolOSCoordinator
 from .manual_intellicenter import ManualIntelliCenterCommandError
+from .manual_thermal import (
+    HEAT_MODE_OFF,
+    HEAT_MODE_SOLAR,
+    async_request_heat_mode,
+    requested_heat_mode,
+)
+from poolos.integration import ThermalBody
+from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,20 +170,51 @@ class PoolOSNativeIntelliCenterSolarSwitch(
                 "Solar cannot be turned on unless Pool is active"
             )
 
-        await manual.async_set_pool_solar_active(True)
+        if _native_value(self.coordinator, "pool.raw_heater_id") is None:
+            raise ManualIntelliCenterCommandError(
+                "effective Pool heat source is unavailable"
+            )
+
+        await async_request_heat_mode(
+            self._runtime,
+            ThermalBody.POOL,
+            HEAT_MODE_SOLAR,
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Explicitly deselect Solar without changing Pool circulation."""
 
         del kwargs
 
-        manual = self._runtime.manual_intellicenter
-        if manual is None:
+        native_heater = _native_value(
+            self.coordinator,
+            "pool.raw_heater_id",
+        )
+        if native_heater in {"00000", "H0001"}:
+            return
+        if native_heater != "H0002":
             raise ManualIntelliCenterCommandError(
-                "manual IntelliCenter command connection is not configured"
+                "effective Pool heat source is unavailable or unknown"
             )
 
-        await manual.async_set_pool_solar_active(False)
+        requested = requested_heat_mode(
+            self._runtime,
+            ThermalBody.POOL,
+        )
+        if requested is ThermalRequestedMode.SOLAR_PREFERRED:
+            raise ManualIntelliCenterCommandError(
+                "Solar OFF cannot replace a Solar Preferred policy request"
+            )
+        if requested is not ThermalRequestedMode.SOLAR:
+            raise ManualIntelliCenterCommandError(
+                "Solar OFF conflicts with the current requested Pool heat mode"
+            )
+
+        await async_request_heat_mode(
+            self._runtime,
+            ThermalBody.POOL,
+            HEAT_MODE_OFF,
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -188,6 +227,7 @@ class PoolOSNativeIntelliCenterSolarSwitch(
             "solar_heater_objnam": "H0002",
             "off_heater_objnam": "00000",
             "canonical_concept": "solar.active",
+            "operator_intent_surface": "pool_heat_mode",
             "observation_source": "poolos.independent_intellicenter",
             "observation_authority": "native_intellicenter",
             "manual_command_delivery_enabled": (

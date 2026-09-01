@@ -58,7 +58,7 @@ def test_optional_legacy_mappings_cover_only_supported_parity_inputs() -> None:
     assert "superchlor" not in combined
 
 
-def test_new_surface_is_read_only_and_does_not_expand_manual_commands() -> None:
+def test_intellichlor_sensors_remain_and_only_output_numbers_are_writable() -> None:
     sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
     binary_sensor = (COMPONENT / "binary_sensor.py").read_text(encoding="utf-8")
     number = (COMPONENT / "number.py").read_text(encoding="utf-8")
@@ -67,9 +67,10 @@ def test_new_surface_is_read_only_and_does_not_expand_manual_commands() -> None:
 
     assert "intellichlor" in sensor.casefold()
     assert '"freeze.active"' in binary_sensor
-    assert "intellichlor" not in number.casefold()
+    assert "intellichlor" in number.casefold()
     assert "intellichlor" not in switch.casefold()
-    assert "chlorinator" not in manual.casefold()
+    assert "async_set_intellichlor_output" in manual
+    assert "set_chlorinator_output" in manual
     assert "superchlor" not in manual.casefold()
 
 
@@ -87,7 +88,7 @@ def test_intentionally_unmigrated_legacy_product_surfaces_remain_absent() -> Non
         "rpm_solar",
         "rpm_spa",
         "rpm_waterfall",
-        "solar_preferred",
+        "hxslr",
         "pool_last_temp",
         "spa_last_temp",
         "water_sensor",
@@ -99,10 +100,7 @@ def test_intentionally_unmigrated_legacy_product_surfaces_remain_absent() -> Non
 
     number = (COMPONENT / "number.py").read_text(encoding="utf-8")
     assert "PoolOSNativeIntelliCenterPoolRPM" in number
-    assert "PoolOSNativeIntelliCenter" not in number.replace(
-        "PoolOSNativeIntelliCenterPoolRPM",
-        "",
-    )
+    assert "PoolOSNativeIntelliCenterIntelliChlorOutput" in number
 
 
 def test_transport_retains_super_only_as_raw_forensic_inventory() -> None:

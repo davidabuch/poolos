@@ -15,29 +15,27 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import PoolOSCoordinator
-from .manual_intellicenter import ManualIntelliCenterCommandError
+from .manual_thermal import (
+    HEAT_MODE_GAS,
+    HEAT_MODE_OFF,
+    HEAT_MODE_OPTIONS,
+    HEAT_MODE_SOLAR,
+    HEAT_MODE_SOLAR_PREFERRED,
+    async_request_heat_mode,
+    requested_heat_mode,
+)
 from poolos.integration import ThermalBody
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
+__all__ = [
+    "HEAT_MODE_GAS",
+    "HEAT_MODE_OFF",
+    "HEAT_MODE_OPTIONS",
+    "HEAT_MODE_SOLAR",
+    "HEAT_MODE_SOLAR_PREFERRED",
+]
 
-HEAT_MODE_OFF = "Off"
-HEAT_MODE_SOLAR = "Solar"
-HEAT_MODE_GAS = "Gas"
-HEAT_MODE_SOLAR_PREFERRED = "Solar Preferred"
-
-HEAT_MODE_OPTIONS = (
-    HEAT_MODE_OFF,
-    HEAT_MODE_SOLAR,
-    HEAT_MODE_GAS,
-    HEAT_MODE_SOLAR_PREFERRED,
-)
-
-_NATIVE_HEATER_BY_DIRECT_MODE = {
-    HEAT_MODE_OFF: "00000",
-    HEAT_MODE_GAS: "H0001",
-    HEAT_MODE_SOLAR: "H0002",
-}
 
 _EFFECTIVE_SOURCE_BY_HEATER = {
     "00000": "Off",
@@ -125,8 +123,6 @@ class PoolOSHeatModeSelect(
 
         self._runtime = entry.runtime_data
         self._description = description
-        self._requested_mode = description.default_mode
-
         self._attr_name = description.name
         self._attr_icon = description.icon
         self._attr_unique_id = (
@@ -154,10 +150,12 @@ class PoolOSHeatModeSelect(
             previous is not None
             and previous.state in HEAT_MODE_OPTIONS
         ):
-            self._requested_mode = previous.state
+            requested = previous.state
+        else:
+            requested = self._description.default_mode
         self._runtime.thermal_runtime.set_requested_mode(
             self._description.body,
-            ThermalRequestedMode(self._requested_mode),
+            ThermalRequestedMode(requested),
             publish=False,
         )
 
@@ -181,7 +179,10 @@ class PoolOSHeatModeSelect(
     def current_option(self) -> str:
         """Return persistent user-requested PoolOS heat mode."""
 
-        return self._requested_mode
+        return requested_heat_mode(
+            self._runtime,
+            self._description.body,
+        ).value
 
     @property
     def effective_native_heater_id(self) -> str | None:
@@ -211,40 +212,10 @@ class PoolOSHeatModeSelect(
     async def async_select_option(self, option: str) -> None:
         """Set requested mode, commanding only commissioned direct modes."""
 
-        if option not in HEAT_MODE_OPTIONS:
-            raise ValueError(f"unsupported heat mode: {option}")
-
-        if option == HEAT_MODE_SOLAR_PREFERRED:
-            # This is PoolOS policy intent, not a native Pentair Solar Preferred selection.
-            # Autonomous source selection remains intentionally disabled.
-            self._requested_mode = option
-            self._runtime.thermal_runtime.set_requested_mode(
-                self._description.body,
-                ThermalRequestedMode(option),
-            )
-            self.async_write_ha_state()
-            return
-
-        manual = self._runtime.manual_intellicenter
-
-        if manual is None or not manual.available:
-            raise ManualIntelliCenterCommandError(
-                "manual IntelliCenter command connection is unavailable"
-            )
-
-        heater_objnam = _NATIVE_HEATER_BY_DIRECT_MODE[option]
-
-        await manual.async_set_body_heat_source(
-            self._description.body_objnam,
-            heater_objnam,
-        )
-
-        # Requested mode is PoolOS operator intent. Effective heat source
-        # remains native-authoritative and is never optimistically mutated.
-        self._requested_mode = option
-        self._runtime.thermal_runtime.set_requested_mode(
+        await async_request_heat_mode(
+            self._runtime,
             self._description.body,
-            ThermalRequestedMode(option),
+            option,
         )
         self.async_write_ha_state()
 
@@ -256,7 +227,7 @@ class PoolOSHeatModeSelect(
 
         return {
             "body_objnam": self._description.body_objnam,
-            "requested_heat_mode": self._requested_mode,
+            "requested_heat_mode": self.current_option,
             "default_heat_mode": self._description.default_mode,
             "effective_heat_source": self.effective_heat_source,
             "effective_native_heater_id": self.effective_native_heater_id,
