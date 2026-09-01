@@ -19,21 +19,31 @@ from poolos.observations import FreshnessPolicy, ObservationFreshness, PoolObser
 
 from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
+    CONF_FIRMWARE_VERSION_ENTITY,
+    CONF_FREEZE_ACTIVE_ENTITY,
     CONF_HEATER_ACTIVE_ENTITY,
     CONF_GRID_STATUS_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
+    CONF_INTELLICHLOR_POOL_OUTPUT_ENTITY,
+    CONF_INTELLICHLOR_SALT_ENTITY,
+    CONF_INTELLICHLOR_SPA_OUTPUT_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
     CONF_POOL_LIGHT_ENTITY,
+    CONF_POOL_MAXIMUM_TEMPERATURE_ENTITY,
     CONF_POOL_THERMOSTAT_ENTITY,
     CONF_PUMP_GPM_ENTITY,
     CONF_PUMP_POWER_ENTITY,
+    CONF_PUMP_MAXIMUM_RPM_ENTITY,
+    CONF_PUMP_MINIMUM_RPM_ENTITY,
     CONF_PUMP_RPM_ENTITY,
     CONF_SLIDE_ACTIVE_ENTITY,
     CONF_SOLAR_ACTIVE_ENTITY,
     CONF_SOLAR_TEMPERATURE_ENTITY,
     CONF_SPA_COMMAND_ENTITY,
+    CONF_SPA_MAXIMUM_TEMPERATURE_ENTITY,
     CONF_SPA_THERMOSTAT_ENTITY,
     CONF_WATERFALL_ACTIVE_ENTITY,
+    CONF_SYSTEM_MODE_ENTITY,
     CONF_WATER_TEMPERATURE_ENTITY,
     OBSERVATION_STALE_AFTER,
     REQUIRED_ENTITY_OPTIONS,
@@ -75,6 +85,16 @@ class ObservationConcept(str, Enum):
     POOL_LIGHT_ACTIVE = "pool_light.active"
     POOL_LIGHT_COLOR_MODE = "pool_light.color_mode"
     POOL_LIGHT_EFFECT = "pool_light.effect"
+    INTELLICHLOR_SALT_PPM = "intellichlor.salt_ppm"
+    INTELLICHLOR_POOL_OUTPUT_PERCENT = "intellichlor.pool_output_percent"
+    INTELLICHLOR_SPA_OUTPUT_PERCENT = "intellichlor.spa_output_percent"
+    FREEZE_ACTIVE = "freeze.active"
+    INTELLICENTER_FIRMWARE_VERSION = "intellicenter.firmware_version"
+    INTELLICENTER_SYSTEM_MODE = "intellicenter.system_mode"
+    POOL_MAXIMUM_TEMPERATURE = "pool.maximum_temperature"
+    SPA_MAXIMUM_TEMPERATURE = "spa.maximum_temperature"
+    PUMP_MINIMUM_RPM = "pump.minimum_rpm"
+    PUMP_MAXIMUM_RPM = "pump.maximum_rpm"
 
     POOL_RAW_HVAC_MODE = "pool.raw_hvac_mode"
     SPA_RAW_HVAC_MODE = "spa.raw_hvac_mode"
@@ -151,6 +171,19 @@ MAPPING_SPECS: tuple[EntityMappingSpec, ...] = (
     EntityMappingSpec(CONF_WATERFALL_ACTIVE_ENTITY, ObservationConcept.WATERFALL_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
     EntityMappingSpec(CONF_JETS_ACTIVE_ENTITY, ObservationConcept.JETS_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
     EntityMappingSpec(CONF_SLIDE_ACTIVE_ENTITY, ObservationConcept.SLIDE_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
+
+    # Optional legacy IntelliCenter observations retained only for native
+    # commissioning parity. They never become authoritative controller truth.
+    EntityMappingSpec(CONF_INTELLICHLOR_SALT_ENTITY, ObservationConcept.INTELLICHLOR_SALT_PPM, HomeAssistantValueType.INTEGER, "ppm", False),
+    EntityMappingSpec(CONF_INTELLICHLOR_POOL_OUTPUT_ENTITY, ObservationConcept.INTELLICHLOR_POOL_OUTPUT_PERCENT, HomeAssistantValueType.INTEGER, "%", False),
+    EntityMappingSpec(CONF_INTELLICHLOR_SPA_OUTPUT_ENTITY, ObservationConcept.INTELLICHLOR_SPA_OUTPUT_PERCENT, HomeAssistantValueType.INTEGER, "%", False),
+    EntityMappingSpec(CONF_FREEZE_ACTIVE_ENTITY, ObservationConcept.FREEZE_ACTIVE, HomeAssistantValueType.BOOLEAN, None, False),
+    EntityMappingSpec(CONF_FIRMWARE_VERSION_ENTITY, ObservationConcept.INTELLICENTER_FIRMWARE_VERSION, HomeAssistantValueType.STRING, None, False),
+    EntityMappingSpec(CONF_SYSTEM_MODE_ENTITY, ObservationConcept.INTELLICENTER_SYSTEM_MODE, HomeAssistantValueType.STRING, None, False),
+    EntityMappingSpec(CONF_POOL_MAXIMUM_TEMPERATURE_ENTITY, ObservationConcept.POOL_MAXIMUM_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", False),
+    EntityMappingSpec(CONF_SPA_MAXIMUM_TEMPERATURE_ENTITY, ObservationConcept.SPA_MAXIMUM_TEMPERATURE, HomeAssistantValueType.FLOAT, "°F", False),
+    EntityMappingSpec(CONF_PUMP_MINIMUM_RPM_ENTITY, ObservationConcept.PUMP_MINIMUM_RPM, HomeAssistantValueType.INTEGER, "rpm", False),
+    EntityMappingSpec(CONF_PUMP_MAXIMUM_RPM_ENTITY, ObservationConcept.PUMP_MAXIMUM_RPM, HomeAssistantValueType.INTEGER, "rpm", False),
 )
 
 

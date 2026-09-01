@@ -226,12 +226,36 @@ def _objects() -> tuple[tuple[str, dict[str, Any]], ...]:
             params.update({"SUBTYP": "HEATER", "SNAME": "Gas Heater"})
         elif object_type == "PUMP":
             params.update(
-                {"SNAME": "Filter Pump", "STATUS": "10", "RPM": 2200, "GPM": 42, "PWR": 1200}
+                {
+                    "SNAME": "Filter Pump",
+                    "STATUS": "10",
+                    "RPM": 2200,
+                    "GPM": 42,
+                    "PWR": 1200,
+                    "MIN": 950,
+                    "MAX": 3450,
+                }
             )
         elif object_type == "SENSE":
             params.update({"SUBTYP": "AIR", "SNAME": "Air", "SOURCE": 78})
         elif object_type == "CIRCUIT":
             params.update({"SNAME": "Pool", "STATUS": "ON", "USE": "POOL"})
+        elif object_type == "CHEM":
+            params.update(
+                {
+                    "SUBTYP": "ICHLOR",
+                    "SNAME": "IntelliChlor",
+                    "BODY": "B1101",
+                    "SALT": "4050",
+                    "PRIM": "52",
+                    "SEC": "4",
+                    # Retained only as raw forensic evidence. PoolOS does not
+                    # expose or migrate native Super Chlorinate.
+                    "SUPER": "1",
+                }
+            )
+        elif object_type == "SYSTEM":
+            params.update({"SERVICE": "AUTO", "VER": "IC: 3.014"})
         result.append((objnam, params))
     return tuple(result)
 
@@ -239,7 +263,9 @@ def _objects() -> tuple[tuple[str, dict[str, Any]], ...]:
 def _load_module(monkeypatch: pytest.MonkeyPatch):
     pyic = ModuleType("pyintellicenter")
     constants = {
+        "BODY_ATTR": "BODY",
         "BODY_TYPE": "BODY",
+        "CHEM_TYPE": "CHEM",
         "CIRCUIT_TYPE": "CIRCUIT",
         "GPM_ATTR": "GPM",
         "HEATER_ATTR": "HEATER",
@@ -248,6 +274,8 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
         "HTMODE_ATTR": "HTMODE",
         "LOTMP_ATTR": "LOTMP",
         "LSTTMP_ATTR": "LSTTMP",
+        "MAX_ATTR": "MAX",
+        "MIN_ATTR": "MIN",
         "MODE_ATTR": "MODE",
         "OBJTYP_ATTR": "OBJTYP",
         "PARENT_ATTR": "PARENT",
@@ -255,13 +283,19 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
         "PUMP_STATUS_ON": "10",
         "PUMP_TYPE": "PUMP",
         "PWR_ATTR": "PWR",
+        "PRIM_ATTR": "PRIM",
         "RPM_ATTR": "RPM",
+        "SALT_ATTR": "SALT",
+        "SEC_ATTR": "SEC",
         "SENSE_TYPE": "SENSE",
+        "SERVICE_ATTR": "SERVICE",
         "SNAME_ATTR": "SNAME",
         "SOURCE_ATTR": "SOURCE",
         "STATUS_ATTR": "STATUS",
         "STATUS_OFF": "OFF",
         "SUBTYP_ATTR": "SUBTYP",
+        "SYSTEM_TYPE": "SYSTEM",
+        "VER_ATTR": "VER",
         "VOL_ATTR": "VOL",
     }
     for name, value in constants.items():
@@ -307,6 +341,17 @@ def _load_module(monkeypatch: pytest.MonkeyPatch):
         "STATUS",
         "SUBTYP",
     }
+    attributes.ALL_ATTRIBUTES_BY_TYPE["CHEM"] = {
+        "BODY",
+        "PRIM",
+        "SALT",
+        "SEC",
+        "SNAME",
+        "SUBTYP",
+        "SUPER",
+    }
+    attributes.ALL_ATTRIBUTES_BY_TYPE["PUMP"].update({"MAX", "MIN", "RPM", "PWR", "GPM"})
+    attributes.ALL_ATTRIBUTES_BY_TYPE["SYSTEM"].update({"SERVICE", "VER"})
     monkeypatch.setitem(sys.modules, "pyintellicenter", pyic)
     monkeypatch.setitem(sys.modules, "pyintellicenter.attributes", attributes)
     monkeypatch.setitem(sys.modules, "pyintellicenter.exceptions", exceptions)
@@ -398,6 +443,11 @@ def test_body_monitoring_matches_working_narrow_subscription(
 
     # Narrowing BODY must not reduce any other known object's monitoring map.
     assert transport._model.attribute_map["PUMP"] == {
+        "GPM",
+        "MAX",
+        "MIN",
+        "PWR",
+        "RPM",
         "SNAME",
         "PARENT",
         "SUBTYP",
@@ -489,7 +539,29 @@ def test_startup_requests_exact_narrow_sense_monitoring_for_every_sensor(
         "VOL",
     ]
     pump_request = next(item for item in object_list if item["objnam"] == "P0001")
-    assert pump_request["keys"] == ["PARENT", "SNAME", "STATUS", "SUBTYP"]
+    assert pump_request["keys"] == [
+        "GPM",
+        "MAX",
+        "MIN",
+        "PARENT",
+        "PWR",
+        "RPM",
+        "SNAME",
+        "STATUS",
+        "SUBTYP",
+    ]
+    chlorinator_request = next(
+        item for item in object_list if item["objnam"] == "CH001"
+    )
+    assert chlorinator_request["keys"] == [
+        "BODY",
+        "PRIM",
+        "SALT",
+        "SEC",
+        "SNAME",
+        "SUBTYP",
+        "SUPER",
+    ]
 
 
 def test_reconnect_and_dynamic_discovery_retain_narrow_sense_monitoring(
@@ -587,6 +659,222 @@ def test_snapshot_is_defensive_and_feeds_existing_normalization_and_parity(
         "pool.command_active",
     }
     assert report.parity_ratio == 1.0
+
+
+def test_remaining_native_surface_flows_from_real_model_to_canonical_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proven CHEM/BODY/PUMP/CIRCUIT/SYSTEM fields survive the real copy path."""
+
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = (
+        (
+            "B1101",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "POOL",
+                "SNAME": "Pool",
+                "STATUS": "ON",
+                "HTMODE": "0",
+                "HITMP": "100",
+                "LSTTMP": "86",
+                "LOTMP": "90",
+            },
+        ),
+        (
+            "B1202",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "SPA",
+                "SNAME": "Spa",
+                "STATUS": "OFF",
+                "HTMODE": "0",
+                "HITMP": "104",
+                "LSTTMP": "98",
+                "LOTMP": "101",
+            },
+        ),
+        (
+            "CHR01",
+            {
+                "OBJTYP": "CHEM",
+                "SUBTYP": "ICHLOR",
+                "SNAME": "IntelliChlor",
+                "BODY": "B1101 B1202",
+                "SALT": "4050",
+                "PRIM": "0",
+                "SEC": "100",
+                "SUPER": "1",
+            },
+        ),
+        (
+            "_FEA2",
+            {
+                "OBJTYP": "CIRCUIT",
+                "SUBTYP": "FRZ",
+                "SNAME": "Freeze",
+                "STATUS": "ON",
+            },
+        ),
+        (
+            "Pump1",
+            {
+                "OBJTYP": "PUMP",
+                "SNAME": "Filter Pump",
+                "STATUS": "10",
+                "RPM": "2600",
+                "GPM": "55",
+                "PWR": "1100",
+                "MIN": "950",
+                "MAX": "3450",
+            },
+        ),
+        (
+            "_5451",
+            {
+                "OBJTYP": "SYSTEM",
+                "SNAME": "IntelliCenter",
+                "SERVICE": "TIMOUT",
+                "VER": "IC: 3.014 , ICWEB:2026-04-22 3.014",
+            },
+        ),
+    )
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+
+    native = transport.read_snapshot()
+    canonical = NativeIntelliCenterReadAdapter().map_snapshot(
+        native,
+        generated_at=native.observed_at,
+    )
+    values = {item.observation_id: item.value for item in canonical.observations}
+
+    assert values["intellichlor.salt_ppm"] == 4050
+    assert values["intellichlor.pool_output_percent"] == 0
+    assert values["intellichlor.spa_output_percent"] == 100
+    assert values["freeze.active"] is True
+    assert values["intellicenter.firmware_version"] == (
+        "IC: 3.014 , ICWEB:2026-04-22 3.014"
+    )
+    assert values["intellicenter.system_mode"] == "timeout"
+    assert values["pool.maximum_temperature"] == 100.0
+    assert values["spa.maximum_temperature"] == 104.0
+    assert values["pump.minimum_rpm"] == 950.0
+    assert values["pump.maximum_rpm"] == 3450.0
+    assert not any("super" in concept.casefold() for concept in values)
+
+    chlorinator = next(
+        item for item in native.raw_inventory if item.native_id == "CHR01"
+    )
+    assert dict(
+        (attribute.name, attribute.value) for attribute in chlorinator.attributes
+    )["SUPER"] == "1"
+
+
+def test_intellichlor_push_update_reaches_canonical_values_without_new_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects() + (
+        (
+            "B1202",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "SPA",
+                "SNAME": "Spa",
+                "STATUS": "OFF",
+                "HTMODE": "0",
+                "HITMP": "104",
+                "LSTTMP": "98",
+                "LOTMP": "101",
+            },
+        ),
+    )
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+    chlorinator = transport._controller.model["CH001"]
+    assert chlorinator is not None
+    chlorinator.properties["BODY"] = "B1101 B1202"
+
+    transport._controller.sent_operations.clear()
+    transport._controller._apply_updates(
+        [
+            {
+                "objnam": "CH001",
+                "params": {"SALT": "3900", "PRIM": "53", "SEC": "5"},
+            }
+        ]
+    )
+
+    native = transport.read_snapshot()
+    canonical = NativeIntelliCenterReadAdapter().map_snapshot(
+        native,
+        generated_at=native.observed_at,
+    )
+    values = {item.observation_id: item.value for item in canonical.observations}
+    assert values["intellichlor.salt_ppm"] == 3900
+    assert values["intellichlor.pool_output_percent"] == 53
+    assert values["intellichlor.spa_output_percent"] == 5
+    assert transport._controller.sent_operations == []
+
+
+def test_remaining_native_values_fail_closed_individually(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects() + (
+        (
+            "B1202",
+            {
+                "OBJTYP": "BODY",
+                "SUBTYP": "SPA",
+                "SNAME": "Spa",
+                "STATUS": "OFF",
+                "HTMODE": "0",
+                "HITMP": None,
+                "LSTTMP": "98",
+                "LOTMP": "101",
+            },
+        ),
+    )
+    transport = module.IndependentIntelliCenterReadOnlyTransport(
+        host="192.0.2.10"
+    )
+    asyncio.run(transport.async_start())
+    chlorinator = transport._controller.model["CH001"]
+    pump = transport._controller.model["P0001"]
+    system = transport._controller.model["SYS01"]
+    assert chlorinator is not None and pump is not None and system is not None
+    chlorinator.properties.update(
+        {"BODY": "B1101 B1202", "SALT": "bad", "PRIM": "-1", "SEC": "101"}
+    )
+    pump.properties.update({"MIN": "3500", "MAX": "950"})
+    system.properties.update({"SERVICE": "future-mode", "VER": ""})
+    transport._on_updated({"CH001": {"SALT": "bad"}})
+
+    native = transport.read_snapshot()
+    canonical = NativeIntelliCenterReadAdapter().map_snapshot(
+        native,
+        generated_at=native.observed_at,
+    )
+    values = {item.observation_id: item.value for item in canonical.observations}
+
+    for concept in (
+        "intellichlor.salt_ppm",
+        "intellichlor.pool_output_percent",
+        "intellichlor.spa_output_percent",
+        "intellicenter.firmware_version",
+        "intellicenter.system_mode",
+        "pump.minimum_rpm",
+        "pump.maximum_rpm",
+        "spa.maximum_temperature",
+    ):
+        assert concept not in values
+        assert concept in canonical.missing_concepts
 
 
 def test_sense_mapping_uses_documented_subtype_and_calibrated_source_only(

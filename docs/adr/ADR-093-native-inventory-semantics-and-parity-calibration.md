@@ -71,6 +71,41 @@ does not infer sensor semantics from names or parents. Unknown and ambiguous
 probes remain raw inventory. A live value mismatch remains visible until
 evidence explains it.
 
+The reviewed remaining operator surface uses the same immutable path. An
+IntelliChlor `CHEM/ICHLOR` object contributes `SALT`, `PRIM`, and `SEC`; its
+ordered `BODY` relationship determines whether each configured percentage
+belongs to Pool or Spa. BODY `HITMP` is the body's maximum-temperature
+configuration rather than its normal `LOTMP` thermostat target. PUMP `MIN` and
+`MAX` are read-only hardware constraints and are published only when both are
+positive and ordered. CIRCUIT subtype `FRZ` uses `STATUS` for observed freeze
+state. SYSTEM `VER` and `SERVICE` provide firmware and a normalized
+auto/service/timeout mode; unknown future modes remain unavailable rather than
+being invented.
+
+These concepts are observation-first and read-only in PoolOS. The commissioned
+manual command adapter does not expose CHEM, BODY maximum-temperature, SYSTEM,
+or pump-limit mutation, so legacy writable entity domains are not copied merely
+for visual parity. Optional legacy HA mappings exist only as independent parity
+inputs during retirement commissioning.
+
+### Intentional migration boundary
+
+PoolOS does not mirror IntelliCenter schedules, Vacation Mode,
+operation-specific RPM presets, duplicate Pool/Spa/environment temperatures,
+direct Pool/Spa hydraulic activation controls, or obsolete Solar Preferred
+entity surfaces. There remains one persistent configured Pool RPM baseline;
+temporary operating RPM belongs to planning, and actual RPM remains observed
+equipment truth.
+
+Native IntelliChlor Super Chlorinate is also intentionally not migrated. Its
+raw field may remain in privacy-safe inventory for protocol forensics, but it
+has no PoolOS canonical concept, parity requirement, entity, or write path. A
+future PoolOS-owned super-chlorination feature, if separately designed and
+commissioned, will orchestrate a bounded temporary normal Pool-output target
+of 100 percent and then re-evaluate or restore normal output. That policy
+requires explicit duration, restart, recovery, restoration, safety, and
+commissioning semantics and is not part of native observation parity.
+
 ### Complete inventory export
 
 The HA inventory sensor remains capped at 20 objects and retains explicit

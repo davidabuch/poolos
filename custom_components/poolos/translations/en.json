@@ -24,6 +24,16 @@
           "diagnostics_enabled": "Enable diagnostics",
           "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
           "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)",
+          "intellichlor_salt_entity": "Legacy IntelliChlor salt entity (optional parity)",
+          "intellichlor_pool_output_entity": "Legacy IntelliChlor Pool output entity (optional parity)",
+          "intellichlor_spa_output_entity": "Legacy IntelliChlor Spa output entity (optional parity)",
+          "freeze_active_entity": "Legacy freeze-active entity (optional parity)",
+          "firmware_version_entity": "Legacy IntelliCenter firmware entity (optional parity)",
+          "system_mode_entity": "Legacy IntelliCenter system-mode entity (optional parity)",
+          "pool_maximum_temperature_entity": "Legacy Pool maximum-temperature entity (optional parity)",
+          "spa_maximum_temperature_entity": "Legacy Spa maximum-temperature entity (optional parity)",
+          "pump_minimum_rpm_entity": "Legacy pump minimum-RPM entity (optional parity)",
+          "pump_maximum_rpm_entity": "Legacy pump maximum-RPM entity (optional parity)",
           "intellicenter_host": "IntelliCenter host for independent read-only discovery (optional)",
           "intellicenter_transport": "Independent IntelliCenter transport"
         }
@@ -57,6 +67,16 @@
           "diagnostics_enabled": "Enable diagnostics",
           "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
           "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)",
+          "intellichlor_salt_entity": "Legacy IntelliChlor salt entity (optional parity)",
+          "intellichlor_pool_output_entity": "Legacy IntelliChlor Pool output entity (optional parity)",
+          "intellichlor_spa_output_entity": "Legacy IntelliChlor Spa output entity (optional parity)",
+          "freeze_active_entity": "Legacy freeze-active entity (optional parity)",
+          "firmware_version_entity": "Legacy IntelliCenter firmware entity (optional parity)",
+          "system_mode_entity": "Legacy IntelliCenter system-mode entity (optional parity)",
+          "pool_maximum_temperature_entity": "Legacy Pool maximum-temperature entity (optional parity)",
+          "spa_maximum_temperature_entity": "Legacy Spa maximum-temperature entity (optional parity)",
+          "pump_minimum_rpm_entity": "Legacy pump minimum-RPM entity (optional parity)",
+          "pump_maximum_rpm_entity": "Legacy pump maximum-RPM entity (optional parity)",
           "intellicenter_host": "IntelliCenter host for independent read-only discovery (optional)",
           "intellicenter_transport": "Independent IntelliCenter transport"
         }

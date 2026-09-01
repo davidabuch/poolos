@@ -18,7 +18,9 @@ from types import MappingProxyType
 from typing import Any
 
 from pyintellicenter import (
+    BODY_ATTR,
     BODY_TYPE,
+    CHEM_TYPE,
     CIRCUIT_TYPE,
     GPM_ATTR,
     HEATER_ATTR,
@@ -29,19 +31,27 @@ from pyintellicenter import (
     ICModelController,
     LOTMP_ATTR,
     LSTTMP_ATTR,
+    MAX_ATTR,
+    MIN_ATTR,
     MODE_ATTR,
     OBJTYP_ATTR,
     PARENT_ATTR,
     PUMP_STATUS_ON,
     PUMP_TYPE,
     PWR_ATTR,
+    PRIM_ATTR,
     RPM_ATTR,
+    SALT_ATTR,
+    SEC_ATTR,
     SENSE_TYPE,
+    SERVICE_ATTR,
     SNAME_ATTR,
     SOURCE_ATTR,
     STATUS_ATTR,
     STATUS_OFF,
     SUBTYP_ATTR,
+    SYSTEM_TYPE,
+    VER_ATTR,
     VOL_ATTR,
     PoolModel,
     PoolObject,
@@ -55,12 +65,14 @@ from poolos.intellicenter_readonly import (
     NativeCircuitState,
     NativeIntelliCenterReadError,
     NativeIntelliCenterTransportSnapshot,
+    NativeIntelliChlorState,
     NativePumpState,
     NativeRawAttribute,
     NativeRawObject,
     NativeRawScalar,
     NativeTemperatureKind,
     NativeTemperatureState,
+    NativeSystemState,
 )
 
 # IntelliCenter and pyintellicenter define LOTMP as the heating setpoint.
@@ -819,6 +831,15 @@ class IndependentIntelliCenterReadOnlyTransport:
                 for obj in self._model.get_by_type(PUMP_TYPE)
                 if (item := _copy_pump(obj)) is not None
             ),
+            intellichlors=tuple(
+                item
+                for obj in self._model.get_by_type(CHEM_TYPE)
+                if (item := _copy_intellichlor(obj, self._model)) is not None
+            ),
+            systems=tuple(
+                _copy_system(obj)
+                for obj in self._model.get_by_type(SYSTEM_TYPE)
+            ),
             temperatures=tuple(
                 _copy_temperature(obj)
                 for obj in self._model.get_by_type(SENSE_TYPE)
@@ -878,6 +899,7 @@ def _copy_body(
                 else _number(item[_SETPT_ATTR])
             )
         ),
+        maximum_temperature=_number(item[HITMP_ATTR]),
         active_heat_source=_heater_source(selected_heater),
         selected_heat_mode=_heater_mode(selected_heater),
         raw_heater_id=selected_heater_id,
@@ -889,6 +911,15 @@ def _copy_pump(item: PoolObject) -> NativePumpState | None:
     status = item[STATUS_ATTR]
     if status is None:
         return None
+    minimum_rpm = _positive_number(item[MIN_ATTR])
+    maximum_rpm = _positive_number(item[MAX_ATTR])
+    if (
+        minimum_rpm is not None
+        and maximum_rpm is not None
+        and minimum_rpm > maximum_rpm
+    ):
+        minimum_rpm = None
+        maximum_rpm = None
     return NativePumpState(
         native_id=str(item.objnam),
         name=str(item.sname or item.objnam),
@@ -896,6 +927,46 @@ def _copy_pump(item: PoolObject) -> NativePumpState | None:
         rpm=_number(item[RPM_ATTR]),
         gpm=_number(item[GPM_ATTR]),
         power_watts=_number(item[PWR_ATTR]),
+        minimum_rpm=minimum_rpm,
+        maximum_rpm=maximum_rpm,
+    )
+
+
+def _copy_intellichlor(
+    item: PoolObject,
+    model: PoolModel,
+) -> NativeIntelliChlorState | None:
+    """Copy one proven ICHLOR object without exposing native SUPER control."""
+
+    if str(item.subtype or "").upper() != "ICHLOR":
+        return None
+
+    outputs: dict[NativeBodyKind, int] = {}
+    body_ids = tuple(str(item[BODY_ATTR] or "").split())
+    output_attributes = (PRIM_ATTR, SEC_ATTR)
+    for body_id, attribute in zip(body_ids, output_attributes, strict=False):
+        body = model[body_id]
+        if body is None:
+            continue
+        body_kind = _body_kind(body)
+        output = _percentage(item[attribute])
+        if body_kind in {NativeBodyKind.POOL, NativeBodyKind.SPA} and output is not None:
+            outputs[body_kind] = output
+
+    return NativeIntelliChlorState(
+        native_id=str(item.objnam),
+        name=str(item.sname or item.objnam),
+        salt_ppm=_nonnegative_integer(item[SALT_ATTR]),
+        pool_output_percent=outputs.get(NativeBodyKind.POOL),
+        spa_output_percent=outputs.get(NativeBodyKind.SPA),
+    )
+
+
+def _copy_system(item: PoolObject) -> NativeSystemState:
+    return NativeSystemState(
+        native_id=str(item.objnam),
+        firmware_version=_optional_text(item[VER_ATTR]),
+        operating_mode=_system_mode(item[SERVICE_ATTR]),
     )
 
 
@@ -926,6 +997,7 @@ def _copy_circuit(item: PoolObject) -> NativeCircuitState | None:
         active=str(status).upper() != STATUS_OFF,
         use=_optional_text(item["USE"]),
         subtype=_optional_text(item.subtype),
+        raw_status=_optional_text(status),
     )
 
 
@@ -1004,6 +1076,39 @@ def _number(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _positive_number(value: Any) -> float | None:
+    number = _number(value)
+    return number if number is not None and number > 0 else None
+
+
+def _integer(value: Any) -> int | None:
+    number = _number(value)
+    if number is None or not number.is_integer():
+        return None
+    return int(number)
+
+
+def _nonnegative_integer(value: Any) -> int | None:
+    number = _integer(value)
+    return number if number is not None and number >= 0 else None
+
+
+def _percentage(value: Any) -> int | None:
+    number = _integer(value)
+    return number if number is not None and 0 <= number <= 100 else None
+
+
+def _system_mode(value: Any) -> str | None:
+    normalized = str(value or "").strip().casefold().replace(" ", "")
+    return {
+        "auto": "auto",
+        "service": "service",
+        "timeout": "timeout",
+        # Pentair exposes this misspelling on real controllers.
+        "timout": "timeout",
+    }.get(normalized)
 
 
 def _optional_text(value: Any) -> str | None:

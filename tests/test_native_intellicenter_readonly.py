@@ -18,13 +18,16 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterReadError,
     NativeIntelliCenterStatus,
     NativeIntelliCenterTransportSnapshot,
+    NativeIntelliChlorState,
     NativePumpState,
     NativeRawAttribute,
     NativeRawObject,
     NativeTemperatureKind,
     NativeTemperatureState,
+    NativeSystemState,
 )
 from poolos.observations import ObservationQuality
+from poolos.observation_parity import ObservationParityEngine
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime(2026, 8, 10, 18, 0, tzinfo=UTC)
@@ -45,6 +48,7 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
                 True,
                 82.0,
                 86.0,
+                maximum_temperature=100.0,
                 active_heat_source="gas",
                 raw_heater_id="HTR01",
                 raw_htmode="1",
@@ -57,11 +61,29 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
                 False,
                 80.0,
                 100.0,
+                maximum_temperature=104.0,
                 raw_heater_id="HTR02",
                 raw_htmode="0",
             ),
         ),
-        pumps=(NativePumpState("PMP01", "Filter Pump", True, 2200.0, 42.0, 1234.0),),
+        pumps=(
+            NativePumpState(
+                "PMP01",
+                "Filter Pump",
+                True,
+                2200.0,
+                42.0,
+                1234.0,
+                minimum_rpm=950.0,
+                maximum_rpm=3450.0,
+            ),
+        ),
+        intellichlors=(
+            NativeIntelliChlorState("CHR01", "IntelliChlor", 4050, 52, 4),
+        ),
+        systems=(
+            NativeSystemState("_5451", "IC: 3.014", "auto"),
+        ),
         temperatures=(
             NativeTemperatureState("S01", "Air", NativeTemperatureKind.AIR, 78.0),
             NativeTemperatureState("S02", "Solar", NativeTemperatureKind.SOLAR, 101.0),
@@ -75,6 +97,13 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
             NativeCircuitState("C05", "Waterfall", False),
             NativeCircuitState("C06", "Jets", False),
             NativeCircuitState("C07", "Slide", True),
+            NativeCircuitState(
+                "_FEA2",
+                "Freeze",
+                False,
+                subtype="FRZ",
+                raw_status="OFF",
+            ),
             NativeCircuitState(
                 "C0002",
                 "Pool Light",
@@ -113,6 +142,18 @@ def test_maps_supported_concepts_with_distinct_native_provenance() -> None:
     assert values["pump.rpm"].value == 2200.0
     assert values["pump.gpm"].value == 42.0
     assert values["pump.power"].value == 1234.0
+    assert values["pump.minimum_rpm"].value == 950.0
+    assert values["pump.maximum_rpm"].value == 3450.0
+    assert values["intellichlor.salt_ppm"].value == 4050
+    assert values["intellichlor.pool_output_percent"].value == 52
+    assert values["intellichlor.spa_output_percent"].value == 4
+    assert values["intellichlor.pool_output_percent"].unit == "%"
+    assert values["intellichlor.spa_output_percent"].unit == "%"
+    assert values["freeze.active"].value is False
+    assert values["intellicenter.firmware_version"].value == "IC: 3.014"
+    assert values["intellicenter.system_mode"].value == "auto"
+    assert values["pool.maximum_temperature"].value == 100.0
+    assert values["spa.maximum_temperature"].value == 104.0
     assert values["solar.temperature"].value == 101.0
     assert values["slide.active"].value is True
     assert values["heater.active"].value is True
@@ -132,6 +173,35 @@ def test_maps_supported_concepts_with_distinct_native_provenance() -> None:
     assert all("home_assistant" not in (item.source_id or "") for item in values.values())
 
 
+def test_remaining_native_concepts_participate_in_deterministic_parity() -> None:
+    native = NativeIntelliCenterReadAdapter().map_snapshot(
+        transport(), generated_at=NOW
+    )
+
+    report = ObservationParityEngine().compare(
+        native.observations,
+        native.observations,
+        generated_at=NOW,
+        ha_source_available=True,
+        native_source_available=True,
+    )
+    by_concept = {item.concept: item for item in report.details}
+
+    for concept in (
+        "freeze.active",
+        "intellicenter.firmware_version",
+        "intellicenter.system_mode",
+        "intellichlor.pool_output_percent",
+        "intellichlor.salt_ppm",
+        "intellichlor.spa_output_percent",
+        "pool.maximum_temperature",
+        "pump.maximum_rpm",
+        "pump.minimum_rpm",
+        "spa.maximum_temperature",
+    ):
+        assert by_concept[concept].status.value == "MATCH"
+
+
 def test_missing_native_values_remain_explicitly_missing() -> None:
     empty = NativeIntelliCenterTransportSnapshot(
         source_id="panel-main",
@@ -143,6 +213,56 @@ def test_missing_native_values_remain_explicitly_missing() -> None:
     assert result.observations == ()
     assert result.missing_concepts == NATIVE_TARGET_CONCEPTS
     assert result.available is True
+
+
+def test_unknown_freeze_status_is_unavailable_not_fabricated() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="panel-main",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        circuits=(
+            NativeCircuitState(
+                "_FEA2",
+                "Freeze",
+                True,
+                subtype="FRZ",
+                raw_status="UNKNOWN",
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item.value for item in result.observations}
+    assert "freeze.active" not in values
+    assert "freeze.active" in result.missing_concepts
+
+
+def test_partial_intellichlor_evidence_remains_individually_available() -> None:
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id="panel-main",
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        intellichlors=(
+            NativeIntelliChlorState("CHR01", "IntelliChlor", 4050, None, None),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item for item in result.observations}
+    assert values["intellichlor.salt_ppm"].value == 4050
+    assert values["intellichlor.salt_ppm"].unit == "ppm"
+    assert "intellichlor.pool_output_percent" not in values
+    assert "intellichlor.spa_output_percent" not in values
+    assert "intellichlor.pool_output_percent" in result.missing_concepts
+    assert "intellichlor.spa_output_percent" in result.missing_concepts
 
 
 def test_absent_body_raw_fields_and_ambiguous_lights_are_not_fabricated() -> None:
