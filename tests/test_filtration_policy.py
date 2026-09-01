@@ -1,6 +1,8 @@
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from poolos.filtration_policy import (
     FiltrationDisposition,
     DailyFiltrationDebt,
@@ -105,28 +107,88 @@ def test_temperature_bands_define_initial_daily_targets_without_gpm() -> None:
     assert policy.target_for(75) == timedelta(hours=8)
     assert policy.target_for(83) == timedelta(hours=9)
     assert policy.target_for(88) == timedelta(hours=10)
+    assert policy.target_for(89.9) == timedelta(hours=10)
+    assert policy.target_for(90.0) == timedelta(hours=12)
     assert policy.target_for(91) == timedelta(hours=12)
     assert "pump_gpm" not in FiltrationDebtLedger.credit_circulation.__annotations__
 
 
-def test_pool_circulation_credits_one_to_one_regardless_of_normal_rpm() -> None:
-    for _rpm in (1500, 2600, 2900, 3000):
-        ledger = FiltrationDebtLedger((DailyFiltrationDebt(date(2026, 8, 26), timedelta(hours=2)),))
-        credited = ledger.credit_circulation(timedelta(hours=1), pool_routed_through_filter=True)
-        assert credited.remaining_runtime == timedelta(hours=1)
+@pytest.mark.parametrize(
+    ("temperature", "hours"),
+    (
+        (70.0, 6),
+        (70.1, 8),
+        (80.0, 8),
+        (80.1, 9),
+        (85.0, 9),
+        (85.1, 10),
+        (89.9, 10),
+        (90.0, 12),
+        (90.1, 12),
+    ),
+)
+def test_temperature_filtration_policy_exact_boundaries(
+    temperature: float,
+    hours: int,
+) -> None:
+    assert TemperatureFiltrationPolicy().target_for(temperature) == timedelta(
+        hours=hours
+    )
+
+
+@pytest.mark.parametrize(
+    ("rpm", "expected_credit"),
+    (
+        (799.9, timedelta(0)),
+        (800, timedelta(minutes=30)),
+        (1199.9, timedelta(minutes=30)),
+        (1200, timedelta(minutes=40)),
+        (1900.9, timedelta(minutes=40)),
+        (1901, timedelta(hours=1)),
+        (2600, timedelta(hours=1)),
+    ),
+)
+def test_pool_circulation_credit_uses_exact_actual_rpm_bands(
+    rpm: float,
+    expected_credit: timedelta,
+) -> None:
+    ledger = FiltrationDebtLedger(
+        (DailyFiltrationDebt(date(2026, 8, 26), timedelta(hours=2)),)
+    )
+    credited = ledger.credit_circulation(
+        timedelta(hours=1),
+        pool_routed_through_filter=True,
+        pump_rpm=rpm,
+    )
+    assert credited.debts[0].credited_runtime == expected_credit
 
 
 def test_spa_mode_earns_no_pool_filtration_credit() -> None:
     ledger = FiltrationDebtLedger((DailyFiltrationDebt(date(2026, 8, 26), timedelta(hours=2)),))
-    assert ledger.credit_circulation(timedelta(hours=1), pool_routed_through_filter=False) is ledger
+    assert (
+        ledger.credit_circulation(
+            timedelta(hours=1),
+            pool_routed_through_filter=False,
+            pump_rpm=3000,
+        )
+        is ledger
+    )
 
 
-def test_confirmed_grid_outage_earns_two_thirds_credit_only() -> None:
+def test_actual_rpm_not_outage_label_determines_credit() -> None:
     ledger = FiltrationDebtLedger((DailyFiltrationDebt(date(2026, 8, 26), timedelta(hours=3)),))
-    outage = ledger.credit_circulation(timedelta(minutes=90), pool_routed_through_filter=True, confirmed_grid_outage=True)
-    normal_probe = ledger.credit_circulation(timedelta(minutes=90), pool_routed_through_filter=True, confirmed_grid_outage=False)
-    assert outage.remaining_runtime == timedelta(hours=2)
-    assert normal_probe.remaining_runtime == timedelta(minutes=90)
+    reduced = ledger.credit_circulation(
+        timedelta(minutes=90),
+        pool_routed_through_filter=True,
+        pump_rpm=1500,
+    )
+    full = ledger.credit_circulation(
+        timedelta(minutes=90),
+        pool_routed_through_filter=True,
+        pump_rpm=2100,
+    )
+    assert reduced.remaining_runtime == timedelta(hours=2)
+    assert full.remaining_runtime == timedelta(minutes=90)
 
 
 def test_two_day_debt_persists_and_is_repaid_oldest_first() -> None:
@@ -136,12 +198,20 @@ def test_two_day_debt_persists_and_is_repaid_oldest_first() -> None:
             DailyFiltrationDebt(date(2026, 8, 26), timedelta(hours=3)),
         )
     )
-    credited = ledger.credit_circulation(timedelta(hours=2, minutes=30), pool_routed_through_filter=True)
+    credited = ledger.credit_circulation(
+        timedelta(hours=2, minutes=30),
+        pool_routed_through_filter=True,
+        pump_rpm=2600,
+    )
     assert credited.debts[0].remaining_runtime == timedelta(0)
     assert credited.debts[1].remaining_runtime == timedelta(hours=2, minutes=30)
 
 
 def test_actual_overnight_work_reduces_debt_used_by_opportunistic_policy() -> None:
     ledger = FiltrationDebtLedger((DailyFiltrationDebt(date(2026, 8, 25), timedelta(hours=2)),))
-    morning = ledger.credit_circulation(timedelta(hours=2), pool_routed_through_filter=True)
+    morning = ledger.credit_circulation(
+        timedelta(hours=2),
+        pool_routed_through_filter=True,
+        pump_rpm=2600,
+    )
     assert morning.remaining_runtime == timedelta(0)

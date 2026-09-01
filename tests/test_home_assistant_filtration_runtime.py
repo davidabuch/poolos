@@ -72,7 +72,7 @@ def snapshot(
     *,
     pool_active: bool,
     spa_active: bool = False,
-    rpm: int = 2600,
+    rpm: float = 2600,
     temperature: float = 88.0,
     stale: tuple[str, ...] = (),
     solar_active: bool = False,
@@ -185,6 +185,7 @@ def test_live_snapshot_exposes_bounded_authoritative_filtration_diagnostics() ->
     runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
     start = datetime(2026, 8, 28, 8, 0, tzinfo=LOCAL)
     runtime.refresh(snapshot(start, pool_active=True))
+    runtime.refresh(snapshot(start + timedelta(minutes=2), pool_active=True))
     runtime.refresh(
         snapshot(start + timedelta(hours=8, minutes=11), pool_active=False, rpm=0)
     )
@@ -198,6 +199,28 @@ def test_live_snapshot_exposes_bounded_authoritative_filtration_diagnostics() ->
     assert diagnostics["authority"] == "none"
     assert diagnostics["command_delivery_enabled"] is False
     assert len(json.dumps(diagnostics, sort_keys=True).encode()) < 8192
+
+
+def test_temperature_validation_diagnostics_are_bounded_and_explanatory() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 28, 8, 0, tzinfo=LOCAL)
+
+    runtime.refresh(snapshot(start, pool_active=True, temperature=88))
+    stabilizing = runtime.diagnostics()
+    runtime.refresh(
+        snapshot(start + timedelta(minutes=2), pool_active=True, temperature=88)
+    )
+    validated = runtime.diagnostics()
+
+    assert stabilizing["highest_validated_pool_temperature_f"] is None
+    assert stabilizing["temperature_validation_state"] == (
+        "stabilizing_pool_temperature"
+    )
+    assert stabilizing["pool_temperature_stabilization_remaining_seconds"] == 120
+    assert validated["highest_validated_pool_temperature_f"] == 88
+    assert validated["temperature_validation_state"] == "validated"
+    assert validated["pool_temperature_stabilization_remaining_seconds"] == 0
+    assert len(json.dumps(validated, sort_keys=True).encode()) < 8192
 
 
 def test_restore_replays_persistent_observation_history_without_gap_credit() -> None:
@@ -293,6 +316,12 @@ def test_pool_gas_circulation_is_crediting_not_deferred() -> None:
 def test_spa_mode_genuinely_defers_pool_filtration_credit() -> None:
     runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
     start = datetime(2026, 8, 28, 11, 0, tzinfo=LOCAL)
+    runtime.refresh(
+        snapshot(start - timedelta(minutes=3), pool_active=True, rpm=2600)
+    )
+    runtime.refresh(
+        snapshot(start - timedelta(minutes=1), pool_active=True, rpm=2600)
+    )
     runtime.refresh(snapshot(start, pool_active=False, spa_active=True, rpm=3000))
     runtime.refresh(
         snapshot(
@@ -306,12 +335,18 @@ def test_spa_mode_genuinely_defers_pool_filtration_credit() -> None:
     diagnostics = runtime.diagnostics()
     assert diagnostics["disposition"] == "deferred_higher_priority"
     assert diagnostics["currently_earning_credit"] is False
-    assert diagnostics["credited_runtime_seconds"] == 0
+    assert diagnostics["credited_runtime_seconds"] == 3 * 60
 
 
 def test_high_peak_without_pool_circulation_is_true_tou_deferral() -> None:
     runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
     high_peak = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
+    runtime.refresh(
+        snapshot(high_peak - timedelta(minutes=3), pool_active=True, rpm=2600)
+    )
+    runtime.refresh(
+        snapshot(high_peak - timedelta(minutes=1), pool_active=True, rpm=2600)
+    )
 
     runtime.refresh(snapshot(high_peak, pool_active=False, rpm=0))
 
@@ -359,11 +394,21 @@ def test_unusable_pool_temperature_cannot_create_daily_requirement() -> None:
             stale=("native:pool.temperature",),
         )
     )
+    runtime.refresh(
+        snapshot(
+            at + timedelta(minutes=2),
+            pool_active=True,
+            stale=("native:pool.temperature",),
+        )
+    )
 
     diagnostics = runtime.diagnostics()
-    assert diagnostics["disposition"] == "evidence_unavailable"
-    assert diagnostics["reason_code"] == "daily_requirement_temperature_unavailable"
-    assert diagnostics["required_runtime_seconds"] == 0
+    assert diagnostics["disposition"] == "crediting"
+    assert diagnostics["reason_code"] == "filtration_crediting_active_pool_circulation"
+    assert diagnostics["required_runtime_seconds"] == 6 * 60 * 60
+    assert diagnostics["temperature_validation_state"] == (
+        "awaiting_usable_temperature"
+    )
 
 
 @pytest.mark.parametrize(
@@ -444,6 +489,20 @@ def test_live_credit_remains_monotonic_through_unrelated_health_failures() -> No
     assert credited == [0, 0, 30, 60, 90, 120, 150]
     assert credited == sorted(credited)
     assert dispositions[1:] == ["crediting"] * 6
+
+
+def test_fractional_observed_rpm_is_not_rounded_across_credit_boundary() -> None:
+    runtime = PoolOSFiltrationRuntime(FakeCoordinator(FakeRecorder()))
+    start = datetime(2026, 8, 29, 8, 0, tzinfo=LOCAL)
+    runtime.refresh(snapshot(start, pool_active=True, rpm=1900.9))
+    runtime.refresh(
+        snapshot(start + timedelta(hours=1), pool_active=True, rpm=1900.9)
+    )
+
+    diagnostics = runtime.diagnostics()
+    assert diagnostics["credited_runtime_seconds"] == 40 * 60
+    assert diagnostics["observed_pump_rpm"] == 1900.9
+    assert diagnostics["filtration_credit_factor_ratio"] == "2/3"
 
 
 def test_long_replay_credits_all_provable_intervals_despite_global_health() -> None:
@@ -658,7 +717,7 @@ def test_obligation_day_uses_aggregate_time_across_midnight() -> None:
     )
 
     assert runtime.assessment is not None
-    assert runtime.assessment.obligation_day.isoformat() == "2026-08-30"
+    assert runtime.assessment.obligation_day.isoformat() == "2026-08-29"
 
 
 def test_long_lifecycle_preserves_credit_through_restart_and_midnight() -> None:
@@ -730,7 +789,7 @@ def test_long_lifecycle_preserves_credit_through_restart_and_midnight() -> None:
     assert spa_disposition is FiltrationDisposition.DEFERRED_HIGHER_PRIORITY
     assert stale_disposition is FiltrationDisposition.RUN_NOW
     assert live.assessment is not None
-    assert live.assessment.obligation_day.isoformat() == "2026-08-30"
+    assert live.assessment.obligation_day.isoformat() == "2026-08-29"
     assert live.assessment.disposition is FiltrationDisposition.CREDITING
     assert live.assessment.authority == "none"
     assert live.assessment.command_delivery_enabled is False
@@ -821,3 +880,32 @@ def test_ha_surface_is_one_diagnostic_view_not_a_command_or_second_ledger() -> N
         "asyncio.sleep",
     ):
         assert prohibited not in runtime_source
+
+
+def test_restore_seed_reconstructs_missed_previous_operational_day() -> None:
+    before_gap = datetime(2026, 8, 31, 7, 0, tzinfo=LOCAL)
+    after_gap = datetime(2026, 9, 1, 9, 0, tzinfo=LOCAL)
+    runtime = PoolOSFiltrationRuntime(
+        FakeCoordinator(
+            FakeRecorder(
+                (
+                    recorded(before_gap, pool_active=False),
+                    recorded(after_gap, pool_active=False),
+                )
+            )
+        )
+    )
+
+    asyncio.run(
+        runtime.async_restore(restored_at=after_gap + timedelta(minutes=1))
+    )
+
+    assert runtime.assessment is not None
+    assert tuple(
+        item.isoformat() for item in runtime.assessment.debt_days
+    ) == ("2026-08-31", "2026-09-01")
+    prior, current = runtime.tracker.ledger.debts
+    assert prior.required_runtime == timedelta(hours=6)
+    assert prior.credited_runtime == timedelta(0)
+    assert prior.highest_validated_pool_temperature_f is None
+    assert current.required_runtime == timedelta(hours=6)

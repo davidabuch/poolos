@@ -313,7 +313,7 @@ def _filtration_ordering_harness() -> tuple[ModuleType, Any]:
             self.tracker.restore(
                 (
                     _filtration_observation(
-                        high_water - timedelta(minutes=1),
+                        high_water - timedelta(minutes=2),
                         pool_active=self.pool_active,
                         spa_active=self.spa_active,
                         rpm=self.rpm,
@@ -822,6 +822,14 @@ def test_seeded_internal_refresh_interleavings_preserve_ledger_monotonicity() ->
         harness.spa_active = False
         harness.rpm = 2600
         start = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
+        harness.tracker.observe(
+            _filtration_observation(
+                start - timedelta(minutes=2),
+                pool_active=True,
+                spa_active=False,
+                rpm=2600,
+            )
+        )
         generator = random.Random(105)
         credited: list[timedelta] = []
         real_datetime = module.datetime
@@ -855,7 +863,7 @@ def test_seeded_internal_refresh_interleavings_preserve_ledger_monotonicity() ->
             module.datetime = real_datetime
 
         assert credited == sorted(credited)
-        assert credited[-1] == timedelta(seconds=99)
+        assert credited[-1] == timedelta(minutes=2, seconds=99)
         assert harness.tracker.current is not None
         assert harness.tracker.current.remaining_runtime >= timedelta(0)
         assert harness.tracker.current.temporal_regressions_ignored == 0
