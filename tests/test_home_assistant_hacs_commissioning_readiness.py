@@ -19,7 +19,7 @@ def _json(path: Path) -> dict[str, object]:
 
 def test_hacs_root_metadata_and_brand_asset_exist() -> None:
     assert _json(ROOT / "hacs.json") == {"name": "PoolOS"}
-    icon = ROOT / "brand" / "icon.png"
+    icon = COMPONENT / "brand" / "icon.png"
     assert icon.is_file()
     assert icon.stat().st_size > 0
 
