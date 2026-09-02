@@ -114,6 +114,8 @@ def runtime_fixture(*, raw_inventory: tuple[object, ...] = ()):
 
 def test_first_install_and_every_new_runtime_start_effectively_disabled() -> None:
     first, _, _ = runtime_fixture()
+    assert first.pool_requested_mode_resolved is False
+    assert first.hot_tub_requested_mode_resolved is False
     first.set_effective_live_enabled(True)
     first.set_commissioning_scope(ThermalLiveCommissioningScope.POOL)
     restarted, _, _ = runtime_fixture()
@@ -121,6 +123,25 @@ def test_first_install_and_every_new_runtime_start_effectively_disabled() -> Non
     assert first.effective_live_enabled
     assert restarted.effective_live_enabled is False
     assert restarted.commissioning_scope is ThermalLiveCommissioningScope.DISABLED
+
+
+def test_requested_mode_resolution_is_body_specific_and_explicit() -> None:
+    runtime, _, _ = runtime_fixture()
+
+    runtime.set_requested_mode(
+        ThermalBody.POOL,
+        ThermalRequestedMode.SOLAR,
+        publish=False,
+    )
+    assert runtime.pool_requested_mode_resolved is True
+    assert runtime.hot_tub_requested_mode_resolved is False
+
+    runtime.set_requested_mode(
+        ThermalBody.HOT_TUB,
+        ThermalRequestedMode.SOLAR_PREFERRED,
+        publish=False,
+    )
+    assert runtime.hot_tub_requested_mode_resolved is True
 
 
 def test_config_and_refresh_paths_recompute_only_and_never_call_manual_setters() -> None:

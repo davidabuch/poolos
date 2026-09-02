@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from poolos.integration import ThermalBody
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
+from .configured_thermal import configured_heater_intent_for_direct_requested_mode
 from .manual_intellicenter import ManualIntelliCenterCommandError
 
 if TYPE_CHECKING:
@@ -29,13 +30,6 @@ _BODY_OBJNAM = {
     ThermalBody.POOL: "B1101",
     ThermalBody.HOT_TUB: "B1202",
 }
-
-_NATIVE_HEATER_BY_DIRECT_MODE = {
-    HEAT_MODE_OFF: "00000",
-    HEAT_MODE_GAS: "H0001",
-    HEAT_MODE_SOLAR: "H0002",
-}
-
 
 def requested_heat_mode(
     runtime: PoolOSRuntimeData,
@@ -69,10 +63,11 @@ async def async_request_heat_mode(
             "manual IntelliCenter command connection is unavailable"
         )
 
-    await manual.async_set_body_heat_source(
-        _BODY_OBJNAM[body],
-        _NATIVE_HEATER_BY_DIRECT_MODE[option],
-    )
+    heater_id = configured_heater_intent_for_direct_requested_mode(mode)
+    if heater_id is None:
+        raise ValueError(f"unsupported direct heat mode: {option}")
+
+    await manual.async_set_body_heat_source(_BODY_OBJNAM[body], heater_id)
 
     # Requested mode changes only after accepted delivery. Native HEATER and
     # active-source state remain read-back truth from the independent transport.

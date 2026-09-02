@@ -11,7 +11,6 @@ from poolos.external_change import (
     ExternalNativeChangeMonitor,
     ExternalOwnershipContext,
 )
-from poolos.integration import PhysicalHeatMode
 from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
@@ -20,17 +19,11 @@ from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
 from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
+from .configured_thermal import configured_heater_intent_for_direct_requested_mode
 from .thermal_runtime import PoolOSThermalRuntime
 
 
 EVENT_POOLOS_EXTERNAL_CHANGE = "poolos_external_change"
-
-_HEATER_IDS = {
-    PhysicalHeatMode.OFF: "00000",
-    PhysicalHeatMode.GAS: "H0001",
-    PhysicalHeatMode.SOLAR: "H0002",
-}
-
 
 @dataclass(slots=True)
 class PoolOSExternalChangeRuntime:
@@ -62,11 +55,15 @@ class PoolOSExternalChangeRuntime:
         if self._connection_generation != connection_generation:
             self._connection_generation = connection_generation
             self.monitor.reset_baseline()
+        ownership = self._ownership()
         batch = self.monitor.process(
             native,
             transport,
-            ownership=self._ownership(),
+            ownership=ownership,
         )
+        refreshed_ownership = self._ownership()
+        if refreshed_ownership.intended_values != ownership.intended_values:
+            self.monitor.recompute_current_ownership(refreshed_ownership)
         for event in batch.events:
             self.hass.bus.async_fire(
                 EVENT_POOLOS_EXTERNAL_CHANGE,
@@ -98,29 +95,57 @@ class PoolOSExternalChangeRuntime:
         }
 
     def _ownership(self) -> ExternalOwnershipContext:
+        intended: dict[str, Any] = {}
+        blockers: list[str] = []
+        configured_modes = (
+            (
+                "pool",
+                self.thermal_runtime.pool_requested_mode,
+                self.thermal_runtime.pool_requested_mode_resolved,
+            ),
+            (
+                "spa",
+                self.thermal_runtime.hot_tub_requested_mode,
+                self.thermal_runtime.hot_tub_requested_mode_resolved,
+            ),
+        )
+        for prefix, requested_mode, resolved in configured_modes:
+            concept = f"{prefix}.raw_heater_id"
+            if not resolved:
+                blockers.append(f"{prefix}_requested_heat_mode_unresolved")
+                continue
+            heater_id = configured_heater_intent_for_direct_requested_mode(
+                requested_mode
+            )
+            if heater_id is None:
+                continue
+            if concept not in self.monitor.current_concepts():
+                blockers.append(f"{prefix}_native_heater_baseline_unavailable")
+                continue
+            intended[concept] = heater_id
+
         assessment = self.thermal_runtime.assessment
         if assessment is None:
-            self._ownership_blockers = ()
-            return ExternalOwnershipContext()
-        intended: dict[str, Any] = {}
+            self._ownership_blockers = tuple(blockers)
+            return ExternalOwnershipContext(intended)
         pump_claims: set[int] = set()
-        for body_assessment, prefix in (
-            (assessment.pool, "pool"),
-            (assessment.hot_tub, "spa"),
+        for body_assessment, requested_mode_resolved in (
+            (assessment.pool, self.thermal_runtime.pool_requested_mode_resolved),
+            (
+                assessment.hot_tub,
+                self.thermal_runtime.hot_tub_requested_mode_resolved,
+            ),
         ):
             if (
-                body_assessment.body_active is not True
+                not requested_mode_resolved
+                or body_assessment.body_active is not True
                 or body_assessment.requested_mode is ThermalRequestedMode.OFF
                 or not _assessment_usable_for_ownership(body_assessment)
             ):
                 continue
             desired = body_assessment.plan.desired
-            intended[f"{prefix}.raw_heater_id"] = _HEATER_IDS[
-                desired.selected_source
-            ]
             if desired.required_pump_rpm is not None:
                 pump_claims.add(desired.required_pump_rpm)
-        blockers: list[str] = []
         if len(pump_claims) == 1:
             intended["pump.rpm"] = next(iter(pump_claims))
         elif len(pump_claims) > 1:

@@ -52,6 +52,8 @@ class PoolOSThermalRuntime:
     hot_tub_requested_mode: ThermalRequestedMode = (
         ThermalRequestedMode.SOLAR_PREFERRED
     )
+    pool_requested_mode_resolved: bool = False
+    hot_tub_requested_mode_resolved: bool = False
     assessment: ThermalRuntimeAssessment | None = None
     last_error: str | None = None
     _latest_authoritative_snapshot: ObservationSnapshot | None = field(
@@ -95,8 +97,10 @@ class PoolOSThermalRuntime:
 
         if body is ThermalBody.POOL:
             self.pool_requested_mode = ThermalRequestedMode(mode)
+            self.pool_requested_mode_resolved = True
         else:
             self.hot_tub_requested_mode = ThermalRequestedMode(mode)
+            self.hot_tub_requested_mode_resolved = True
         self.refresh(publish=publish)
 
     def refresh(
