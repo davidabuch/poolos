@@ -126,6 +126,19 @@ _CONTEXTUAL_RECONCILE = frozenset(
     {"pump.rpm", "pool.raw_heater_id", "spa.raw_heater_id"}
 )
 
+_EXTERNAL_PUMP_RPM_TOLERANCE = 25.0
+
+
+def _semantically_aligned(concept: str, intended: Any, observed: Any) -> bool:
+    """Return whether current native truth is aligned with owned intent."""
+
+    if concept != "pump.rpm":
+        return intended == observed
+    try:
+        return abs(float(observed) - float(intended)) <= _EXTERNAL_PUMP_RPM_TOLERANCE
+    except (TypeError, ValueError, OverflowError):
+        return intended == observed
+
 
 @dataclass(slots=True)
 class ExternalNativeChangeMonitor:
@@ -219,7 +232,8 @@ class ExternalNativeChangeMonitor:
                 continue
             intended = ownership.intended_values.get(concept)
             reconciliation = (
-                policy is ExternalChangePolicy.RECONCILE and intended != value
+                policy is ExternalChangePolicy.RECONCILE
+                and not _semantically_aligned(concept, intended, value)
             )
             action = _action(policy, maintenance=maintenance, reconciliation=reconciliation)
             event = ExternalChangeEvent(
@@ -231,7 +245,11 @@ class ExternalNativeChangeMonitor:
                 observed_at=observed_at,
                 external_policy=policy,
                 action_taken=action,
-                notification_recommended=notify and not maintenance,
+                notification_recommended=(
+                    notify
+                    and not maintenance
+                    and (policy is not ExternalChangePolicy.RECONCILE or reconciliation)
+                ),
                 reconciliation_required=reconciliation and not maintenance,
                 intended_value=intended,
                 maintenance_mode=maintenance,
@@ -334,7 +352,7 @@ class ExternalNativeChangeMonitor:
                 if concept not in _CONTEXTUAL_RECONCILE or concept not in current:
                     continue
                 value, source_id = current[concept]
-                if value == intended:
+                if _semantically_aligned(concept, intended, value):
                     continue
                 drift[concept] = ExternalChangeEvent(
                     concept=concept,

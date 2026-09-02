@@ -166,6 +166,117 @@ def test_contextual_rpm_and_heater_ownership_create_current_drift_only_when_owne
     assert all(not event.notification_recommended for event in batch.events)
 
 
+def test_pump_rpm_semantic_tolerance_is_shared_by_events_and_current_drift() -> None:
+    owned = ExternalOwnershipContext({"pump.rpm": 2900})
+
+    for observed, expected_drift in (
+        (2900.0, False),
+        (2904.0, False),
+        (2925.0, False),
+        (2926.0, True),
+    ):
+        monitor = ExternalNativeChangeMonitor(authority())
+        process(
+            monitor,
+            NOW,
+            {"pump.rpm": (2900.0, "PMP01")},
+            ownership=owned,
+        )
+        batch = process(
+            monitor,
+            NOW + timedelta(seconds=1),
+            {"pump.rpm": (observed, "PMP01")},
+            ownership=owned,
+        )
+
+        diagnostics = monitor.diagnostics()
+        assert (diagnostics["active_drift_count"] == 1) is expected_drift
+
+        if observed == 2900.0:
+            assert batch.events == ()
+            continue
+
+        assert len(batch.events) == 1
+        event = batch.events[0]
+        assert event.concept == "pump.rpm"
+        assert event.reconciliation_required is expected_drift
+        assert event.notification_recommended is expected_drift
+        assert event.action_taken == (
+            "reconciliation_required" if expected_drift else "already_aligned"
+        )
+
+
+def test_real_external_pump_rpm_change_still_requires_reconciliation() -> None:
+    monitor = ExternalNativeChangeMonitor(authority())
+    owned = ExternalOwnershipContext({"pump.rpm": 2900})
+    process(
+        monitor,
+        NOW,
+        {"pump.rpm": (2900.0, "PMP01")},
+        ownership=owned,
+    )
+
+    batch = process(
+        monitor,
+        NOW + timedelta(seconds=1),
+        {"pump.rpm": (2600.0, "PMP01")},
+        ownership=owned,
+    )
+
+    assert len(batch.events) == 1
+    event = batch.events[0]
+    assert event.reconciliation_required
+    assert event.notification_recommended
+    assert event.action_taken == "reconciliation_required"
+    assert monitor.diagnostics()["active_drift_concepts"] == ["pump.rpm"]
+
+
+def test_heat_source_drift_remains_exact() -> None:
+    monitor = ExternalNativeChangeMonitor(authority())
+    owned = ExternalOwnershipContext({"pool.raw_heater_id": "H0002"})
+    process(
+        monitor,
+        NOW,
+        {"pool.raw_heater_id": ("H0002", "B1101")},
+        ownership=owned,
+    )
+
+    batch = process(
+        monitor,
+        NOW + timedelta(seconds=1),
+        {"pool.raw_heater_id": ("H0001", "B1101")},
+        ownership=owned,
+    )
+
+    assert len(batch.events) == 1
+    assert batch.events[0].reconciliation_required
+    assert batch.events[0].notification_recommended
+    assert monitor.diagnostics()["active_drift_concepts"] == ["pool.raw_heater_id"]
+
+
+def test_nonnumeric_pump_rpm_fails_safe_as_drift() -> None:
+    monitor = ExternalNativeChangeMonitor(authority())
+    owned = ExternalOwnershipContext({"pump.rpm": 2900})
+    process(
+        monitor,
+        NOW,
+        {"pump.rpm": (2900.0, "PMP01")},
+        ownership=owned,
+    )
+
+    batch = process(
+        monitor,
+        NOW + timedelta(seconds=1),
+        {"pump.rpm": ("not-a-number", "PMP01")},
+        ownership=owned,
+    )
+
+    assert len(batch.events) == 1
+    assert batch.events[0].reconciliation_required
+    assert batch.events[0].notification_recommended
+    assert monitor.diagnostics()["active_drift_concepts"] == ["pump.rpm"]
+
+
 def test_current_drift_recomputes_when_ownership_or_intention_changes() -> None:
     monitor = ExternalNativeChangeMonitor(authority())
     values = {
