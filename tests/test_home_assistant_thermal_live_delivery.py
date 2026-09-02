@@ -72,7 +72,9 @@ class FakeManualControl:
         self,
         target: str,
         rpm: int,
+        **kwargs: object,
     ) -> ManualCommandReceipt:
+        del kwargs
         self.calls.append(("pump", target, rpm))
         return ManualCommandReceipt(target, "pump_circuit_speed", rpm)
 
@@ -80,7 +82,9 @@ class FakeManualControl:
         self,
         target: str,
         heater_id: str,
+        **kwargs: object,
     ) -> ManualCommandReceipt:
+        del kwargs
         self.calls.append(("heater", target, heater_id))
         return ManualCommandReceipt(target, "body_heat_source", heater_id)
 

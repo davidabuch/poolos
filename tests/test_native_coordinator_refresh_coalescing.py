@@ -11,6 +11,8 @@ import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+import pytest
+
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
     NativeBodyState,
@@ -485,6 +487,35 @@ def test_fast_mapping_failure_preserves_last_good_and_durable_recovery() -> None
         assert harness._event_refresh_count == 1
 
     asyncio.run(exercise())
+
+
+def test_diagnostic_exception_cannot_suppress_authoritative_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_coordinator_module()
+    logged: list[str] = []
+    monkeypatch.setattr(
+        module.LOGGER,
+        "exception",
+        lambda message, *args, **kwargs: logged.append(str(message)),
+    )
+    harness = _harness()
+    _set_last_known_native_target(harness, 97)
+    _attach_transport(harness, 98)
+
+    def reject_diagnostics(*args: object) -> None:
+        del args
+        raise RuntimeError("synthetic external classifier failure")
+
+    harness._native_snapshot_observer = reject_diagnostics
+    harness._publish_latest_native_intellicenter_snapshot()
+
+    assert _canonical_target(harness.native_intellicenter_snapshot) == 98
+    assert harness.listener_targets == [98]
+    assert logged == [
+        "PoolOS external native-change diagnostics failed; "
+        "authoritative publication continues"
+    ]
 
 
 def test_callback_after_unload_has_no_fast_publication_or_orphan_task() -> None:

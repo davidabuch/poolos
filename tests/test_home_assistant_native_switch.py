@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
@@ -27,6 +29,101 @@ def test_switch_platform_is_enabled() -> None:
 
     assert '"switch"' in const
     assert "PLATFORMS" in const
+
+
+def test_maintenance_switch_has_stable_global_identity_and_restores_fail_closed() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        external = SimpleNamespace(
+            maintenance_entered=lambda: None,
+            maintenance_exited=lambda: None,
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                external_change_runtime=external,
+                coordinator=SimpleNamespace(async_update_listeners=lambda: None),
+            ),
+        )
+        entity = module.PoolOSMaintenanceModeSwitch(entry)
+        entity.async_write_ha_state = lambda: None
+        assert entity._attr_unique_id == "test-entry_maintenance_mode"
+        assert entity.is_on
+        assert not entity.available
+
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(state="on")
+        )
+        await entity.async_added_to_hass()
+        assert entity.available
+        assert entity.is_on
+
+    asyncio.run(run())
+
+
+def test_maintenance_off_only_removes_deny_and_rebaselines_without_commands() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        authority.resolve_maintenance(True)
+        calls: list[str] = []
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                external_change_runtime=SimpleNamespace(
+                    maintenance_exited=lambda: calls.append("rebaseline")
+                ),
+                coordinator=SimpleNamespace(async_update_listeners=lambda: None),
+            ),
+        )
+        entity = module.PoolOSMaintenanceModeSwitch(entry)
+        entity.async_write_ha_state = lambda: None
+        await entity.async_turn_off()
+        assert authority.maintenance_mode is False
+        assert calls == ["rebaseline"]
+        assert entity.extra_state_attributes["commands_replayed_on_exit"] is False
+        assert entity.extra_state_attributes["physical_state_restored_on_exit"] is False
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("restored_state", (None, "off"))
+def test_first_install_or_restored_off_resolves_without_replaying_commands(
+    restored_state: str | None,
+) -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        external_calls: list[str] = []
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                external_change_runtime=SimpleNamespace(
+                    maintenance_exited=lambda: external_calls.append("rebaseline")
+                ),
+            ),
+        )
+        entity = module.PoolOSMaintenanceModeSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=(
+                None
+                if restored_state is None
+                else SimpleNamespace(state=restored_state)
+            )
+        )
+
+        await entity.async_added_to_hass()
+
+        assert entity.available
+        assert not entity.is_on
+        assert authority.maintenance_mode is False
+        assert external_calls == []
+
+    asyncio.run(run())
 
 
 def test_exact_feature_switch_contract() -> None:
@@ -113,6 +210,7 @@ def _load_executable_switch_module():
         "homeassistant.core",
         "homeassistant.helpers",
         "homeassistant.helpers.entity_platform",
+        "homeassistant.helpers.restore_state",
         "homeassistant.helpers.update_coordinator",
     ]
 
@@ -179,10 +277,27 @@ def _load_executable_switch_module():
             def __init__(self, coordinator):
                 self.coordinator = coordinator
 
+            def _handle_coordinator_update(self) -> None:
+                return None
+
         update_coordinator.CoordinatorEntity = CoordinatorEntity
         sys.modules[
             "homeassistant.helpers.update_coordinator"
         ] = update_coordinator
+
+        restore_state = types.ModuleType(
+            "homeassistant.helpers.restore_state"
+        )
+
+        class RestoreEntity:
+            async def async_added_to_hass(self) -> None:
+                return None
+
+            async def async_get_last_state(self):
+                return None
+
+        restore_state.RestoreEntity = RestoreEntity
+        sys.modules["homeassistant.helpers.restore_state"] = restore_state
 
         package = types.ModuleType(package_name)
         package.__path__ = [str(COMPONENT)]
@@ -264,6 +379,9 @@ class _Coordinator:
     def __init__(self, values: dict[str, object]) -> None:
         self.native_intellicenter_snapshot = _Snapshot(values)
 
+    def async_update_listeners(self) -> None:
+        return None
+
 
 class _Manual:
     available = True
@@ -303,7 +421,15 @@ class _Entry:
             coordinator=coordinator,
             manual_intellicenter=manual,
             thermal_runtime=_ThermalRuntime(),
+            physical_command_authority=_ready_authority(),
         )
+
+
+def _ready_authority() -> PoolOSPhysicalCommandAuthority:
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    return authority
 
 
 def _description(module, key: str):
@@ -602,6 +728,7 @@ def test_jets_are_forced_off_when_spa_becomes_inactive() -> None:
         manual.async_set_circuit_state.assert_awaited_once_with(
             "C0003",
             False,
+            request_source=module.PhysicalRequestSource.SAFETY_INTERLOCK,
         )
 
     asyncio.run(run())
@@ -631,6 +758,7 @@ def test_spillway_is_forced_off_when_pool_becomes_inactive() -> None:
         manual.async_set_circuit_state.assert_awaited_once_with(
             "FTR01",
             False,
+            request_source=module.PhysicalRequestSource.SAFETY_INTERLOCK,
         )
 
     asyncio.run(run())
@@ -695,6 +823,7 @@ def test_interlock_does_not_repeat_off_before_native_confirmation() -> None:
         manual.async_set_circuit_state.assert_awaited_once_with(
             "C0003",
             False,
+            request_source=module.PhysicalRequestSource.SAFETY_INTERLOCK,
         )
 
         coordinator.native_intellicenter_snapshot = _Snapshot(
@@ -709,6 +838,89 @@ def test_interlock_does_not_repeat_off_before_native_confirmation() -> None:
         assert jets._safety_interlock_off_pending is False
 
     asyncio.run(run())
+
+
+def test_maintenance_blocks_parent_interlock_without_retry_churn_then_reevaluates() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        coordinator = _Coordinator(
+            {
+                "jets.active": True,
+                "spa.active": False,
+            }
+        )
+        manual = _Manual()
+        entry = _Entry(coordinator, manual)
+        authority = entry.runtime_data.physical_command_authority
+        authority.resolve_maintenance(True)
+        jets = module.PoolOSNativeIntelliCenterSwitch(
+            coordinator,
+            entry,
+            _description(module, "jets"),
+        )
+        tasks: list[asyncio.Task[None]] = []
+        jets.hass = SimpleNamespace(
+            async_create_task=lambda coroutine, name: tasks.append(
+                asyncio.create_task(coroutine, name=name)
+            )
+        )
+
+        for _ in range(5):
+            jets._handle_coordinator_update()
+        assert tasks == []
+        manual.async_set_circuit_state.assert_not_awaited()
+        assert (
+            jets.extra_state_attributes["safety_interlock_blocked_reason"]
+            == "maintenance_mode"
+        )
+
+        authority.resolve_maintenance(False)
+        jets._handle_coordinator_update()
+        assert len(tasks) == 1
+        await tasks[0]
+        manual.async_set_circuit_state.assert_awaited_once_with(
+            "C0003",
+            False,
+            request_source=module.PhysicalRequestSource.SAFETY_INTERLOCK,
+        )
+
+    asyncio.run(run())
+
+
+def test_maintenance_exit_does_not_replay_interlock_after_technician_correction() -> None:
+    module = _load_executable_switch_module()
+    coordinator = _Coordinator(
+        {
+            "jets.active": True,
+            "spa.active": False,
+        }
+    )
+    manual = _Manual()
+    entry = _Entry(coordinator, manual)
+    authority = entry.runtime_data.physical_command_authority
+    authority.resolve_maintenance(True)
+    jets = module.PoolOSNativeIntelliCenterSwitch(
+        coordinator,
+        entry,
+        _description(module, "jets"),
+    )
+    task_calls: list[object] = []
+    jets.hass = SimpleNamespace(
+        async_create_task=lambda coroutine, name: task_calls.append((coroutine, name))
+    )
+
+    jets._handle_coordinator_update()
+    coordinator.native_intellicenter_snapshot = _Snapshot(
+        {
+            "jets.active": False,
+            "spa.active": False,
+        }
+    )
+    authority.resolve_maintenance(False)
+    jets._handle_coordinator_update()
+
+    assert task_calls == []
+    manual.async_set_circuit_state.assert_not_awaited()
 
 def test_solar_switch_delegates_to_canonical_requested_mode_path() -> None:
     async def run() -> None:

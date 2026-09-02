@@ -20,6 +20,9 @@ from .observations import (
 )
 
 NATIVE_ADAPTER_ID = "poolos.native_intellicenter.readonly.v1"
+POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT = (
+    "pump_circuit.p0102.configured_speed_rpm"
+)
 RAW_INVENTORY_DIAGNOSTIC_LIMIT = 20
 RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT = 16
 
@@ -427,6 +430,29 @@ class NativeIntelliCenterReadAdapter:
                 _put(values, "pump.minimum_rpm", pump.minimum_rpm, "rpm", pump.native_id)
                 _put(values, "pump.maximum_rpm", pump.maximum_rpm, "rpm", pump.native_id)
 
+        # PMPCIRC SPEED is the configured circuit setpoint written by the
+        # commissioned p0102 command. It is deliberately distinct from the
+        # parent pump's observed/actual RPM, which may remain zero while the
+        # pump is off.
+        pump_circuit = next(
+            (
+                item
+                for item in transport.raw_inventory
+                if item.object_type.upper() == "PMPCIRC"
+                and item.native_id == "p0102"
+            ),
+            None,
+        )
+        if pump_circuit is not None:
+            configured_speed = _raw_numeric_attribute(pump_circuit, "SPEED")
+            _put(
+                values,
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+                configured_speed,
+                "rpm",
+                pump_circuit.native_id,
+            )
+
         intellichlor = _only(transport.intellichlors)
         if intellichlor is not None:
             _put(
@@ -784,6 +810,27 @@ def _put(
         values[concept] = (value, unit, native_id)
 
 
+def _raw_numeric_attribute(
+    item: NativeRawObject,
+    name: str,
+) -> float | None:
+    value = next(
+        (
+            attribute.value
+            for attribute in item.attributes
+            if attribute.name.upper() == name.upper()
+        ),
+        None,
+    )
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result >= 0 else None
+
+
 def _canonical_temperature(value: float | None, unit: str) -> float | None:
     if value is None:
         return None
@@ -804,6 +851,7 @@ def _compact_diagnostic_value(value: Any) -> Any:
 __all__ = [
     "INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS",
     "NATIVE_ADAPTER_ID",
+    "POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT",
     "NATIVE_TARGET_CONCEPTS",
     "NativeBodyKind",
     "NativeBodyState",

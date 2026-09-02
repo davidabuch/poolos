@@ -31,8 +31,12 @@ _enable_local_vendored_core()
 from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
 from .coordinator import PoolOSCoordinator  # noqa: E402
 from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
+from .external_change_runtime import PoolOSExternalChangeRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
+from poolos.physical_command_authority import (  # noqa: E402
+    PoolOSPhysicalCommandAuthority,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +49,8 @@ class PoolOSRuntimeData:
     manual_intellicenter: ManualIntelliCenterControl | None
     filtration_runtime: PoolOSFiltrationRuntime
     thermal_runtime: PoolOSThermalRuntime
+    physical_command_authority: PoolOSPhysicalCommandAuthority
+    external_change_runtime: PoolOSExternalChangeRuntime
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
@@ -68,11 +74,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     configured = {**dict(entry.data), **dict(entry.options)}
     manual_host = str(configured.get("intellicenter_host", "")).strip()
+    physical_command_authority = PoolOSPhysicalCommandAuthority()
     manual_intellicenter = (
         None
         if not manual_host
         else ManualIntelliCenterControl(
             host=manual_host,
+            command_authority=physical_command_authority,
             transport=str(configured.get("intellicenter_transport", "tcp")),
         )
     )
@@ -82,6 +90,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         manual_intellicenter=manual_intellicenter,
         filtration_runtime=filtration_runtime,
     )
+    external_change_runtime = PoolOSExternalChangeRuntime(
+        hass=hass,
+        authority=physical_command_authority,
+        thermal_runtime=thermal_runtime,
+    )
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
@@ -89,8 +102,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         manual_intellicenter=manual_intellicenter,
         filtration_runtime=filtration_runtime,
         thermal_runtime=thermal_runtime,
+        physical_command_authority=physical_command_authority,
+        external_change_runtime=external_change_runtime,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
+    coordinator.set_native_snapshot_observer(external_change_runtime.process)
+    thermal_runtime.set_assessment_observer(
+        external_change_runtime.refresh_ownership
+    )
     thermal_runtime.refresh(coordinator.data)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))

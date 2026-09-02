@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import PoolOSRuntimeData
@@ -22,6 +24,10 @@ from .manual_thermal import (
     requested_heat_mode,
 )
 from poolos.integration import ThermalBody
+from poolos.physical_command_authority import (
+    PhysicalCommandRequest,
+    PhysicalRequestSource,
+)
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
 
@@ -276,6 +282,75 @@ class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
         }
 
 
+class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
+    """Persistent global deny for every PoolOS physical mutation."""
+
+    _attr_name = "PoolOS Maintenance Mode"
+    _attr_icon = "mdi:tools"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_maintenance_mode"
+
+    async def async_added_to_hass(self) -> None:
+        """Resolve persisted state; authority remains denied until this completes."""
+
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        enabled = previous is not None and previous.state == "on"
+        self._runtime.physical_command_authority.resolve_maintenance(enabled)
+        if enabled:
+            self._runtime.external_change_runtime.maintenance_entered()
+
+    @property
+    def available(self) -> bool:
+        return self._runtime.physical_command_authority.maintenance_resolved
+
+    @property
+    def is_on(self) -> bool:
+        # Unresolved startup state is effectively denied and is never exposed
+        # as a transient permissive OFF state.
+        return self._runtime.physical_command_authority.maintenance_mode is not False
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.physical_command_authority.resolve_maintenance(True)
+        self._runtime.external_change_runtime.maintenance_entered()
+        self._publish_authority_change()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.physical_command_authority.resolve_maintenance(False)
+        self._runtime.external_change_runtime.maintenance_exited()
+        self._publish_authority_change()
+        self.async_write_ha_state()
+
+    def _publish_authority_change(self) -> None:
+        """Reevaluate entities from current truth without replaying a request."""
+
+        coordinator = getattr(self._runtime, "coordinator", None)
+        publish = getattr(coordinator, "async_update_listeners", None)
+        if callable(publish):
+            publish()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **dict(
+                self._runtime.physical_command_authority.diagnostics(
+                    now=datetime.now(UTC)
+                )
+            ),
+            "global_physical_command_deny": self.is_on,
+            "thermal_live_execution_distinct": True,
+            "observation_continues": True,
+            "parity_continues": True,
+            "commands_replayed_on_exit": False,
+            "physical_state_restored_on_exit": False,
+        }
+
+
 class PoolOSNativeIntelliCenterSwitch(
     CoordinatorEntity[PoolOSCoordinator],
     SwitchEntity,
@@ -294,6 +369,7 @@ class PoolOSNativeIntelliCenterSwitch(
         self._runtime = entry.runtime_data
         self._description = description
         self._safety_interlock_off_pending = False
+        self._safety_interlock_blocked_reason: str | None = None
 
         self._attr_name = description.name
         self._attr_unique_id = (
@@ -403,10 +479,12 @@ class PoolOSNativeIntelliCenterSwitch(
 
         if child_active is not True:
             self._safety_interlock_off_pending = False
+            self._safety_interlock_blocked_reason = None
             return
 
         if parent_active is True:
             self._safety_interlock_off_pending = False
+            self._safety_interlock_blocked_reason = None
             return
 
         if self._safety_interlock_off_pending:
@@ -414,18 +492,39 @@ class PoolOSNativeIntelliCenterSwitch(
 
         manual = self._runtime.manual_intellicenter
         if manual is None or not manual.available:
+            self._safety_interlock_blocked_reason = "manual_transport_unavailable"
             return
 
+        request = self._safety_interlock_request()
+        decision = self._runtime.physical_command_authority.assess(request)
+        if not decision.allowed:
+            self._safety_interlock_blocked_reason = decision.reason.value
+            return
+
+        self._safety_interlock_blocked_reason = None
         self._safety_interlock_off_pending = True
 
         try:
             await manual.async_set_circuit_state(
                 self._description.objnam,
                 False,
+                request_source=PhysicalRequestSource.SAFETY_INTERLOCK,
             )
-        except Exception:
+        except ManualIntelliCenterCommandError:
             self._safety_interlock_off_pending = False
+            decision = self._runtime.physical_command_authority.assess(request)
+            if not decision.allowed:
+                self._safety_interlock_blocked_reason = decision.reason.value
+                return
             raise
+
+    def _safety_interlock_request(self) -> PhysicalCommandRequest:
+        return PhysicalCommandRequest(
+            operation="circuit_active",
+            target=self._description.objnam,
+            source=PhysicalRequestSource.SAFETY_INTERLOCK,
+            requested_value=False,
+        )
 
     def _handle_coordinator_update(self) -> None:
         """Enforce safety invariants whenever fresh native state is published."""
@@ -444,14 +543,26 @@ class PoolOSNativeIntelliCenterSwitch(
 
             if child_active is not True or parent_active is True:
                 self._safety_interlock_off_pending = False
+                self._safety_interlock_blocked_reason = None
             elif not self._safety_interlock_off_pending:
-                self.hass.async_create_task(
-                    self._async_enforce_parent_interlock(),
-                    (
-                        "PoolOS safety interlock "
-                        f"{self._description.key} parent loss"
-                    ),
-                )
+                manual = self._runtime.manual_intellicenter
+                request = self._safety_interlock_request()
+                decision = self._runtime.physical_command_authority.assess(request)
+                if manual is None or not manual.available:
+                    self._safety_interlock_blocked_reason = (
+                        "manual_transport_unavailable"
+                    )
+                elif not decision.allowed:
+                    self._safety_interlock_blocked_reason = decision.reason.value
+                else:
+                    self._safety_interlock_blocked_reason = None
+                    self.hass.async_create_task(
+                        self._async_enforce_parent_interlock(),
+                        (
+                            "PoolOS safety interlock "
+                            f"{self._description.key} parent loss"
+                        ),
+                    )
 
         super()._handle_coordinator_update()
 
@@ -481,6 +592,9 @@ class PoolOSNativeIntelliCenterSwitch(
             "safety_interlock_off_pending": (
                 self._safety_interlock_off_pending
             ),
+            "safety_interlock_blocked_reason": (
+                self._safety_interlock_blocked_reason
+            ),
         }
 
 
@@ -509,5 +623,6 @@ async def async_setup_entry(
                 entry,
             ),
             PoolOSThermalLiveExecutionSwitch(entry),
+            PoolOSMaintenanceModeSwitch(entry),
         ]
     )
