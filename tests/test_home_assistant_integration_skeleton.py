@@ -19,6 +19,7 @@ def test_required_integration_files_exist() -> None:
         "__init__.py",
         "authoritative.py",
         "binary_sensor.py",
+        "brand/icon.png",
         "button.py",
         "climate.py",
             "config_flow.py",
