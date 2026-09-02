@@ -137,6 +137,22 @@ def test_config_and_refresh_paths_recompute_only_and_never_call_manual_setters()
     assert runtime.assessment.pool.actual_authorization.authorized
 
 
+def test_assessment_observer_runs_for_requested_intent_changes() -> None:
+    runtime, _, manual = runtime_fixture()
+    calls: list[object] = []
+    runtime.set_assessment_observer(lambda: calls.append(runtime.assessment))
+
+    runtime.set_requested_mode(
+        ThermalBody.POOL,
+        ThermalRequestedMode.GAS,
+        publish=False,
+    )
+
+    assert len(calls) == 1
+    assert calls[0] is runtime.assessment
+    assert manual.command_calls == []
+
+
 def test_requested_mode_comes_directly_from_runtime_not_ha_state_lookup() -> None:
     runtime, _, _ = runtime_fixture()
 

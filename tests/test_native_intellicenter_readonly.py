@@ -11,6 +11,7 @@ import pytest
 
 from poolos.intellicenter_readonly import (
     NATIVE_TARGET_CONCEPTS,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     NativeBodyKind,
     NativeBodyState,
     NativeCircuitState,
@@ -119,6 +120,49 @@ def test_native_models_are_immutable_and_adapter_surface_is_read_only() -> None:
     snapshot = transport()
     with pytest.raises(FrozenInstanceError):
         snapshot.connected = False  # type: ignore[misc]
+
+
+def test_commissioned_pmpcirc_speed_is_distinct_from_actual_pump_rpm() -> None:
+    base = transport()
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        pumps=(
+            NativePumpState(
+                "PMP01",
+                "Filter Pump",
+                False,
+                0.0,
+                0.0,
+                0.0,
+                minimum_rpm=450.0,
+                maximum_rpm=3450.0,
+            ),
+        ),
+        raw_inventory=(
+            NativeRawObject(
+                native_id="p0102",
+                object_type="PMPCIRC",
+                subtype=None,
+                name="Pool",
+                parent_id="PMP01",
+                observed_at=NOW,
+                attributes=(NativeRawAttribute("SPEED", "2900"),),
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+    values = {item.observation_id: item for item in result.observations}
+    assert values["pump.rpm"].value == 0.0
+    configured = values[POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT]
+    assert configured.value == 2900.0
+    assert configured.source_id == "intellicenter_native:panel-main:p0102"
 
     public = {name for name in dir(NativeIntelliCenterReadAdapter) if not name.startswith("_")}
     assert public == {"capture", "initializing", "map_snapshot", "unavailable"}

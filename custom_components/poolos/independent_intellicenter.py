@@ -433,6 +433,12 @@ class IndependentIntelliCenterReadOnlyTransport:
     def latest_snapshot(self) -> NativeIntelliCenterTransportSnapshot | None:
         return self._latest_snapshot
 
+    @property
+    def discovery_generation(self) -> int:
+        """Identify one connection/discovery lifecycle for baseline handling."""
+
+        return self._discovery_generation
+
     def _set_snapshot_update_callback(
         self,
         callback: Callable[[], None] | None,

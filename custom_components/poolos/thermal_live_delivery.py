@@ -19,6 +19,7 @@ from poolos.integration import (
     ThermalBody,
 )
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.physical_command_authority import PhysicalRequestSource
 from poolos.thermal_live_execution import COMMISSIONED_THERMAL_PUMP_ID
 
 from .manual_intellicenter import (
@@ -61,12 +62,14 @@ class ManualIntelliCenterThermalLiveDelivery:
                 manual_receipt = await self.manual.async_set_pump_circuit_speed(
                     COMMISSIONED_THERMAL_PUMP_ID,
                     operation.rpm,
+                    request_source=PhysicalRequestSource.AUTONOMOUS,
                 )
             elif isinstance(operation, SetHeatMode):
                 body_id, heater_id = self._validate_heat_mode(operation)
                 manual_receipt = await self.manual.async_set_body_heat_source(
                     body_id,
                     heater_id,
+                    request_source=PhysicalRequestSource.AUTONOMOUS,
                 )
             else:
                 return CommandReceipt(

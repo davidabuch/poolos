@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+import logging
 from typing import TYPE_CHECKING, Any
 
 from poolos.integration import ThermalBody
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
 
 
 _EVALUATION_ERROR_MESSAGE_LIMIT = 256
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -56,6 +59,16 @@ class PoolOSThermalRuntime:
         init=False,
         repr=False,
     )
+    _assessment_observer: Callable[[], None] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
+    def set_assessment_observer(self, observer: Callable[[], None]) -> None:
+        """Register bounded diagnostics that follow assessment changes."""
+
+        self._assessment_observer = observer
 
     def set_effective_live_enabled(self, enabled: bool) -> None:
         """Change readiness configuration only; never execute a plan."""
@@ -99,6 +112,7 @@ class PoolOSThermalRuntime:
         if authoritative is None:
             self.assessment = None
             self.last_error = "authoritative_observation_snapshot_unavailable"
+            self._notify_assessment_observer()
             if publish:
                 self.coordinator.async_update_listeners()
             return
@@ -179,8 +193,21 @@ class PoolOSThermalRuntime:
             self.last_error = _bounded_evaluation_error(exc)
         else:
             self.last_error = None
+        self._notify_assessment_observer()
         if publish:
             self.coordinator.async_update_listeners()
+
+    def _notify_assessment_observer(self) -> None:
+        observer = self._assessment_observer
+        if observer is None:
+            return
+        try:
+            observer()
+        except Exception:
+            LOGGER.exception(
+                "PoolOS external ownership diagnostics refresh failed; "
+                "thermal assessment publication continues"
+            )
 
     def _select_authoritative_snapshot(
         self,

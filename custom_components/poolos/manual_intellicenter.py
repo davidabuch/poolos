@@ -23,9 +23,21 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping
+
+from poolos.physical_command_authority import (
+    ExpectedNativeConsequence,
+    PhysicalCommandDeniedError,
+    PhysicalCommandRequest,
+    PhysicalRequestSource,
+    PoolOSPhysicalCommandAuthority,
+)
+from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
 
 from pyintellicenter import (
     BODY_ATTR,
@@ -152,6 +164,7 @@ class ManualIntelliCenterControl:
         self,
         *,
         host: str,
+        command_authority: PoolOSPhysicalCommandAuthority,
         transport: str = "tcp",
         keepalive_interval: float = 90.0,
         reconnect_delay: int = 30,
@@ -167,6 +180,7 @@ class ManualIntelliCenterControl:
             raise ValueError("manual IntelliCenter reconnect delay must be positive")
 
         self._host = normalized_host
+        self._command_authority = command_authority
         self._transport_name = transport
         self._model = PoolModel()
         self._controller = ICModelController(
@@ -233,6 +247,8 @@ class ManualIntelliCenterControl:
         self,
         body_objnam: str,
         active: bool,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Turn Pool/Spa body circulation on or off."""
 
@@ -240,21 +256,25 @@ class ManualIntelliCenterControl:
         if not isinstance(active, bool):
             raise ValueError("body active state must be boolean")
 
-        await self._require_available()
-
-        async with self._command_lock:
-            try:
-                await self._controller.request_changes(
-                    body_objnam,
-                    {
-                        STATUS_ATTR: STATUS_ON if active else STATUS_OFF,
-                    },
-                )
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
-                raise ManualIntelliCenterCommandError(
-                    f"failed to set {body_objnam} active state"
-                ) from exc
+        prefix = "pool" if body_objnam == "B1101" else "spa"
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="body_active",
+                target=body_objnam,
+                source=request_source,
+                requested_value=active,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept=f"{prefix}.active",
+                native_object_id=body_objnam,
+                expected_value=active,
+            ),
+            dispatch=lambda: self._controller.request_changes(
+                body_objnam,
+                {STATUS_ATTR: STATUS_ON if active else STATUS_OFF},
+            ),
+            failure_message=f"failed to set {body_objnam} active state",
+        )
 
         self._last_error_code = None
         return ManualCommandReceipt(
@@ -267,6 +287,8 @@ class ManualIntelliCenterControl:
         self,
         circuit_objnam: str,
         active: bool,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Turn one explicitly allow-listed IntelliCenter circuit on or off."""
 
@@ -275,19 +297,29 @@ class ManualIntelliCenterControl:
         if not isinstance(active, bool):
             raise ValueError("circuit active state must be boolean")
 
-        await self._require_available()
-
-        async with self._command_lock:
-            try:
-                await self._controller.set_circuit_state(
-                    circuit_objnam,
-                    active,
-                )
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
-                raise ManualIntelliCenterCommandError(
-                    f"failed to set {circuit_objnam} circuit state"
-                ) from exc
+        concept = {
+            "C0002": "pool_light.active",
+            "C0003": "jets.active",
+            "C0004": "slide.active",
+            "FTR01": "waterfall.active",
+        }[circuit_objnam]
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="circuit_active",
+                target=circuit_objnam,
+                source=request_source,
+                requested_value=active,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept=concept,
+                native_object_id=circuit_objnam,
+                expected_value=active,
+            ),
+            dispatch=lambda: self._controller.set_circuit_state(
+                circuit_objnam, active
+            ),
+            failure_message=f"failed to set {circuit_objnam} circuit state",
+        )
 
         self._last_error_code = None
         return ManualCommandReceipt(
@@ -301,6 +333,8 @@ class ManualIntelliCenterControl:
         self,
         circuit_objnam: str,
         effect: str,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Set the IntelliBrite effect for the Pool Light circuit."""
 
@@ -314,19 +348,23 @@ class ManualIntelliCenterControl:
                 f"unsupported Pool Light effect: {effect}"
             )
 
-        await self._require_available()
-
-        async with self._command_lock:
-            try:
-                await self._controller.set_light_effect(
-                    circuit_objnam,
-                    effect,
-                )
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
-                raise ManualIntelliCenterCommandError(
-                    f"failed to set {circuit_objnam} light effect"
-                ) from exc
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="light_effect",
+                target=circuit_objnam,
+                source=request_source,
+                requested_value=effect,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept="pool_light.effect",
+                native_object_id=circuit_objnam,
+                expected_value=effect,
+            ),
+            dispatch=lambda: self._controller.set_light_effect(
+                circuit_objnam, effect
+            ),
+            failure_message=f"failed to set {circuit_objnam} light effect",
+        )
 
         self._last_error_code = None
         return ManualCommandReceipt(
@@ -339,6 +377,8 @@ class ManualIntelliCenterControl:
         self,
         body_objnam: str,
         heater_objnam: str,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Select one explicitly allow-listed heat source for a Pool/Spa body."""
 
@@ -349,21 +389,24 @@ class ManualIntelliCenterControl:
                 f"unsupported manual-control heat source: {heater_objnam}"
             )
 
-        await self._require_available()
-
-        async with self._command_lock:
-            try:
-                await self._controller.request_changes(
-                    body_objnam,
-                    {
-                        HEATER_ATTR: heater_objnam,
-                    },
-                )
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
-                raise ManualIntelliCenterCommandError(
-                    f"failed to set {body_objnam} heat source"
-                ) from exc
+        prefix = "pool" if body_objnam == "B1101" else "spa"
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="body_heat_source",
+                target=body_objnam,
+                source=request_source,
+                requested_value=heater_objnam,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept=f"{prefix}.raw_heater_id",
+                native_object_id=body_objnam,
+                expected_value=heater_objnam,
+            ),
+            dispatch=lambda: self._controller.request_changes(
+                body_objnam, {HEATER_ATTR: heater_objnam}
+            ),
+            failure_message=f"failed to set {body_objnam} heat source",
+        )
 
         self._last_error_code = None
 
@@ -377,6 +420,8 @@ class ManualIntelliCenterControl:
         self,
         body_objnam: str,
         percent: int,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Set one body output on the commissioned CHR01 IntelliChlor."""
 
@@ -407,34 +452,40 @@ class ManualIntelliCenterControl:
             )
         output_index = body_ids.index(body_objnam)
 
-        await self._require_available()
-
-        async with self._command_lock:
-            try:
-                if output_index == 0:
-                    await self._controller.set_chlorinator_output(
-                        _INTELLICHLOR_OBJNAM,
-                        percent,
-                    )
-                else:
-                    primary = _percentage(chlorinator[PRIM_ATTR])
-                    if primary is None:
-                        raise ManualIntelliCenterCommandError(
-                            "IntelliChlor Pool output is unavailable; "
-                            "Spa output cannot be changed safely"
-                        )
-                    await self._controller.set_chlorinator_output(
-                        _INTELLICHLOR_OBJNAM,
-                        primary,
-                        percent,
-                    )
-            except ManualIntelliCenterCommandError:
-                raise
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
+        primary = None
+        if output_index != 0:
+            primary = _percentage(chlorinator[PRIM_ATTR])
+            if primary is None:
                 raise ManualIntelliCenterCommandError(
-                    f"failed to set {body_objnam} IntelliChlor output"
-                ) from exc
+                    "IntelliChlor Pool output is unavailable; "
+                    "Spa output cannot be changed safely"
+                )
+
+        async def dispatch() -> Any:
+            if output_index == 0:
+                return await self._controller.set_chlorinator_output(
+                    _INTELLICHLOR_OBJNAM, percent
+                )
+            return await self._controller.set_chlorinator_output(
+                _INTELLICHLOR_OBJNAM, primary, percent
+            )
+
+        prefix = "pool" if body_objnam == "B1101" else "spa"
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="intellichlor_output",
+                target=body_objnam,
+                source=request_source,
+                requested_value=percent,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept=f"intellichlor.{prefix}_output_percent",
+                native_object_id=_INTELLICHLOR_OBJNAM,
+                expected_value=percent,
+            ),
+            dispatch=dispatch,
+            failure_message=f"failed to set {body_objnam} IntelliChlor output",
+        )
 
         self._last_error_code = None
         return ManualCommandReceipt(
@@ -447,6 +498,8 @@ class ManualIntelliCenterControl:
         self,
         body_objnam: str,
         temperature: int | float,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Set Pool/Spa heating target through IntelliCenter LOTMP."""
 
@@ -466,19 +519,24 @@ class ManualIntelliCenterControl:
                 f"{_MIN_TARGET_TEMPERATURE} and {_MAX_TARGET_TEMPERATURE}"
             )
 
-        await self._require_available()
-
-        async with self._command_lock:
-            try:
-                await self._controller.set_heating_setpoint(
-                    body_objnam,
-                    target,
-                )
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
-                raise ManualIntelliCenterCommandError(
-                    f"failed to set {body_objnam} heating setpoint"
-                ) from exc
+        prefix = "pool" if body_objnam == "B1101" else "spa"
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="heating_setpoint",
+                target=body_objnam,
+                source=request_source,
+                requested_value=target,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept=f"{prefix}.target_temperature",
+                native_object_id=body_objnam,
+                expected_value=float(target),
+            ),
+            dispatch=lambda: self._controller.set_heating_setpoint(
+                body_objnam, target
+            ),
+            failure_message=f"failed to set {body_objnam} heating setpoint",
+        )
 
         self._last_error_code = None
         return ManualCommandReceipt(
@@ -492,6 +550,8 @@ class ManualIntelliCenterControl:
         self,
         pump_circuit_objnam: str,
         rpm: int | float,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
     ) -> ManualCommandReceipt:
         """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
 
@@ -508,7 +568,7 @@ class ManualIntelliCenterControl:
 
         await self._require_available()
 
-        minimum, maximum = self._pump_circuit_rpm_limits(
+        _parent_id, minimum, maximum = self._pump_circuit_rpm_limits(
             pump_circuit_objnam
         )
 
@@ -517,19 +577,25 @@ class ManualIntelliCenterControl:
                 f"pump RPM must be between {minimum} and {maximum}"
             )
 
-        async with self._command_lock:
-            try:
-                await self._controller.request_changes(
-                    pump_circuit_objnam,
-                    {
-                        SPEED_ATTR: str(target),
-                    },
-                )
-            except Exception as exc:
-                self._last_error_code = type(exc).__name__.upper()
-                raise ManualIntelliCenterCommandError(
-                    f"failed to set {pump_circuit_objnam} pump circuit speed"
-                ) from exc
+        await self._async_deliver(
+            request=PhysicalCommandRequest(
+                operation="pump_circuit_speed",
+                target=pump_circuit_objnam,
+                source=request_source,
+                requested_value=target,
+            ),
+            consequence=ExpectedNativeConsequence(
+                concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+                native_object_id=pump_circuit_objnam,
+                expected_value=float(target),
+            ),
+            dispatch=lambda: self._controller.request_changes(
+                pump_circuit_objnam, {SPEED_ATTR: str(target)}
+            ),
+            failure_message=(
+                f"failed to set {pump_circuit_objnam} pump circuit speed"
+            ),
+        )
 
         self._last_error_code = None
 
@@ -569,8 +635,55 @@ class ManualIntelliCenterControl:
                 "reconnect_count": self._reconnect_count,
                 "manual_command_delivery_enabled": True,
                 "autonomous_command_delivery_enabled": False,
+                "central_physical_authority": dict(
+                    self._command_authority.diagnostics(
+                        now=datetime.now(UTC)
+                    )
+                ),
             }
         )
+
+    async def _async_deliver(
+        self,
+        *,
+        request: PhysicalCommandRequest,
+        consequence: ExpectedNativeConsequence,
+        dispatch: Callable[[], Awaitable[Any]],
+        failure_message: str,
+    ) -> None:
+        """Reserve, recheck inside the command lock, and dispatch once."""
+
+        await self._require_available()
+        now = datetime.now(UTC)
+        try:
+            expectation_id = self._command_authority.reserve(
+                request, consequence, now=now
+            )
+        except PhysicalCommandDeniedError as exc:
+            raise ManualIntelliCenterCommandError(str(exc)) from exc
+
+        async with self._command_lock:
+            try:
+                # This is the final PoolOS check immediately before invoking
+                # pyintellicenter's physical dispatch coroutine.  A request
+                # queued behind the lock cannot reuse an earlier permission.
+                self._command_authority.require_allowed(request)
+                if expectation_id is not None:
+                    self._command_authority.mark_dispatch_started(expectation_id)
+                await dispatch()
+            except PhysicalCommandDeniedError as exc:
+                if expectation_id is not None:
+                    self._command_authority.cancel(expectation_id)
+                raise ManualIntelliCenterCommandError(str(exc)) from exc
+            except ManualIntelliCenterCommandError:
+                if expectation_id is not None:
+                    self._command_authority.cancel(expectation_id)
+                raise
+            except Exception as exc:
+                if expectation_id is not None:
+                    self._command_authority.cancel(expectation_id)
+                self._last_error_code = type(exc).__name__.upper()
+                raise ManualIntelliCenterCommandError(failure_message) from exc
 
     async def _require_available(self) -> None:
         if not self.available:
@@ -616,8 +729,8 @@ class ManualIntelliCenterControl:
     def _pump_circuit_rpm_limits(
         self,
         pump_circuit_objnam: str,
-    ) -> tuple[int, int]:
-        """Validate PMPCIRC identity/mode and return parent pump limits."""
+    ) -> tuple[str, int, int]:
+        """Validate PMPCIRC identity/mode and return parent identity/limits."""
 
         item = self._model[pump_circuit_objnam]
 
@@ -661,7 +774,7 @@ class ManualIntelliCenterControl:
                 f"{pump_circuit_objnam} parent pump RPM limits are invalid"
             )
 
-        return minimum, maximum
+        return str(parent_id), minimum, maximum
 
     def _on_connected(self, *, reconnected: bool) -> None:
         self._state = ManualIntelliCenterState.AVAILABLE

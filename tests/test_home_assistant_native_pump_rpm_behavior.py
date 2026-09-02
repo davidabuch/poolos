@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import importlib.util
 from pathlib import Path
 import sys
@@ -10,6 +11,12 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+
+from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
+
+from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,6 +151,15 @@ class _RecordingController:
             changes["SEC"] = str(secondary)
         await self.request_changes(objnam, changes)
 
+    async def set_circuit_state(self, objnam: str, active: bool) -> None:
+        await self.request_changes(objnam, {"STATUS": "ON" if active else "OFF"})
+
+    async def set_light_effect(self, objnam: str, effect: str) -> None:
+        await self.request_changes(objnam, {"EFFECT": effect})
+
+    async def set_heating_setpoint(self, objnam: str, target: int) -> None:
+        await self.request_changes(objnam, {"LOTMP": str(target)})
+
 
 def _gateway(
     objects: list[Any],
@@ -160,6 +176,9 @@ def _gateway(
     gateway._state = ManualIntelliCenterState.AVAILABLE
     gateway._command_lock = asyncio.Lock()
     gateway._last_error_code = None
+    gateway._command_authority = PoolOSPhysicalCommandAuthority()
+    gateway._command_authority.resolve_maintenance(False)
+    gateway._command_authority.set_controller_mode("auto")
 
     return gateway, recorder
 
@@ -430,6 +449,67 @@ def test_command_failure_is_not_reported_as_success(
     assert gateway._last_error_code == "RUNTIMEERROR"
 
 
+def test_pump_speed_expectation_tracks_configured_pmpcirc_not_actual_rpm(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(objnam="PMP01")
+    circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+        rpm_setpoint=2600,
+    )
+    gateway, recorder = _gateway([pump, circuit])
+    gateway._command_authority.replace_native_truth(
+        {(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, "p0102"): 2600.0}
+    )
+
+    _run(gateway.async_set_pump_circuit_speed("p0102", 2900))
+    observed_at = datetime.now(UTC)
+    assert gateway._command_authority.correlate(
+        concept="pump.rpm",
+        native_object_id="PMP01",
+        value=2900.0,
+        observed_at=observed_at,
+    ) is None
+    assert gateway._command_authority.diagnostics(
+        now=observed_at
+    )["pending_expectation_count"] == 1
+    assert gateway._command_authority.correlate(
+        concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        native_object_id="wrong-pmpcirc",
+        value=2900.0,
+        observed_at=observed_at,
+    ) is None
+    assert gateway._command_authority.correlate(
+        concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        native_object_id="p0102",
+        value=2900.0,
+        observed_at=observed_at,
+    ) is not None
+    assert recorder.calls == [("p0102", {"SPEED": "2900"})]
+
+
+def test_no_op_manual_command_dispatches_without_leaving_expectation() -> None:
+    gateway, recorder = _gateway([])
+    gateway._command_authority.replace_native_truth(
+        {("pool.raw_heater_id", "B1101"): "H0002"}
+    )
+
+    _run(gateway.async_set_body_heat_source("B1101", "H0002"))
+
+    assert recorder.calls == [("B1101", {"HEATER": "H0002"})]
+    assert gateway._command_authority.diagnostics(
+        now=datetime.now(UTC)
+    )["pending_expectation_count"] == 0
+    assert gateway._command_authority.correlate(
+        concept="pool.raw_heater_id",
+        native_object_id="B1101",
+        value="H0002",
+        observed_at=datetime.now(UTC),
+    ) is None
+
+
 def test_unavailable_manual_transport_rejects_before_delivery(
     pump_object_factory,
     pump_circuit_object_factory,
@@ -552,6 +632,120 @@ def test_body_heat_source_transport_failure_is_not_success() -> None:
 
     assert recorder.calls == []
     assert gateway._last_error_code == "RUNTIMEERROR"
+    assert (
+        gateway._command_authority.diagnostics(
+            now=datetime.now(UTC)
+        )["pending_expectation_count"]
+        == 0
+    )
+
+
+def test_queued_command_rechecks_maintenance_inside_command_lock() -> None:
+    async def scenario() -> None:
+        gateway, recorder = _gateway([])
+        await gateway._command_lock.acquire()
+        task = asyncio.create_task(
+            gateway.async_set_body_heat_source("B1101", "H0002")
+        )
+        await asyncio.sleep(0)
+        assert gateway._command_authority.diagnostics(
+            now=datetime.now(UTC)
+        )["pending_expectation_count"] == 1
+
+        gateway._command_authority.resolve_maintenance(True)
+        gateway._command_lock.release()
+        with pytest.raises(
+            ManualIntelliCenterCommandError,
+            match="maintenance_mode",
+        ):
+            await task
+        assert recorder.calls == []
+        assert gateway._command_authority.diagnostics(
+            now=datetime.now(UTC)
+        )["pending_expectation_count"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_already_dispatched_command_may_finish_after_maintenance_turns_on() -> None:
+    class BlockingController(_RecordingController):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def request_changes(
+            self, objnam: str, changes: dict[str, str]
+        ) -> None:
+            self.calls.append((objnam, dict(changes)))
+            self.started.set()
+            await self.release.wait()
+
+    async def scenario() -> None:
+        controller = BlockingController()
+        gateway, _ = _gateway([], controller)
+        task = asyncio.create_task(
+            gateway.async_set_body_heat_source("B1101", "H0002")
+        )
+        await controller.started.wait()
+        gateway._command_authority.resolve_maintenance(True)
+        controller.release.set()
+        receipt = await task
+        assert receipt.value == "H0002"
+        assert controller.calls == [("B1101", {"HEATER": "H0002"})]
+        assert gateway._command_authority.diagnostics(
+            now=datetime.now(UTC)
+        )["pending_expectation_count"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_maintenance_blocks_every_public_mutation_surface(
+    chemistry_object_factory,
+    pump_object_factory,
+    pump_circuit_object_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chlorinator = chemistry_object_factory(
+        objnam="CHR01",
+        subtype="ICHLOR",
+        body_ids="B1101 B1202",
+        primary_output=52,
+        secondary_output=4,
+    )
+    pump = pump_object_factory(objnam="PMP01")
+    circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+    )
+    gateway, recorder = _gateway([chlorinator, pump, circuit])
+    gateway._command_authority.resolve_maintenance(True)
+    monkeypatch.setattr(manual_module, "LIGHT_EFFECTS", {"Romance": "ROMANCE"})
+
+    operations = (
+        gateway.async_set_body_active("B1101", True),
+        gateway.async_set_body_active("B1202", True),
+        gateway.async_set_circuit_state("C0002", True),
+        gateway.async_set_circuit_state("C0003", True),
+        gateway.async_set_circuit_state("C0004", True),
+        gateway.async_set_circuit_state("FTR01", True),
+        gateway.async_set_light_effect("C0002", "Romance"),
+        gateway.async_set_body_heat_source("B1101", "H0002"),
+        gateway.async_set_body_heat_source("B1202", "H0001"),
+        gateway.async_set_intellichlor_output("B1101", 60),
+        gateway.async_set_intellichlor_output("B1202", 5),
+        gateway.async_set_heating_setpoint("B1101", 88),
+        gateway.async_set_heating_setpoint("B1202", 100),
+        gateway.async_set_pump_circuit_speed("p0102", 2900),
+    )
+    for operation in operations:
+        with pytest.raises(
+            ManualIntelliCenterCommandError,
+            match="maintenance_mode",
+        ):
+            _run(operation)
+
+    assert recorder.calls == []
 
 
 @pytest.mark.parametrize(

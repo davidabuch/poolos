@@ -639,6 +639,13 @@ def _recorder_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
     }
 
 
+def _external_change_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
+    del coordinator
+    return runtime.external_change_runtime.diagnostics()
+
+
 TELEMETRY = (
     ("pool_active", "Pool Active", "pool.active", "mdi:pool"),
     ("spa_active", "Spa Active", "spa.active", "mdi:hot-tub"),
@@ -670,6 +677,15 @@ TELEMETRY = (
 
 
 SENSORS = (
+    PoolOSControlCenterSensorDescription(
+        "external_change",
+        "External Change",
+        lambda coordinator, runtime: runtime.external_change_runtime.diagnostics()[
+            "state"
+        ],
+        _external_change_attributes,
+        "mdi:swap-horizontal-bold",
+    ),
     PoolOSControlCenterSensorDescription(
         "filtration_obligation",
         "Filtration Obligation",

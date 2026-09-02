@@ -29,6 +29,7 @@ from poolos.intellicenter_readonly import (
     INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS,
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterReadAdapter,
+    NativeIntelliCenterTransportSnapshot,
 )
 from poolos.native_inventory_export import NativeIntelliCenterInventoryExporter
 from poolos.native_parity_commissioning import (
@@ -173,6 +174,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._durable_health_confirmation = DurableHealthConfirmationState()
         self._filtration_runtime_refresh: Callable[[ObservationSnapshot], None] | None = None
         self._thermal_runtime_refresh: Callable[[ObservationSnapshot], None] | None = None
+        self._native_snapshot_observer: Callable[
+            [
+                NativeIntelliCenterObservationSnapshot,
+                NativeIntelliCenterTransportSnapshot,
+                int,
+            ],
+            None,
+        ] | None = None
 
     async def async_initialize_persistence(self) -> None:
         """Load disk-backed commissioning state without blocking HA's event loop."""
@@ -266,6 +275,21 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             )
             return
         self.native_intellicenter_snapshot = mapped
+        observer = getattr(self, "_native_snapshot_observer", None)
+        if observer is not None:
+            try:
+                observer(
+                    mapped,
+                    transport_snapshot,
+                    getattr(transport, "discovery_generation", 0),
+                )
+            except Exception:
+                LOGGER.exception(
+                    "PoolOS external native-change diagnostics failed; "
+                    "authoritative publication continues"
+                )
+        # The diagnostic boundary above is synchronous and bounded, but its
+        # failure can never suppress the already-mapped authoritative state.
         self.async_update_listeners()
 
     async def _async_native_intellicenter_snapshot_updated(self) -> None:
@@ -1057,6 +1081,22 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         """Attach one command-free authoritative filtration ledger evaluator."""
 
         self._filtration_runtime_refresh = callback
+
+    def set_native_snapshot_observer(
+        self,
+        callback: Callable[
+            [
+                NativeIntelliCenterObservationSnapshot,
+                NativeIntelliCenterTransportSnapshot,
+                int,
+            ],
+            None,
+        ]
+        | None,
+    ) -> None:
+        """Attach one synchronous read-only native transition observer."""
+
+        self._native_snapshot_observer = callback
 
     def _update_durable_health_confirmation(
         self,
