@@ -118,6 +118,21 @@ leave historical drift latched. Blocked or unusable thermal plans claim no
 ownership; incompatible simultaneous pump requirements fail closed as
 unowned.
 
+Configured BODY heat-mode ownership is distinct from the momentary thermal
+operating decision. After requested-mode restoration is resolved and a usable
+authoritative BODY `HEATER` baseline exists, direct requested modes map to
+configured intent as Off=`00000`, Gas=`H0001`, and Solar=`H0002`, regardless of
+body activity or the planner's current selected source. For example, requested
+Pool Solar with native `HEATER=H0002`, a collector below the minimum, and
+`planned_source=off` is configured correctly: PoolOS simply does not apply
+solar heat at that moment, and no configured heat-mode drift exists.
+
+PoolOS Solar Preferred remains policy intent and has no static direct native
+`HEATER` mapping. Operational pump-RPM ownership continues to require a usable
+thermal assessment, active body, technical preflight, and an unambiguous RPM
+claim. Thus persistent configured-source intent and current operational pump
+requirements cannot redefine one another.
+
 RECONCILE means current drift/reconciliation-needed evidence only. This ADR
 does not authorize physical correction. ADOPT uses authoritative native truth
 and existing requested-state mechanisms where they exist; it does not create a

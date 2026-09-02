@@ -45,14 +45,17 @@ def test_pool_and_hot_tub_defaults_are_body_specific() -> None:
 
 
 def test_direct_modes_map_only_to_empirically_commissioned_ids() -> None:
-    source = (COMPONENT / "manual_thermal.py").read_text(encoding="utf-8")
+    source = (COMPONENT / "configured_thermal.py").read_text(encoding="utf-8")
+    manual = (COMPONENT / "manual_thermal.py").read_text(encoding="utf-8")
 
-    assert 'HEAT_MODE_OFF: "00000"' in source
-    assert 'HEAT_MODE_GAS: "H0001"' in source
-    assert 'HEAT_MODE_SOLAR: "H0002"' in source
+    assert 'ThermalRequestedMode.OFF: "00000"' in source
+    assert 'ThermalRequestedMode.GAS: "H0001"' in source
+    assert 'ThermalRequestedMode.SOLAR: "H0002"' in source
+    assert "ThermalRequestedMode.SOLAR_PREFERRED:" not in source
 
     assert '"HXSLR"' not in source
-    assert "async_set_body_heat_source(" in source
+    assert "configured_heater_intent_for_direct_requested_mode(mode)" in manual
+    assert "async_set_body_heat_source(" in manual
 
 
 def test_solar_preferred_is_poolos_policy_not_pentair_mode() -> None:

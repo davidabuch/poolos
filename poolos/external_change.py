@@ -299,6 +299,11 @@ class ExternalNativeChangeMonitor:
 
         self._active_drift.clear()
 
+    def current_concepts(self) -> frozenset[str]:
+        """Return concepts in the last accepted authoritative native baseline."""
+
+        return frozenset(() if self._baseline is None else self._baseline)
+
     def recompute_current_ownership(
         self,
         ownership: ExternalOwnershipContext,
