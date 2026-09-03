@@ -12,9 +12,11 @@ def observation(*, at: datetime = NOW, pool_active: bool = True, spa_active: boo
     return SolarEligibilityInput(at, pool_active, spa_active, solar_active, water, collector, target)
 
 
-def test_default_policy_uses_immediate_activation_and_two_shutdown_holds() -> None:
+def test_default_policy_uses_seven_degree_start_three_degree_stop_and_five_minute_hold() -> None:
     policy = SolarEligibilityPolicy()
-    assert policy.deactivation_hold == timedelta(minutes=10)
+    assert policy.activation_differential_f == 7
+    assert policy.deactivation_differential_f == 3
+    assert policy.deactivation_hold == timedelta(minutes=5)
     assert policy.target_satisfaction_hold == timedelta(minutes=10)
     assert policy.minimum_collector_temperature_f == 90
 
@@ -32,23 +34,92 @@ def test_roof_minimum_and_differential_are_both_required() -> None:
     assert weak.reason_code == "activation_differential_insufficient"
 
 
-def test_active_solar_differential_shutdown_requires_ten_continuous_minutes() -> None:
+def test_active_solar_differential_shutdown_requires_five_continuous_minutes_below_three() -> None:
     tracker = SolarEligibilityTracker()
-    first = tracker.evaluate(observation(solar_active=True, collector=92))
-    ninth = tracker.evaluate(observation(at=NOW + timedelta(minutes=9), solar_active=True, collector=92))
-    tenth = tracker.evaluate(observation(at=NOW + timedelta(minutes=10), solar_active=True, collector=92))
-    assert first.eligible and ninth.eligible
-    assert not tenth.eligible
-    assert tenth.reason_code == "differential_low_sustained"
+    first = tracker.evaluate(observation(solar_active=True, collector=88.9))
+    almost = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=4, seconds=59),
+            solar_active=True,
+            collector=88.9,
+        )
+    )
+    fifth = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=5),
+            solar_active=True,
+            collector=88.9,
+        )
+    )
+    assert first.eligible and almost.eligible
+    assert not fifth.eligible
+    assert fifth.reason_code == "differential_low_sustained"
 
 
-def test_differential_recovery_resets_shutdown_timer() -> None:
+def test_differential_recovery_to_three_resets_shutdown_timer() -> None:
     tracker = SolarEligibilityTracker()
-    tracker.evaluate(observation(solar_active=True, collector=92))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=9), solar_active=True, collector=94))
-    restarted = tracker.evaluate(observation(at=NOW + timedelta(minutes=10), solar_active=True, collector=92))
-    still_running = tracker.evaluate(observation(at=NOW + timedelta(minutes=19), solar_active=True, collector=92))
-    assert restarted.eligible and still_running.eligible
+    tracker.evaluate(observation(solar_active=True, collector=88.9))
+    recovered = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=4),
+            solar_active=True,
+            collector=89.0,
+        )
+    )
+    restarted = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=5),
+            solar_active=True,
+            collector=88.9,
+        )
+    )
+    still_running = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=9, seconds=59),
+            solar_active=True,
+            collector=88.9,
+        )
+    )
+    assert recovered.eligible
+    assert restarted.eligible
+    assert still_running.eligible
+
+
+def test_activation_boundary_remains_inclusive_at_seven() -> None:
+    below = SolarEligibilityTracker().evaluate(observation(collector=92.9))
+    at_threshold = SolarEligibilityTracker().evaluate(observation(collector=93.0))
+    assert not below.eligible
+    assert below.reason_code == "activation_differential_insufficient"
+    assert at_threshold.eligible
+
+
+def test_active_solar_is_not_forced_off_by_activation_only_ninety_degree_floor() -> None:
+    tracker = SolarEligibilityTracker()
+    result = tracker.evaluate(
+        observation(
+            solar_active=True,
+            water=83.0,
+            collector=89.0,
+        )
+    )
+    assert result.eligible
+    assert result.reason_code == "active_shutdown_debounce"
+    assert result.differential_f == 6.0
+
+
+def test_active_solar_exactly_three_degree_differential_does_not_start_shutdown() -> None:
+    tracker = SolarEligibilityTracker()
+    at_threshold = tracker.evaluate(observation(solar_active=True, collector=89.0))
+    later = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=10),
+            solar_active=True,
+            collector=89.0,
+        )
+    )
+    assert at_threshold.eligible
+    assert later.eligible
+    assert later.differential_below_since is None
 
 
 def test_target_satisfaction_shutdown_requires_ten_continuous_minutes() -> None:

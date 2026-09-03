@@ -18,9 +18,9 @@ class SolarEligibilityPolicy:
     """Initial physical thresholds; values remain configurable policy."""
 
     activation_differential_f: float = 7.0
-    deactivation_differential_f: float = 7.0
+    deactivation_differential_f: float = 3.0
     minimum_collector_temperature_f: float = 90.0
-    deactivation_hold: timedelta = timedelta(minutes=10)
+    deactivation_hold: timedelta = timedelta(minutes=5)
     target_satisfaction_hold: timedelta = timedelta(minutes=10)
 
     def __post_init__(self) -> None:
@@ -89,7 +89,7 @@ class SolarEligibilityAssessment:
 
 
 class SolarEligibilityTracker:
-    """Apply immediate activation and independent ten-minute shutdown debounce."""
+    """Apply immediate activation with hysteresis and shutdown debounce."""
 
     def __init__(self, policy: SolarEligibilityPolicy = SolarEligibilityPolicy()) -> None:
         self._policy = policy
@@ -159,12 +159,12 @@ class SolarEligibilityTracker:
             return self._block(observation, differential=differential, reason_code="pool_circulation_inactive", rationale="Pool circulation is not active.")
         if observation.spa_active:
             return self._block(observation, differential=differential, reason_code="spa_priority", rationale="Active spa operation suppresses pool solar.")
-        if collector < self._policy.minimum_collector_temperature_f:
-            return self._block(observation, differential=differential, reason_code="collector_below_minimum", rationale="Collector temperature is below the configured minimum.")
 
         if not observation.solar_active:
             self._differential_below_since = None
             self._target_satisfied_since = None
+            if collector < self._policy.minimum_collector_temperature_f:
+                return self._block(observation, differential=differential, reason_code="collector_below_minimum", rationale="Collector temperature is below the configured minimum.")
             if water >= target:
                 return self._block(observation, differential=differential, reason_code="target_satisfied", rationale="Pool target is already satisfied.")
             if differential < self._policy.activation_differential_f:
