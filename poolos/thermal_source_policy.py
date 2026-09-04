@@ -191,7 +191,7 @@ class ThermalSourceSelector:
                 source_reference="trusted-water-temperature-probe",
                 constraints=(pump_baseline_criterion(rpm=rpm, operating_mode="temperature_probe"), command_disabled_criterion()),
             )
-            return ThermalOperatingAssessment(observation.evaluated_at, ThermalOperatingMode.POOL_TEMPERATURE_PROBE, ThermalHeatSource.NONE, rpm, solar, gate_applied, gate_passed, intent, "trusted_temperature_probe_required")
+            return ThermalOperatingAssessment(observation.evaluated_at, ThermalOperatingMode.POOL_TEMPERATURE_PROBE, ThermalHeatSource.NONE, rpm, solar, gate_applied, gate_passed, intent, "pool_temperature_probe_required")
 
         if observation.heating_mode is PoolHeatingMode.GAS_ONLY:
             if not needs_heat:

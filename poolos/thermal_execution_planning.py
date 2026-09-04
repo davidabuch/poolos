@@ -30,6 +30,7 @@ from .thermal_source_policy import (
     PoolHeatingMode,
     ThermalHeatSource,
     ThermalOperatingAssessment,
+    ThermalOperatingMode,
     ThermalSourceInput,
 )
 
@@ -187,11 +188,17 @@ def desired_pool_state(
         observation.trusted_pool_temperature_f is not None
         and observation.pool_target_f is not None
     )
-    required_available = pool_temperature_available and (
-        selected_source is PhysicalHeatMode.OFF
-        or (
-            observation.heating_mode is PoolHeatingMode.GAS_ONLY
-            or observation.collector_temperature_f is not None
+    probe_required = (
+        assessment.mode is ThermalOperatingMode.POOL_TEMPERATURE_PROBE
+    )
+    required_available = probe_required or (
+        pool_temperature_available
+        and (
+            selected_source is PhysicalHeatMode.OFF
+            or (
+                observation.heating_mode is PoolHeatingMode.GAS_ONLY
+                or observation.collector_temperature_f is not None
+            )
         )
     )
     effective_blockers = tuple(blockers)

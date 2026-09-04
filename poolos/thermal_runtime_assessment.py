@@ -13,7 +13,7 @@ from enum import StrEnum
 from hashlib import sha256
 import json
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, ClassVar, Mapping
 
 from .integration import PhysicalHeatMode, ThermalBody
 from .native_configuration_policy import NativeConfigurationAssessment
@@ -44,6 +44,12 @@ from .thermal_source_policy import (
     ThermalSourceInput,
     ThermalSourceSelector,
 )
+from .water_temperature_policy import (
+    TemperatureSample,
+    WaterTemperatureAssessment,
+    WaterTemperatureDisposition,
+    WaterTemperatureTracker,
+)
 
 
 class ThermalRequestedMode(StrEnum):
@@ -51,6 +57,105 @@ class ThermalRequestedMode(StrEnum):
     SOLAR = "Solar"
     GAS = "Gas"
     SOLAR_PREFERRED = "Solar Preferred"
+
+
+class PoolTemperatureProbePhase(StrEnum):
+    """In-memory ownership lifecycle for one Pool water-temperature probe."""
+
+    IDLE = "idle"
+    PROBE_REQUIRED = "probe_required"
+    PROBING = "probing"
+    TRUSTED = "trusted"
+    ACQUISITION_FAILED = "acquisition_failed"
+
+
+@dataclass(slots=True)
+class PoolTemperatureProbeRuntimeState:
+    """Retain one bounded probe lifecycle without commanding circulation."""
+
+    phase: PoolTemperatureProbePhase = PoolTemperatureProbePhase.IDLE
+    requested_at: datetime | None = None
+    started_at: datetime | None = None
+    samples: tuple[TemperatureSample, ...] = ()
+    last_assessment: WaterTemperatureAssessment | None = None
+    sample_limit: ClassVar[int] = 64
+
+    @property
+    def owned(self) -> bool:
+        return self.phase in {
+            PoolTemperatureProbePhase.PROBE_REQUIRED,
+            PoolTemperatureProbePhase.PROBING,
+            PoolTemperatureProbePhase.ACQUISITION_FAILED,
+        }
+
+    @property
+    def tracker_probe_active(self) -> bool:
+        return self.phase in {
+            PoolTemperatureProbePhase.PROBING,
+            PoolTemperatureProbePhase.ACQUISITION_FAILED,
+        }
+
+    def require(self, at: datetime) -> None:
+        if self.phase is PoolTemperatureProbePhase.ACQUISITION_FAILED:
+            return
+        if self.phase is not PoolTemperatureProbePhase.PROBE_REQUIRED:
+            self.phase = PoolTemperatureProbePhase.PROBE_REQUIRED
+            self.requested_at = at
+            self.started_at = None
+            self.samples = ()
+
+    def begin_if_required(self, at: datetime, *, pool_circulating: bool) -> None:
+        if (
+            self.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+            and pool_circulating
+        ):
+            self.phase = PoolTemperatureProbePhase.PROBING
+            self.started_at = at
+
+    def samples_with(
+        self,
+        sample: TemperatureSample | None,
+    ) -> tuple[TemperatureSample, ...]:
+        if not self.tracker_probe_active or sample is None:
+            return self.samples
+        if self.started_at is not None and sample.observed_at < self.started_at:
+            return self.samples
+        if self.samples and sample.observed_at <= self.samples[-1].observed_at:
+            return self.samples
+        return (*self.samples, sample)[-self.sample_limit :]
+
+    def accept(
+        self,
+        assessment: WaterTemperatureAssessment,
+        samples: tuple[TemperatureSample, ...],
+    ) -> None:
+        self.last_assessment = assessment
+        self.samples = samples
+        if (
+            assessment.disposition is WaterTemperatureDisposition.TRUSTED
+            and self.phase is PoolTemperatureProbePhase.PROBING
+        ):
+            self.phase = PoolTemperatureProbePhase.TRUSTED
+        elif (
+            assessment.disposition
+            is WaterTemperatureDisposition.ACQUISITION_FAILED
+        ):
+            self.phase = PoolTemperatureProbePhase.ACQUISITION_FAILED
+        elif (
+            assessment.disposition is WaterTemperatureDisposition.NOT_REQUIRED
+            and self.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+        ):
+            self.phase = PoolTemperatureProbePhase.IDLE
+            self.requested_at = None
+            self.started_at = None
+            self.samples = ()
+
+    def reset(self) -> None:
+        self.phase = PoolTemperatureProbePhase.IDLE
+        self.requested_at = None
+        self.started_at = None
+        self.samples = ()
+        self.last_assessment = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +172,7 @@ class ThermalRuntimeEvidence:
     stale_native_concepts: tuple[str, ...]
     missing_native_concepts: tuple[str, ...]
     native_configuration: NativeConfigurationAssessment
+    native_observed_at: Mapping[str, datetime] = field(default_factory=dict)
     filtration_debt: timedelta | None = None
     pending_durable_incident_confirmation: bool = False
     durable_incident_confirmed: bool = False
@@ -74,6 +180,10 @@ class ThermalRuntimeEvidence:
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at)
         object.__setattr__(self, "native_values", MappingProxyType(dict(self.native_values)))
+        observed_at = dict(self.native_observed_at)
+        for timestamp in observed_at.values():
+            _require_aware(timestamp)
+        object.__setattr__(self, "native_observed_at", MappingProxyType(observed_at))
         object.__setattr__(
             self, "stale_native_concepts", tuple(sorted(set(self.stale_native_concepts)))
         )
@@ -208,9 +318,20 @@ class ThermalRuntimeEvaluator:
 
     pool_selector: ThermalSourceSelector = field(default_factory=ThermalSourceSelector)
     spa_tracker: SpaThermalPolicyTracker = field(default_factory=SpaThermalPolicyTracker)
+    water_temperature_tracker: WaterTemperatureTracker = field(
+        default_factory=WaterTemperatureTracker
+    )
+    pool_temperature_probe: PoolTemperatureProbeRuntimeState = field(
+        default_factory=PoolTemperatureProbeRuntimeState
+    )
     planner: ThermalExecutionPlanBuilder = field(default_factory=ThermalExecutionPlanBuilder)
     authorization: ThermalLiveAuthorizationEngine = field(
         default_factory=ThermalLiveAuthorizationEngine
+    )
+    _last_pool_temperature_evaluated_at: datetime | None = field(
+        default=None,
+        init=False,
+        repr=False,
     )
 
     def evaluate(
@@ -219,6 +340,11 @@ class ThermalRuntimeEvaluator:
         *,
         live_policy: ThermalLiveExecutionPolicy,
     ) -> ThermalRuntimeAssessment:
+        if evidence.pool_requested_mode not in {
+            ThermalRequestedMode.SOLAR,
+            ThermalRequestedMode.SOLAR_PREFERRED,
+        }:
+            self.pool_temperature_probe.reset()
         evaluation_id = _evaluation_id(evidence)
         pool = self._evaluate_body(
             evidence,
@@ -279,6 +405,108 @@ class ThermalRuntimeEvaluator:
         }
         missing = tuple(sorted(relevant & set(evidence.missing_native_concepts)))
         stale = tuple(sorted(relevant & set(evidence.stale_native_concepts)))
+
+        water_temperature: WaterTemperatureAssessment | None = None
+        if (
+            body is ThermalBody.POOL
+            and requested_mode
+            in {
+                ThermalRequestedMode.SOLAR,
+                ThermalRequestedMode.SOLAR_PREFERRED,
+            }
+        ):
+            if (
+                self._last_pool_temperature_evaluated_at is not None
+                and evidence.evaluated_at
+                < self._last_pool_temperature_evaluated_at
+            ):
+                raise ValueError(
+                    "solar eligibility observations must be chronological"
+                )
+            self._last_pool_temperature_evaluated_at = evidence.evaluated_at
+            pool_temperature_usable = (
+                "pool.temperature" not in missing
+                and "pool.temperature" not in stale
+            )
+            collector_temperature_usable = (
+                "solar.temperature" not in missing
+                and "solar.temperature" not in stale
+            )
+            pool_circulating = (
+                active is True and pump_rpm is not None and pump_rpm > 0
+            )
+            self.pool_temperature_probe.begin_if_required(
+                evidence.evaluated_at,
+                pool_circulating=pool_circulating,
+            )
+            sample: TemperatureSample | None = None
+            observed_temperature = (
+                _number(values.get("pool.temperature"))
+                if pool_temperature_usable
+                else None
+            )
+            if (
+                self.pool_temperature_probe.tracker_probe_active
+                and pool_circulating
+                and observed_temperature is not None
+            ):
+                sample_observed_at = evidence.native_observed_at.get(
+                    "pool.temperature"
+                )
+                if (
+                    sample_observed_at is not None
+                    and sample_observed_at <= evidence.evaluated_at
+                ):
+                    sample = TemperatureSample(
+                        sample_observed_at,
+                        observed_temperature,
+                    )
+            samples = self.pool_temperature_probe.samples_with(sample)
+            try:
+                water_temperature = self.water_temperature_tracker.evaluate(
+                    evaluated_at=evidence.evaluated_at,
+                    observed_temperature_f=observed_temperature,
+                    pool_circulating=pool_circulating,
+                    probe_active=(
+                        self.pool_temperature_probe.tracker_probe_active
+                    ),
+                    probe_started_at=self.pool_temperature_probe.started_at,
+                    samples=samples,
+                    collector_temperature_f=(
+                        _number(values.get("solar.temperature"))
+                        if collector_temperature_usable
+                        else None
+                    ),
+                    thermal_decision_requested=True,
+                )
+            except ValueError as exc:
+                if str(exc) == "temperature evaluations must be chronological":
+                    raise ValueError(
+                        "solar eligibility observations must be chronological"
+                    ) from exc
+                raise
+
+            self.pool_temperature_probe.accept(water_temperature, samples)
+            if (
+                water_temperature.disposition
+                is WaterTemperatureDisposition.PROBE_REQUIRED
+            ):
+                self.pool_temperature_probe.require(evidence.evaluated_at)
+
+            if (
+                water_temperature.disposition
+                in {
+                    WaterTemperatureDisposition.PROBE_REQUIRED,
+                    WaterTemperatureDisposition.PROBING,
+                }
+            ):
+                missing = tuple(
+                    item for item in missing if item != "pool.temperature"
+                )
+                stale = tuple(
+                    item for item in stale if item != "pool.temperature"
+                )
+
         blockers = tuple(
             (
                 *(f"missing_native:{item}" for item in missing),
@@ -292,6 +520,7 @@ class ThermalRuntimeEvaluator:
             requested_mode=requested_mode,
             evidence_usable=not blockers,
             blockers=blockers,
+            water_temperature=water_temperature,
         )
         current = ThermalCurrentState(
             observed_at=evidence.evaluated_at,
@@ -369,6 +598,7 @@ class ThermalRuntimeEvaluator:
         requested_mode: ThermalRequestedMode,
         evidence_usable: bool,
         blockers: tuple[str, ...],
+        water_temperature: WaterTemperatureAssessment | None = None,
     ) -> ThermalDesiredState:
         if requested_mode is ThermalRequestedMode.OFF:
             return _off_desired(
@@ -394,11 +624,34 @@ class ThermalRuntimeEvaluator:
                 pool_active=values.get("pool.active") is True,
                 spa_active=values.get("spa.active") is True,
                 solar_active=values.get("solar.active") is True,
-                trusted_pool_temperature_f=_number(values.get("pool.temperature")),
+                trusted_pool_temperature_f=(
+                    water_temperature.trusted_temperature_f
+                    if (
+                        water_temperature is not None
+                        and water_temperature.disposition
+                        in {
+                            WaterTemperatureDisposition.TRUSTED,
+                            WaterTemperatureDisposition.REUSED,
+                        }
+                    )
+                    else (
+                        _number(values.get("pool.temperature"))
+                        if water_temperature is None
+                        else None
+                    )
+                ),
                 pool_target_f=_number(values.get("pool.target_temperature")),
                 collector_temperature_f=_number(values.get("solar.temperature")),
                 heating_mode=pool_mode,
                 permissions=permissions,
+                temperature_probe_required=(
+                    water_temperature is not None
+                    and water_temperature.disposition
+                    in {
+                        WaterTemperatureDisposition.PROBE_REQUIRED,
+                        WaterTemperatureDisposition.PROBING,
+                    }
+                ),
             )
             return desired_pool_state(
                 source_input,
