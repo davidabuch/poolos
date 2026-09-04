@@ -92,3 +92,55 @@ def test_roadmap_marks_113c_done_and_113d_next() -> None:
     assert "| 11.3C | Behavioral inference engine | DONE |" in roadmap
     assert "| 11.3D | Daily operational retrospective + counterfactual report | DONE |" in roadmap
     assert "provisional activation/deactivation differential" in roadmap
+
+
+def test_inference_sensor_attributes_avoid_full_report_serialization() -> None:
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+
+    behavioral_start = source.index("def _behavioral_attributes(")
+    solar_start = source.index("def _solar_inference_attributes(")
+    retrospective_start = source.index("def _retrospective_attributes(")
+
+    behavioral = source[behavioral_start:solar_start]
+    solar = source[solar_start:retrospective_start]
+
+    assert "report.to_dict()" not in behavioral
+    assert "report.to_dict()" not in solar
+    assert "report.events[-10:]" in behavioral
+    assert "len(report.source_event_ids)" in behavioral
+    assert "report.current_state_confidence" in behavioral
+    assert "solar = report.solar" in solar
+
+
+def test_inference_sensor_attributes_preserve_public_fields() -> None:
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+
+    behavioral_start = source.index("def _behavioral_attributes(")
+    solar_start = source.index("def _solar_inference_attributes(")
+    retrospective_start = source.index("def _retrospective_attributes(")
+
+    behavioral = source[behavioral_start:solar_start]
+    solar = source[solar_start:retrospective_start]
+
+    for field in (
+        '"confidence"',
+        '"source_event_count"',
+        '"generated_from_start"',
+        '"generated_from_end"',
+        '"recent_events"',
+    ):
+        assert field in behavioral
+
+    for field in (
+        '"activation_samples"',
+        '"deactivation_samples"',
+        '"activation_differential_f"',
+        '"deactivation_differential_f"',
+        '"hysteresis_differential_f"',
+        '"activation_roof_temperature_f"',
+        '"deactivation_roof_temperature_f"',
+        '"confidence"',
+        '"assessment"',
+        '"evidence_event_ids"',
+    ):
+        assert field in solar
