@@ -628,8 +628,9 @@ def _probe_values(
     active: bool,
     rpm: int,
     temperature: float = 98.0,
+    spa_active: bool = False,
 ) -> dict[str, object]:
-    native = values(pool_active=active)
+    native = values(pool_active=active, spa_active=spa_active)
     native["pool.raw_heater_id"] = "00000"
     native["pump.rpm"] = rpm
     native["pool.temperature"] = temperature
@@ -646,6 +647,9 @@ def _evaluate_probe(
     active: bool,
     rpm: int,
     temperature: float = 98.0,
+    spa_active: bool = False,
+    stale: tuple[str, ...] = (),
+    missing: tuple[str, ...] = (),
 ) -> object:
     return evaluator.evaluate(
         evidence(
@@ -654,9 +658,12 @@ def _evaluate_probe(
                 active=active,
                 rpm=rpm,
                 temperature=temperature,
+                spa_active=spa_active,
             ),
             pool_mode=ThermalRequestedMode.SOLAR,
             observed_at={"pool.temperature": at},
+            stale=stale,
+            missing=missing,
         ),
         live_policy=disabled_policy(),
     )
@@ -768,6 +775,240 @@ def test_probe_samples_use_authoritative_observation_time_and_ignore_duplicates(
         sample.observed_at == observed_at
         for sample in evaluator.pool_temperature_probe.samples
     ) == 1
+
+
+def test_pool_stop_discards_probe_epoch_and_requires_fresh_acquisition() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    first_started = NOW + timedelta(seconds=30)
+    _evaluate_probe(
+        evaluator,
+        at=first_started,
+        active=True,
+        rpm=1500,
+        temperature=90.0,
+    )
+    _evaluate_probe(
+        evaluator,
+        at=first_started + timedelta(seconds=60),
+        active=True,
+        rpm=1500,
+        temperature=89.5,
+    )
+
+    _evaluate_probe(
+        evaluator,
+        at=first_started + timedelta(seconds=70),
+        active=False,
+        rpm=0,
+        temperature=99.0,
+    )
+
+    interrupted = evaluator.pool_temperature_probe
+    assert interrupted.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert interrupted.started_at is None
+    assert interrupted.samples == ()
+
+    second_started = first_started + timedelta(seconds=75)
+    resumed = _evaluate_probe(
+        evaluator,
+        at=second_started,
+        active=True,
+        rpm=1500,
+        temperature=89.0,
+    )
+
+    assert interrupted.phase is PoolTemperatureProbePhase.PROBING
+    assert interrupted.started_at == second_started
+    assert [sample.temperature_f for sample in interrupted.samples] == [89.0]
+    assert interrupted.last_assessment is not None
+    assert interrupted.last_assessment.trusted_temperature_f is None
+    assert resumed.pool.plan.desired.evidence["pool_temperature_f"] is None
+
+
+def test_old_samples_cannot_bridge_a_short_probe_interruption() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    first_started = NOW + timedelta(seconds=30)
+    _evaluate_probe(
+        evaluator,
+        at=first_started,
+        active=True,
+        rpm=1500,
+        temperature=90.0,
+    )
+    _evaluate_probe(
+        evaluator,
+        at=first_started + timedelta(seconds=60),
+        active=True,
+        rpm=1500,
+        temperature=89.5,
+    )
+    _evaluate_probe(
+        evaluator,
+        at=first_started + timedelta(seconds=65),
+        active=False,
+        rpm=0,
+    )
+
+    second_started = first_started + timedelta(seconds=70)
+    result = _evaluate_probe(
+        evaluator,
+        at=second_started,
+        active=True,
+        rpm=1500,
+        temperature=89.0,
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBING
+    assert probe.started_at == second_started
+    assert tuple(sample.observed_at for sample in probe.samples) == (second_started,)
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.reason_code == "probe_minimum_duration"
+    assert result.pool.plan.desired.evidence["pool_temperature_f"] is None
+
+
+def test_zero_rpm_invalidates_probe_even_while_pool_remains_active() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=started, active=True, rpm=1500)
+
+    _evaluate_probe(
+        evaluator,
+        at=started + timedelta(seconds=30),
+        active=True,
+        rpm=0,
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert probe.started_at is None
+    assert probe.samples == ()
+
+
+def test_spa_takeover_invalidates_pool_probe_epoch() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=started, active=True, rpm=1500)
+
+    result = _evaluate_probe(
+        evaluator,
+        at=started + timedelta(seconds=30),
+        active=False,
+        spa_active=True,
+        rpm=3000,
+        temperature=101.0,
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert probe.started_at is None
+    assert probe.samples == ()
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.trusted_temperature_f is None
+    assert result.pool.plan.desired.evidence["pool_temperature_f"] is None
+
+
+def test_simultaneous_pool_and_spa_activity_invalidates_pool_probe_epoch() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=started, active=True, rpm=1500)
+
+    _evaluate_probe(
+        evaluator,
+        at=started + timedelta(seconds=30),
+        active=True,
+        spa_active=True,
+        rpm=3000,
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert probe.started_at is None
+    assert probe.samples == ()
+
+
+@pytest.mark.parametrize("concept", ("pool.active", "spa.active", "pump.rpm"))
+@pytest.mark.parametrize("qualification", ("missing", "stale"))
+def test_unusable_hydraulic_evidence_invalidates_pool_probe_epoch(
+    concept: str,
+    qualification: str,
+) -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=started, active=True, rpm=1500)
+
+    unusable = (concept,)
+    _evaluate_probe(
+        evaluator,
+        at=started + timedelta(seconds=30),
+        active=True,
+        rpm=1500,
+        missing=unusable if qualification == "missing" else (),
+        stale=unusable if qualification == "stale" else (),
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert probe.started_at is None
+    assert probe.samples == ()
+
+
+def test_probe_maximum_duration_restarts_with_fresh_continuous_epoch() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    first_started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=first_started, active=True, rpm=1500)
+    _evaluate_probe(
+        evaluator,
+        at=first_started + timedelta(minutes=4, seconds=50),
+        active=True,
+        rpm=1500,
+        temperature=94.0,
+    )
+    _evaluate_probe(
+        evaluator,
+        at=first_started + timedelta(minutes=4, seconds=55),
+        active=False,
+        rpm=0,
+    )
+
+    second_started = first_started + timedelta(minutes=5, seconds=5)
+    _evaluate_probe(
+        evaluator,
+        at=second_started,
+        active=True,
+        rpm=1500,
+        temperature=90.0,
+    )
+    before_new_maximum = _evaluate_probe(
+        evaluator,
+        at=second_started + timedelta(minutes=4, seconds=59),
+        active=True,
+        rpm=1500,
+        temperature=85.0,
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBING
+    assert probe.started_at == second_started
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.disposition.value == "probing"
+    assert before_new_maximum.pool.plan.desired.evidence["pool_temperature_f"] is None
+
+    _evaluate_probe(
+        evaluator,
+        at=second_started + timedelta(minutes=5),
+        active=True,
+        rpm=1500,
+        temperature=84.0,
+    )
+    assert probe.phase is PoolTemperatureProbePhase.ACQUISITION_FAILED
 
 
 def test_probe_succeeds_only_after_minimum_duration_and_stable_window() -> None:
