@@ -122,7 +122,7 @@ def test_unusable_evidence_breaks_credit_continuity_fail_closed() -> None:
     assert recovered is not None and recovered.credited_runtime == timedelta(0)
 
 
-def test_high_peak_deferral_preserves_debt_and_later_window_runs_at_2600() -> None:
+def test_high_peak_deferral_preserves_debt_then_optimization_waits_for_catchup() -> None:
     tracker = accounting()
     high_peak = datetime(2026, 8, 28, 14, 0, tzinfo=LOCAL)
     tracker.observe(
@@ -139,8 +139,11 @@ def test_high_peak_deferral_preserves_debt_and_later_window_runs_at_2600() -> No
     assert deferred.tou_tier is TimeOfUseTier.HIGH_PEAK
     assert deferred.remaining_runtime == timedelta(hours=9, minutes=57)
     assert deferred.next_suitable_at == high_peak.replace(hour=17)
-    assert later is not None and later.disposition is FiltrationDisposition.RUN_NOW
+
+    assert later is not None
+    assert later.disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
     assert later.remaining_runtime == timedelta(hours=9, minutes=57)
+    assert later.next_suitable_at == high_peak.replace(hour=20)
     assert later.ordinary_filtration_rpm == 2600
 
 
