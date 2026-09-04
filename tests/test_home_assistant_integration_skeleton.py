@@ -88,6 +88,10 @@ def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
     assert "type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]" in source
     assert "entry.runtime_data = PoolOSRuntimeData" in source
     assert "async_config_entry_first_refresh" in source
+    assert source.count("ThermalRuntimeOrchestrator()") == 1
+    assert "thermal_runtime.set_orchestration_observer(" in source
+    assert "thermal_runtime.set_orchestration_failure_observer(" in source
+    assert "thermal_runtime_orchestrator.unload(" in source
 
 
 def test_coordinator_performs_no_external_io_and_disables_actuation() -> None:

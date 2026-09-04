@@ -109,6 +109,7 @@ def test_runtime_publishes_one_stable_bounded_ha_event_after_baseline() -> None:
     runtime.process(_native(now, pool_active=False), transport, 1)
     assert calls == []
     assert authority.controller_mode == "auto"
+    assert runtime.latest_batch.events == ()
 
     runtime.process(
         _native(now + timedelta(seconds=1), pool_active=True), transport, 1
@@ -122,6 +123,7 @@ def test_runtime_publishes_one_stable_bounded_ha_event_after_baseline() -> None:
     assert data["notification_recommended"] is True
     assert data["reconciliation_required"] is False
     assert "history" not in data
+    assert runtime.latest_batch.events[0].concept == "pool.active"
 
 
 def _body_assessment(

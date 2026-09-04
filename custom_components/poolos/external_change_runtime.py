@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from poolos.external_change import (
+    ExternalChangeBatch,
     ExternalNativeChangeMonitor,
     ExternalOwnershipContext,
 )
@@ -35,6 +36,10 @@ class PoolOSExternalChangeRuntime:
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
+    latest_batch: ExternalChangeBatch = field(
+        default_factory=lambda: ExternalChangeBatch(()),
+        init=False,
+    )
 
     def __post_init__(self) -> None:
         self.monitor = ExternalNativeChangeMonitor(self.authority)
@@ -61,6 +66,7 @@ class PoolOSExternalChangeRuntime:
             transport,
             ownership=ownership,
         )
+        self.latest_batch = batch
         refreshed_ownership = self._ownership()
         if refreshed_ownership.intended_values != ownership.intended_values:
             self.monitor.recompute_current_ownership(refreshed_ownership)

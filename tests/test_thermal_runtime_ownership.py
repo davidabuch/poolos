@@ -152,6 +152,7 @@ def external_event(
     new: object,
     *,
     reconciliation_required: bool = True,
+    observed_at: datetime | None = None,
 ) -> ExternalChangeEvent:
     return ExternalChangeEvent(
         concept=concept,
@@ -159,7 +160,7 @@ def external_event(
         native_object_id="native-object",
         previous_value=previous,
         new_value=new,
-        observed_at=NOW + timedelta(seconds=1),
+        observed_at=(NOW + timedelta(seconds=1) if observed_at is None else observed_at),
         external_policy=ExternalChangePolicy.RECONCILE,
         action_taken="reconciliation_required",
         notification_recommended=True,
@@ -276,6 +277,110 @@ def test_exact_expected_poolos_consequence_does_not_self_preempt(operation: str)
 
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
     assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+def test_prelease_external_event_cannot_preempt_new_lease() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(pump_rpm=2900))
+    batch = ExternalChangeBatch(
+        (
+            external_event(
+                "pump.rpm",
+                2600,
+                2900,
+                observed_at=NOW - timedelta(microseconds=1),
+            ),
+        )
+    )
+
+    decision = manager.evaluate(
+        evidence(at=NOW + timedelta(seconds=1), changes=batch)
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+@pytest.mark.parametrize("offset", [timedelta(0), timedelta(microseconds=1)])
+def test_external_event_at_or_after_lease_start_still_preempts(
+    offset: timedelta,
+) -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(pump_rpm=2900))
+    batch = ExternalChangeBatch(
+        (
+            external_event(
+                "pump.rpm",
+                2600,
+                2900,
+                observed_at=NOW + offset,
+            ),
+        )
+    )
+
+    decision = manager.evaluate(
+        evidence(at=NOW + timedelta(seconds=1), changes=batch)
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+
+
+def test_duplicate_postlease_event_cannot_mutate_terminal_ownership_twice() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(pump_rpm=2900))
+    event = external_event("pump.rpm", 2600, 2900, observed_at=NOW)
+    batch = ExternalChangeBatch((event,))
+
+    first = manager.evaluate(evidence(at=NOW + timedelta(seconds=1), changes=batch))
+    duplicate = manager.evaluate(
+        evidence(at=NOW + timedelta(seconds=2), changes=batch)
+    )
+
+    assert first.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+    assert duplicate.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.PREEMPTED
+
+
+def test_old_event_cannot_preempt_successor_lease_after_prior_preemption() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(pump_rpm=2900))
+    event = external_event(
+        "pump.rpm",
+        2900,
+        2600,
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            pump_rpm=2600,
+            changes=ExternalChangeBatch((event,)),
+        )
+    )
+    successor = execution_ownership(
+        pump_rpm=2900,
+        evaluation_id="evaluation-2",
+        plan_id="plan-2",
+        execution_plan_id="execution-plan-2",
+    )
+    decision = manager.establish(
+        successor,
+        established_at=NOW + timedelta(seconds=2),
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext("evaluation-2", "plan-2"),
+    )
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+
+    retained = manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=3),
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+            changes=ExternalChangeBatch((event,)),
+        )
+    )
+
+    assert retained.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
 
 
 @pytest.mark.parametrize(

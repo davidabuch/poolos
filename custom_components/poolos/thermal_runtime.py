@@ -66,11 +66,39 @@ class PoolOSThermalRuntime:
         init=False,
         repr=False,
     )
+    _orchestration_observer: Callable[
+        [ObservationSnapshot | None, ThermalRuntimeAssessment | None],
+        None,
+    ] | None = field(default=None, init=False, repr=False)
+    _orchestration_failure_observer: Callable[
+        [ObservationSnapshot, Exception],
+        None,
+    ] | None = field(default=None, init=False, repr=False)
 
     def set_assessment_observer(self, observer: Callable[[], None]) -> None:
         """Register bounded diagnostics that follow assessment changes."""
 
         self._assessment_observer = observer
+
+    def set_orchestration_observer(
+        self,
+        observer: Callable[
+            [ObservationSnapshot | None, ThermalRuntimeAssessment | None],
+            None,
+        ]
+        | None,
+    ) -> None:
+        """Attach one command-free lifecycle owner to assessment publication."""
+
+        self._orchestration_observer = observer
+
+    def set_orchestration_failure_observer(
+        self,
+        observer: Callable[[ObservationSnapshot, Exception], None] | None,
+    ) -> None:
+        """Attach a fail-closed transition for orchestration adapter errors."""
+
+        self._orchestration_failure_observer = observer
 
     def set_effective_live_enabled(self, enabled: bool) -> None:
         """Change readiness configuration only; never execute a plan."""
@@ -208,6 +236,7 @@ class PoolOSThermalRuntime:
         else:
             self.last_error = None
         self._notify_assessment_observer()
+        self._notify_orchestration_observer(authoritative)
         if publish:
             self.coordinator.async_update_listeners()
 
@@ -222,6 +251,29 @@ class PoolOSThermalRuntime:
                 "PoolOS external ownership diagnostics refresh failed; "
                 "thermal assessment publication continues"
             )
+
+    def _notify_orchestration_observer(
+        self,
+        snapshot: ObservationSnapshot | None,
+    ) -> None:
+        observer = self._orchestration_observer
+        if observer is None:
+            return
+        try:
+            observer(snapshot, self.assessment)
+        except Exception as exc:
+            LOGGER.exception(
+                "PoolOS thermal orchestration failed; "
+                "authoritative assessment publication continues"
+            )
+            failure_observer = self._orchestration_failure_observer
+            if failure_observer is not None and snapshot is not None:
+                try:
+                    failure_observer(snapshot, exc)
+                except Exception:
+                    LOGGER.exception(
+                        "PoolOS thermal orchestration fail-closed transition failed"
+                    )
 
     def _select_authoritative_snapshot(
         self,

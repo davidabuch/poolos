@@ -854,6 +854,11 @@ def _external_preemption_reason(
     target_prefix = "pool" if lease.body is ThermalBody.POOL else "spa"
     target_body_concept = f"{target_prefix}.active"
     for event in batch.events:
+        # An event predating this lease belongs to an earlier ownership epoch.
+        # Equality remains fail-closed because ordering within one timestamp
+        # cannot prove that the event preceded accepted lease establishment.
+        if event.observed_at < lease.established_at:
+            continue
         if lease.body_activation is not None and event.concept == target_body_concept:
             return "runtime_ownership_preempted:body_external_change"
         if (

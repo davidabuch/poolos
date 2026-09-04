@@ -68,10 +68,18 @@ separate timestamps.
 Expected-outage acknowledgments remain retrospective operator annotations.
 They cannot establish or accelerate actual outage confirmation.
 
-No production decision/runtime surface currently consumes the confirmed
-assessment to create an outage recommendation or physical action. Command-free
-runtime integration and any later physical commissioning remain separate work
-before the intended safety behavior can be treated as active PoolOS behavior.
+The production thermal runtime orchestrator owns one tracker per config entry
+and consumes its typed assessment as a command-free lifecycle gate. Pending,
+unknown, and confirmed-outage states block a new thermal candidate. They also
+end any existing in-memory thermal ownership entitlement without issuing a
+cleanup, restoration, pump, body, or heat-source command. Authoritative
+`ON_GRID` evidence permits only a fresh evaluation; it never restores a prior
+plan, session, ownership lease, RPM, source, or body state.
+
+Physical outage response and autonomous thermal delivery remain separate,
+uncommissioned work. The orchestrator has no delivery port and permanently
+reports `automatic_execution_driver_enabled=false` and
+`command_delivery_performed=false`.
 
 When grid power returns, release safety ownership and immediately reevaluate current conditions. Do not restore a pre-outage snapshot.
 

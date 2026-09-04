@@ -34,6 +34,9 @@ from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
 from .external_change_runtime import PoolOSExternalChangeRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
+from poolos.thermal_runtime_orchestration import (  # noqa: E402
+    ThermalRuntimeOrchestrator,
+)
 from poolos.physical_command_authority import (  # noqa: E402
     PoolOSPhysicalCommandAuthority,
 )
@@ -51,6 +54,7 @@ class PoolOSRuntimeData:
     thermal_runtime: PoolOSThermalRuntime
     physical_command_authority: PoolOSPhysicalCommandAuthority
     external_change_runtime: PoolOSExternalChangeRuntime
+    thermal_runtime_orchestrator: ThermalRuntimeOrchestrator
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
@@ -95,6 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         thermal_runtime=thermal_runtime,
     )
+    thermal_runtime_orchestrator = ThermalRuntimeOrchestrator()
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
@@ -104,11 +109,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_runtime=thermal_runtime,
         physical_command_authority=physical_command_authority,
         external_change_runtime=external_change_runtime,
+        thermal_runtime_orchestrator=thermal_runtime_orchestrator,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
     coordinator.set_native_snapshot_observer(external_change_runtime.process)
     thermal_runtime.set_assessment_observer(
         external_change_runtime.refresh_ownership
+    )
+    thermal_runtime.set_orchestration_observer(
+        lambda snapshot, assessment: (
+            None
+            if snapshot is None
+            else thermal_runtime_orchestrator.refresh(
+                generated_at=snapshot.generated_at,
+                observations=snapshot.observations,
+                thermal=assessment,
+                external_changes=external_change_runtime.latest_batch,
+            )
+        )
+    )
+    thermal_runtime.set_orchestration_failure_observer(
+        lambda snapshot, error: thermal_runtime_orchestrator.fail_closed(
+            failed_at=snapshot.generated_at,
+            reason_code=(
+                "thermal_orchestration_processing_failed:"
+                f"{type(error).__name__}"
+            ),
+        )
     )
     thermal_runtime.refresh(coordinator.data)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -168,6 +195,11 @@ async def _async_options_updated(hass: HomeAssistant, entry: PoolOSConfigEntry) 
 async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
     """Unload the read-only PoolOS config entry."""
 
+    entry.runtime_data.thermal_runtime.set_orchestration_observer(None)
+    entry.runtime_data.thermal_runtime.set_orchestration_failure_observer(None)
+    entry.runtime_data.thermal_runtime_orchestrator.unload(
+        unloaded_at=datetime.now(UTC)
+    )
     await entry.runtime_data.coordinator.async_prepare_unload()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if entry.runtime_data.manual_intellicenter is not None:
