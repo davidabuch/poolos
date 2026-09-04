@@ -109,6 +109,18 @@ class ThermalLiveExecutionStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ThermalLiveExecutionContext:
+    """Current immutable thermal evaluation and plan identity."""
+
+    evaluation_id: str
+    plan_id: str
+
+    def __post_init__(self) -> None:
+        if not self.evaluation_id.strip() or not self.plan_id.strip():
+            raise ValueError("evaluation_id and plan_id must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class ThermalLiveExecutionPolicy:
     """Explicit kill switch and commissioned live scope; both default off."""
 
@@ -214,6 +226,15 @@ class ThermalLiveSafetyEvidence:
         object.__setattr__(self, "contradictory_evidence", contradictions)
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
+    @property
+    def current_context(self) -> ThermalLiveExecutionContext:
+        """Return the current thermal identity supplied by the runtime."""
+
+        return ThermalLiveExecutionContext(
+            evaluation_id=self.current_evaluation_id,
+            plan_id=self.current_plan_id,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ThermalLiveAuthorizationResult:
@@ -264,18 +285,127 @@ class ThermalLiveStepAttempt:
     step: ExecutionStep
     authorization: ThermalLiveAuthorizationResult
     lifecycle: ExecutionStepLifecycle
+    correlation_id: str
     receipt: CommandReceipt | None = None
     verifications: tuple[ExecutionVerificationResult, ...] = ()
     verified_hold_started_at: datetime | None = None
     failure_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if not self.correlation_id.strip():
+            raise ValueError("correlation_id must not be empty")
         if self.verified_hold_started_at is not None:
             _require_aware(
                 self.verified_hold_started_at,
                 "verified_hold_started_at",
             )
         object.__setattr__(self, "verifications", tuple(self.verifications))
+
+
+@dataclass(frozen=True, slots=True)
+class ThermalLiveExecutionOwnership:
+    """Accepted PoolOS delivery provenance owned by one live session.
+
+    This records only operations submitted and accepted through the scoped
+    thermal delivery port. Native observation equivalence never creates
+    ownership, and terminal sessions discard it.
+    """
+
+    evaluation_id: str
+    thermal_plan_id: str
+    execution_plan_id: str
+    target_body: ThermalBody
+    body_activation_operation_id: str | None = None
+    body_activation_receipt_id: str | None = None
+    body_activation_correlation_id: str | None = None
+    pump_operation_id: str | None = None
+    pump_receipt_id: str | None = None
+    pump_correlation_id: str | None = None
+    commanded_pump_rpm: int | None = None
+    heat_source_operation_id: str | None = None
+    heat_source_receipt_id: str | None = None
+    heat_source_correlation_id: str | None = None
+    commanded_heat_source: PhysicalHeatMode | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("evaluation_id", "thermal_plan_id", "execution_plan_id"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        object.__setattr__(self, "target_body", ThermalBody(self.target_body))
+
+    @property
+    def owns_body_activation(self) -> bool:
+        return self.body_activation_operation_id is not None
+
+    @property
+    def owns_pump_setpoint(self) -> bool:
+        return self.pump_operation_id is not None
+
+    @property
+    def owns_heat_source(self) -> bool:
+        return self.heat_source_operation_id is not None
+
+    def record_accepted(
+        self,
+        operation: PoolOperation,
+        *,
+        receipt: CommandReceipt,
+        correlation_id: str,
+    ) -> ThermalLiveExecutionOwnership:
+        """Return ownership including one accepted, session-bound operation."""
+
+        if not receipt.accepted:
+            raise ValueError("ownership requires an accepted delivery receipt")
+        if not receipt.command_id.strip():
+            raise ValueError("ownership requires a delivery receipt identity")
+        if not correlation_id.strip():
+            raise ValueError("ownership requires delivery correlation")
+        if isinstance(operation, SetBodyActive) and operation.active:
+            if operation.equipment_id != self.target_body.value:
+                raise ValueError("body activation ownership target mismatch")
+            return replace(
+                self,
+                body_activation_operation_id=operation.operation_id,
+                body_activation_receipt_id=receipt.command_id,
+                body_activation_correlation_id=correlation_id,
+            )
+        if isinstance(operation, SetPumpSpeed):
+            return replace(
+                self,
+                pump_operation_id=operation.operation_id,
+                pump_receipt_id=receipt.command_id,
+                pump_correlation_id=correlation_id,
+                commanded_pump_rpm=operation.rpm,
+            )
+        if isinstance(operation, SetHeatMode):
+            if operation.equipment_id != self.target_body.value:
+                raise ValueError("heat-source ownership target mismatch")
+            return replace(
+                self,
+                heat_source_operation_id=operation.operation_id,
+                heat_source_receipt_id=receipt.command_id,
+                heat_source_correlation_id=correlation_id,
+                commanded_heat_source=operation.mode,
+            )
+        raise ValueError("unsupported thermal ownership operation")
+
+    def cleared(self) -> ThermalLiveExecutionOwnership:
+        """Discard all active provenance while retaining session identity."""
+
+        return replace(
+            self,
+            body_activation_operation_id=None,
+            body_activation_receipt_id=None,
+            body_activation_correlation_id=None,
+            pump_operation_id=None,
+            pump_receipt_id=None,
+            pump_correlation_id=None,
+            commanded_pump_rpm=None,
+            heat_source_operation_id=None,
+            heat_source_receipt_id=None,
+            heat_source_correlation_id=None,
+            commanded_heat_source=None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +417,7 @@ class ThermalLiveExecutionSession:
     status: ThermalLiveExecutionStatus
     started_at: datetime
     updated_at: datetime
+    ownership: ThermalLiveExecutionOwnership
     attempts: tuple[ThermalLiveStepAttempt, ...] = ()
     current_attempt: ThermalLiveStepAttempt | None = None
     failure_reason: str | None = None
@@ -301,6 +432,14 @@ class ThermalLiveExecutionSession:
             raise ValueError("evaluation_id must not be empty")
         if self.execution_plan.plan_id != self.coordination.plan_id:
             raise ValueError("coordination must reference execution_plan")
+        if self.ownership.evaluation_id != self.evaluation_id:
+            raise ValueError("ownership must reference session evaluation")
+        if self.ownership.thermal_plan_id != self.assessment.plan_id:
+            raise ValueError("ownership must reference thermal plan")
+        if self.ownership.execution_plan_id != self.execution_plan.plan_id:
+            raise ValueError("ownership must reference execution plan")
+        if self.ownership.target_body is not self.assessment.desired.body:
+            raise ValueError("ownership must reference target body")
         if self.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
             if self.current_attempt is None or self.current_attempt.receipt is None:
                 raise ValueError("awaiting verification requires a delivered attempt")
@@ -312,6 +451,15 @@ class ThermalLiveExecutionSession:
         } and not self.failure_reason:
             raise ValueError("terminal failure status requires failure_reason")
         object.__setattr__(self, "attempts", tuple(self.attempts))
+
+    @property
+    def originating_context(self) -> ThermalLiveExecutionContext:
+        """Return the immutable thermal identity that admitted this session."""
+
+        return ThermalLiveExecutionContext(
+            evaluation_id=self.evaluation_id,
+            plan_id=self.assessment.plan_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -739,6 +887,12 @@ class ThermalLiveExecutionEngine:
             status=ThermalLiveExecutionStatus.READY,
             started_at=evidence.evaluated_at,
             updated_at=evidence.evaluated_at,
+            ownership=ThermalLiveExecutionOwnership(
+                evaluation_id=evidence.evaluation_id,
+                thermal_plan_id=assessment.plan_id,
+                execution_plan_id=plan.plan_id,
+                target_body=assessment.desired.body,
+            ),
         )
 
     async def deliver_current_step(
@@ -751,6 +905,17 @@ class ThermalLiveExecutionEngine:
     ) -> ThermalLiveExecutionSession:
         if session.status is not ThermalLiveExecutionStatus.READY:
             raise ValueError("session is not ready for step delivery")
+        superseded = self._supersession_reason(
+            session,
+            current_context=evidence.current_context,
+        )
+        if superseded is not None:
+            return self._terminal(
+                session,
+                ThermalLiveExecutionStatus.SUPERSEDED,
+                superseded,
+                evidence.evaluated_at,
+            )
         selected = self.coordinator.current_step(
             session.execution_plan,
             session.coordination,
@@ -843,6 +1008,7 @@ class ThermalLiveExecutionEngine:
                 step=step,
                 authorization=authorization,
                 lifecycle=failed.lifecycle,
+                correlation_id=correlation_id,
                 failure_reason=f"delivery_exception:{type(exc).__name__}",
             )
             return self._terminal(
@@ -874,6 +1040,7 @@ class ThermalLiveExecutionEngine:
                 step=step,
                 authorization=authorization,
                 lifecycle=failed.lifecycle,
+                correlation_id=correlation_id,
                 receipt=receipt,
                 failure_reason=f"delivery_{receipt.status.value}",
             )
@@ -902,13 +1069,41 @@ class ThermalLiveExecutionEngine:
             step=step,
             authorization=authorization,
             lifecycle=delivered.lifecycle,
+            correlation_id=correlation_id,
             receipt=receipt,
         )
+        try:
+            ownership = session.ownership.record_accepted(
+                step.operation,
+                receipt=receipt,
+                correlation_id=correlation_id,
+            )
+        except ValueError as exc:
+            reason = f"delivery_ownership_invalid:{exc}"
+            failed = self.step_state_machine.transition(
+                delivered.lifecycle,
+                to_status=ExecutionStepStatus.FAILED,
+                occurred_at=evidence.evaluated_at,
+                reason=reason,
+                actor="thermal-live-execution",
+            )
+            failed_attempt = replace(
+                attempt,
+                lifecycle=failed.lifecycle,
+                failure_reason=reason,
+            )
+            return self._terminal(
+                replace(session, current_attempt=failed_attempt),
+                ThermalLiveExecutionStatus.FAILED,
+                reason,
+                evidence.evaluated_at,
+            )
         return replace(
             session,
             status=ThermalLiveExecutionStatus.AWAITING_VERIFICATION,
             updated_at=evidence.evaluated_at,
             current_attempt=attempt,
+            ownership=ownership,
         )
 
     def verify_current_step(
@@ -916,6 +1111,7 @@ class ThermalLiveExecutionEngine:
         session: ThermalLiveExecutionSession,
         observations: ObservationStore,
         *,
+        current_context: ThermalLiveExecutionContext,
         policy: ThermalLiveExecutionPolicy,
         evaluated_at: datetime,
         source_id: str | None = None,
@@ -923,6 +1119,17 @@ class ThermalLiveExecutionEngine:
         if session.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
             raise ValueError("session is not awaiting verification")
         _require_aware(evaluated_at, "evaluated_at")
+        superseded = self._supersession_reason(
+            session,
+            current_context=current_context,
+        )
+        if superseded is not None:
+            return self._terminal(
+                session,
+                ThermalLiveExecutionStatus.SUPERSEDED,
+                superseded,
+                evaluated_at,
+            )
         attempt = session.current_attempt
         assert attempt is not None and attempt.receipt is not None
         lifecycle = attempt.lifecycle
@@ -1095,6 +1302,7 @@ class ThermalLiveExecutionEngine:
                     attempts=attempts,
                     current_attempt=None,
                     outcome=outcome,
+                    ownership=session.ownership.cleared(),
                 )
             if advanced.disposition is not CoordinationDisposition.READY:
                 return self._terminal(
@@ -1262,6 +1470,20 @@ class ThermalLiveExecutionEngine:
             reasons.append("execution_plan_operation_payload_mismatch")
         return tuple(reasons)
 
+    @staticmethod
+    def _supersession_reason(
+        session: ThermalLiveExecutionSession,
+        *,
+        current_context: ThermalLiveExecutionContext,
+    ) -> str | None:
+        """Return the first immutable identity mismatch, if any."""
+
+        if current_context.evaluation_id != session.evaluation_id:
+            return "thermal_execution_superseded:evaluation_id"
+        if current_context.plan_id != session.assessment.plan_id:
+            return "thermal_execution_superseded:plan_id"
+        return None
+
     def _record_coordination(self, result: ExecutionCoordinationResult) -> None:
         if self.recorder is None:
             return
@@ -1302,6 +1524,7 @@ class ThermalLiveExecutionEngine:
             current_attempt=None,
             failure_reason=reason,
             outcome=outcome,
+            ownership=session.ownership.cleared(),
         )
 
     @staticmethod
