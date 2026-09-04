@@ -282,6 +282,7 @@ class FiltrationDisposition(str, Enum):
     CREDITING = "crediting"
     RUN_NOW = "run_now"
     DEFERRED_TOU = "deferred_tou"
+    DEFERRED_OPTIMIZATION = "deferred_optimization"
     DEFERRED_HIGHER_PRIORITY = "deferred_higher_priority"
 
 
@@ -315,9 +316,68 @@ class FiltrationPolicy:
         tou_profile: TimeOfUseProfile,
         *,
         baselines: PumpOperatingBaselines = PumpOperatingBaselines(),
+        preferred_catchup_start: time = time(hour=20),
+        completion_safety_margin: timedelta = timedelta(minutes=30),
+        operational_day_boundary: time = time(hour=8),
     ) -> None:
+        if completion_safety_margin < timedelta(0):
+            raise ValueError("completion_safety_margin must not be negative")
         self._tou_profile = tou_profile
         self._baselines = baselines
+        self._preferred_catchup_start = preferred_catchup_start
+        self._completion_safety_margin = completion_safety_margin
+        self._operational_day_boundary = operational_day_boundary
+
+    def _optimized_catchup_at(
+        self,
+        evaluated_at: datetime,
+        *,
+        remaining_runtime: timedelta,
+    ) -> datetime | None:
+        """Return a safe deferred start, or None when filtration must run now."""
+
+        local = self._tou_profile._local(evaluated_at)
+        local_time = local.timetz().replace(tzinfo=None)
+
+        if local_time >= self._operational_day_boundary:
+            operational_end = datetime.combine(
+                local.date() + timedelta(days=1),
+                self._operational_day_boundary,
+                tzinfo=local.tzinfo,
+            )
+            preferred_start = datetime.combine(
+                local.date(),
+                self._preferred_catchup_start,
+                tzinfo=local.tzinfo,
+            )
+        else:
+            operational_end = datetime.combine(
+                local.date(),
+                self._operational_day_boundary,
+                tzinfo=local.tzinfo,
+            )
+            preferred_start = datetime.combine(
+                local.date() - timedelta(days=1),
+                self._preferred_catchup_start,
+                tzinfo=local.tzinfo,
+            )
+
+        # Once the preferred overnight catch-up window has begun, ordinary
+        # filtration should run rather than repeatedly defer itself.
+        if local >= preferred_start:
+            return None
+
+        latest_safe_start = (
+            operational_end
+            - remaining_runtime
+            - self._completion_safety_margin
+        )
+
+        # The completion-capacity backstop always wins over optimization.
+        if latest_safe_start <= local:
+            return None
+
+        return min(preferred_start, latest_safe_start)
 
     def evaluate(
         self,
@@ -363,52 +423,81 @@ class FiltrationPolicy:
         if higher_priority_requirement:
             disposition = FiltrationDisposition.DEFERRED_HIGHER_PRIORITY
             reason = "A higher-priority operational requirement defers filtration."
+            next_suitable = self._tou_profile.next_at_or_below(
+                evaluated_at,
+                maximum_tier=TimeOfUseTier.LOW_PEAK,
+            )
         elif tier is TimeOfUseTier.HIGH_PEAK and safely_deferrable:
             disposition = FiltrationDisposition.DEFERRED_TOU
             reason = "Flexible filtration is deferred during the high-price period."
-        else:
-            intent = OperationalIntent(
-                intent_type=OperationalIntentType.MAINTAIN_CIRCULATION,
-                source=OperationalIntentSource.SCHEDULE,
-                priority=OperationalIntentPriority.NORMAL,
-                description="Complete the outstanding daily filtration obligation",
-                requested_at=evaluated_at,
-                source_reference="daily-filtration-obligation",
-                constraints=(
-                    pump_baseline_criterion(
-                        rpm=self._baselines.filtration_rpm,
-                        operating_mode="ordinary_filtration",
-                    ),
-                    command_disabled_criterion(),
-                    IntentCriterion(
-                        code="filtration_runtime_remaining",
-                        description="Outstanding daily filtration runtime evidence",
-                        parameters={"seconds": remaining.total_seconds()},
-                    ),
-                ),
+            next_suitable = self._tou_profile.next_at_or_below(
+                evaluated_at,
+                maximum_tier=TimeOfUseTier.LOW_PEAK,
             )
+        elif safely_deferrable:
+            optimized_start = self._optimized_catchup_at(
+                evaluated_at,
+                remaining_runtime=remaining,
+            )
+            if optimized_start is not None:
+                return FiltrationAssessment(
+                    evaluated_at,
+                    FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                    remaining,
+                    tier,
+                    optimized_start,
+                    None,
+                    (
+                        "Flexible filtration is deferred while daytime circulation "
+                        "can be reserved for higher-value thermal or solar work.",
+                        "The remaining obligation still fits within the preferred "
+                        "overnight catch-up window with the configured completion "
+                        "safety margin.",
+                        "Remaining filtration obligation is preserved.",
+                    ),
+                )
+
+        if higher_priority_requirement or (
+            tier is TimeOfUseTier.HIGH_PEAK and safely_deferrable
+        ):
             return FiltrationAssessment(
                 evaluated_at,
-                FiltrationDisposition.RUN_NOW,
+                disposition,
                 remaining,
                 tier,
-                evaluated_at,
-                intent,
-                ("Outstanding filtration should run in the current suitable window.",),
+                next_suitable,
+                None,
+                (reason, "Remaining filtration obligation is preserved."),
             )
 
-        next_suitable = self._tou_profile.next_at_or_below(
-            evaluated_at,
-            maximum_tier=TimeOfUseTier.LOW_PEAK,
+        intent = OperationalIntent(
+            intent_type=OperationalIntentType.MAINTAIN_CIRCULATION,
+            source=OperationalIntentSource.SCHEDULE,
+            priority=OperationalIntentPriority.NORMAL,
+            description="Complete the outstanding daily filtration obligation",
+            requested_at=evaluated_at,
+            source_reference="daily-filtration-obligation",
+            constraints=(
+                pump_baseline_criterion(
+                    rpm=self._baselines.filtration_rpm,
+                    operating_mode="ordinary_filtration",
+                ),
+                command_disabled_criterion(),
+                IntentCriterion(
+                    code="filtration_runtime_remaining",
+                    description="Outstanding daily filtration runtime evidence",
+                    parameters={"seconds": remaining.total_seconds()},
+                ),
+            ),
         )
         return FiltrationAssessment(
             evaluated_at,
-            disposition,
+            FiltrationDisposition.RUN_NOW,
             remaining,
             tier,
-            next_suitable,
-            None,
-            (reason, "Remaining filtration obligation is preserved."),
+            evaluated_at,
+            intent,
+            ("Outstanding filtration should run in the current suitable window.",),
         )
 
 
@@ -908,6 +997,9 @@ class FiltrationAccountingTracker:
             ),
             FiltrationDisposition.RUN_NOW: "outstanding_filtration_run_now",
             FiltrationDisposition.DEFERRED_TOU: "filtration_deferred_high_peak",
+            FiltrationDisposition.DEFERRED_OPTIMIZATION: (
+                "filtration_deferred_optimization"
+            ),
             FiltrationDisposition.DEFERRED_HIGHER_PRIORITY: (
                 "filtration_deferred_higher_priority"
             ),

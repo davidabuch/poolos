@@ -215,3 +215,85 @@ def test_actual_overnight_work_reduces_debt_used_by_opportunistic_policy() -> No
         pump_rpm=2600,
     )
     assert morning.remaining_runtime == timedelta(0)
+
+
+def test_flexible_morning_filtration_defers_to_overnight_catchup_window() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=9)),
+        evaluated_at=datetime(2026, 9, 4, 8, 0, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
+    assert result.remaining_runtime == timedelta(hours=9)
+    assert result.intent is None
+    assert result.next_suitable_at == datetime(2026, 9, 4, 20, 0, tzinfo=LOCAL)
+
+
+def test_maximum_obligation_uses_completion_capacity_backstop() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=12)),
+        evaluated_at=datetime(2026, 9, 4, 9, 0, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
+    assert result.next_suitable_at == datetime(2026, 9, 4, 19, 30, tzinfo=LOCAL)
+
+
+def test_completion_backstop_forces_run_when_latest_safe_start_arrives() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=12)),
+        evaluated_at=datetime(2026, 9, 4, 19, 30, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is FiltrationDisposition.RUN_NOW
+    assert result.intent is not None
+
+
+def test_overnight_catchup_window_runs_outstanding_filtration() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=9)),
+        evaluated_at=datetime(2026, 9, 4, 20, 0, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is FiltrationDisposition.RUN_NOW
+    assert result.intent is not None
+
+
+def test_nondeferrable_morning_filtration_still_runs_immediately() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=9)),
+        evaluated_at=datetime(2026, 9, 4, 8, 0, tzinfo=LOCAL),
+        safely_deferrable=False,
+    )
+
+    assert result.disposition is FiltrationDisposition.RUN_NOW
+    assert result.intent is not None
+
+
+def test_active_solar_circulation_still_credits_instead_of_deferring() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=9), timedelta(hours=1)),
+        evaluated_at=datetime(2026, 9, 4, 10, 0, tzinfo=LOCAL),
+        safely_deferrable=True,
+        higher_priority_requirement=True,
+        filtration_in_progress=True,
+    )
+
+    assert result.disposition is FiltrationDisposition.CREDITING
+    assert result.remaining_runtime == timedelta(hours=8)
+    assert result.intent is None
+
+
+def test_deferred_optimization_disposition_is_stable_public_contract() -> None:
+    result = FiltrationPolicy(LADWP_INITIAL_PROFILE).evaluate(
+        FiltrationObligation(timedelta(hours=9)),
+        evaluated_at=datetime(2026, 9, 4, 8, 0, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
+    assert result.next_suitable_at == datetime(2026, 9, 4, 20, 0, tzinfo=LOCAL)
