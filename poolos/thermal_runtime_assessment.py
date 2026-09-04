@@ -36,6 +36,7 @@ from .thermal_live_execution import (
     ThermalLiveAuthorizationResult,
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionPolicy,
+    ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
 )
 from .thermal_source_policy import (
@@ -573,8 +574,30 @@ class ThermalRuntimeEvaluator:
             htmode=_string_or_none(values.get(f"{prefix}.raw_htmode")),
         )
         plan = self.planner.build(desired, current)
-        hydraulic_safe = active is True and not (
-            values.get("pool.active") is True and values.get("spa.active") is True
+        pool_active = _bool_or_none(values.get("pool.active"))
+        spa_active = _bool_or_none(values.get("spa.active"))
+        missing_native = set(evidence.missing_native_concepts)
+        stale_native = set(evidence.stale_native_concepts)
+        pool_activity_usable = (
+            pool_active is not None and "pool.active" not in missing_native
+        )
+        spa_activity_usable = (
+            spa_active is not None and "spa.active" not in missing_native
+        )
+        pool_activity_fresh = (
+            pool_activity_usable and "pool.active" not in stale_native
+        )
+        spa_activity_fresh = (
+            spa_activity_usable and "spa.active" not in stale_native
+        )
+        other_active = (
+            spa_active if body is ThermalBody.POOL else pool_active
+        )
+        hydraulic_safe = (
+            pool_activity_fresh
+            and spa_activity_fresh
+            and isinstance(active, bool)
+            and other_active is False
         )
         safety = ThermalLiveSafetyEvidence(
             evaluated_at=evidence.evaluated_at,
@@ -587,6 +610,15 @@ class ThermalRuntimeEvaluator:
             observation_health_acceptable=evidence.immediate_observation_healthy,
             body_active=active is True,
             hydraulic_safety_acceptable=hydraulic_safe,
+            hydraulic=ThermalHydraulicSafetyEvidence(
+                target_body=body,
+                pool_active=pool_active,
+                spa_active=spa_active,
+                pool_activity_fresh=pool_activity_fresh,
+                spa_activity_fresh=spa_activity_fresh,
+                pool_activity_usable=pool_activity_usable,
+                spa_activity_usable=spa_activity_usable,
+            ),
             native_configuration=evidence.native_configuration,
             contradictory_evidence=(
                 ("pool_and_hot_tub_active",)

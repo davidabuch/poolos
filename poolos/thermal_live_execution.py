@@ -19,6 +19,7 @@ import json
 from types import MappingProxyType
 from typing import Mapping, Protocol
 
+from .clock import FixedClock
 from .environment import RuntimeMode
 from .execution_coordinator import (
     CoordinationDisposition,
@@ -69,6 +70,8 @@ from .native_configuration_policy import (
 )
 from .observations import (
     FreshnessPolicy,
+    ObservationFreshness,
+    ObservationQuality,
     ObservationSourceKind,
     ObservationStore,
 )
@@ -128,6 +131,59 @@ class ThermalLiveExecutionPolicy:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ThermalHydraulicSafetyEvidence:
+    """Authoritative two-body topology evidence for one thermal evaluation."""
+
+    target_body: ThermalBody
+    pool_active: bool | None
+    spa_active: bool | None
+    pool_activity_fresh: bool
+    spa_activity_fresh: bool
+    pool_activity_usable: bool
+    spa_activity_usable: bool
+
+    def __post_init__(self) -> None:
+        try:
+            target_body = ThermalBody(self.target_body)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported hydraulic target body") from exc
+        for name in ("pool_active", "spa_active"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, bool):
+                raise ValueError(f"{name} must be boolean or None")
+        for name in (
+            "pool_activity_fresh",
+            "spa_activity_fresh",
+            "pool_activity_usable",
+            "spa_activity_usable",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        object.__setattr__(self, "target_body", target_body)
+
+    def active_for(self, body: ThermalBody) -> bool | None:
+        return (
+            self.pool_active
+            if body is ThermalBody.POOL
+            else self.spa_active
+        )
+
+    def fresh_for(self, body: ThermalBody) -> bool:
+        return (
+            self.pool_activity_fresh
+            if body is ThermalBody.POOL
+            else self.spa_activity_fresh
+        )
+
+    def usable_for(self, body: ThermalBody) -> bool:
+        return (
+            self.pool_activity_usable
+            if body is ThermalBody.POOL
+            else self.spa_activity_usable
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ThermalLiveSafetyEvidence:
     """Explicit current evidence required before each physical step."""
 
@@ -141,6 +197,7 @@ class ThermalLiveSafetyEvidence:
     observation_health_acceptable: bool
     body_active: bool
     hydraulic_safety_acceptable: bool
+    hydraulic: ThermalHydraulicSafetyEvidence
     native_configuration: NativeConfigurationAssessment
     contradictory_evidence: tuple[str, ...] = ()
     interrupted_execution_present: bool = False
@@ -384,6 +441,13 @@ class ThermalLiveAuthorizationEngine:
                 reasons.append("thermal_step_identity_mismatch")
             if not specification.expected_observations:
                 reasons.append("post_command_expectation_missing")
+            if (
+                specification.metadata.get("hydraulic_continuity_required")
+                != "true"
+                or specification.metadata.get("hydraulic_target_body")
+                != assessment.desired.body.value
+            ):
+                reasons.append("hydraulic_continuity_contract_mismatch")
         if evidence.evaluation_id != evidence.current_evaluation_id:
             reasons.append("evaluation_superseded")
         if evidence.current_plan_id != assessment.plan_id:
@@ -407,16 +471,15 @@ class ThermalLiveAuthorizationEngine:
         )
         if evidence.interrupted_execution_present:
             reasons.append("interrupted_execution_requires_fresh_reevaluation")
-        body_activation_step = (
-            isinstance(operation, SetBodyActive)
-            and operation.active is True
-            and operation.equipment_id == assessment.desired.body.value
-        )
-
-        if not evidence.hydraulic_safety_acceptable and not body_activation_step:
+        if not evidence.hydraulic_safety_acceptable:
             reasons.append("hydraulic_safety_model_not_satisfied")
-        if not evidence.body_active and not body_activation_step:
-            reasons.append("target_body_inactive")
+        reasons.extend(
+            self._hydraulic_authorization_reasons(
+                assessment,
+                operation=operation,
+                evidence=evidence,
+            )
+        )
         if operation is not None:
             reasons.extend(
                 self._operation_reasons(
@@ -428,6 +491,58 @@ class ThermalLiveAuthorizationEngine:
             )
         reasons.extend(self._configuration_reasons(assessment, evidence))
         return tuple(dict.fromkeys(reasons))
+
+    @staticmethod
+    def _hydraulic_authorization_reasons(
+        assessment: ThermalExecutionPlanAssessment,
+        *,
+        operation: PoolOperation | None,
+        evidence: ThermalLiveSafetyEvidence,
+    ) -> tuple[str, ...]:
+        hydraulic = evidence.hydraulic
+        target = assessment.desired.body
+        other = (
+            ThermalBody.HOT_TUB
+            if target is ThermalBody.POOL
+            else ThermalBody.POOL
+        )
+        reasons: list[str] = []
+        if hydraulic.target_body is not target:
+            reasons.append("hydraulic_evidence_body_mismatch")
+
+        for body in (target, other):
+            concept = "pool.active" if body is ThermalBody.POOL else "spa.active"
+            if not hydraulic.usable_for(body):
+                reasons.append(f"hydraulic_activity_evidence_unusable:{concept}")
+            if not hydraulic.fresh_for(body):
+                reasons.append(f"hydraulic_activity_evidence_not_fresh:{concept}")
+            if hydraulic.active_for(body) is None:
+                reasons.append(f"hydraulic_activity_evidence_unknown:{concept}")
+
+        target_active = hydraulic.active_for(target)
+        other_active = hydraulic.active_for(other)
+        if hydraulic.pool_active is True and hydraulic.spa_active is True:
+            reasons.append("hydraulic_topology_contradictory:pool_and_hot_tub_active")
+        if (
+            target_active is not None
+            and evidence.body_active != (target_active is True)
+        ):
+            reasons.append("target_body_activity_summary_conflict")
+
+        activation_step = (
+            isinstance(operation, SetBodyActive)
+            and operation.active is True
+            and operation.equipment_id == target.value
+        )
+        if activation_step:
+            if target_active is True:
+                reasons.append("target_body_already_active_requires_reevaluation")
+        elif target_active is False:
+            reasons.append("target_body_inactive")
+
+        if other_active is True:
+            reasons.append("other_body_active")
+        return tuple(reasons)
 
     @staticmethod
     def _operation_reasons(
@@ -827,6 +942,42 @@ class ThermalLiveExecutionEngine:
                     evaluated_at,
                 )
             lifecycle = verifying.lifecycle
+        hydraulic_target, contract_failure = _hydraulic_verification_contract(
+            session.assessment,
+            attempt.step,
+        )
+        hydraulic_failure = contract_failure
+        if hydraulic_failure is None:
+            assert hydraulic_target is not None
+            hydraulic_failure = _hydraulic_continuity_failure_reason(
+                observations,
+                target=hydraulic_target,
+                evaluated_at=evaluated_at,
+                freshness_policy=FreshnessPolicy(
+                    max_age=policy.observation_freshness
+                ),
+                source_id=source_id,
+            )
+        if hydraulic_failure is not None:
+            reason = f"hydraulic_continuity_lost:{hydraulic_failure}"
+            failed = self.step_state_machine.transition(
+                lifecycle,
+                to_status=ExecutionStepStatus.FAILED,
+                occurred_at=evaluated_at,
+                reason=reason,
+                actor="thermal-live-execution",
+            )
+            failed_attempt = replace(
+                attempt,
+                lifecycle=failed.lifecycle,
+                failure_reason=reason,
+            )
+            return self._terminal(
+                replace(session, current_attempt=failed_attempt),
+                ThermalLiveExecutionStatus.FAILED,
+                reason,
+                evaluated_at,
+            )
         minimum_hold = _minimum_verified_hold(attempt.step)
         hold_in_progress = (
             minimum_hold > timedelta(0)
@@ -1235,6 +1386,84 @@ def _digest(payload: object) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()[:24]
 
 
+def _hydraulic_verification_contract(
+    assessment: ThermalExecutionPlanAssessment,
+    step: ExecutionStep,
+) -> tuple[ThermalBody | None, str | None]:
+    """Bind verification to the immutable Phase 1 hydraulic contract."""
+
+    step_index = step.sequence - 1
+    if not 0 <= step_index < len(assessment.step_specifications):
+        return None, "hydraulic_continuity_contract_missing"
+    specification = assessment.step_specifications[step_index]
+    if specification.operation_id != step.operation.operation_id:
+        return None, "hydraulic_continuity_contract_identity_mismatch"
+    if specification.metadata.get("hydraulic_continuity_required") != "true":
+        return None, "hydraulic_continuity_contract_invalid"
+    try:
+        target = ThermalBody(specification.metadata["hydraulic_target_body"])
+    except (KeyError, ValueError):
+        return None, "hydraulic_continuity_contract_invalid"
+    if target is not assessment.desired.body:
+        return None, "hydraulic_continuity_contract_body_mismatch"
+    return target, None
+
+
+def _hydraulic_continuity_failure_reason(
+    observations: ObservationStore,
+    *,
+    target: ThermalBody,
+    evaluated_at: datetime,
+    freshness_policy: FreshnessPolicy,
+    source_id: str | None,
+) -> str | None:
+    """Return why an explicitly hydraulic-sensitive step lost safe topology."""
+
+    clock = FixedClock(evaluated_at)
+    active: dict[ThermalBody, bool] = {}
+    for body, concept in (
+        (ThermalBody.POOL, "pool.active"),
+        (ThermalBody.HOT_TUB, "spa.active"),
+    ):
+        observation = observations.get(
+            concept,
+            source_kind=ObservationSourceKind.LIVE,
+            source_id=source_id,
+        )
+        if observation is None:
+            return f"hydraulic_activity_evidence_missing:{concept}"
+        freshness = observation.freshness(
+            clock=clock,
+            policy=freshness_policy,
+        )
+        if freshness is not ObservationFreshness.FRESH:
+            return (
+                "hydraulic_activity_evidence_"
+                f"{freshness.value}:{concept}"
+            )
+        if observation.quality not in {
+            ObservationQuality.GOOD,
+            ObservationQuality.DEGRADED,
+        }:
+            return f"hydraulic_activity_evidence_unusable:{concept}"
+        if observation.confidence < 0.5 or not isinstance(observation.value, bool):
+            return f"hydraulic_activity_evidence_unusable:{concept}"
+        active[body] = observation.value
+
+    if active[ThermalBody.POOL] and active[ThermalBody.HOT_TUB]:
+        return "hydraulic_topology_contradictory:pool_and_hot_tub_active"
+    other = (
+        ThermalBody.HOT_TUB
+        if target is ThermalBody.POOL
+        else ThermalBody.POOL
+    )
+    if active[other]:
+        return f"other_body_active:{other.value}"
+    if not active[target]:
+        return f"target_body_inactive:{target.value}"
+    return None
+
+
 def _minimum_verified_hold(step: ExecutionStep) -> timedelta:
     """Return an explicitly commissioned verified-state hold duration."""
 
@@ -1273,6 +1502,7 @@ __all__ = [
     "ThermalLiveExecutionPolicy",
     "ThermalLiveExecutionSession",
     "ThermalLiveExecutionStatus",
+    "ThermalHydraulicSafetyEvidence",
     "ThermalLiveSafetyEvidence",
     "ThermalLiveStepAttempt",
 ]
