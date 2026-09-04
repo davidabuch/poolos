@@ -363,26 +363,61 @@ def _native_parity_commissioning_attributes(
     )
 
 
-def _behavioral_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+def _behavioral_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
     report = coordinator.behavioral_inference_report
     if report is None:
         return {"available": False, "source_event_count": 0}
-    data = report.to_dict()
     return {
         "available": True,
-        "confidence": data["current_state_confidence"],
-        "source_event_count": data["source_event_count"],
-        "generated_from_start": data["generated_from_start"],
-        "generated_from_end": data["generated_from_end"],
-        "recent_events": data["events"][-10:],
+        "confidence": report.current_state_confidence,
+        "source_event_count": len(report.source_event_ids),
+        "generated_from_start": (
+            report.generated_from_start.isoformat()
+            if report.generated_from_start is not None
+            else None
+        ),
+        "generated_from_end": (
+            report.generated_from_end.isoformat()
+            if report.generated_from_end is not None
+            else None
+        ),
+        "recent_events": [
+            {
+                "inference_id": item.inference_id,
+                "kind": item.kind,
+                "occurred_at": item.occurred_at.isoformat(),
+                "confidence": item.confidence,
+                "summary": item.summary,
+                "evidence_event_ids": list(item.evidence_event_ids),
+                "attributes": dict(item.attributes),
+            }
+            for item in report.events[-10:]
+        ],
     }
 
 
-def _solar_inference_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
+def _solar_inference_attributes(
+    coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData
+) -> dict[str, Any]:
     report = coordinator.behavioral_inference_report
     if report is None:
         return {"available": False}
-    return {"available": True, **report.to_dict()["solar"]}
+    solar = report.solar
+    return {
+        "available": True,
+        "activation_samples": solar.activation_samples,
+        "deactivation_samples": solar.deactivation_samples,
+        "activation_differential_f": solar.activation_differential_f,
+        "deactivation_differential_f": solar.deactivation_differential_f,
+        "hysteresis_differential_f": solar.hysteresis_differential_f,
+        "activation_roof_temperature_f": solar.activation_roof_temperature_f,
+        "deactivation_roof_temperature_f": solar.deactivation_roof_temperature_f,
+        "confidence": solar.confidence,
+        "assessment": solar.assessment,
+        "evidence_event_ids": list(solar.evidence_event_ids),
+    }
 
 
 
