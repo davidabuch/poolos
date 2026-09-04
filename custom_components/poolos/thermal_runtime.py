@@ -125,6 +125,15 @@ class PoolOSThermalRuntime:
             if native is None
             else {item.observation_id: item.value for item in native.observations}
         )
+        observed_at = (
+            {}
+            if native is None
+            else {
+                item.observation_id: getattr(item, "observed_at", None)
+                for item in native.observations
+                if getattr(item, "observed_at", None) is not None
+            }
+        )
         missing = set(() if native is None else native.missing_concepts)
         if native is None:
             missing.update(
@@ -163,6 +172,7 @@ class PoolOSThermalRuntime:
                 ThermalRuntimeEvidence(
                     evaluated_at=authoritative.generated_at,
                     native_values=values,
+                    native_observed_at=observed_at,
                     pool_requested_mode=self.pool_requested_mode,
                     hot_tub_requested_mode=self.hot_tub_requested_mode,
                     native_transport_available=(
