@@ -174,6 +174,59 @@ def test_assessment_observer_runs_for_requested_intent_changes() -> None:
     assert manual.command_calls == []
 
 
+def test_orchestration_observer_receives_existing_snapshot_and_assessment() -> None:
+    runtime, coordinator, manual = runtime_fixture()
+    calls: list[tuple[object, object]] = []
+    runtime.set_orchestration_observer(
+        lambda snapshot, assessment: calls.append((snapshot, assessment))
+    )
+
+    runtime.set_requested_mode(
+        ThermalBody.POOL,
+        ThermalRequestedMode.GAS,
+        publish=False,
+    )
+
+    assert calls == [(coordinator.data, runtime.assessment)]
+    assert manual.command_calls == []
+
+
+def test_orchestration_failure_does_not_suppress_thermal_publication() -> None:
+    runtime, coordinator, manual = runtime_fixture()
+
+    def fail(_snapshot: object, _assessment: object) -> None:
+        raise RuntimeError("diagnostic failure")
+
+    runtime.set_orchestration_observer(fail)
+    runtime.set_requested_mode(ThermalBody.POOL, ThermalRequestedMode.GAS)
+
+    assert runtime.assessment is not None
+    assert runtime.assessment.pool.requested_mode is ThermalRequestedMode.GAS
+    assert coordinator.listener_updates == 1
+    assert manual.command_calls == []
+
+
+def test_orchestration_failure_invokes_fail_closed_observer() -> None:
+    runtime, coordinator, manual = runtime_fixture()
+    failures: list[tuple[object, Exception]] = []
+
+    def fail(_snapshot: object, _assessment: object) -> None:
+        raise RuntimeError("orchestration failure")
+
+    runtime.set_orchestration_observer(fail)
+    runtime.set_orchestration_failure_observer(
+        lambda snapshot, error: failures.append((snapshot, error))
+    )
+    runtime.set_requested_mode(ThermalBody.POOL, ThermalRequestedMode.GAS)
+
+    assert len(failures) == 1
+    assert failures[0][0] is coordinator.data
+    assert isinstance(failures[0][1], RuntimeError)
+    assert runtime.assessment is not None
+    assert coordinator.listener_updates == 1
+    assert manual.command_calls == []
+
+
 def test_requested_mode_comes_directly_from_runtime_not_ha_state_lookup() -> None:
     runtime, _, _ = runtime_fixture()
 

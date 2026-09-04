@@ -77,11 +77,57 @@ even if current equipment and historical receipts match a former PoolOS
 thermal lifecycle. Fresh accepted execution provenance or a valid explicit
 handoff from a still-live predecessor is required.
 
-ADR-005 now defines a canonical command-free tracker that can turn the raw grid
-observation into two-second-confirmed actual-outage evidence. No production
-decision surface consumes that assessment yet. Runtime ownership therefore
-still does not consume outage state, and a separate integration/preemption
-change remains a prerequisite for safe outage preemption.
+The production thermal runtime orchestrator owns one
+`ThermalRuntimeOwnershipManager` and one canonical
+`GridOutageConfirmationTracker` per config entry. It receives the already-built
+authoritative observation frame and current thermal assessment synchronously
+from the existing serialized refresh path. It retains bounded lifecycle,
+currentness, candidate, outage, and ownership diagnostics only.
+
+The orchestrator starts unowned and cannot establish ownership because it has
+no delivery port. Matching Pool, Spa, pump, or heat-source state therefore
+remains external/pre-existing after startup or restart. If accepted delivery
+provenance is supplied by a future explicit driver, the existing ownership
+manager evaluates it against current plan identity, external-change evidence,
+body topology, configured and actual RPM, heat source, and the complete
+repository-classified shared-hydraulic inventory. Non-authoritative grid state
+ends continuation entitlement command-free; authoritative grid return causes
+only a fresh evaluation.
+
+Duplicate or older authoritative snapshots cannot mutate lifecycle truth. A
+new evaluation or plan supersedes the prior candidate even when requested mode
+or observed hardware looks compatible. Unload unregisters the callback and
+discards in-memory ownership and outage state without cleanup or restoration.
+The orchestrator permanently reports
+`automatic_execution_driver_enabled=false` and
+`command_delivery_performed=false`; probe delivery, physical outage response,
+and any autonomous execution driver remain separate future work.
+
+Orchestration evidence uses the same live verification boundary as thermal
+execution: source kind must be `LIVE`, confidence must be at least `0.5`, and
+quality must be `GOOD` or `DEGRADED`. Freshness remains concept-specific.
+Canonical grid confirmation intentionally retains its stricter grid-evidence
+contract. Low-confidence, non-live, stale, missing, suspect, or invalid body,
+pump, source, or shared-hydraulic evidence cannot support candidacy or retain
+runtime ownership.
+
+Snapshot identity is a bounded deterministic fingerprint of the authoritative
+generation time, orchestration-relevant observation identity/value/time/source/
+quality/confidence, and current body evaluation, plan, requested-mode, and
+authorization identities. An exact repeated frame is idempotent; an older frame
+is ignored; a materially different frame with the same generation time is a
+contradiction and transitions command-free readiness to blocked.
+
+External events can preempt an ownership lease only when their authoritative
+`observed_at` belongs to that lease epoch. Events before `established_at` are
+ignored for the new lease. Equality is deliberately treated as relevant because
+same-timestamp ordering cannot prove that the event preceded establishment.
+
+Home Assistant isolates orchestration processing from authoritative thermal
+publication. If orchestration processing raises, a separate bounded
+fail-closed callback clears candidate readiness, relinquishes any current
+in-memory lease without cleanup, and records a bounded reason. Only a newer
+valid authoritative frame can recover candidacy.
 
 ## Consequences
 
