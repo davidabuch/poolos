@@ -78,7 +78,12 @@ class ThermalDesiredState:
             raise ValueError("requested_mode and reason_code must not be empty")
         if self.selected_source is PhysicalHeatMode.OFF:
             if self.required_pump_rpm is not None:
-                raise ValueError("off heat source cannot require a thermal pump RPM")
+                if self.required_pump_rpm <= 0:
+                    raise ValueError("required pump RPM must be positive")
+                if self.reason_code != "pool_temperature_probe_required":
+                    raise ValueError(
+                        "off heat source may require pump RPM only for pool temperature probe"
+                    )
         elif self.required_pump_rpm is None or self.required_pump_rpm <= 0:
             raise ValueError("selected heat source requires a positive pump RPM")
         if not self.rationale or any(not item.strip() for item in self.rationale):
@@ -392,6 +397,8 @@ class ThermalExecutionPlanBuilder:
         elif desired.selected_source is PhysicalHeatMode.OFF:
             if source_changed:
                 ordering.append("source")
+            if rpm_changed:
+                ordering.append("rpm")
         elif source_changed and rpm_changed:
             assert desired_rpm is not None
             assert current.pump_rpm is not None

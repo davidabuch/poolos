@@ -807,3 +807,95 @@ def test_active_body_with_stopped_pump_still_requires_cold_start_prime() -> None
     assert plan.operations[1].rpm == 2900
 
     assert "cold_start_priming_required" in plan.change_reasons
+
+
+def test_pool_temperature_probe_cold_start_primes_then_settles_to_probe_rpm() -> None:
+    desired = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.POOL,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="pool_temperature_probe_required",
+        rpm_reason_code="pool_temperature_probe_required",
+        rationale=("Collector is actionable and trusted pool temperature is unavailable.",),
+        criteria=("pool_temperature_probe",),
+        evidence={"collector_temperature_f": 95.0},
+    )
+    current = ThermalCurrentState(
+        observed_at=NOW,
+        body=ThermalBody.POOL,
+        selected_source=PhysicalHeatMode.OFF,
+        pump_rpm=0,
+        body_active=False,
+    )
+
+    plan = ThermalExecutionPlanBuilder().build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (
+        SetBodyActive,
+        SetPumpSpeed,
+        SetPumpSpeed,
+    )
+    assert isinstance(plan.operations[0], SetBodyActive)
+    assert plan.operations[0].active is True
+    assert isinstance(plan.operations[1], SetPumpSpeed)
+    assert plan.operations[1].rpm == 3000
+    assert plan.step_specifications[1].metadata["priming_step"] == "true"
+    assert plan.step_specifications[1].metadata["minimum_verified_hold_seconds"] == "60"
+    assert isinstance(plan.operations[2], SetPumpSpeed)
+    assert plan.operations[2].rpm == 1500
+    assert plan.expected_final_state == {
+        "pool.raw_heater_id": "00000",
+        "pump.rpm": 1500,
+    }
+
+
+def test_pool_temperature_probe_does_not_reprime_existing_circulation() -> None:
+    desired = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.POOL,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="pool_temperature_probe_required",
+        rpm_reason_code="pool_temperature_probe_required",
+        rationale=("Collector is actionable and trusted pool temperature is unavailable.",),
+        criteria=("pool_temperature_probe",),
+        evidence={"collector_temperature_f": 95.0},
+    )
+    current = ThermalCurrentState(
+        observed_at=NOW,
+        body=ThermalBody.POOL,
+        selected_source=PhysicalHeatMode.OFF,
+        pump_rpm=2600,
+        body_active=True,
+    )
+
+    plan = ThermalExecutionPlanBuilder().build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (SetPumpSpeed,)
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 1500
+    assert "cold_start_priming_required" not in plan.change_reasons
+
+
+def test_off_source_pump_rpm_is_rejected_outside_temperature_probe() -> None:
+    with pytest.raises(
+        ValueError,
+        match="off heat source may require pump RPM only for pool temperature probe",
+    ):
+        ThermalDesiredState(
+            evaluated_at=NOW,
+            body=ThermalBody.POOL,
+            requested_mode="solar_preferred",
+            selected_source=PhysicalHeatMode.OFF,
+            required_pump_rpm=1500,
+            reason_code="arbitrary_off_source_circulation",
+            rpm_reason_code="arbitrary_off_source_circulation",
+            rationale=("Test invalid OFF-source circulation.",),
+            criteria=("test",),
+            evidence={},
+        )
