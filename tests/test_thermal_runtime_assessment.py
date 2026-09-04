@@ -474,10 +474,10 @@ def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> Non
     )
     assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
 
-    # An inactive body is no longer a terminal technical blocker because
-    # the plan now contains an explicit, verified body-activation first step.
-    assert result.hot_tub.technical_preflight.ready is True
-    assert result.hot_tub.technical_preflight.blocking_reasons == ()
+    # The plan may describe activation, but shared hydraulics fail closed while
+    # Pool is authoritative active and Hot Tub is inactive.
+    assert result.hot_tub.technical_preflight.ready is False
+    assert "other_body_active" in result.hot_tub.technical_preflight.blocking_reasons
     assert isinstance(result.hot_tub.plan.operations[0], SetBodyActive)
     assert result.hot_tub.plan.operations[0].equipment_id == ThermalBody.HOT_TUB.value
     assert result.hot_tub.plan.operations[0].active is True

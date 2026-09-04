@@ -47,7 +47,9 @@ from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionEngine,
     ThermalLiveExecutionPolicy,
+    ThermalLiveExecutionSession,
     ThermalLiveExecutionStatus,
+    ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
 )
 
@@ -118,10 +120,29 @@ def evidence(
     fresh: bool = True,
     health: bool = True,
     hydraulic_safe: bool = True,
+    hydraulic: ThermalHydraulicSafetyEvidence | None = None,
     configuration: NativeConfigurationInput = NativeConfigurationInput(),
     contradictions: tuple[str, ...] = (),
     interrupted: bool = False,
 ) -> ThermalLiveSafetyEvidence:
+    if hydraulic is None:
+        hydraulic = ThermalHydraulicSafetyEvidence(
+            target_body=plan.desired.body,
+            pool_active=(
+                body_active
+                if plan.desired.body is ThermalBody.POOL
+                else False
+            ),
+            spa_active=(
+                body_active
+                if plan.desired.body is ThermalBody.HOT_TUB
+                else False
+            ),
+            pool_activity_fresh=True,
+            spa_activity_fresh=True,
+            pool_activity_usable=True,
+            spa_activity_usable=True,
+        )
     return ThermalLiveSafetyEvidence(
         evaluated_at=at,
         evaluation_id=evaluation_id,
@@ -133,6 +154,7 @@ def evidence(
         observation_health_acceptable=health,
         body_active=body_active,
         hydraulic_safety_acceptable=hydraulic_safe,
+        hydraulic=hydraulic,
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
         contradictory_evidence=contradictions,
         interrupted_execution_present=interrupted,
@@ -162,20 +184,163 @@ class FakeThermalDelivery:
         )
 
 
-def store(observation_id: str, value: object, *, at: datetime) -> ObservationStore:
+def store(
+    observation_id: str,
+    value: object,
+    *,
+    at: datetime,
+    body: ThermalBody = ThermalBody.POOL,
+    hydraulics_at: datetime | None = None,
+) -> ObservationStore:
     observations = ObservationStore()
-    observations.put(
-        PoolObservation(
-            observation_id=observation_id,
-            value=value,
-            observed_at=at,
-            source_kind=ObservationSourceKind.LIVE,
-            source_id="native-intellicenter",
-            quality=ObservationQuality.GOOD,
-            confidence=1.0,
+    hydraulic_timestamp = hydraulics_at or at
+    values = {
+        observation_id: (value, at),
+        "pool.active": (
+            body is ThermalBody.POOL,
+            hydraulic_timestamp,
+        ),
+        "spa.active": (
+            body is ThermalBody.HOT_TUB,
+            hydraulic_timestamp,
+        ),
+    }
+    for concept, (observed_value, observed_at) in values.items():
+        observations.put(
+            PoolObservation(
+                observation_id=concept,
+                value=observed_value,
+                observed_at=observed_at,
+                source_kind=ObservationSourceKind.LIVE,
+                source_id="native-intellicenter",
+                quality=ObservationQuality.GOOD,
+                confidence=1.0,
+            )
+        )
+    return observations
+
+
+def hydraulic_store(
+    *,
+    at: datetime,
+    pool_active: bool | None = True,
+    spa_active: bool | None = False,
+    pump_rpm: int = 3000,
+    stale: tuple[str, ...] = (),
+    unusable: tuple[str, ...] = (),
+) -> ObservationStore:
+    observations = ObservationStore()
+    values: dict[str, object | None] = {
+        "pool.active": pool_active,
+        "spa.active": spa_active,
+        "pump.rpm": pump_rpm,
+    }
+    for observation_id, value in values.items():
+        if value is None:
+            continue
+        observed_at = (
+            at - timedelta(minutes=1) if observation_id in stale else at
+        )
+        observations.put(
+            PoolObservation(
+                observation_id=observation_id,
+                value=value,
+                observed_at=observed_at,
+                source_kind=ObservationSourceKind.LIVE,
+                source_id="native-intellicenter",
+                quality=(
+                    ObservationQuality.SUSPECT
+                    if observation_id in unusable
+                    else ObservationQuality.GOOD
+                ),
+                confidence=1.0,
+            )
+        )
+    return observations
+
+
+def hydraulic_evidence(
+    *,
+    target_body: ThermalBody,
+    pool_active: bool | None,
+    spa_active: bool | None,
+    pool_fresh: bool = True,
+    spa_fresh: bool = True,
+    pool_usable: bool = True,
+    spa_usable: bool = True,
+) -> ThermalHydraulicSafetyEvidence:
+    return ThermalHydraulicSafetyEvidence(
+        target_body=target_body,
+        pool_active=pool_active,
+        spa_active=spa_active,
+        pool_activity_fresh=pool_fresh,
+        spa_activity_fresh=spa_fresh,
+        pool_activity_usable=pool_usable,
+        spa_activity_usable=spa_usable,
+    )
+
+
+def priming_plan(
+    body: ThermalBody = ThermalBody.POOL,
+) -> ThermalExecutionPlanAssessment:
+    source = (
+        PhysicalHeatMode.SOLAR
+        if body is ThermalBody.POOL
+        else PhysicalHeatMode.GAS
+    )
+    return ThermalExecutionPlanBuilder().build(
+        desired(
+            source,
+            2900 if body is ThermalBody.POOL else 3000,
+            body=body,
+        ),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=body,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=True,
+        ),
+    )
+
+
+def delivered_priming_session(
+    body: ThermalBody = ThermalBody.POOL,
+) -> tuple[
+    ThermalLiveExecutionEngine,
+    ThermalLiveExecutionPolicy,
+    ThermalLiveExecutionSession,
+]:
+    plan = priming_plan(body)
+    live_policy = policy(
+        ThermalLiveCommissioningScope.POOL
+        if body is ThermalBody.POOL
+        else ThermalLiveCommissioningScope.HOT_TUB
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=live_policy, evidence=evidence(plan))
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=live_policy,
+            evidence=evidence(plan, at=NOW + timedelta(seconds=1)),
+            delivery=FakeThermalDelivery(),
         )
     )
-    return observations
+    return engine, live_policy, session
+
+
+def inactive_body_plan(body: ThermalBody) -> ThermalExecutionPlanAssessment:
+    return ThermalExecutionPlanBuilder().build(
+        desired(PhysicalHeatMode.SOLAR, 2900, body=body),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=body,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
 
 
 def authorize(
@@ -888,7 +1053,12 @@ def test_stale_authoritative_observation_stops_execution() -> None:
 
     result = engine.verify_current_step(
         waiting,
-        store("pool.raw_heater_id", "H0002", at=NOW),
+        store(
+            "pool.raw_heater_id",
+            "H0002",
+            at=NOW,
+            hydraulics_at=NOW + timedelta(minutes=1),
+        ),
         policy=policy(),
         evaluated_at=NOW + timedelta(minutes=1),
         source_id="native-intellicenter",
@@ -1158,6 +1328,150 @@ def test_priming_hold_fails_closed_if_rpm_deviates_before_completion() -> None:
     assert session.failure_reason == "priming_verified_hold_continuity_lost"
 
 
+@pytest.mark.parametrize(
+    ("pool_active", "spa_active", "stale", "unusable"),
+    (
+        (False, False, (), ()),
+        (False, True, (), ()),
+        (True, True, (), ()),
+        (None, False, (), ()),
+        (True, None, (), ()),
+        (True, False, ("pool.active",), ()),
+        (True, False, ("spa.active",), ()),
+        (True, False, (), ("pool.active",)),
+        (True, False, (), ("spa.active",)),
+    ),
+)
+def test_priming_hold_fails_closed_when_pool_hydraulics_lose_continuity(
+    pool_active: bool | None,
+    spa_active: bool | None,
+    stale: tuple[str, ...],
+    unusable: tuple[str, ...],
+) -> None:
+    plan = priming_plan()
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.step_specifications[0].metadata["priming_step"] == "true"
+    engine, live_policy, session = delivered_priming_session()
+
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(at=first_verified_at),
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+
+    broken_at = NOW + timedelta(seconds=62)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(
+            at=broken_at,
+            pool_active=pool_active,
+            spa_active=spa_active,
+            stale=stale,
+            unusable=unusable,
+        ),
+        policy=live_policy,
+        evaluated_at=broken_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.FAILED
+    assert session.failure_reason is not None
+    assert session.failure_reason.startswith("hydraulic_continuity_lost:")
+
+
+def test_priming_hold_fails_closed_when_pump_stops() -> None:
+    engine, live_policy, session = delivered_priming_session()
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(at=first_verified_at),
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+
+    stopped_at = NOW + timedelta(seconds=30)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(at=stopped_at, pump_rpm=0),
+        policy=live_policy,
+        evaluated_at=stopped_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.FAILED
+    assert session.failure_reason == "priming_verified_hold_continuity_lost"
+
+
+def test_uninterrupted_hot_tub_priming_requires_hot_tub_only_topology() -> None:
+    engine, live_policy, session = delivered_priming_session(
+        ThermalBody.HOT_TUB
+    )
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(
+            at=first_verified_at,
+            pool_active=False,
+            spa_active=True,
+        ),
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    completed_hold_at = NOW + timedelta(seconds=62)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(
+            at=completed_hold_at,
+            pool_active=False,
+            spa_active=True,
+        ),
+        policy=live_policy,
+        evaluated_at=completed_hold_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.READY
+
+
+def test_pool_takeover_during_hot_tub_priming_fails_closed() -> None:
+    engine, live_policy, session = delivered_priming_session(
+        ThermalBody.HOT_TUB
+    )
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(
+            at=first_verified_at,
+            pool_active=False,
+            spa_active=True,
+        ),
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    takeover_at = NOW + timedelta(seconds=30)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(
+            at=takeover_at,
+            pool_active=True,
+            spa_active=False,
+        ),
+        policy=live_policy,
+        evaluated_at=takeover_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.FAILED
+    assert session.failure_reason == "hydraulic_continuity_lost:other_body_active:pool"
+
+
 def test_nonpriming_verified_step_still_advances_immediately() -> None:
     plan = thermal_plan(
         PhysicalHeatMode.SOLAR,
@@ -1195,21 +1509,41 @@ def test_nonpriming_verified_step_still_advances_immediately() -> None:
     assert session.status is ThermalLiveExecutionStatus.COMPLETED
 
 
-def test_inactive_body_may_authorize_only_its_activation_step() -> None:
+def test_pool_temperature_probe_rpm_remains_outside_live_authority() -> None:
+    probe_desired = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.POOL,
+        requested_mode="solar",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="pool_temperature_probe_required",
+        rpm_reason_code="baseline:1500",
+        rationale=("Trusted Pool water temperature is required.",),
+        criteria=("pool_temperature_untrusted",),
+        evidence={},
+    )
     plan = ThermalExecutionPlanBuilder().build(
-        desired(
-            PhysicalHeatMode.SOLAR,
-            2900,
-            body=ThermalBody.POOL,
-        ),
+        probe_desired,
         ThermalCurrentState(
             observed_at=NOW,
             body=ThermalBody.POOL,
             selected_source=PhysicalHeatMode.OFF,
-            pump_rpm=0,
-            body_active=False,
+            pump_rpm=3000,
+            body_active=True,
         ),
     )
+    assert len(plan.operations) == 1
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 1500
+
+    result = authorize(plan)
+
+    assert result.authorized is False
+    assert "nonthermal_or_uncommissioned_pump_rpm" in result.blocking_reasons
+
+
+def test_inactive_body_may_authorize_only_its_activation_step() -> None:
+    plan = inactive_body_plan(ThermalBody.POOL)
 
     assert isinstance(plan.operations[0], SetBodyActive)
 
@@ -1218,7 +1552,7 @@ def test_inactive_body_may_authorize_only_its_activation_step() -> None:
         live_evidence=evidence(
             plan,
             body_active=False,
-            hydraulic_safe=False,
+            hydraulic_safe=True,
         ),
         step_index=0,
     )
@@ -1226,6 +1560,182 @@ def test_inactive_body_may_authorize_only_its_activation_step() -> None:
     assert first.authorized is True
     assert "target_body_inactive" not in first.blocking_reasons
     assert "hydraulic_safety_model_not_satisfied" not in first.blocking_reasons
+
+
+def test_body_activation_does_not_bypass_explicit_hydraulic_safety_veto() -> None:
+    plan = inactive_body_plan(ThermalBody.POOL)
+
+    result = authorize(
+        plan,
+        live_evidence=evidence(
+            plan,
+            body_active=False,
+            hydraulic_safe=False,
+        ),
+    )
+
+    assert result.authorized is False
+    assert "hydraulic_safety_model_not_satisfied" in result.blocking_reasons
+
+
+@pytest.mark.parametrize("body", (ThermalBody.POOL, ThermalBody.HOT_TUB))
+@pytest.mark.parametrize(
+    (
+        "target_active",
+        "other_active",
+        "target_fresh",
+        "other_fresh",
+        "target_usable",
+        "other_usable",
+        "authorized",
+        "reason",
+    ),
+    (
+        (False, False, True, True, True, True, True, None),
+        (False, True, True, True, True, True, False, "other_body_active"),
+        (
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            False,
+            "hydraulic_topology_contradictory:pool_and_hot_tub_active",
+        ),
+        (
+            False,
+            None,
+            True,
+            False,
+            True,
+            False,
+            False,
+            "hydraulic_activity_evidence_unusable",
+        ),
+        (
+            False,
+            False,
+            True,
+            False,
+            True,
+            True,
+            False,
+            "hydraulic_activity_evidence_not_fresh",
+        ),
+        (
+            None,
+            False,
+            False,
+            True,
+            False,
+            True,
+            False,
+            "hydraulic_activity_evidence_unusable",
+        ),
+        (
+            False,
+            False,
+            False,
+            True,
+            True,
+            True,
+            False,
+            "hydraulic_activity_evidence_not_fresh",
+        ),
+    ),
+)
+def test_body_activation_requires_unambiguous_two_body_hydraulic_evidence(
+    body: ThermalBody,
+    target_active: bool | None,
+    other_active: bool | None,
+    target_fresh: bool,
+    other_fresh: bool,
+    target_usable: bool,
+    other_usable: bool,
+    authorized: bool,
+    reason: str | None,
+) -> None:
+    plan = inactive_body_plan(body)
+    assert isinstance(plan.operations[0], SetBodyActive)
+    if body is ThermalBody.POOL:
+        pool_active, spa_active = target_active, other_active
+        pool_fresh, spa_fresh = target_fresh, other_fresh
+        pool_usable, spa_usable = target_usable, other_usable
+    else:
+        pool_active, spa_active = other_active, target_active
+        pool_fresh, spa_fresh = other_fresh, target_fresh
+        pool_usable, spa_usable = other_usable, target_usable
+    topology = hydraulic_evidence(
+        target_body=body,
+        pool_active=pool_active,
+        spa_active=spa_active,
+        pool_fresh=pool_fresh,
+        spa_fresh=spa_fresh,
+        pool_usable=pool_usable,
+        spa_usable=spa_usable,
+    )
+    live_evidence = evidence(
+        plan,
+        body_active=target_active is True,
+        hydraulic_safe=True,
+        hydraulic=topology,
+    )
+
+    result = authorize(
+        plan,
+        live_policy=policy(
+            ThermalLiveCommissioningScope.POOL
+            if body is ThermalBody.POOL
+            else ThermalLiveCommissioningScope.HOT_TUB
+        ),
+        live_evidence=live_evidence,
+    )
+
+    assert result.authorized is authorized
+    if reason is not None:
+        assert any(item.startswith(reason) for item in result.blocking_reasons)
+
+
+def test_body_activation_verification_rejects_other_body_takeover() -> None:
+    plan = inactive_body_plan(ThermalBody.POOL)
+    safe_activation_evidence = evidence(
+        plan,
+        body_active=False,
+        hydraulic_safe=True,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(
+        plan,
+        policy=policy(),
+        evidence=safe_activation_evidence,
+    )
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=replace(
+                safe_activation_evidence,
+                evaluated_at=NOW + timedelta(seconds=1),
+            ),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    at = NOW + timedelta(seconds=2)
+
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(at=at, pool_active=True, spa_active=True),
+        policy=policy(),
+        evaluated_at=at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.FAILED
+    assert session.failure_reason == (
+        "hydraulic_continuity_lost:"
+        "hydraulic_topology_contradictory:pool_and_hot_tub_active"
+    )
 
 
 def test_inactive_body_still_blocks_priming_step_until_activation_verified() -> None:

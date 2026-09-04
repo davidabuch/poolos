@@ -12,8 +12,9 @@ guards would grant authority far beyond thermal commissioning.
 The commissioned thermal identities are PMPCIRC `p0102`, Pool `B1101`, Hot Tub
 `B1202`, Off `00000`, Gas `H0001`, and Solar `H0002`. Phase 2 must provide a
 production-capable path without activating it, changing hydraulic routes,
-starting bodies, rewriting IntelliCenter configuration, or resuming work after
-restart.
+rewriting IntelliCenter configuration, or resuming work after restart. A later
+cold-start extension added narrowly bounded activation of the selected body,
+without granting route selection or body-deactivation authority.
 
 ## Decision
 
@@ -31,14 +32,21 @@ before delivery. Authorization requires:
 - a plan no older than the configured maximum age;
 - available independent native observations and manual delivery transport;
 - fresh, healthy, non-contradictory authoritative evidence;
-- satisfied hydraulic safety context and an active target body;
+- fresh, usable, unambiguous Pool and Hot Tub activity evidence;
+- satisfied hydraulic safety context and either an active target body or a
+  safe target-body activation step while both bodies are explicitly inactive;
 - no interrupted execution awaiting fresh reevaluation;
 - required post-command expectations; and
 - no native configuration conflict affecting the selected thermal capability.
 
-Only `SetPumpSpeed(p0102, solar_heating_rpm/gas_heating_rpm)` and body-matching
-`SetHeatMode(Off/Solar/Gas)` are admitted. Filtration, probe, grid-outage, and
-Spillway RPM values are not thermal authority even when numerically equal.
+Only `SetBodyActive(Pool/Hot Tub, True)`,
+`SetPumpSpeed(p0102, solar_heating_rpm/gas_heating_rpm/priming_rpm)`, and
+body-matching `SetHeatMode(Off/Solar/Gas)` are admitted. Body activation
+requires both body observations to be fresh and usable, the target to be
+explicitly inactive, the other body to be explicitly inactive, and no separate
+hydraulic veto. Body deactivation remains prohibited. Filtration, probe,
+grid-outage, and Spillway RPM values are not thermal authority even when
+numerically equal.
 Solar is blocked by native Solar Preferred, Solar RPM, or general RPM ownership
 conflicts. Gas is blocked by native Gas/Heater/Spa RPM or general RPM ownership
 conflicts. Native configuration is never rewritten.
@@ -59,6 +67,13 @@ payload difference blocks without calling the delivery port. Static future
 step metadata records only that live authorization is required; the actual
 per-step attempt, receipt correlation, verification, and outcome retain the
 fresh authorization ID used for that one delivery.
+
+Every thermal step carries an immutable target-body hydraulic-continuity
+contract. Verification requires the target body active and the other body
+inactive using fresh, usable authoritative activity evidence. Missing, stale,
+ambiguous, or contradictory topology terminates the session. A topology break
+during a verified priming hold invalidates that hold and requires a fresh plan
+and session; hold time is never paused or resumed across the break.
 
 Pump verification retains the inclusive 25-RPM tolerance and bounded settling
 until the configured deadline. A fresh wrong `HEATER` fails immediately.
@@ -84,9 +99,10 @@ endpoint bounds remain unchanged.
 - Kill switch and body scope default disabled; this commit cannot actuate by
   itself.
 - Disabling the switch stops new steps and emits no restoration command.
-- Pool and Hot Tub must already be active for autonomous thermal delivery,
-  including Off during initial commissioning. No body or route operation is
-  inferred from configured mode or target.
+- Pool and Hot Tub must already be active for source and RPM delivery. A
+  cold-start plan may activate only its selected inactive body when the other
+  body is explicitly inactive and all hydraulic evidence is usable. No route
+  operation or body deactivation is inferred from configured mode or target.
 - Newer evaluation or plan identity supersedes an in-progress plan before its
   next command. No automatic reversal is issued.
 - Interrupted history cannot resume. Restart requires fresh observation,
@@ -94,8 +110,9 @@ endpoint bounds remain unchanged.
 - Delivery rejection/failure/timeout, verification failure/timeout, stale
   evidence, unavailable transport, or a safety/configuration blocker stops the
   plan without retry.
-- No authority is granted to `StartPump`, `StopPump`, `SetHydraulicRoute`,
-  arbitrary circuits or vendor commands, Spillway, filtration, probing, grid
-  outage, lighting, chemistry, schedules, or configuration changes.
+- No authority is granted to `StartPump`, `StopPump`, `SetHydraulicRoute`, body
+  deactivation, arbitrary circuits or vendor commands, Spillway, filtration,
+  probing, grid outage, lighting, chemistry, schedules, or configuration
+  changes.
 - Inactive-body manual configuration remains available, but autonomous
   inactive-body `HEATER` preselection remains uncommissioned and prohibited.

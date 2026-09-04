@@ -512,7 +512,11 @@ class ThermalExecutionPlanBuilder:
                         "command_delivery_enabled": False,
                     },
                     expected_observations=expected,
-                    metadata=metadata,
+                    metadata={
+                        **metadata,
+                        "hydraulic_continuity_required": "true",
+                        "hydraulic_target_body": desired.body.value,
+                    },
                 )
             )
 
