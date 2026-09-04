@@ -14,6 +14,7 @@ from poolos.hal import CommandReceipt, CommandStatus
 from poolos.integration import (
     PhysicalHeatMode,
     PoolOperation,
+    SetBodyActive,
     SetHeatMode,
     SetPumpSpeed,
     ThermalBody,
@@ -57,7 +58,14 @@ class ManualIntelliCenterThermalLiveDelivery:
             raise ValueError("correlation_id must not be empty")
         issued_at = datetime.now(timezone.utc)
         try:
-            if isinstance(operation, SetPumpSpeed):
+            if isinstance(operation, SetBodyActive):
+                body_id = self._validate_body_activation(operation)
+                manual_receipt = await self.manual.async_set_body_active(
+                    body_id,
+                    True,
+                    request_source=PhysicalRequestSource.AUTONOMOUS,
+                )
+            elif isinstance(operation, SetPumpSpeed):
                 self._validate_pump(operation)
                 manual_receipt = await self.manual.async_set_pump_circuit_speed(
                     COMMISSIONED_THERMAL_PUMP_ID,
@@ -106,12 +114,27 @@ class ManualIntelliCenterThermalLiveDelivery:
             },
         )
 
+    @staticmethod
+    def _validate_body_activation(operation: SetBodyActive) -> str:
+        try:
+            body = ThermalBody(operation.equipment_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported thermal body") from exc
+
+        if operation.active is not True:
+            raise ValueError(
+                "autonomous thermal body deactivation is not commissioned"
+            )
+
+        return _BODY_ID[body]
+
     def _validate_pump(self, operation: SetPumpSpeed) -> None:
         if operation.equipment_id != COMMISSIONED_THERMAL_PUMP_ID:
             raise ValueError("unsupported thermal pump circuit")
         if operation.rpm not in {
             self.baselines.solar_heating_rpm,
             self.baselines.gas_heating_rpm,
+            self.baselines.priming_rpm,
         }:
             raise ValueError("unsupported thermal pump RPM baseline")
 

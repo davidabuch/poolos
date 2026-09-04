@@ -16,6 +16,7 @@ class PumpOperatingBaselines:
     temperature_probe_rpm: int = 1500
     grid_outage_rpm: int = 1500
     filtration_rpm: int = 2600
+    priming_rpm: int = 3000
     solar_heating_rpm: int = 2900
     spillway_rpm: int = 2900
     gas_heating_rpm: int = 3000
@@ -25,6 +26,7 @@ class PumpOperatingBaselines:
             "temperature_probe_rpm",
             "grid_outage_rpm",
             "filtration_rpm",
+            "priming_rpm",
             "solar_heating_rpm",
             "spillway_rpm",
             "gas_heating_rpm",

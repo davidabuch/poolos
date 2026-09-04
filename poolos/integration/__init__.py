@@ -18,6 +18,7 @@ from .handler import OperationTranslationHandler, TranslationContextProvider
 from .operations import (
     PhysicalHeatMode,
     PoolOperation,
+    SetBodyActive,
     SetHeatMode,
     SetHydraulicRoute,
     SetPumpSpeed,
@@ -38,6 +39,7 @@ __all__ = [
     "OperationTranslationHandler",
     "PhysicalHeatMode",
     "PoolOperation",
+    "SetBodyActive",
     "SetHeatMode",
     "SetHydraulicRoute",
     "SetPumpSpeed",

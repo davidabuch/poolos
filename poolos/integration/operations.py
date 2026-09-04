@@ -47,6 +47,23 @@ class PoolOperation:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SetBodyActive(PoolOperation):
+    """Request Pool or Hot Tub body circulation state."""
+
+    active: bool
+
+    def __post_init__(self) -> None:
+        super(SetBodyActive, self).__post_init__()
+        try:
+            body = ThermalBody(self.equipment_id)
+        except ValueError as exc:
+            raise ValueError("unsupported thermal body") from exc
+        if not isinstance(self.active, bool):
+            raise ValueError("active must be boolean")
+        object.__setattr__(self, "equipment_id", body.value)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SetPumpSpeed(PoolOperation):
     """Request a variable-speed pump setpoint in revolutions per minute."""
 

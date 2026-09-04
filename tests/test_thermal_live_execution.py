@@ -14,6 +14,7 @@ from poolos.hal import CommandReceipt, CommandStatus
 from poolos.integration import (
     PhysicalHeatMode,
     PoolOperation,
+    SetBodyActive,
     SetHeatMode,
     SetHydraulicRoute,
     SetPumpSpeed,
@@ -1040,3 +1041,251 @@ def test_no_live_execution_is_created_for_already_converged_plan() -> None:
 
     assert not result.authorized
     assert "thermal_plan_not_ready" in result.blocking_reasons
+
+
+def test_priming_step_does_not_advance_until_60_seconds_continuously_verified() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        0,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 3000
+    assert (
+        plan.step_specifications[0].metadata["minimum_verified_hold_seconds"]
+        == "60"
+    )
+
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery()
+
+    delivered_at = NOW + timedelta(seconds=1)
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan, at=delivered_at),
+            delivery=delivery,
+        )
+    )
+
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        store("pump.rpm", 3000, at=first_verified_at),
+        policy=policy(),
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert session.current_attempt is not None
+    assert session.current_attempt.verified_hold_started_at == first_verified_at
+
+    still_holding_at = NOW + timedelta(seconds=61)
+    session = engine.verify_current_step(
+        session,
+        store("pump.rpm", 3000, at=still_holding_at),
+        policy=policy(),
+        evaluated_at=still_holding_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert session.current_attempt is not None
+    assert session.current_attempt.verified_hold_started_at == first_verified_at
+
+    completed_hold_at = NOW + timedelta(seconds=62)
+    session = engine.verify_current_step(
+        session,
+        store("pump.rpm", 3000, at=completed_hold_at),
+        policy=policy(),
+        evaluated_at=completed_hold_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.READY
+    assert session.current_attempt is None
+    assert session.coordination.current_step_sequence == 2
+
+
+def test_priming_hold_fails_closed_if_rpm_deviates_before_completion() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        0,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery()
+
+    delivered_at = NOW + timedelta(seconds=1)
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan, at=delivered_at),
+            delivery=delivery,
+        )
+    )
+
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        store("pump.rpm", 3000, at=first_verified_at),
+        policy=policy(),
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+
+    deviation_at = NOW + timedelta(seconds=30)
+    session = engine.verify_current_step(
+        session,
+        store("pump.rpm", 2900, at=deviation_at),
+        policy=policy(),
+        evaluated_at=deviation_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.FAILED
+    assert session.failure_reason == "priming_verified_hold_continuity_lost"
+
+
+def test_nonpriming_verified_step_still_advances_immediately() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.SOLAR,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+
+    assert len(plan.operations) == 1
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert "minimum_verified_hold_seconds" not in plan.step_specifications[0].metadata
+
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery()
+
+    at = NOW + timedelta(seconds=2)
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan, at=at),
+            delivery=delivery,
+        )
+    )
+
+    session = engine.verify_current_step(
+        session,
+        store("pump.rpm", 2900, at=at),
+        policy=policy(),
+        evaluated_at=at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.COMPLETED
+
+
+def test_inactive_body_may_authorize_only_its_activation_step() -> None:
+    plan = ThermalExecutionPlanBuilder().build(
+        desired(
+            PhysicalHeatMode.SOLAR,
+            2900,
+            body=ThermalBody.POOL,
+        ),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    assert isinstance(plan.operations[0], SetBodyActive)
+
+    first = authorize(
+        plan,
+        live_evidence=evidence(
+            plan,
+            body_active=False,
+            hydraulic_safe=False,
+        ),
+        step_index=0,
+    )
+
+    assert first.authorized is True
+    assert "target_body_inactive" not in first.blocking_reasons
+    assert "hydraulic_safety_model_not_satisfied" not in first.blocking_reasons
+
+
+def test_inactive_body_still_blocks_priming_step_until_activation_verified() -> None:
+    plan = ThermalExecutionPlanBuilder().build(
+        desired(
+            PhysicalHeatMode.SOLAR,
+            2900,
+            body=ThermalBody.POOL,
+        ),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    assert isinstance(plan.operations[0], SetBodyActive)
+    assert isinstance(plan.operations[1], SetPumpSpeed)
+
+    second = authorize(
+        plan,
+        live_evidence=evidence(
+            plan,
+            body_active=False,
+            hydraulic_safe=False,
+        ),
+        step_index=1,
+    )
+
+    assert second.authorized is False
+    assert "target_body_inactive" in second.blocking_reasons
+    assert "hydraulic_safety_model_not_satisfied" in second.blocking_reasons
+
+
+def test_verified_body_activation_allows_following_priming_step() -> None:
+    plan = ThermalExecutionPlanBuilder().build(
+        desired(
+            PhysicalHeatMode.SOLAR,
+            2900,
+            body=ThermalBody.POOL,
+        ),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    second = authorize(
+        plan,
+        live_evidence=evidence(
+            plan,
+            body_active=True,
+            hydraulic_safe=True,
+        ),
+        step_index=1,
+    )
+
+    assert second.authorized is True

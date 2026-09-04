@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from poolos.integration import PhysicalHeatMode, SetHeatMode, SetPumpSpeed
+from poolos.integration import PhysicalHeatMode, SetBodyActive, ThermalBody, SetHeatMode, SetPumpSpeed
 from poolos.native_configuration_policy import (
     NativeConfigurationGuard,
     NativeConfigurationInput,
@@ -470,7 +470,18 @@ def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> Non
         == "opportunistic_started_or_resumed"
     )
     assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
-    assert "target_body_inactive" in result.hot_tub.technical_preflight.blocking_reasons
-    assert "hydraulic_safety_model_not_satisfied" in (
-        result.hot_tub.technical_preflight.blocking_reasons
+
+    # An inactive body is no longer a terminal technical blocker because
+    # the plan now contains an explicit, verified body-activation first step.
+    assert result.hot_tub.technical_preflight.ready is True
+    assert result.hot_tub.technical_preflight.blocking_reasons == ()
+    assert isinstance(result.hot_tub.plan.operations[0], SetBodyActive)
+    assert result.hot_tub.plan.operations[0].equipment_id == ThermalBody.HOT_TUB.value
+    assert result.hot_tub.plan.operations[0].active is True
+
+    # Operator/live authority remains independently gated.
+    assert result.hot_tub.actual_authorization.authorized is False
+    assert (
+        "thermal_live_kill_switch_disabled"
+        in result.hot_tub.actual_authorization.blocking_reasons
     )

@@ -16,7 +16,15 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .execution_plans import ExecutionStepSpecification
-from .integration import PhysicalHeatMode, PoolOperation, SetHeatMode, SetPumpSpeed, ThermalBody
+from .integration import (
+    PhysicalHeatMode,
+    PoolOperation,
+    SetBodyActive,
+    SetHeatMode,
+    SetPumpSpeed,
+    ThermalBody,
+)
+from .pump_priming_policy import PumpPrimingPolicy
 from .spa_thermal_policy import SpaHeatingMode, SpaPolicyAssessment, SpaPolicyInput
 from .thermal_source_policy import (
     PoolHeatingMode,
@@ -95,6 +103,7 @@ class ThermalCurrentState:
     body: ThermalBody
     selected_source: PhysicalHeatMode
     pump_rpm: int | None
+    body_active: bool | None = None
     source_evidence_usable: bool = True
     pump_evidence_usable: bool = True
     blockers: tuple[str, ...] = ()
@@ -355,7 +364,32 @@ class ThermalExecutionPlanBuilder:
             return self._non_ready(desired, current, ())
 
         ordering: list[str] = []
-        if desired.selected_source is PhysicalHeatMode.OFF:
+
+        circulation_required = desired.required_pump_rpm is not None
+        body_start_required = circulation_required and current.body_active is False
+
+        priming = PumpPrimingPolicy().evaluate(
+            circulation_requested=circulation_required,
+            currently_circulating=(
+                current.pump_rpm is not None and current.pump_rpm > 0
+            ),
+        )
+
+        if body_start_required:
+            ordering.append("body")
+
+        if priming.priming_required:
+            ordering.append("prime")
+
+            if (
+                desired.required_pump_rpm is not None
+                and desired.required_pump_rpm != priming.priming_rpm
+            ):
+                ordering.append("rpm")
+
+            if source_changed:
+                ordering.append("source")
+        elif desired.selected_source is PhysicalHeatMode.OFF:
             if source_changed:
                 ordering.append("source")
         elif source_changed and rpm_changed:
@@ -377,8 +411,51 @@ class ThermalExecutionPlanBuilder:
             operation_id = f"{plan_id}:operation:{sequence}:{kind}"
             expected: dict[str, Any]
             metadata: dict[str, str]
-            if kind == "source":
-                operation: PoolOperation = SetHeatMode(
+            operation: PoolOperation
+            if kind == "body":
+                operation = SetBodyActive(
+                    equipment_id=desired.body.value,
+                    active=True,
+                    operation_id=operation_id,
+                    metadata={
+                        "reason_code": "thermal_body_activation_required",
+                        "command_delivery_enabled": False,
+                    },
+                )
+                expected = {
+                    (
+                        "pool.active"
+                        if desired.body is ThermalBody.POOL
+                        else "spa.active"
+                    ): True
+                }
+                metadata = {
+                    "verification_truth": "authoritative_native_body_active",
+                }
+            elif kind == "prime":
+                assert priming.priming_rpm is not None
+                assert priming.minimum_duration is not None
+
+                operation = SetPumpSpeed(
+                    equipment_id=self.pump_equipment_id,
+                    rpm=priming.priming_rpm,
+                    operation_id=operation_id,
+                    metadata={
+                        "reason_code": "cold_start_pump_priming",
+                        "command_delivery_enabled": False,
+                    },
+                )
+                expected = {"pump.rpm": priming.priming_rpm}
+                metadata = {
+                    "verification_truth": "authoritative_native_pump_rpm",
+                    "numeric_tolerance:pump.rpm": str(self.pump_rpm_tolerance),
+                    "priming_step": "true",
+                    "minimum_verified_hold_seconds": str(
+                        int(priming.minimum_duration.total_seconds())
+                    ),
+                }
+            elif kind == "source":
+                operation = SetHeatMode(
                     equipment_id=desired.body.value,
                     mode=desired.selected_source,
                     operation_id=operation_id,
@@ -435,6 +512,8 @@ class ThermalExecutionPlanBuilder:
         change_reasons = tuple(
             reason
             for changed, reason in (
+                (body_start_required, "target_body_activation_required"),
+                (priming.priming_required, "cold_start_priming_required"),
                 (source_changed, "selected_heat_source_changed"),
                 (rpm_changed, "thermal_pump_baseline_changed"),
             )

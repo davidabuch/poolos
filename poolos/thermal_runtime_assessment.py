@@ -298,6 +298,7 @@ class ThermalRuntimeEvaluator:
             body=body,
             selected_source=current_source,
             pump_rpm=pump_rpm,
+            body_active=active if isinstance(active, bool) else None,
             source_evidence_usable=heater_id in {"00000", "H0001", "H0002"},
             pump_evidence_usable="pump.rpm" not in missing and "pump.rpm" not in stale,
             blockers=blockers,

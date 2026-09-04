@@ -12,6 +12,7 @@ import pytest
 from poolos.hal import CommandStatus
 from poolos.integration import (
     PhysicalHeatMode,
+    SetBodyActive,
     SetHeatMode,
     SetPumpSpeed,
     StartPump,
@@ -67,6 +68,16 @@ ManualIntelliCenterThermalLiveDelivery = _load_adapter_class()
 class FakeManualControl:
     available: bool = True
     calls: list[tuple[str, object, object]] = field(default_factory=list)
+
+    async def async_set_body_active(
+        self,
+        target: str,
+        active: bool,
+        **kwargs: object,
+    ) -> ManualCommandReceipt:
+        del kwargs
+        self.calls.append(("body", target, active))
+        return ManualCommandReceipt(target, "body_active", active)
 
     async def async_set_pump_circuit_speed(
         self,
@@ -211,3 +222,67 @@ def test_adapter_availability_is_read_only_and_does_not_start_manual_control() -
 
     assert delivery.available is False
     assert manual.calls == []
+
+
+@pytest.mark.parametrize(
+    ("body", "native_body"),
+    (
+        (ThermalBody.POOL, "B1101"),
+        (ThermalBody.HOT_TUB, "B1202"),
+    ),
+)
+def test_adapter_delivers_only_commissioned_body_activation(
+    body: ThermalBody,
+    native_body: str,
+) -> None:
+    manual = FakeManualControl()
+
+    receipt = asyncio.run(
+        adapter(manual).deliver(
+            SetBodyActive(
+                equipment_id=body,
+                active=True,
+            ),
+            correlation_id=f"activate-{body.value}",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert receipt.verification_required is True
+    assert manual.calls == [("body", native_body, True)]
+
+
+def test_adapter_rejects_autonomous_body_deactivation_before_manual_call() -> None:
+    manual = FakeManualControl()
+
+    receipt = asyncio.run(
+        adapter(manual).deliver(
+            SetBodyActive(
+                equipment_id=ThermalBody.POOL,
+                active=False,
+            ),
+            correlation_id="body-off",
+        )
+    )
+
+    assert receipt.status is CommandStatus.REJECTED
+    assert receipt.details["error_type"] == "ValueError"
+    assert manual.calls == []
+
+
+def test_adapter_accepts_explicit_priming_rpm_baseline() -> None:
+    manual = FakeManualControl()
+
+    receipt = asyncio.run(
+        adapter(manual).deliver(
+            SetPumpSpeed(
+                equipment_id="p0102",
+                rpm=3000,
+                metadata={"reason_code": "cold_start_pump_priming"},
+            ),
+            correlation_id="prime",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.calls == [("pump", "p0102", 3000)]
