@@ -17,7 +17,10 @@ Use only:
 binary_sensor.1_powerwall_grid_status
 ```
 
-Activate after the sensor is off for two seconds.
+Confirm an actual outage only after the sensor is continuously off for exactly
+two seconds. The configured sensor is a persistent, event-driven Home Assistant
+state source; PoolOS may establish elapsed continuity on a later evaluation of
+the same fresh current state without scheduling a two-second timer.
 
 Do not use:
 
@@ -46,12 +49,29 @@ sensor.buch_family_vs_rpm
 Do not alter Pentair RPM preset configuration values.
 
 This ADR records the intended safety behavior, not current runtime authority.
-The present HA observation adapter maps the configured grid-status entity
-directly and does not yet implement the required two-second confirmation.
-No production decision/runtime surface currently consumes a confirmed outage
-to create this recommendation. Confirmation, command-free runtime integration,
-and any later physical commissioning must be implemented together before this
-decision can be treated as active PoolOS behavior.
+The HA observation adapter maps the configured grid-status entity to the raw
+`grid.outage_active` observation. The core `GridOutageConfirmationTracker` is
+the single canonical command-free boundary between that raw observation and a
+confirmed actual outage. It distinguishes authoritative `ON_GRID`,
+`OFF_GRID_PENDING`, `CONFIRMED_OUTAGE`, and `UNKNOWN` dispositions. Missing,
+stale, future, contradictory, or otherwise unusable evidence cannot confirm a
+pending outage and cannot manufacture proof that a confirmed outage ended.
+Only usable positive on-grid evidence ends a confirmed outage epoch.
+
+The tracker is in-memory and deliberately does not reconstruct confirmation
+from an old matching state after restart. A first off-grid evaluation after
+restart begins a new two-second evidentiary epoch. It uses no sleep, polling,
+timer, persistence, replay, or command path. The logical threshold time and the
+later time at which PoolOS evaluates and knows confirmation are retained as
+separate timestamps.
+
+Expected-outage acknowledgments remain retrospective operator annotations.
+They cannot establish or accelerate actual outage confirmation.
+
+No production decision/runtime surface currently consumes the confirmed
+assessment to create an outage recommendation or physical action. Command-free
+runtime integration and any later physical commissioning remain separate work
+before the intended safety behavior can be treated as active PoolOS behavior.
 
 When grid power returns, release safety ownership and immediately reevaluate current conditions. Do not restore a pre-outage snapshot.
 
