@@ -882,6 +882,25 @@ def test_pool_temperature_probe_does_not_reprime_existing_circulation() -> None:
     assert "cold_start_priming_required" not in plan.change_reasons
 
 
+def test_off_source_residual_plan_keeps_rpm_before_source_after_priming() -> None:
+    """A new epoch after priming remains a suffix of the cold-start plan."""
+
+    plan = ThermalExecutionPlanBuilder().build(
+        _desired(PhysicalHeatMode.SOLAR, 2900),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=3000,
+            body_active=True,
+        ),
+    )
+
+    assert _operation_kinds(plan) == (SetPumpSpeed, SetHeatMode)
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 2900
+
+
 def test_off_source_pump_rpm_is_rejected_outside_temperature_probe() -> None:
     with pytest.raises(
         ValueError,

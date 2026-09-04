@@ -31,6 +31,7 @@ from .thermal_execution_planning import (
     desired_pool_state,
     desired_spa_state,
 )
+from .thermal_execution_currentness import ThermalExecutionCurrentness
 from .thermal_live_execution import (
     ThermalLiveAuthorizationEngine,
     ThermalLiveAuthorizationResult,
@@ -239,6 +240,15 @@ class ThermalBodyRuntimeAssessment:
     actual_pump_rpm: int | None
     evidence_blockers: tuple[str, ...]
 
+    @property
+    def execution_currentness(self) -> ThermalExecutionCurrentness:
+        """Return concrete audit identity plus stable execution purpose."""
+
+        return ThermalExecutionCurrentness.from_assessment(
+            self.plan,
+            evaluation_id=self.evaluation_id,
+        )
+
     def diagnostics(self, *, blocker_limit: int = 16) -> Mapping[str, Any]:
         desired = self.plan.desired
         return MappingProxyType(
@@ -256,6 +266,9 @@ class ThermalBodyRuntimeAssessment:
                 "plan_disposition": self.plan.disposition.value,
                 "plan_id": self.plan.plan_id,
                 "evaluation_id": self.evaluation_id,
+                "execution_purpose_id": (
+                    self.execution_currentness.purpose.purpose_id
+                ),
                 "body_active": self.body_active,
                 "effective_native_heater_id": self.effective_heater_id,
                 "actual_pump_rpm": self.actual_pump_rpm,
@@ -574,6 +587,10 @@ class ThermalRuntimeEvaluator:
             htmode=_string_or_none(values.get(f"{prefix}.raw_htmode")),
         )
         plan = self.planner.build(desired, current)
+        execution_currentness = ThermalExecutionCurrentness.from_assessment(
+            plan,
+            evaluation_id=evaluation_id,
+        )
         pool_active = _bool_or_none(values.get("pool.active"))
         spa_active = _bool_or_none(values.get("spa.active"))
         missing_native = set(evidence.missing_native_concepts)
@@ -628,6 +645,7 @@ class ThermalRuntimeEvaluator:
             ),
             interrupted_execution_present=False,
             metadata={"phase3_dry_run": "true"},
+            execution_currentness=execution_currentness,
         )
         actual = self.authorization.authorize(
             plan,

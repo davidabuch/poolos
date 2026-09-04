@@ -81,8 +81,10 @@ class ThermalRuntimeOrchestrationAssessment:
     snapshot_identity: str
     pool_evaluation_id: str | None
     pool_plan_id: str | None
+    pool_execution_purpose_id: str | None
     hot_tub_evaluation_id: str | None
     hot_tub_plan_id: str | None
+    hot_tub_execution_purpose_id: str | None
     pool_requested_mode: str | None
     hot_tub_requested_mode: str | None
     outage: GridOutageAssessment | None
@@ -90,6 +92,7 @@ class ThermalRuntimeOrchestrationAssessment:
     ownership_decision: ThermalRuntimeOwnershipDecision | None
     candidate_id: str | None
     candidate_body: ThermalBody | None
+    candidate_execution_purpose_id: str | None
     superseded_candidate_id: str | None
     awaiting_verification: bool
     blocking_reason: str
@@ -217,11 +220,21 @@ class ThermalRuntimeOrchestrator:
             snapshot_identity=_snapshot_identity(generated_at, frame_fingerprint),
             pool_evaluation_id=None if thermal is None else thermal.pool.evaluation_id,
             pool_plan_id=None if thermal is None else thermal.pool.plan.plan_id,
+            pool_execution_purpose_id=(
+                None
+                if thermal is None
+                else _execution_purpose_id(thermal.pool)
+            ),
             hot_tub_evaluation_id=(
                 None if thermal is None else thermal.hot_tub.evaluation_id
             ),
             hot_tub_plan_id=(
                 None if thermal is None else thermal.hot_tub.plan.plan_id
+            ),
+            hot_tub_execution_purpose_id=(
+                None
+                if thermal is None
+                else _execution_purpose_id(thermal.hot_tub)
             ),
             pool_requested_mode=(
                 None if thermal is None else thermal.pool.requested_mode.value
@@ -234,6 +247,11 @@ class ThermalRuntimeOrchestrator:
             ownership_decision=ownership_decision,
             candidate_id=candidate_id,
             candidate_body=candidate_body,
+            candidate_execution_purpose_id=(
+                None
+                if candidate_id is None or body_assessment is None
+                else _execution_purpose_id(body_assessment)
+            ),
             superseded_candidate_id=superseded,
             awaiting_verification=False,
             blocking_reason=reason,
@@ -280,10 +298,16 @@ class ThermalRuntimeOrchestrator:
             ),
             pool_evaluation_id=None if prior is None else prior.pool_evaluation_id,
             pool_plan_id=None if prior is None else prior.pool_plan_id,
+            pool_execution_purpose_id=(
+                None if prior is None else prior.pool_execution_purpose_id
+            ),
             hot_tub_evaluation_id=(
                 None if prior is None else prior.hot_tub_evaluation_id
             ),
             hot_tub_plan_id=None if prior is None else prior.hot_tub_plan_id,
+            hot_tub_execution_purpose_id=(
+                None if prior is None else prior.hot_tub_execution_purpose_id
+            ),
             pool_requested_mode=None if prior is None else prior.pool_requested_mode,
             hot_tub_requested_mode=(
                 None if prior is None else prior.hot_tub_requested_mode
@@ -293,6 +317,7 @@ class ThermalRuntimeOrchestrator:
             ownership_decision=ownership_decision,
             candidate_id=None,
             candidate_body=None,
+            candidate_execution_purpose_id=None,
             superseded_candidate_id=None if prior is None else prior.candidate_id,
             awaiting_verification=False,
             blocking_reason=reason,
@@ -322,8 +347,10 @@ class ThermalRuntimeOrchestrator:
             snapshot_identity=_snapshot_identity(unloaded_at),
             pool_evaluation_id=None,
             pool_plan_id=None,
+            pool_execution_purpose_id=None,
             hot_tub_evaluation_id=None,
             hot_tub_plan_id=None,
+            hot_tub_execution_purpose_id=None,
             pool_requested_mode=None,
             hot_tub_requested_mode=None,
             outage=None,
@@ -331,6 +358,7 @@ class ThermalRuntimeOrchestrator:
             ownership_decision=None,
             candidate_id=None,
             candidate_body=None,
+            candidate_execution_purpose_id=None,
             superseded_candidate_id=None,
             awaiting_verification=False,
             blocking_reason="thermal_orchestration_unloaded",
@@ -482,6 +510,7 @@ def _ownership_evidence(
         current_context=ThermalLiveExecutionContext(
             evaluation_id=body.evaluation_id,
             plan_id=body.plan.plan_id,
+            execution_currentness=getattr(body, "execution_currentness", None),
         ),
         requested_mode=body.requested_mode.value,
         pool_active=_boolean(pool.value),
@@ -616,6 +645,11 @@ def _candidate_id(body: ThermalBodyRuntimeAssessment) -> str:
     return "thermal-candidate-" + sha256(payload.encode()).hexdigest()[:24]
 
 
+def _execution_purpose_id(body: ThermalBodyRuntimeAssessment) -> str | None:
+    currentness = getattr(body, "execution_currentness", None)
+    return None if currentness is None else currentness.purpose.purpose_id
+
+
 def _snapshot_identity(generated_at: datetime, fingerprint: str | None = None) -> str:
     value = fingerprint or sha256(generated_at.isoformat().encode()).hexdigest()
     return "thermal-snapshot-" + value[:24]
@@ -648,6 +682,7 @@ def _frame_fingerprint(
                     body.body.value,
                     _text_digest(body.evaluation_id),
                     _text_digest(body.plan.plan_id),
+                    _text_digest(_execution_purpose_id(body)),
                     body.requested_mode.value,
                     body.actual_authorization.authorized,
                 )

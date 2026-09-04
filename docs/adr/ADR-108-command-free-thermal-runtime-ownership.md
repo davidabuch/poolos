@@ -26,8 +26,10 @@ Assistant, or transport dependency.
 
 A runtime lease may be established only from the existing immutable
 `ThermalLiveExecutionOwnership` record for the current evaluation and thermal
-plan. Each owned concept retains its exact operation, accepted receipt, and
-delivery-correlation identities. Provenance remains concept-specific:
+plan. Typed leases additionally require the originating execution purpose and
+explicit accepted/verified PoolOS progress; observation equivalence cannot fill
+in missing progress. Each owned concept retains its exact operation, accepted
+receipt, and delivery-correlation identities. Provenance remains concept-specific:
 
 - accepted target-body activation may own body activation;
 - accepted `p0102` thermal setpoint delivery may own the pump setpoint; and
@@ -38,13 +40,15 @@ not establish ownership. A session that did not deliver a concept cannot claim
 it. Incomplete or non-current provenance is denied.
 
 Current native evidence may retain or terminally invalidate an established
-lease. Continued ownership requires chronological evidence, the originating
-requested mode and plan identity, a fresh and usable target-body topology,
-fresh and usable pump evidence for an owned setpoint, and fresh and usable
-heater evidence for an owned source. Pump-setpoint ownership distinguishes the
-authoritative `p0102.SPEED` configuration from actual parent-pump RPM and
-requires both to remain aligned within the existing inclusive 25-RPM
-tolerance.
+lease. Concrete evaluation and plan IDs remain audit identities, while continued
+semantic currentness is decided by the shared stable execution-purpose and
+progress-compatible residual-plan contract. Continued ownership also requires
+chronological evidence, the originating requested mode, a fresh and usable
+target-body topology, fresh and usable pump evidence for an owned setpoint, and
+fresh and usable heater evidence for an owned source. Pump-setpoint ownership
+distinguishes the authoritative `p0102.SPEED` configuration from actual
+parent-pump RPM and requires both to remain aligned within the existing
+inclusive 25-RPM tolerance.
 
 Pool and Spa simultaneously active, target-body loss, other-body takeover,
 missing or degraded relevant evidence, incompatible native values, and an
@@ -94,9 +98,11 @@ repository-classified shared-hydraulic inventory. Non-authoritative grid state
 ends continuation entitlement command-free; authoritative grid return causes
 only a fresh evaluation.
 
-Duplicate or older authoritative snapshots cannot mutate lifecycle truth. A
-new evaluation or plan supersedes the prior candidate even when requested mode
-or observed hardware looks compatible. Unload unregisters the callback and
+Duplicate or older authoritative snapshots cannot mutate lifecycle truth. The
+orchestrator publishes both concrete evaluation/plan audit identities and the
+stable purpose identity. A materially different purpose supersedes ownership;
+a same-purpose residual plan may retain it only when the removed prefix is
+proved by PoolOS execution progress. Unload unregisters the callback and
 discards in-memory ownership and outage state without cleanup or restoration.
 The orchestrator permanently reports
 `automatic_execution_driver_enabled=false` and

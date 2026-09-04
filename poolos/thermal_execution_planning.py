@@ -409,7 +409,10 @@ class ThermalExecutionPlanBuilder:
         elif source_changed and rpm_changed:
             assert desired_rpm is not None
             assert current.pump_rpm is not None
-            if current.pump_rpm < desired_rpm:
+            if (
+                current.pump_rpm < desired_rpm
+                or current.selected_source is PhysicalHeatMode.OFF
+            ):
                 ordering.extend(("rpm", "source"))
             else:
                 ordering.extend(("source", "rpm"))

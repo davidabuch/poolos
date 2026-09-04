@@ -17,6 +17,12 @@ from typing import Mapping
 
 from .external_change import ExternalChangeBatch
 from .integration import PhysicalHeatMode, ThermalBody
+from .thermal_execution_currentness import (
+    ThermalExecutionCompatibilityDisposition,
+    ThermalExecutionCurrentness,
+    ThermalExecutionProgress,
+    assess_execution_compatibility,
+)
 from .thermal_live_execution import (
     ThermalLiveExecutionContext,
     ThermalLiveExecutionOwnership,
@@ -141,6 +147,8 @@ class ThermalRuntimeOwnershipLease:
     heat_source: ThermalRuntimeConceptProvenance | None = None
     predecessor_lease_id: str | None = None
     ended_at: datetime | None = None
+    originating_currentness: ThermalExecutionCurrentness | None = None
+    execution_progress: ThermalExecutionProgress | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -165,6 +173,15 @@ class ThermalRuntimeOwnershipLease:
                 raise ValueError("ownership end cannot precede establishment")
         object.__setattr__(self, "body", ThermalBody(self.body))
         object.__setattr__(self, "status", ThermalRuntimeOwnershipStatus(self.status))
+        if (self.originating_currentness is None) != (self.execution_progress is None):
+            raise ValueError(
+                "ownership currentness and execution progress must be supplied together"
+            )
+        if self.originating_currentness is not None and (
+            self.originating_currentness.evaluation_id != self.evaluation_id
+            or self.originating_currentness.plan_id != self.thermal_plan_id
+        ):
+            raise ValueError("ownership currentness must reference lease origin")
 
     @property
     def owns_body_activation(self) -> bool:
@@ -286,6 +303,7 @@ class ThermalRuntimeHandoffRequest:
     successor_requires_body_active: bool
     successor_required_pump_rpm: int | None
     successor_heat_source: PhysicalHeatMode | None
+    successor_progress: ThermalExecutionProgress | None = None
 
     def __post_init__(self) -> None:
         if not self.predecessor_lease_id.strip():
@@ -337,6 +355,7 @@ class ThermalRuntimeOwnershipManager:
         established_at: datetime,
         requested_mode: str,
         current_context: ThermalLiveExecutionContext,
+        execution_progress: ThermalExecutionProgress | None = None,
     ) -> ThermalRuntimeOwnershipDecision:
         """Establish a lease only from complete accepted delivery provenance."""
 
@@ -352,6 +371,15 @@ class ThermalRuntimeOwnershipManager:
             return self._decision(
                 ThermalRuntimeOwnershipDisposition.DENIED,
                 "runtime_ownership_establishment_denied:provenance_not_current",
+                previous,
+                established_at,
+            )
+        originating_currentness = current_context.execution_currentness
+        if (originating_currentness is None) != (execution_progress is None):
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_establishment_denied:"
+                "execution_currentness_progress_incomplete",
                 previous,
                 established_at,
             )
@@ -410,6 +438,8 @@ class ThermalRuntimeOwnershipManager:
             body_activation=activation,
             pump_setpoint=pump,
             heat_source=source,
+            originating_currentness=originating_currentness,
+            execution_progress=execution_progress,
         )
         self._state = ThermalRuntimeOwnershipState(
             status=lease.status,
@@ -504,6 +534,8 @@ class ThermalRuntimeOwnershipManager:
             reason_code="runtime_ownership_handed_off:compatible_successor",
             predecessor_lease_id=lease.lease_id,
             ended_at=None,
+            originating_currentness=request.successor_context.execution_currentness,
+            execution_progress=request.successor_progress,
         )
         self._state = ThermalRuntimeOwnershipState(
             status=successor.status,
@@ -572,10 +604,34 @@ class ThermalRuntimeOwnershipManager:
         if evidence.evaluated_at < lease.last_confirmed_at:
             return "runtime_ownership_preempted:evidence_temporal_regression"
         if check_identity:
-            if evidence.current_context.evaluation_id != lease.evaluation_id:
-                return "runtime_ownership_superseded:evaluation_id"
-            if evidence.current_context.plan_id != lease.thermal_plan_id:
-                return "runtime_ownership_superseded:plan_id"
+            if lease.originating_currentness is not None:
+                currentness = evidence.current_context.execution_currentness
+                if currentness is None:
+                    return (
+                        "runtime_ownership_preempted:"
+                        "execution_currentness_unavailable"
+                    )
+                assert lease.execution_progress is not None
+                compatibility = assess_execution_compatibility(
+                    lease.originating_currentness,
+                    currentness,
+                    progress=lease.execution_progress,
+                )
+                if (
+                    compatibility.disposition
+                    is ThermalExecutionCompatibilityDisposition.SUPERSEDED
+                ):
+                    return "runtime_ownership_superseded:execution_purpose"
+                if not compatibility.continuation_allowed:
+                    return (
+                        "runtime_ownership_preempted:execution_currentness_unprovable:"
+                        f"{compatibility.reason_code}"
+                    )
+            else:
+                if evidence.current_context.evaluation_id != lease.evaluation_id:
+                    return "runtime_ownership_superseded:evaluation_id"
+                if evidence.current_context.plan_id != lease.thermal_plan_id:
+                    return "runtime_ownership_superseded:plan_id"
         if check_requested_mode and evidence.requested_mode != lease.requested_mode:
             return "runtime_ownership_superseded:requested_mode"
         hydraulic = _hydraulic_failure_reason(lease.body, evidence)
@@ -647,6 +703,10 @@ class ThermalRuntimeOwnershipManager:
             return prefix + "successor_plan_not_current"
         if evidence.requested_mode != request.successor_requested_mode:
             return prefix + "successor_requested_mode_not_current"
+        if (
+            request.successor_context.execution_currentness is None
+        ) != (request.successor_progress is None):
+            return prefix + "successor_currentness_progress_incomplete"
         continuation = self._continuation_failure_reason(
             lease,
             evidence,

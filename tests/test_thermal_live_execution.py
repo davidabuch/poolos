@@ -39,6 +39,10 @@ from poolos.thermal_execution_planning import (
     ThermalExecutionPlanAssessment,
     ThermalExecutionPlanBuilder,
 )
+from poolos.thermal_execution_currentness import (
+    ThermalExecutionCurrentness,
+    ThermalExecutionProgress,
+)
 from poolos.thermal_live_execution import (
     COMMISSIONED_THERMAL_PUMP_ID,
     ThermalLiveAuthorizationDisposition,
@@ -125,6 +129,7 @@ def evidence(
     configuration: NativeConfigurationInput = NativeConfigurationInput(),
     contradictions: tuple[str, ...] = (),
     interrupted: bool = False,
+    execution_currentness: ThermalExecutionCurrentness | None = None,
 ) -> ThermalLiveSafetyEvidence:
     if hydraulic is None:
         hydraulic = ThermalHydraulicSafetyEvidence(
@@ -159,6 +164,7 @@ def evidence(
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
         contradictory_evidence=contradictions,
         interrupted_execution_present=interrupted,
+        execution_currentness=execution_currentness,
     )
 
 
@@ -666,12 +672,16 @@ class MismatchedOperationAuthorizationEngine(ThermalLiveAuthorizationEngine):
         step_index: int,
         policy: ThermalLiveExecutionPolicy,
         evidence: ThermalLiveSafetyEvidence,
+        originating_currentness: ThermalExecutionCurrentness | None = None,
+        execution_progress: ThermalExecutionProgress | None = None,
     ) -> ThermalLiveAuthorizationResult:
         authorized = super().authorize(
             assessment,
             step_index=step_index,
             policy=policy,
             evidence=evidence,
+            originating_currentness=originating_currentness,
+            execution_progress=execution_progress,
         )
         return replace(authorized, operation_id="mismatched-authorized-operation")
 
@@ -2068,6 +2078,249 @@ def test_supersession_discards_priming_hold_and_clears_ownership() -> None:
             evaluated_at=NOW + timedelta(seconds=63),
             source_id="native-intellicenter",
         )
+
+
+def test_new_epoch_same_purpose_residual_plan_verifies_without_false_supersession() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    delivery = FakeThermalDelivery()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    originating = session.originating_currentness
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                execution_currentness=originating,
+            ),
+            delivery=delivery,
+        )
+    )
+    current_plan = ThermalExecutionPlanBuilder().build(
+        replace(plan.desired, evaluated_at=NOW + timedelta(seconds=1)),
+        ThermalCurrentState(
+            observed_at=NOW + timedelta(seconds=1),
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2900,
+            body_active=True,
+        ),
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        current_plan,
+        evaluation_id="evaluation-2",
+    )
+
+    result = engine.verify_current_step(
+        waiting,
+        store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=ThermalLiveExecutionContext(
+            evaluation_id=current.evaluation_id,
+            plan_id=current.plan_id,
+            execution_currentness=current,
+        ),
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.READY
+    assert result.coordination.current_step_sequence == 2
+
+
+def test_current_convergence_does_not_skip_delivered_step_verification() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                execution_currentness=session.originating_currentness,
+            ),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    converged_plan = ThermalExecutionPlanBuilder().build(
+        replace(plan.desired, evaluated_at=NOW + timedelta(seconds=1)),
+        ThermalCurrentState(
+            observed_at=NOW + timedelta(seconds=1),
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.SOLAR,
+            pump_rpm=2900,
+            body_active=True,
+        ),
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        converged_plan,
+        evaluation_id="evaluation-converged",
+    )
+    context = ThermalLiveExecutionContext(
+        current.evaluation_id,
+        current.plan_id,
+        current,
+    )
+
+    wrong = engine.verify_current_step(
+        waiting,
+        store("pool.raw_heater_id", "00000", at=NOW + timedelta(seconds=1)),
+        current_context=context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert wrong.status is ThermalLiveExecutionStatus.FAILED
+    assert wrong.status is not ThermalLiveExecutionStatus.COMPLETED
+
+    second_engine = ThermalLiveExecutionEngine()
+    second_session = second_engine.begin(
+        plan,
+        policy=policy(),
+        evidence=evidence(plan),
+    )
+    second_waiting = asyncio.run(
+        second_engine.deliver_current_step(
+            second_session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                execution_currentness=second_session.originating_currentness,
+            ),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    verified = second_engine.verify_current_step(
+        second_waiting,
+        store("pool.raw_heater_id", "H0002", at=NOW + timedelta(seconds=1)),
+        current_context=context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert verified.status is ThermalLiveExecutionStatus.COMPLETED
+
+
+def test_new_epoch_changed_purpose_still_supersedes_before_verification() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                execution_currentness=session.originating_currentness,
+            ),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    gas_plan = ThermalExecutionPlanBuilder().build(
+        replace(
+            plan.desired,
+            evaluated_at=NOW + timedelta(seconds=1),
+            requested_mode="gas",
+            selected_source=PhysicalHeatMode.GAS,
+            required_pump_rpm=3000,
+            reason_code="gas_physical_gas",
+            rpm_reason_code="baseline:3000",
+        ),
+        ThermalCurrentState(
+            observed_at=NOW + timedelta(seconds=1),
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2900,
+            body_active=True,
+        ),
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        gas_plan,
+        evaluation_id="evaluation-2",
+    )
+
+    result = engine.verify_current_step(
+        waiting,
+        store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=ThermalLiveExecutionContext(
+            current.evaluation_id,
+            current.plan_id,
+            current,
+        ),
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
+    assert result.failure_reason == "thermal_execution_purpose_superseded"
+
+
+def test_priming_hold_continues_across_compatible_runtime_epochs() -> None:
+    engine, live_policy, waiting = delivered_priming_session()
+    first_verified_at = NOW + timedelta(seconds=2)
+    after_priming = ThermalExecutionPlanBuilder().build(
+        replace(
+            waiting.assessment.desired,
+            evaluated_at=first_verified_at,
+        ),
+        ThermalCurrentState(
+            observed_at=first_verified_at,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=3000,
+            body_active=True,
+        ),
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        after_priming,
+        evaluation_id="evaluation-after-priming",
+    )
+    context = ThermalLiveExecutionContext(
+        current.evaluation_id,
+        current.plan_id,
+        current,
+    )
+
+    holding = engine.verify_current_step(
+        waiting,
+        hydraulic_store(at=first_verified_at),
+        current_context=context,
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    completed = engine.verify_current_step(
+        holding,
+        hydraulic_store(at=NOW + timedelta(seconds=62)),
+        current_context=context,
+        policy=live_policy,
+        evaluated_at=NOW + timedelta(seconds=62),
+        source_id="native-intellicenter",
+    )
+
+    assert holding.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert completed.status is ThermalLiveExecutionStatus.READY
+    assert completed.coordination.current_step_sequence == 2
 
 
 def test_supersession_after_body_activation_blocks_following_delivery() -> None:
