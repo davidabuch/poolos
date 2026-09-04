@@ -5,7 +5,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from poolos.integration import PhysicalHeatMode, SetHeatMode, SetPumpSpeed, ThermalBody
+from poolos.integration import (
+    PhysicalHeatMode,
+    SetBodyActive,
+    SetHeatMode,
+    SetPumpSpeed,
+    ThermalBody,
+)
 from poolos.spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
@@ -245,7 +251,7 @@ def test_spa_opportunistic_policy_remains_solar_only_and_distinct_from_pool() ->
             0,
             PhysicalHeatMode.SOLAR,
             2900,
-            (SetPumpSpeed, SetHeatMode),
+            (SetPumpSpeed, SetPumpSpeed, SetHeatMode),
         ),
         (
             PhysicalHeatMode.OFF,
@@ -640,3 +646,164 @@ def test_plan_identity_and_order_are_deterministic() -> None:
     assert [item.operation_id for item in first.operations] == [
         item.operation_id for item in second.operations
     ]
+
+
+def test_inactive_pool_cold_start_plans_body_prime_final_rpm_then_solar() -> None:
+    desired = _desired(
+        PhysicalHeatMode.SOLAR,
+        2900,
+        body=ThermalBody.POOL,
+    )
+    current = ThermalCurrentState(
+        NOW,
+        ThermalBody.POOL,
+        PhysicalHeatMode.OFF,
+        0,
+        body_active=False,
+    )
+
+    plan = ThermalExecutionPlanBuilder().build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (
+        SetBodyActive,
+        SetPumpSpeed,
+        SetPumpSpeed,
+        SetHeatMode,
+    )
+
+    body = plan.operations[0]
+    prime = plan.operations[1]
+    final_rpm = plan.operations[2]
+    source = plan.operations[3]
+
+    assert isinstance(body, SetBodyActive)
+    assert body.equipment_id == ThermalBody.POOL.value
+    assert body.active is True
+    assert plan.step_specifications[0].expected_observations == {
+        "pool.active": True
+    }
+
+    assert isinstance(prime, SetPumpSpeed)
+    assert prime.rpm == 3000
+    assert plan.step_specifications[1].expected_observations == {
+        "pump.rpm": 3000
+    }
+    assert plan.step_specifications[1].metadata["priming_step"] == "true"
+    assert (
+        plan.step_specifications[1].metadata["minimum_verified_hold_seconds"]
+        == "60"
+    )
+
+    assert isinstance(final_rpm, SetPumpSpeed)
+    assert final_rpm.rpm == 2900
+
+    assert isinstance(source, SetHeatMode)
+    assert source.mode is PhysicalHeatMode.SOLAR
+
+    assert "target_body_activation_required" in plan.change_reasons
+    assert "cold_start_priming_required" in plan.change_reasons
+
+
+def test_inactive_hot_tub_gas_start_primes_once_at_3000() -> None:
+    desired = _desired(
+        PhysicalHeatMode.GAS,
+        3000,
+        body=ThermalBody.HOT_TUB,
+    )
+    current = ThermalCurrentState(
+        NOW,
+        ThermalBody.HOT_TUB,
+        PhysicalHeatMode.OFF,
+        0,
+        body_active=False,
+    )
+
+    plan = ThermalExecutionPlanBuilder().build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (
+        SetBodyActive,
+        SetPumpSpeed,
+        SetHeatMode,
+    )
+
+    body = plan.operations[0]
+    prime = plan.operations[1]
+    source = plan.operations[2]
+
+    assert isinstance(body, SetBodyActive)
+    assert body.equipment_id == ThermalBody.HOT_TUB.value
+    assert body.active is True
+    assert plan.step_specifications[0].expected_observations == {
+        "spa.active": True
+    }
+
+    assert isinstance(prime, SetPumpSpeed)
+    assert prime.rpm == 3000
+    assert (
+        plan.step_specifications[1].metadata["minimum_verified_hold_seconds"]
+        == "60"
+    )
+
+    assert isinstance(source, SetHeatMode)
+    assert source.mode is PhysicalHeatMode.GAS
+
+
+def test_active_running_pool_does_not_reprime_for_solar_transition() -> None:
+    desired = _desired(
+        PhysicalHeatMode.SOLAR,
+        2900,
+        body=ThermalBody.POOL,
+    )
+    current = ThermalCurrentState(
+        NOW,
+        ThermalBody.POOL,
+        PhysicalHeatMode.OFF,
+        2600,
+        body_active=True,
+    )
+
+    plan = ThermalExecutionPlanBuilder().build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (SetPumpSpeed, SetHeatMode)
+    assert not any(isinstance(item, SetBodyActive) for item in plan.operations)
+    assert all(
+        specification.metadata.get("priming_step") != "true"
+        for specification in plan.step_specifications
+    )
+    assert "cold_start_priming_required" not in plan.change_reasons
+
+
+def test_active_body_with_stopped_pump_still_requires_cold_start_prime() -> None:
+    desired = _desired(
+        PhysicalHeatMode.SOLAR,
+        2900,
+        body=ThermalBody.POOL,
+    )
+    current = ThermalCurrentState(
+        NOW,
+        ThermalBody.POOL,
+        PhysicalHeatMode.OFF,
+        0,
+        body_active=True,
+    )
+
+    plan = ThermalExecutionPlanBuilder().build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (
+        SetPumpSpeed,
+        SetPumpSpeed,
+        SetHeatMode,
+    )
+
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 3000
+    assert plan.step_specifications[0].metadata["priming_step"] == "true"
+
+    assert isinstance(plan.operations[1], SetPumpSpeed)
+    assert plan.operations[1].rpm == 2900
+
+    assert "cold_start_priming_required" in plan.change_reasons

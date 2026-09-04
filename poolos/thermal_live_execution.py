@@ -58,8 +58,10 @@ from .hal import CommandReceipt, CommandStatus
 from .integration import (
     PhysicalHeatMode,
     PoolOperation,
+    SetBodyActive,
     SetHeatMode,
     SetPumpSpeed,
+    ThermalBody,
 )
 from .native_configuration_policy import (
     AutonomousCapability,
@@ -207,9 +209,15 @@ class ThermalLiveStepAttempt:
     lifecycle: ExecutionStepLifecycle
     receipt: CommandReceipt | None = None
     verifications: tuple[ExecutionVerificationResult, ...] = ()
+    verified_hold_started_at: datetime | None = None
     failure_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if self.verified_hold_started_at is not None:
+            _require_aware(
+                self.verified_hold_started_at,
+                "verified_hold_started_at",
+            )
         object.__setattr__(self, "verifications", tuple(self.verifications))
 
 
@@ -399,12 +407,25 @@ class ThermalLiveAuthorizationEngine:
         )
         if evidence.interrupted_execution_present:
             reasons.append("interrupted_execution_requires_fresh_reevaluation")
-        if not evidence.hydraulic_safety_acceptable:
+        body_activation_step = (
+            isinstance(operation, SetBodyActive)
+            and operation.active is True
+            and operation.equipment_id == assessment.desired.body.value
+        )
+
+        if not evidence.hydraulic_safety_acceptable and not body_activation_step:
             reasons.append("hydraulic_safety_model_not_satisfied")
-        if not evidence.body_active:
+        if not evidence.body_active and not body_activation_step:
             reasons.append("target_body_inactive")
         if operation is not None:
-            reasons.extend(self._operation_reasons(assessment, operation, policy))
+            reasons.extend(
+                self._operation_reasons(
+                    assessment,
+                    operation,
+                    policy,
+                    step_index=step_index,
+                )
+            )
         reasons.extend(self._configuration_reasons(assessment, evidence))
         return tuple(dict.fromkeys(reasons))
 
@@ -413,10 +434,67 @@ class ThermalLiveAuthorizationEngine:
         assessment: ThermalExecutionPlanAssessment,
         operation: PoolOperation,
         policy: ThermalLiveExecutionPolicy,
+        *,
+        step_index: int,
     ) -> tuple[str, ...]:
+        if isinstance(operation, SetBodyActive):
+            if operation.equipment_id != assessment.desired.body.value:
+                return ("body_activation_body_mismatch",)
+            if operation.active is not True:
+                return ("autonomous_body_deactivation_not_commissioned",)
+
+            specification = (
+                assessment.step_specifications[step_index]
+                if 0 <= step_index < len(assessment.step_specifications)
+                else None
+            )
+            if specification is None:
+                return ("body_activation_step_specification_missing",)
+
+            expected_concept = (
+                "pool.active"
+                if assessment.desired.body is ThermalBody.POOL
+                else "spa.active"
+            )
+            if dict(specification.expected_observations) != {
+                expected_concept: True
+            }:
+                return ("body_activation_verification_contract_mismatch",)
+
+            if (
+                operation.metadata.get("reason_code")
+                != "thermal_body_activation_required"
+            ):
+                return ("body_activation_reason_mismatch",)
+
+            return ()
+
         if isinstance(operation, SetPumpSpeed):
             if operation.equipment_id != COMMISSIONED_THERMAL_PUMP_ID:
                 return ("uncommissioned_thermal_pump",)
+
+            specification = (
+                assessment.step_specifications[step_index]
+                if 0 <= step_index < len(assessment.step_specifications)
+                else None
+            )
+            priming_step = (
+                specification is not None
+                and specification.metadata.get("priming_step") == "true"
+            )
+
+            if priming_step:
+                assert specification is not None
+                if operation.rpm != policy.baselines.priming_rpm:
+                    return ("uncommissioned_priming_pump_rpm",)
+                if operation.metadata.get("reason_code") != "cold_start_pump_priming":
+                    return ("priming_step_reason_mismatch",)
+                if specification.metadata.get(
+                    "minimum_verified_hold_seconds"
+                ) is None:
+                    return ("priming_hold_contract_missing",)
+                return ()
+
             expected_rpm = {
                 PhysicalHeatMode.SOLAR: policy.baselines.solar_heating_rpm,
                 PhysicalHeatMode.GAS: policy.baselines.gas_heating_rpm,
@@ -749,12 +827,22 @@ class ThermalLiveExecutionEngine:
                     evaluated_at,
                 )
             lifecycle = verifying.lifecycle
+        minimum_hold = _minimum_verified_hold(attempt.step)
+        hold_in_progress = (
+            minimum_hold > timedelta(0)
+            and attempt.verified_hold_started_at is not None
+        )
+
         verification = self.verification_engine.verify(
             ExecutionVerificationRequest(
                 plan_id=session.execution_plan.plan_id,
                 step=attempt.step,
                 observations=observations,
-                verification_started_at=attempt.receipt.issued_at,
+                verification_started_at=(
+                    evaluated_at
+                    if hold_in_progress
+                    else attempt.receipt.issued_at
+                ),
                 evaluated_at=evaluated_at,
                 timeout=policy.verification_timeout,
                 freshness_policy=FreshnessPolicy(
@@ -782,6 +870,23 @@ class ThermalLiveExecutionEngine:
             current_attempt=updated_attempt,
         )
         if verification.status is VerificationStatus.VERIFIED:
+            if minimum_hold > timedelta(0):
+                hold_started_at = attempt.verified_hold_started_at
+
+                if hold_started_at is None:
+                    holding_attempt = replace(
+                        updated_attempt,
+                        verified_hold_started_at=evaluated_at,
+                    )
+                    return replace(
+                        updated,
+                        updated_at=evaluated_at,
+                        current_attempt=holding_attempt,
+                    )
+
+                if evaluated_at - hold_started_at < minimum_hold:
+                    return updated
+
             verified = self.step_state_machine.transition(
                 lifecycle,
                 to_status=ExecutionStepStatus.VERIFIED,
@@ -863,6 +968,25 @@ class ThermalLiveExecutionEngine:
             VerificationEvidenceDisposition.UNUSABLE,
             VerificationEvidenceDisposition.LOW_CONFIDENCE,
         }
+
+        # Once a priming hold has begun, the commanded priming state has
+        # already converged. Fresh usable evidence that no longer satisfies
+        # that verified state breaks continuity and must fail closed rather
+        # than receiving the normal post-command convergence grace period.
+        if (
+            hold_in_progress
+            and verification.status is not VerificationStatus.VERIFIED
+            and not (
+                unusable
+                & {item.disposition for item in verification.evidence}
+            )
+        ):
+            return self._terminal(
+                updated,
+                ThermalLiveExecutionStatus.FAILED,
+                "priming_verified_hold_continuity_lost",
+                evaluated_at,
+            )
         if unusable & {item.disposition for item in verification.evidence}:
             return self._terminal(
                 updated,
@@ -1109,6 +1233,33 @@ def _require_aware(value: datetime, name: str) -> None:
 def _digest(payload: object) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()[:24]
+
+
+def _minimum_verified_hold(step: ExecutionStep) -> timedelta:
+    """Return an explicitly commissioned verified-state hold duration."""
+
+    raw = step.metadata.get("minimum_verified_hold_seconds")
+    if raw is None:
+        return timedelta(0)
+
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "minimum_verified_hold_seconds must be an integer"
+        ) from exc
+
+    if seconds <= 0:
+        raise ValueError(
+            "minimum_verified_hold_seconds must be positive"
+        )
+
+    if step.metadata.get("priming_step") != "true":
+        raise ValueError(
+            "verified hold is currently commissioned only for priming steps"
+        )
+
+    return timedelta(seconds=seconds)
 
 
 __all__ = [
