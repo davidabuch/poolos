@@ -15,6 +15,17 @@ from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
 )
+from poolos.thermal_execution_currentness import (
+    ThermalExecutionCurrentness,
+    ThermalExecutionProgress,
+    operation_signature,
+)
+from poolos.thermal_execution_planning import (
+    ThermalCurrentState,
+    ThermalDesiredState,
+    ThermalExecutionPlanAssessment,
+    ThermalExecutionPlanBuilder,
+)
 from poolos.thermal_live_execution import (
     ThermalLiveExecutionContext,
     ThermalLiveExecutionOwnership,
@@ -96,6 +107,7 @@ def evidence(
     changes: ExternalChangeBatch = ExternalChangeBatch(()),
     circuits: tuple[SharedHydraulicCircuitEvidence, ...] = (),
     circuit_inventory_complete: bool = True,
+    execution_currentness: ThermalExecutionCurrentness | None = None,
 ) -> ThermalRuntimeOwnershipEvidence:
     if pool_active is _UNSET:
         pool_active = body is ThermalBody.POOL
@@ -105,7 +117,11 @@ def evidence(
     assert isinstance(spa_active, bool) or spa_active is None
     return ThermalRuntimeOwnershipEvidence(
         evaluated_at=at,
-        current_context=ThermalLiveExecutionContext(evaluation_id, plan_id),
+        current_context=ThermalLiveExecutionContext(
+            evaluation_id,
+            plan_id,
+            execution_currentness,
+        ),
         requested_mode=requested_mode,
         pool_active=pool_active,
         spa_active=spa_active,
@@ -175,6 +191,38 @@ def attribution(operation: str) -> NativeConsequenceAttribution:
         request_source=PhysicalRequestSource.AUTONOMOUS,
         operation=operation,
         target="native-object",
+    )
+
+
+def thermal_assessment(
+    *,
+    at: datetime = NOW,
+    requested_mode: str = "solar",
+    source: PhysicalHeatMode = PhysicalHeatMode.SOLAR,
+    rpm: int = 2900,
+    current_source: PhysicalHeatMode = PhysicalHeatMode.OFF,
+    current_rpm: int = 2600,
+) -> ThermalExecutionPlanAssessment:
+    return ThermalExecutionPlanBuilder().build(
+        ThermalDesiredState(
+            evaluated_at=at,
+            body=ThermalBody.POOL,
+            requested_mode=requested_mode,
+            selected_source=source,
+            required_pump_rpm=rpm,
+            reason_code=f"selected_{source.value}",
+            rpm_reason_code=f"baseline:{rpm}",
+            rationale=("Current thermal objective.",),
+            criteria=("authoritative_evidence",),
+            evidence={"pool_target_f": 90.0},
+        ),
+        ThermalCurrentState(
+            observed_at=at,
+            body=ThermalBody.POOL,
+            selected_source=current_source,
+            pump_rpm=current_rpm,
+            body_active=True,
+        ),
     )
 
 
@@ -996,6 +1044,164 @@ def test_historical_delivery_provenance_cannot_establish_against_new_context() -
 
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
     assert decision.reason_code.endswith("provenance_not_current")
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.UNOWNED
+
+
+def test_runtime_ownership_survives_compatible_new_evaluation_epoch() -> None:
+    original_plan = thermal_assessment()
+    originating = ThermalExecutionCurrentness.from_assessment(
+        original_plan,
+        evaluation_id="evaluation-1",
+    )
+    progress = ThermalExecutionProgress(
+        accepted_current=operation_signature(
+            original_plan.operations[0],
+            original_plan.step_specifications[0].metadata,
+        )
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    established = manager.establish(
+        execution_ownership(pump_rpm=2900, plan_id=originating.plan_id),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            originating.evaluation_id,
+            originating.plan_id,
+            originating,
+        ),
+        execution_progress=progress,
+    )
+    residual_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=1),
+        current_rpm=2900,
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        residual_plan,
+        evaluation_id="evaluation-2",
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id=current.evaluation_id,
+            plan_id=current.plan_id,
+            execution_currentness=current,
+        )
+    )
+
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+def test_typed_runtime_ownership_fails_closed_without_current_purpose() -> None:
+    original_plan = thermal_assessment()
+    originating = ThermalExecutionCurrentness.from_assessment(
+        original_plan,
+        evaluation_id="evaluation-1",
+    )
+    progress = ThermalExecutionProgress(
+        accepted_current=operation_signature(
+            original_plan.operations[0],
+            original_plan.step_specifications[0].metadata,
+        )
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    manager.establish(
+        execution_ownership(pump_rpm=2900, plan_id=originating.plan_id),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            originating.evaluation_id,
+            originating.plan_id,
+            originating,
+        ),
+        execution_progress=progress,
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+        )
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+    assert decision.reason_code.endswith("execution_currentness_unavailable")
+
+
+def test_runtime_ownership_is_superseded_by_changed_execution_purpose() -> None:
+    original_plan = thermal_assessment()
+    originating = ThermalExecutionCurrentness.from_assessment(
+        original_plan,
+        evaluation_id="evaluation-1",
+    )
+    progress = ThermalExecutionProgress(
+        accepted_current=operation_signature(
+            original_plan.operations[0],
+            original_plan.step_specifications[0].metadata,
+        )
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    manager.establish(
+        execution_ownership(pump_rpm=2900, plan_id=originating.plan_id),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            originating.evaluation_id,
+            originating.plan_id,
+            originating,
+        ),
+        execution_progress=progress,
+    )
+    gas_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=1),
+        requested_mode="gas",
+        source=PhysicalHeatMode.GAS,
+        rpm=3000,
+        current_rpm=2900,
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        gas_plan,
+        evaluation_id="evaluation-2",
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id=current.evaluation_id,
+            plan_id=current.plan_id,
+            requested_mode="Gas",
+            execution_currentness=current,
+        )
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.SUPERSEDED
+    assert decision.reason_code == "runtime_ownership_superseded:execution_purpose"
+
+
+def test_typed_ownership_cannot_be_established_without_poolos_progress() -> None:
+    plan = thermal_assessment()
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        plan,
+        evaluation_id="evaluation-1",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+
+    decision = manager.establish(
+        execution_ownership(pump_rpm=2900, plan_id=currentness.plan_id),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            currentness.evaluation_id,
+            currentness.plan_id,
+            currentness,
+        ),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert decision.reason_code.endswith("execution_currentness_progress_incomplete")
     assert manager.state.status is ThermalRuntimeOwnershipStatus.UNOWNED
 
 

@@ -75,11 +75,40 @@ ambiguous, or contradictory topology terminates the session. A topology break
 during a verified priming hold invalidates that hold and requires a fresh plan
 and session; hold time is never paused or resumed across the break.
 
-Each live session also retains its immutable originating evaluation and thermal
-plan identity. The runtime must supply the current typed identity before both
-delivery and verification. Either identity changing terminates the old session
-as superseded before verification or coordinator advancement, discards any
-verified hold, and requires a fresh plan and session.
+Each live session retains three distinct identities: its concrete originating
+evaluation, its concrete plan instance, and a stable execution-purpose identity
+derived only from material body, requested-mode, selected-source, thermal-RPM,
+target-temperature, and probe/Off semantics. The runtime supplies current typed
+identity before delivery and verification. A new evaluation or residual plan may
+continue only when the purpose is unchanged and its remaining operation structure
+is a suffix explained by accepted or verified PoolOS session progress. Hardware
+equivalence alone cannot explain progress. A purpose change, blocked plan,
+unattributed convergence, or incompatible residual plan terminates the old
+session before verification or coordinator advancement and discards any hold.
+
+Currentness vocabulary is explicit:
+
+- `evaluation_id` identifies one observation/evaluation epoch;
+- `plan_id` identifies one concrete planner result;
+- `execution_purpose_id` identifies the stable material objective;
+- the residual plan is the currently required structural operation suffix;
+- execution progress is only the accepted current operation and verified prefix
+  retained by the live session;
+- `SAME_PURPOSE` means a newer epoch retains the same objective and residual;
+- `PROGRESS_COMPATIBLE` means PoolOS-attributed progress explains the shorter
+  residual;
+- `CONVERGED` means verified PoolOS progress explains a same-purpose empty plan;
+- a material purpose change is true supersession, while unprovable structure is
+  `UNKNOWN` and fails closed; and
+- explicit runtime ownership handoff remains the separate ADR-108 mechanism.
+
+Purpose compatibility never authorizes delivery and never replaces fresh safety
+authorization or authoritative verification. Expected PoolOS delivery progress
+may explain a shrinking residual, but a matching manual or external consequence
+cannot. Although the deterministic purpose ID can be recomputed after restart,
+sessions, receipts, verified progress, and ownership are in-memory and are never
+restored from that match. A future automatic driver must consume this contract
+rather than defining another equivalence algorithm.
 
 Physical execution ownership is explicit accepted-delivery provenance scoped
 to one in-memory session. An accepted session-bound body activation, pump
@@ -117,8 +146,10 @@ endpoint bounds remain unchanged.
   cold-start plan may activate only its selected inactive body when the other
   body is explicitly inactive and all hydraulic evidence is usable. No route
   operation or body deactivation is inferred from configured mode or target.
-- Newer evaluation or plan identity supersedes an in-progress plan before its
-  next command or verification. No automatic reversal is issued.
+- A materially newer purpose or unprovable residual plan supersedes an
+  in-progress plan before its next command or verification. Mere timestamp-driven
+  evaluation and plan-instance churn does not supersede a provably compatible
+  purpose. No automatic reversal is issued.
 - Interrupted history cannot resume. Restart requires fresh observation,
   evaluation, authorization, and a newly begun session.
 - Delivery rejection/failure/timeout, verification failure/timeout, stale

@@ -80,6 +80,14 @@ from .thermal_execution_planning import (
     ThermalExecutionPlanAssessment,
     ThermalPlanDisposition,
 )
+from .thermal_execution_currentness import (
+    ThermalExecutionCompatibilityDecision,
+    ThermalExecutionCompatibilityDisposition,
+    ThermalExecutionCurrentness,
+    ThermalExecutionProgress,
+    assess_execution_compatibility,
+    operation_signature,
+)
 
 
 COMMISSIONED_THERMAL_PUMP_ID = "p0102"
@@ -114,10 +122,16 @@ class ThermalLiveExecutionContext:
 
     evaluation_id: str
     plan_id: str
+    execution_currentness: ThermalExecutionCurrentness | None = None
 
     def __post_init__(self) -> None:
         if not self.evaluation_id.strip() or not self.plan_id.strip():
             raise ValueError("evaluation_id and plan_id must not be empty")
+        if self.execution_currentness is not None and (
+            self.execution_currentness.evaluation_id != self.evaluation_id
+            or self.execution_currentness.plan_id != self.plan_id
+        ):
+            raise ValueError("execution currentness must match context audit identity")
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +228,7 @@ class ThermalLiveSafetyEvidence:
     contradictory_evidence: tuple[str, ...] = ()
     interrupted_execution_present: bool = False
     metadata: Mapping[str, str] = field(default_factory=dict)
+    execution_currentness: ThermalExecutionCurrentness | None = None
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at, "evaluated_at")
@@ -223,6 +238,13 @@ class ThermalLiveSafetyEvidence:
         contradictions = tuple(self.contradictory_evidence)
         if any(not item.strip() for item in contradictions):
             raise ValueError("contradictory_evidence must not contain empty values")
+        if self.execution_currentness is not None and (
+            self.execution_currentness.evaluation_id != self.current_evaluation_id
+            or self.execution_currentness.plan_id != self.current_plan_id
+        ):
+            raise ValueError(
+                "execution currentness must match current safety evidence identity"
+            )
         object.__setattr__(self, "contradictory_evidence", contradictions)
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
@@ -233,6 +255,7 @@ class ThermalLiveSafetyEvidence:
         return ThermalLiveExecutionContext(
             evaluation_id=self.current_evaluation_id,
             plan_id=self.current_plan_id,
+            execution_currentness=self.execution_currentness,
         )
 
 
@@ -414,6 +437,7 @@ class ThermalLiveExecutionSession:
     execution_plan: ExecutionPlan
     coordination: ExecutionCoordinationSession
     evaluation_id: str
+    originating_currentness: ThermalExecutionCurrentness
     status: ThermalLiveExecutionStatus
     started_at: datetime
     updated_at: datetime
@@ -440,6 +464,11 @@ class ThermalLiveExecutionSession:
             raise ValueError("ownership must reference execution plan")
         if self.ownership.target_body is not self.assessment.desired.body:
             raise ValueError("ownership must reference target body")
+        if (
+            self.originating_currentness.evaluation_id != self.evaluation_id
+            or self.originating_currentness.plan_id != self.assessment.plan_id
+        ):
+            raise ValueError("originating currentness must reference session origin")
         if self.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
             if self.current_attempt is None or self.current_attempt.receipt is None:
                 raise ValueError("awaiting verification requires a delivered attempt")
@@ -459,6 +488,29 @@ class ThermalLiveExecutionSession:
         return ThermalLiveExecutionContext(
             evaluation_id=self.evaluation_id,
             plan_id=self.assessment.plan_id,
+            execution_currentness=self.originating_currentness,
+        )
+
+    @property
+    def execution_progress(self) -> ThermalExecutionProgress:
+        """Return accepted/verified progress without inferring from hardware."""
+
+        verified = tuple(
+            operation_signature(attempt.step.operation, attempt.step.metadata)
+            for attempt in self.attempts
+            if attempt.lifecycle.status is ExecutionStepStatus.VERIFIED
+        )
+        accepted = (
+            None
+            if self.current_attempt is None or self.current_attempt.receipt is None
+            else operation_signature(
+                self.current_attempt.step.operation,
+                self.current_attempt.step.metadata,
+            )
+        )
+        return ThermalExecutionProgress(
+            verified_prefix=verified,
+            accepted_current=accepted,
         )
 
 
@@ -475,6 +527,8 @@ class ThermalLiveAuthorizationEngine:
         step_index: int,
         policy: ThermalLiveExecutionPolicy,
         evidence: ThermalLiveSafetyEvidence,
+        originating_currentness: ThermalExecutionCurrentness | None = None,
+        execution_progress: ThermalExecutionProgress | None = None,
     ) -> ThermalLiveAuthorizationResult:
         operation = (
             assessment.operations[step_index]
@@ -487,6 +541,8 @@ class ThermalLiveAuthorizationEngine:
             step_index=step_index,
             policy=policy,
             evidence=evidence,
+            originating_currentness=originating_currentness,
+            execution_progress=execution_progress,
         )
         disposition = (
             ThermalLiveAuthorizationDisposition.BLOCKED
@@ -568,6 +624,8 @@ class ThermalLiveAuthorizationEngine:
         policy: ThermalLiveExecutionPolicy,
         evidence: ThermalLiveSafetyEvidence,
         include_operator_gates: bool = True,
+        originating_currentness: ThermalExecutionCurrentness | None = None,
+        execution_progress: ThermalExecutionProgress | None = None,
     ) -> tuple[str, ...]:
         reasons: list[str] = []
         if include_operator_gates:
@@ -596,10 +654,31 @@ class ThermalLiveAuthorizationEngine:
                 != assessment.desired.body.value
             ):
                 reasons.append("hydraulic_continuity_contract_mismatch")
-        if evidence.evaluation_id != evidence.current_evaluation_id:
-            reasons.append("evaluation_superseded")
-        if evidence.current_plan_id != assessment.plan_id:
-            reasons.append("plan_superseded")
+        if originating_currentness is None:
+            if evidence.evaluation_id != evidence.current_evaluation_id:
+                reasons.append("evaluation_superseded")
+            if evidence.current_plan_id != assessment.plan_id:
+                reasons.append("plan_superseded")
+        elif (
+            originating_currentness.evaluation_id != evidence.evaluation_id
+            or originating_currentness.plan_id != assessment.plan_id
+        ):
+            reasons.append("thermal_execution_origin_identity_mismatch")
+        elif evidence.execution_currentness is None:
+            if (
+                evidence.current_evaluation_id
+                != originating_currentness.evaluation_id
+                or evidence.current_plan_id != originating_currentness.plan_id
+            ):
+                reasons.append("thermal_execution_currentness_unavailable")
+        else:
+            currentness = assess_execution_compatibility(
+                originating_currentness,
+                evidence.execution_currentness,
+                progress=execution_progress or ThermalExecutionProgress(),
+            )
+            if not currentness.continuation_allowed:
+                reasons.append(currentness.reason_code)
         age = evidence.evaluated_at - assessment.desired.evaluated_at
         if age < timedelta(0):
             reasons.append("plan_created_in_future")
@@ -827,6 +906,15 @@ class ThermalLiveExecutionEngine:
         policy: ThermalLiveExecutionPolicy,
         evidence: ThermalLiveSafetyEvidence,
     ) -> ThermalLiveExecutionSession:
+        originating_currentness = ThermalExecutionCurrentness.from_assessment(
+            assessment,
+            evaluation_id=evidence.evaluation_id,
+        )
+        if (
+            evidence.execution_currentness is not None
+            and evidence.execution_currentness != originating_currentness
+        ):
+            raise ValueError("thermal live execution currentness does not match plan")
         authorization = self.authorization_engine.authorize(
             assessment,
             step_index=0,
@@ -884,6 +972,7 @@ class ThermalLiveExecutionEngine:
             execution_plan=plan,
             coordination=started.session,
             evaluation_id=evidence.evaluation_id,
+            originating_currentness=originating_currentness,
             status=ThermalLiveExecutionStatus.READY,
             started_at=evidence.evaluated_at,
             updated_at=evidence.evaluated_at,
@@ -905,15 +994,15 @@ class ThermalLiveExecutionEngine:
     ) -> ThermalLiveExecutionSession:
         if session.status is not ThermalLiveExecutionStatus.READY:
             raise ValueError("session is not ready for step delivery")
-        superseded = self._supersession_reason(
+        currentness = self._currentness_decision(
             session,
             current_context=evidence.current_context,
         )
-        if superseded is not None:
+        if not currentness.continuation_allowed:
             return self._terminal(
                 session,
                 ThermalLiveExecutionStatus.SUPERSEDED,
-                superseded,
+                currentness.reason_code,
                 evidence.evaluated_at,
             )
         selected = self.coordinator.current_step(
@@ -934,6 +1023,8 @@ class ThermalLiveExecutionEngine:
             step_index=step_index,
             policy=policy,
             evidence=evidence,
+            originating_currentness=session.originating_currentness,
+            execution_progress=session.execution_progress,
         )
         if not authorization.authorized:
             status = (
@@ -1119,15 +1210,15 @@ class ThermalLiveExecutionEngine:
         if session.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
             raise ValueError("session is not awaiting verification")
         _require_aware(evaluated_at, "evaluated_at")
-        superseded = self._supersession_reason(
+        currentness = self._currentness_decision(
             session,
             current_context=current_context,
         )
-        if superseded is not None:
+        if not currentness.continuation_allowed:
             return self._terminal(
                 session,
                 ThermalLiveExecutionStatus.SUPERSEDED,
-                superseded,
+                currentness.reason_code,
                 evaluated_at,
             )
         attempt = session.current_attempt
@@ -1471,18 +1562,49 @@ class ThermalLiveExecutionEngine:
         return tuple(reasons)
 
     @staticmethod
-    def _supersession_reason(
+    def _currentness_decision(
         session: ThermalLiveExecutionSession,
         *,
         current_context: ThermalLiveExecutionContext,
-    ) -> str | None:
-        """Return the first immutable identity mismatch, if any."""
+    ) -> ThermalExecutionCompatibilityDecision:
+        """Return centralized semantic/progress currentness for one session."""
 
-        if current_context.evaluation_id != session.evaluation_id:
-            return "thermal_execution_superseded:evaluation_id"
-        if current_context.plan_id != session.assessment.plan_id:
-            return "thermal_execution_superseded:plan_id"
-        return None
+        current = current_context.execution_currentness
+        if current is not None:
+            return assess_execution_compatibility(
+                session.originating_currentness,
+                current,
+                progress=session.execution_progress,
+            )
+        disposition = (
+            ThermalExecutionCompatibilityDisposition.SAME_PURPOSE
+            if current_context.evaluation_id == session.evaluation_id
+            and current_context.plan_id == session.assessment.plan_id
+            else ThermalExecutionCompatibilityDisposition.SUPERSEDED
+        )
+        reason = (
+            "thermal_execution_legacy_exact_identity_current"
+            if disposition is ThermalExecutionCompatibilityDisposition.SAME_PURPOSE
+            else (
+                "thermal_execution_superseded:evaluation_id"
+                if current_context.evaluation_id != session.evaluation_id
+                else "thermal_execution_superseded:plan_id"
+            )
+        )
+        return ThermalExecutionCompatibilityDecision(
+            disposition=disposition,
+            reason_code=reason,
+            originating_evaluation_id=session.evaluation_id,
+            originating_plan_id=session.assessment.plan_id,
+            current_evaluation_id=current_context.evaluation_id,
+            current_plan_id=current_context.plan_id,
+            execution_purpose_id=(
+                session.originating_currentness.purpose.purpose_id
+                if disposition
+                is ThermalExecutionCompatibilityDisposition.SAME_PURPOSE
+                else None
+            ),
+        )
 
     def _record_coordination(self, result: ExecutionCoordinationResult) -> None:
         if self.recorder is None:

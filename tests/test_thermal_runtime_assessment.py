@@ -111,6 +111,45 @@ def test_disabled_operator_gates_do_not_hide_technical_preflight() -> None:
     assert not hasattr(result.pool.technical_preflight, "operation_id")
 
 
+def test_runtime_exposes_stable_execution_purpose_across_fresh_epochs() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    first = evaluator.evaluate(evidence(), live_policy=disabled_policy())
+    second = evaluator.evaluate(
+        evidence(at=NOW + timedelta(seconds=1)),
+        live_policy=disabled_policy(),
+    )
+
+    assert first.pool.evaluation_id != second.pool.evaluation_id
+    assert first.pool.plan.plan_id != second.pool.plan.plan_id
+    assert (
+        first.pool.execution_currentness.purpose
+        == second.pool.execution_currentness.purpose
+    )
+    assert (
+        second.pool.diagnostics()["execution_purpose_id"]
+        == second.pool.execution_currentness.purpose.purpose_id
+    )
+
+
+def test_runtime_execution_purpose_changes_with_target_temperature() -> None:
+    first_values = values()
+    second_values = values()
+    second_values["pool.target_temperature"] = 91.0
+    first = ThermalRuntimeEvaluator().evaluate(
+        evidence(native_values=first_values),
+        live_policy=disabled_policy(),
+    )
+    second = ThermalRuntimeEvaluator().evaluate(
+        evidence(native_values=second_values),
+        live_policy=disabled_policy(),
+    )
+
+    assert (
+        first.pool.execution_currentness.purpose.purpose_id
+        != second.pool.execution_currentness.purpose.purpose_id
+    )
+
+
 def test_pool_scope_and_hot_tub_scope_remain_one_body_only() -> None:
     evaluator = ThermalRuntimeEvaluator()
     pool = evaluator.evaluate(evidence(), live_policy=pool_policy())
