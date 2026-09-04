@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.10.0
+poolos@git+https://github.com/davidabuch/poolos.git@v0.10.1
 ```
 
 This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
@@ -80,6 +80,7 @@ Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
 Milestone 11.3C uses integration version `0.8.0` and tag `v0.8.0`.
 Milestone 11.3D uses integration version `0.9.0` and tag `v0.9.0`.
 Milestone 11.4A advances the integration to `0.10.0`; after 11.4A is merged and green, create matching tag and release `v0.10.0` before any installation attempt.
+Patch release `0.10.1` packages the post-11.4A commissioning fixes through PR #115 and pins the core dependency to matching tag `v0.10.1` for HACS delivery.
 
 
 ## 11.4A high-fidelity observation boundary
