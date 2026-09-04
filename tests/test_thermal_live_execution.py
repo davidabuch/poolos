@@ -45,6 +45,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveAuthorizationEngine,
     ThermalLiveAuthorizationResult,
     ThermalLiveCommissioningScope,
+    ThermalLiveExecutionContext,
     ThermalLiveExecutionEngine,
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
@@ -722,6 +723,7 @@ def test_each_step_records_only_its_fresh_delivery_authorization() -> None:
     second_ready = engine.verify_current_step(
         first_waiting,
         store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=first_waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -744,6 +746,7 @@ def test_each_step_records_only_its_fresh_delivery_authorization() -> None:
     completed = engine.verify_current_step(
         second_waiting,
         store("pool.raw_heater_id", "H0002", at=NOW + timedelta(seconds=3)),
+        current_context=second_waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=3),
         source_id="native-intellicenter",
@@ -820,6 +823,7 @@ def test_phase_one_order_is_preserved_by_live_coordinator(
         session = engine.verify_current_step(
             session,
             store(observation_id, expected, at=current_evidence.evaluated_at),
+            current_context=session.originating_context,
             policy=policy(),
             evaluated_at=current_evidence.evaluated_at,
             source_id="native-intellicenter",
@@ -914,6 +918,7 @@ def test_rpm_settles_pending_then_verifies_within_inclusive_tolerance() -> None:
     pending = engine.verify_current_step(
         waiting,
         store("pump.rpm", 2874, at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -921,6 +926,7 @@ def test_rpm_settles_pending_then_verifies_within_inclusive_tolerance() -> None:
     verified = engine.verify_current_step(
         pending,
         store("pump.rpm", 2875, at=NOW + timedelta(seconds=2)),
+        current_context=pending.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=2),
         source_id="native-intellicenter",
@@ -947,6 +953,7 @@ def test_pump_mismatch_at_deadline_times_out() -> None:
     result = engine.verify_current_step(
         waiting,
         store("pump.rpm", 2600, at=NOW + timedelta(seconds=30)),
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=30),
         source_id="native-intellicenter",
@@ -986,6 +993,7 @@ def test_wrong_heater_fails_even_when_htmode_context_is_zero() -> None:
     result = engine.verify_current_step(
         waiting,
         observations,
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -1025,6 +1033,7 @@ def test_correct_heater_verifies_with_htmode_zero_as_context_only() -> None:
     result = engine.verify_current_step(
         waiting,
         observations,
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -1059,6 +1068,7 @@ def test_stale_authoritative_observation_stops_execution() -> None:
             at=NOW,
             hydraulics_at=NOW + timedelta(minutes=1),
         ),
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(minutes=1),
         source_id="native-intellicenter",
@@ -1084,6 +1094,7 @@ def test_disabling_kill_switch_during_plan_blocks_next_command_without_restorati
     ready = engine.verify_current_step(
         waiting,
         store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -1125,6 +1136,7 @@ def test_newer_desired_state_prevents_old_plan_from_continuing(
     ready = engine.verify_current_step(
         waiting,
         store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -1182,6 +1194,7 @@ def test_flight_recorder_and_outcome_retain_why_receipt_and_verification() -> No
     completed = engine.verify_current_step(
         waiting,
         store("pool.raw_heater_id", "H0002", at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
         policy=policy(),
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
@@ -1246,6 +1259,7 @@ def test_priming_step_does_not_advance_until_60_seconds_continuously_verified() 
     session = engine.verify_current_step(
         session,
         store("pump.rpm", 3000, at=first_verified_at),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=first_verified_at,
         source_id="native-intellicenter",
@@ -1259,6 +1273,7 @@ def test_priming_step_does_not_advance_until_60_seconds_continuously_verified() 
     session = engine.verify_current_step(
         session,
         store("pump.rpm", 3000, at=still_holding_at),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=still_holding_at,
         source_id="native-intellicenter",
@@ -1272,6 +1287,7 @@ def test_priming_step_does_not_advance_until_60_seconds_continuously_verified() 
     session = engine.verify_current_step(
         session,
         store("pump.rpm", 3000, at=completed_hold_at),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=completed_hold_at,
         source_id="native-intellicenter",
@@ -1308,6 +1324,7 @@ def test_priming_hold_fails_closed_if_rpm_deviates_before_completion() -> None:
     session = engine.verify_current_step(
         session,
         store("pump.rpm", 3000, at=first_verified_at),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=first_verified_at,
         source_id="native-intellicenter",
@@ -1319,6 +1336,7 @@ def test_priming_hold_fails_closed_if_rpm_deviates_before_completion() -> None:
     session = engine.verify_current_step(
         session,
         store("pump.rpm", 2900, at=deviation_at),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=deviation_at,
         source_id="native-intellicenter",
@@ -1357,6 +1375,7 @@ def test_priming_hold_fails_closed_when_pool_hydraulics_lose_continuity(
     session = engine.verify_current_step(
         session,
         hydraulic_store(at=first_verified_at),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=first_verified_at,
         source_id="native-intellicenter",
@@ -1373,6 +1392,7 @@ def test_priming_hold_fails_closed_when_pool_hydraulics_lose_continuity(
             stale=stale,
             unusable=unusable,
         ),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=broken_at,
         source_id="native-intellicenter",
@@ -1389,6 +1409,7 @@ def test_priming_hold_fails_closed_when_pump_stops() -> None:
     session = engine.verify_current_step(
         session,
         hydraulic_store(at=first_verified_at),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=first_verified_at,
         source_id="native-intellicenter",
@@ -1398,6 +1419,7 @@ def test_priming_hold_fails_closed_when_pump_stops() -> None:
     session = engine.verify_current_step(
         session,
         hydraulic_store(at=stopped_at, pump_rpm=0),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=stopped_at,
         source_id="native-intellicenter",
@@ -1419,6 +1441,7 @@ def test_uninterrupted_hot_tub_priming_requires_hot_tub_only_topology() -> None:
             pool_active=False,
             spa_active=True,
         ),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=first_verified_at,
         source_id="native-intellicenter",
@@ -1431,6 +1454,7 @@ def test_uninterrupted_hot_tub_priming_requires_hot_tub_only_topology() -> None:
             pool_active=False,
             spa_active=True,
         ),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=completed_hold_at,
         source_id="native-intellicenter",
@@ -1451,6 +1475,7 @@ def test_pool_takeover_during_hot_tub_priming_fails_closed() -> None:
             pool_active=False,
             spa_active=True,
         ),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=first_verified_at,
         source_id="native-intellicenter",
@@ -1463,6 +1488,7 @@ def test_pool_takeover_during_hot_tub_priming_fails_closed() -> None:
             pool_active=True,
             spa_active=False,
         ),
+        current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=takeover_at,
         source_id="native-intellicenter",
@@ -1501,6 +1527,7 @@ def test_nonpriming_verified_step_still_advances_immediately() -> None:
     session = engine.verify_current_step(
         session,
         store("pump.rpm", 2900, at=at),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=at,
         source_id="native-intellicenter",
@@ -1726,6 +1753,7 @@ def test_body_activation_verification_rejects_other_body_takeover() -> None:
     session = engine.verify_current_step(
         session,
         hydraulic_store(at=at, pool_active=True, spa_active=True),
+        current_context=session.originating_context,
         policy=policy(),
         evaluated_at=at,
         source_id="native-intellicenter",
@@ -1799,3 +1827,513 @@ def test_verified_body_activation_allows_following_priming_step() -> None:
     )
 
     assert second.authorized is True
+
+
+@pytest.mark.parametrize(
+    ("body", "replacement_source"),
+    (
+        (ThermalBody.POOL, PhysicalHeatMode.OFF),
+        (ThermalBody.POOL, PhysicalHeatMode.GAS),
+        (ThermalBody.HOT_TUB, PhysicalHeatMode.OFF),
+    ),
+)
+def test_delivered_step_cannot_verify_after_thermal_plan_is_superseded(
+    body: ThermalBody,
+    replacement_source: PhysicalHeatMode,
+) -> None:
+    scope = (
+        ThermalLiveCommissioningScope.POOL
+        if body is ThermalBody.POOL
+        else ThermalLiveCommissioningScope.HOT_TUB
+    )
+    original = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        PhysicalHeatMode.SOLAR,
+        2900,
+        body=body,
+    )
+    replacement = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        replacement_source,
+        None if replacement_source is PhysicalHeatMode.OFF else 3000,
+        body=body,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(
+        original,
+        policy=policy(scope),
+        evidence=evidence(original),
+    )
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(scope),
+            evidence=evidence(original),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+
+    result = engine.verify_current_step(
+        waiting,
+        store(
+            (
+                "pool.raw_heater_id"
+                if body is ThermalBody.POOL
+                else "spa.raw_heater_id"
+            ),
+            "H0002",
+            at=NOW + timedelta(seconds=1),
+            body=body,
+        ),
+        current_context=ThermalLiveExecutionContext(
+            evaluation_id="evaluation-2",
+            plan_id=replacement.plan_id,
+        ),
+        policy=policy(scope),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
+    assert result.failure_reason == "thermal_execution_superseded:evaluation_id"
+    assert result.current_attempt is None
+    assert result.ownership.owns_heat_source is False
+
+
+@pytest.mark.parametrize(
+    ("body", "source", "rpm", "scope"),
+    (
+        (
+            ThermalBody.POOL,
+            PhysicalHeatMode.SOLAR,
+            2900,
+            ThermalLiveCommissioningScope.POOL,
+        ),
+        (
+            ThermalBody.POOL,
+            PhysicalHeatMode.GAS,
+            3000,
+            ThermalLiveCommissioningScope.POOL,
+        ),
+        (
+            ThermalBody.HOT_TUB,
+            PhysicalHeatMode.GAS,
+            3000,
+            ThermalLiveCommissioningScope.HOT_TUB,
+        ),
+    ),
+)
+def test_matching_current_identity_preserves_existing_thermal_execution(
+    body: ThermalBody,
+    source: PhysicalHeatMode,
+    rpm: int,
+    scope: ThermalLiveCommissioningScope,
+) -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        rpm,
+        source,
+        rpm,
+        body=body,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(
+        plan,
+        policy=policy(scope),
+        evidence=evidence(plan),
+    )
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(scope),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    assert waiting.current_attempt is not None
+    observation_id, expected = next(
+        iter(waiting.current_attempt.step.expected_observations.items())
+    )
+
+    completed = engine.verify_current_step(
+        waiting,
+        store(
+            observation_id,
+            expected,
+            at=NOW + timedelta(seconds=1),
+            body=body,
+        ),
+        current_context=waiting.originating_context,
+        policy=policy(scope),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert completed.status is ThermalLiveExecutionStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    ("current_context", "reason"),
+    (
+        (
+            ThermalLiveExecutionContext(
+                evaluation_id="evaluation-1",
+                plan_id="replacement-plan",
+            ),
+            "thermal_execution_superseded:plan_id",
+        ),
+        (
+            ThermalLiveExecutionContext(
+                evaluation_id="evaluation-2",
+                plan_id="original-plan-placeholder",
+            ),
+            "thermal_execution_superseded:evaluation_id",
+        ),
+    ),
+)
+def test_verification_requires_matching_current_thermal_identity(
+    current_context: ThermalLiveExecutionContext,
+    reason: str,
+) -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    if current_context.evaluation_id == "evaluation-2":
+        current_context = replace(current_context, plan_id=plan.plan_id)
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+
+    result = engine.verify_current_step(
+        waiting,
+        store("pool.raw_heater_id", "H0002", at=NOW + timedelta(seconds=1)),
+        current_context=current_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
+    assert result.failure_reason == reason
+
+
+def test_supersession_discards_priming_hold_and_clears_ownership() -> None:
+    engine, live_policy, session = delivered_priming_session()
+    first_verified_at = NOW + timedelta(seconds=2)
+    holding = engine.verify_current_step(
+        session,
+        hydraulic_store(at=first_verified_at),
+        current_context=session.originating_context,
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    assert holding.current_attempt is not None
+    assert holding.current_attempt.verified_hold_started_at == first_verified_at
+    assert holding.ownership.owns_pump_setpoint is True
+
+    result = engine.verify_current_step(
+        holding,
+        hydraulic_store(at=NOW + timedelta(seconds=62)),
+        current_context=ThermalLiveExecutionContext(
+            evaluation_id="evaluation-2",
+            plan_id="replacement-plan",
+        ),
+        policy=live_policy,
+        evaluated_at=NOW + timedelta(seconds=62),
+        source_id="native-intellicenter",
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
+    assert result.current_attempt is None
+    assert result.ownership.owns_pump_setpoint is False
+    with pytest.raises(ValueError, match="session is not awaiting verification"):
+        engine.verify_current_step(
+            result,
+            hydraulic_store(at=NOW + timedelta(seconds=63)),
+            current_context=result.originating_context,
+            policy=live_policy,
+            evaluated_at=NOW + timedelta(seconds=63),
+            source_id="native-intellicenter",
+        )
+
+
+def test_supersession_after_body_activation_blocks_following_delivery() -> None:
+    plan = inactive_body_plan(ThermalBody.POOL)
+    engine = ThermalLiveExecutionEngine()
+    delivery = FakeThermalDelivery()
+    session = engine.begin(
+        plan,
+        policy=policy(),
+        evidence=evidence(
+            plan,
+            body_active=False,
+            hydraulic_safe=True,
+            hydraulic=hydraulic_evidence(
+                target_body=ThermalBody.POOL,
+                pool_active=False,
+                spa_active=False,
+            ),
+        ),
+    )
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                body_active=False,
+                hydraulic_safe=True,
+                hydraulic=hydraulic_evidence(
+                    target_body=ThermalBody.POOL,
+                    pool_active=False,
+                    spa_active=False,
+                ),
+            ),
+            delivery=delivery,
+        )
+    )
+    assert waiting.ownership.owns_body_activation is True
+    ready = engine.verify_current_step(
+        waiting,
+        store("pool.active", True, at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+    assert ready.status is ThermalLiveExecutionStatus.READY
+
+    result = asyncio.run(
+        engine.deliver_current_step(
+            ready,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                at=NOW + timedelta(seconds=2),
+                current_evaluation_id="evaluation-2",
+                current_plan_id="replacement-plan",
+            ),
+            delivery=delivery,
+        )
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
+    assert result.ownership.owns_body_activation is False
+    assert len(delivery.calls) == 1
+
+
+def test_preexisting_matching_native_state_never_creates_session_ownership() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+
+    first = ThermalLiveExecutionEngine().begin(
+        plan,
+        policy=policy(),
+        evidence=evidence(plan),
+    )
+    restarted = ThermalLiveExecutionEngine().begin(
+        plan,
+        policy=policy(),
+        evidence=evidence(plan),
+    )
+
+    for session in (first, restarted):
+        assert session.ownership.owns_body_activation is False
+        assert session.ownership.owns_pump_setpoint is False
+        assert session.ownership.owns_heat_source is False
+
+
+@pytest.mark.parametrize(
+    ("plan", "attribute", "expected"),
+    (
+        (
+            inactive_body_plan(ThermalBody.POOL),
+            "owns_body_activation",
+            True,
+        ),
+        (
+            thermal_plan(
+                PhysicalHeatMode.OFF,
+                2600,
+                PhysicalHeatMode.SOLAR,
+                2900,
+            ),
+            "owns_pump_setpoint",
+            True,
+        ),
+        (
+            thermal_plan(
+                PhysicalHeatMode.OFF,
+                2900,
+                PhysicalHeatMode.SOLAR,
+                2900,
+            ),
+            "owns_heat_source",
+            True,
+        ),
+    ),
+)
+def test_accepted_delivery_establishes_only_typed_session_ownership(
+    plan: ThermalExecutionPlanAssessment,
+    attribute: str,
+    expected: bool,
+) -> None:
+    inactive = isinstance(plan.operations[0], SetBodyActive)
+    live_evidence = evidence(
+        plan,
+        body_active=not inactive,
+        hydraulic_safe=True,
+        hydraulic=(
+            hydraulic_evidence(
+                target_body=ThermalBody.POOL,
+                pool_active=False,
+                spa_active=False,
+            )
+            if inactive
+            else None
+        ),
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=live_evidence)
+
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=live_evidence,
+            delivery=FakeThermalDelivery(),
+        )
+    )
+
+    assert getattr(waiting.ownership, attribute) is expected
+    assert waiting.current_attempt is not None
+    operation = waiting.current_attempt.step.operation
+    if isinstance(operation, SetPumpSpeed):
+        assert waiting.ownership.pump_operation_id == operation.operation_id
+        assert waiting.ownership.pump_receipt_id == "receipt-1"
+        assert waiting.ownership.pump_correlation_id == waiting.current_attempt.correlation_id
+        assert waiting.ownership.commanded_pump_rpm == operation.rpm
+    elif isinstance(operation, SetHeatMode):
+        assert waiting.ownership.heat_source_operation_id == operation.operation_id
+        assert waiting.ownership.heat_source_receipt_id == "receipt-1"
+        assert (
+            waiting.ownership.heat_source_correlation_id
+            == waiting.current_attempt.correlation_id
+        )
+        assert waiting.ownership.commanded_heat_source is operation.mode
+    else:
+        assert waiting.ownership.body_activation_operation_id == operation.operation_id
+        assert waiting.ownership.body_activation_receipt_id == "receipt-1"
+        assert (
+            waiting.ownership.body_activation_correlation_id
+            == waiting.current_attempt.correlation_id
+        )
+
+
+def test_rejected_delivery_never_establishes_ownership() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+
+    result = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(statuses=[CommandStatus.REJECTED]),
+        )
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.FAILED
+    assert result.ownership.owns_pump_setpoint is False
+
+
+def test_failed_verification_clears_accepted_delivery_ownership() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    assert waiting.ownership.owns_heat_source is True
+
+    failed = engine.verify_current_step(
+        waiting,
+        hydraulic_store(
+            at=NOW + timedelta(seconds=1),
+            pool_active=False,
+            spa_active=False,
+        ),
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert failed.status is ThermalLiveExecutionStatus.FAILED
+    assert failed.ownership.owns_heat_source is False
+
+
+def test_completed_session_clears_active_ownership_but_retains_receipt_audit() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2900,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    assert waiting.ownership.owns_heat_source is True
+
+    completed = engine.verify_current_step(
+        waiting,
+        store("pool.raw_heater_id", "H0002", at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert completed.status is ThermalLiveExecutionStatus.COMPLETED
+    assert completed.ownership.owns_heat_source is False
+    assert completed.attempts[0].receipt is not None

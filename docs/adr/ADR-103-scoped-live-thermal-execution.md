@@ -75,6 +75,20 @@ ambiguous, or contradictory topology terminates the session. A topology break
 during a verified priming hold invalidates that hold and requires a fresh plan
 and session; hold time is never paused or resumed across the break.
 
+Each live session also retains its immutable originating evaluation and thermal
+plan identity. The runtime must supply the current typed identity before both
+delivery and verification. Either identity changing terminates the old session
+as superseded before verification or coordinator advancement, discards any
+verified hold, and requires a fresh plan and session.
+
+Physical execution ownership is explicit accepted-delivery provenance scoped
+to one in-memory session. An accepted session-bound body activation, pump
+setpoint, or heat-source operation may establish the corresponding ownership;
+matching native observations, pre-existing circulation, and externally caused
+state never do. Ownership is cleared when the session completes or terminates
+and is never persisted or reconstructed after restart. This provenance model
+adds no command, RPM, body, or heat-source capability.
+
 Pump verification retains the inclusive 25-RPM tolerance and bounded settling
 until the configured deadline. A fresh wrong `HEATER` fails immediately.
 `HEATER` is the source truth; `HTMODE` is not written and is not required for
@@ -104,7 +118,7 @@ endpoint bounds remain unchanged.
   body is explicitly inactive and all hydraulic evidence is usable. No route
   operation or body deactivation is inferred from configured mode or target.
 - Newer evaluation or plan identity supersedes an in-progress plan before its
-  next command. No automatic reversal is issued.
+  next command or verification. No automatic reversal is issued.
 - Interrupted history cannot resume. Restart requires fresh observation,
   evaluation, authorization, and a newly begun session.
 - Delivery rejection/failure/timeout, verification failure/timeout, stale

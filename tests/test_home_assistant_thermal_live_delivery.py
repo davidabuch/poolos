@@ -143,6 +143,12 @@ def test_adapter_rejects_nonthermal_or_uncommissioned_operations_before_manual_c
             correlation_id="filtration",
         )
     )
+    temperature_probe = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=1500),
+            correlation_id="temperature-probe",
+        )
+    )
     unknown_pump = asyncio.run(
         delivery.deliver(
             SetPumpSpeed(equipment_id="other", rpm=2900),
@@ -157,7 +163,12 @@ def test_adapter_rejects_nonthermal_or_uncommissioned_operations_before_manual_c
     )
 
     assert manual.calls == []
-    assert {filtration.status, unknown_pump.status, start.status} == {
+    assert {
+        filtration.status,
+        temperature_probe.status,
+        unknown_pump.status,
+        start.status,
+    } == {
         CommandStatus.REJECTED
     }
 
