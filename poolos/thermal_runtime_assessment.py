@@ -112,6 +112,24 @@ class PoolTemperatureProbeRuntimeState:
             self.phase = PoolTemperatureProbePhase.PROBING
             self.started_at = at
 
+    def invalidate_if_probing(
+        self,
+        at: datetime,
+        *,
+        pool_circulating: bool,
+    ) -> None:
+        """Discard one interrupted acquisition epoch and require fresh proof."""
+
+        if (
+            self.phase is PoolTemperatureProbePhase.PROBING
+            and not pool_circulating
+        ):
+            self.phase = PoolTemperatureProbePhase.PROBE_REQUIRED
+            self.requested_at = at
+            self.started_at = None
+            self.samples = ()
+            self.last_assessment = None
+
     def samples_with(
         self,
         sample: TemperatureSample | None,
@@ -432,8 +450,29 @@ class ThermalRuntimeEvaluator:
                 "solar.temperature" not in missing
                 and "solar.temperature" not in stale
             )
+            spa_active = _bool_or_none(values.get("spa.active"))
+            probe_hydraulic_concepts = {
+                "pool.active",
+                "spa.active",
+                "pump.rpm",
+            }
+            probe_hydraulic_evidence_usable = not (
+                probe_hydraulic_concepts
+                & (
+                    set(evidence.missing_native_concepts)
+                    | set(evidence.stale_native_concepts)
+                )
+            )
             pool_circulating = (
-                active is True and pump_rpm is not None and pump_rpm > 0
+                probe_hydraulic_evidence_usable
+                and active is True
+                and spa_active is False
+                and pump_rpm is not None
+                and pump_rpm > 0
+            )
+            self.pool_temperature_probe.invalidate_if_probing(
+                evidence.evaluated_at,
+                pool_circulating=pool_circulating,
             )
             self.pool_temperature_probe.begin_if_required(
                 evidence.evaluated_at,
