@@ -77,11 +77,11 @@ even if current equipment and historical receipts match a former PoolOS
 thermal lifecycle. Fresh accepted execution provenance or a valid explicit
 handoff from a still-live predecessor is required.
 
-The repository currently exposes only raw, unconfirmed grid-outage evidence;
-the canonical two-second-confirmed outage signal described by ADR-005 does not
-yet exist in a production decision surface. Runtime ownership therefore does
-not consume outage state in this change. That confirmation boundary remains a
-prerequisite for safe outage preemption.
+ADR-005 now defines a canonical command-free tracker that can turn the raw grid
+observation into two-second-confirmed actual-outage evidence. No production
+decision surface consumes that assessment yet. Runtime ownership therefore
+still does not consume outage state, and a separate integration/preemption
+change remains a prerequisite for safe outage preemption.
 
 ## Consequences
 
