@@ -125,6 +125,18 @@ def test_runtime_publishes_one_stable_bounded_ha_event_after_baseline() -> None:
     assert "history" not in data
     assert runtime.latest_batch.events[0].concept == "pool.active"
 
+    runtime.process(
+        _native(now + timedelta(seconds=2), pool_active=True), transport, 1
+    )
+    assert runtime.latest_batch.events[0].concept == "pool.active"
+    assert len(calls) == 1
+
+    runtime.process(
+        _native(now + timedelta(seconds=3), pool_active=True), transport, 2
+    )
+    assert runtime.latest_batch.events == ()
+    assert len(calls) == 1
+
 
 def _body_assessment(
     module: ModuleType,

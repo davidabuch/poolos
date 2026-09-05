@@ -125,14 +125,12 @@ def test_owned_pool_source_off_is_the_only_physical_termination_action() -> None
         _entitlement(),
         _evidence(),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=timedelta(hours=2),
     )
 
     assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
     assert result.source_action is ThermalTerminationSourceAction.SET_OFF
     assert result.pump_action is ThermalTerminationPumpAction.RELINQUISH
     assert result.body_action is ThermalTerminationBodyAction.KEEP_ACTIVE
-    assert result.successor_owner == "filtration"
     assert result.operation is not None
     assert result.operation.mode is PhysicalHeatMode.OFF
     assert result.operation.equipment_id == ThermalBody.POOL.value
@@ -144,7 +142,6 @@ def test_preexisting_body_is_never_claimed_or_deactivated() -> None:
         _entitlement(body_owned=False),
         _evidence(),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
 
     assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
@@ -157,7 +154,6 @@ def test_current_policy_requiring_heat_relinquishes_without_source_off() -> None
         _entitlement(),
         _evidence(),
         desired_source=PhysicalHeatMode.GAS,
-        filtration_remaining=None,
     )
 
     assert result.disposition is ThermalTerminationDisposition.RELINQUISH_ONLY
@@ -169,7 +165,6 @@ def test_already_off_needs_no_command() -> None:
         _entitlement(),
         _evidence(source=PhysicalHeatMode.OFF),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
 
     assert result.disposition is ThermalTerminationDisposition.RELINQUISH_ONLY
@@ -194,7 +189,6 @@ def test_external_source_takeover_invalidates_stale_cleanup() -> None:
         _entitlement(),
         _evidence(changes=ExternalChangeBatch((event,))),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
 
     assert result.disposition is ThermalTerminationDisposition.INVALIDATED
@@ -208,13 +202,11 @@ def test_hydraulic_takeover_and_unusable_evidence_fail_closed() -> None:
         _entitlement(),
         _evidence(pool_active=False, spa_active=True),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
     stale = policy.evaluate(
         _entitlement(),
         _evidence(fresh=False),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
 
     assert spa.disposition is ThermalTerminationDisposition.INVALIDATED
@@ -228,7 +220,6 @@ def test_external_pump_takeover_invalidates_source_cleanup_too() -> None:
         _entitlement(),
         _evidence(pump_rpm=2600, configured_rpm=2600),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
 
     assert result.disposition is ThermalTerminationDisposition.INVALIDATED
@@ -241,7 +232,6 @@ def test_hot_tub_residual_does_not_expand_automatic_authority() -> None:
         _entitlement(body=ThermalBody.HOT_TUB),
         _evidence(pool_active=False, spa_active=True),
         desired_source=PhysicalHeatMode.OFF,
-        filtration_remaining=None,
     )
 
     assert result.disposition is ThermalTerminationDisposition.BLOCKED

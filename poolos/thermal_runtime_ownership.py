@@ -167,6 +167,7 @@ class SharedHydraulicCircuitEvidence:
     fresh: bool
     usable: bool
     safety_class: SharedHydraulicSafetyClass
+    observed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.concept.strip():
@@ -178,6 +179,8 @@ class SharedHydraulicCircuitEvidence:
             "safety_class",
             SharedHydraulicSafetyClass(self.safety_class),
         )
+        if self.observed_at is not None:
+            _require_aware(self.observed_at, "shared hydraulic observed_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +320,10 @@ class ThermalRuntimeOwnershipEvidence:
     shared_hydraulic_circuits: tuple[SharedHydraulicCircuitEvidence, ...] = ()
     shared_hydraulic_inventory_complete: bool = False
     heat_source_observed_at: datetime | None = None
+    pool_activity_observed_at: datetime | None = None
+    spa_activity_observed_at: datetime | None = None
+    pump_observed_at: datetime | None = None
+    configured_pump_speed_observed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at, "evaluated_at")
@@ -336,8 +343,16 @@ class ThermalRuntimeOwnershipEvidence:
                 "effective_heat_source",
                 PhysicalHeatMode(self.effective_heat_source),
             )
-        if self.heat_source_observed_at is not None:
-            _require_aware(self.heat_source_observed_at, "heat_source_observed_at")
+        for name in (
+            "heat_source_observed_at",
+            "pool_activity_observed_at",
+            "spa_activity_observed_at",
+            "pump_observed_at",
+            "configured_pump_speed_observed_at",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _require_aware(value, name)
         circuits = tuple(self.shared_hydraulic_circuits)
         concepts = tuple(item.concept for item in circuits)
         if len(concepts) != len(set(concepts)):

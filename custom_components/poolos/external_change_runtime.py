@@ -11,6 +11,7 @@ from poolos.external_change import (
     ExternalChangeBatch,
     ExternalNativeChangeMonitor,
     ExternalOwnershipContext,
+    ThermalRuntimeExternalChangeEvidence,
 )
 from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
@@ -36,6 +37,11 @@ class PoolOSExternalChangeRuntime:
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
+    _thermal_external_evidence: ThermalRuntimeExternalChangeEvidence = field(
+        default_factory=ThermalRuntimeExternalChangeEvidence,
+        init=False,
+        repr=False,
+    )
     latest_batch: ExternalChangeBatch = field(
         default_factory=lambda: ExternalChangeBatch(()),
         init=False,
@@ -60,13 +66,19 @@ class PoolOSExternalChangeRuntime:
         if self._connection_generation != connection_generation:
             self._connection_generation = connection_generation
             self.monitor.reset_baseline()
+            self._thermal_external_evidence.reset()
+            self.latest_batch = ExternalChangeBatch(())
         ownership = self._ownership()
         batch = self.monitor.process(
             native,
             transport,
             ownership=ownership,
         )
-        self.latest_batch = batch
+        # Preserve one latest event per canonical thermal/hydraulic takeover
+        # concept. Later unrelated transitions or correlated PoolOS consequences
+        # cannot erase an earlier lease-relevant takeover. Consumers still apply
+        # their own lease-epoch chronology checks.
+        self.latest_batch = self._thermal_external_evidence.update(batch)
         refreshed_ownership = self._ownership()
         if refreshed_ownership.intended_values != ownership.intended_values:
             self.monitor.recompute_current_ownership(refreshed_ownership)

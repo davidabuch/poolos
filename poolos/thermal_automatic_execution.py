@@ -10,11 +10,16 @@ epoch and may submit at most one new physical operation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping, Protocol
 
+from .circulation_successor import (
+    CirculationSuccessorArbitrator,
+    CirculationSuccessorAssessment,
+    FiltrationSuccessorEvidence,
+)
 from .external_change import ExternalChangeBatch
 from .grid_outage_confirmation import GridOutageDisposition
 from .integration import SetBodyActive, SetHeatMode, ThermalBody
@@ -75,7 +80,7 @@ class ThermalAutomaticExecutionFrame:
     live_policy: ThermalLiveExecutionPolicy
     physical_authority_ready: bool
     physical_authority_blocker: str | None = None
-    filtration_remaining_runtime: timedelta | None = None
+    filtration_successor: FiltrationSuccessorEvidence | None = None
     external_changes: ExternalChangeBatch = ExternalChangeBatch(())
 
     def __post_init__(self) -> None:
@@ -88,11 +93,6 @@ class ThermalAutomaticExecutionFrame:
             raise ValueError("orchestration timestamp must match automatic frame")
         if self.physical_authority_ready == bool(self.physical_authority_blocker):
             raise ValueError("physical authority readiness must match blocker")
-        if (
-            self.filtration_remaining_runtime is not None
-            and self.filtration_remaining_runtime < timedelta(0)
-        ):
-            raise ValueError("filtration remaining runtime must not be negative")
         object.__setattr__(self, "observations", tuple(self.observations))
 
 
@@ -180,6 +180,9 @@ class ThermalAutomaticExecutionDriver:
     termination_attempt: ThermalTerminationAttempt | None = None
     termination_policy: ThermalTerminationPolicy = field(
         default_factory=ThermalTerminationPolicy
+    )
+    circulation_arbitrator: CirculationSuccessorArbitrator = field(
+        default_factory=CirculationSuccessorArbitrator
     )
     _last_epoch_identity: str | None = field(default=None, init=False, repr=False)
     _last_epoch_at: datetime | None = field(default=None, init=False, repr=False)
@@ -610,6 +613,7 @@ class ThermalAutomaticExecutionDriver:
                 assessment is not None
                 and assessment.source_action.value == "already_off"
             ):
+                circulation = self._circulation_assessment(frame)
                 self.orchestrator.ownership.consume_residual_termination(
                     entitlement_id=attempt.entitlement_id,
                 )
@@ -623,6 +627,7 @@ class ThermalAutomaticExecutionDriver:
                     preflight=None,
                     failure=None,
                     command_delivery_performed=False,
+                    circulation_assessment=circulation,
                 )
             if (
                 assessment is None
@@ -690,6 +695,7 @@ class ThermalAutomaticExecutionDriver:
         if assessment.disposition is ThermalTerminationDisposition.BLOCKED:
             return self._blocked(frame, assessment.reason_code)
         if assessment.disposition is ThermalTerminationDisposition.RELINQUISH_ONLY:
+            circulation = self._circulation_assessment(frame)
             if assessment.entitlement_id is not None:
                 self.orchestrator.ownership.consume_residual_termination(
                     entitlement_id=assessment.entitlement_id,
@@ -703,6 +709,7 @@ class ThermalAutomaticExecutionDriver:
                 preflight=None,
                 failure=None,
                 command_delivery_performed=False,
+                circulation_assessment=circulation,
             )
         if assessment.disposition is not ThermalTerminationDisposition.SOURCE_OFF_READY:
             return None
@@ -827,7 +834,6 @@ class ThermalAutomaticExecutionDriver:
                 external_changes=frame.external_changes,
             ),
             desired_source=body.plan.desired.selected_source,
-            filtration_remaining=frame.filtration_remaining_runtime,
             verification_after=(
                 None
                 if self.termination_attempt is None
@@ -835,6 +841,32 @@ class ThermalAutomaticExecutionDriver:
             ),
         )
         return assessment
+
+    def _circulation_assessment(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> CirculationSuccessorAssessment | None:
+        """Evaluate command-free successor truth without mutating entitlement."""
+
+        entitlement = self.orchestrator.ownership.residual_termination
+        if entitlement is None or frame.thermal is None:
+            return None
+        body = (
+            frame.thermal.pool
+            if entitlement.body is ThermalBody.POOL
+            else frame.thermal.hot_tub
+        )
+        return self.circulation_arbitrator.evaluate(
+            entitlement=entitlement,
+            evidence=build_thermal_runtime_ownership_evidence(
+                generated_at=frame.observed_at,
+                observations={item.observation_id: item for item in frame.observations},
+                body=body,
+                external_changes=frame.external_changes,
+            ),
+            filtration=frame.filtration_successor,
+            outage=frame.orchestration.outage,
+        )
 
     def fail_closed(
         self,
@@ -1038,6 +1070,7 @@ class ThermalAutomaticExecutionDriver:
         preflight: ThermalLiveStructuralPreflightResult | None,
         failure: str | None,
         command_delivery_performed: bool,
+        circulation_assessment: CirculationSuccessorAssessment | None = None,
     ) -> ThermalAutomaticDriverAssessment:
         session = self.active_session
         step = None
@@ -1052,7 +1085,10 @@ class ThermalAutomaticExecutionDriver:
         lease = self.orchestrator.ownership.state.lease
         residual = self.orchestrator.ownership.residual_termination
         termination = None if frame is None else self._termination_assessment(frame)
-        ownership_summary = {
+        circulation = circulation_assessment
+        if circulation is None and frame is not None:
+            circulation = self._circulation_assessment(frame)
+        ownership_summary: dict[str, object] = {
             "body": None if lease is None else lease.body.value,
             "owns_body_activation": bool(lease and lease.owns_body_activation),
             "owns_pump_setpoint": bool(lease and lease.owns_pump_setpoint),
@@ -1084,13 +1120,12 @@ class ThermalAutomaticExecutionDriver:
             "termination_body_action": (
                 None if termination is None else termination.body_action.value
             ),
-            "termination_successor_owner": (
-                None if termination is None else termination.successor_owner
-            ),
             "termination_awaiting_verification": self.termination_attempt is not None,
             "body_deactivation_authorized": False,
             "stop_pump_authorized": False,
         }
+        if circulation is not None:
+            ownership_summary.update(circulation.diagnostics())
         previous = self.assessment
         last_transition = (
             evaluated_at

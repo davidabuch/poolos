@@ -89,10 +89,32 @@ Pool `HEATER` Solar/Gas to Off when the source remains attributable, current
 policy requires Off, and current body, pump, source, shared-hydraulic, and
 external-change evidence remains usable and aligned. Pump ownership is
 relinquished without restoring an old RPM. Pool circulation remains active;
-body deactivation and `StopPump` remain unauthorized because the repository
-cannot yet prove exclusive circulation ownership or a filtration successor
-executor. A current filtration debt is represented as a command-free successor
-need, never as a duplicated filtration schedule or hard-coded RPM command.
+body deactivation and `StopPump` remain unauthorized.
+
+PoolOS separately evaluates one pure, typed circulation-successor arbitration
+from the residual accepted provenance and the current authoritative observation
+epoch. PoolOS-created body activation is distinct from pump/source provenance;
+without that positive body proof, active Pool circulation is conservatively
+pre-existing or external. Hardware equality never supplies ownership. Current
+Pool/Spa topology, Waterfall/Jets/Slide evidence, external changes, source-Off
+truth, grid confirmation, and filtration truth must all remain current and
+usable. Pool Light is non-hydraulic. Missing, stale, future, contradictory, or
+epoch-incompatible critical facts block positive exclusivity.
+
+Filtration debt, immediate circulation need, and an RPM target are distinct.
+Only canonical `CREDITING` or `RUN_NOW` accounting dispositions identify an
+immediate filtration successor. Deferred debt is not `RUN_NOW`. The current
+ordinary-filtration RPM may be reported as a command-free policy baseline when
+present; it is not physical authority. Arbitration can report future body-
+deactivation eligibility, pump-handoff eligibility, and structural handoff
+readiness, but performs none of them and never mutates or consumes the residual
+entitlement. Diagnostic publication snapshots the result before the existing
+explicit source-termination lifecycle consumes its entitlement.
+
+The next physical cleanup change, if separately authorized, must bind a fresh
+positive arbitration result to the final command boundary. It must independently
+commission exact Pool body deactivation and/or a typed filtration RPM handoff;
+neither capability exists here.
 
 Runtime ownership is not persisted. A new process or manager begins unowned,
 even if current equipment and historical receipts match a former PoolOS

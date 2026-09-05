@@ -523,12 +523,16 @@ def build_thermal_runtime_ownership_evidence(
         spa_activity_fresh=spa.fresh,
         pool_activity_usable=pool.usable,
         spa_activity_usable=spa.usable,
+        pool_activity_observed_at=pool.observed_at,
+        spa_activity_observed_at=spa.observed_at,
         pump_rpm=_integer(pump.value),
         pump_observation_fresh=pump.fresh,
         pump_observation_usable=pump.usable,
+        pump_observed_at=pump.observed_at,
         configured_pump_speed_rpm=_integer(configured.value),
         configured_pump_speed_observation_fresh=configured.fresh,
         configured_pump_speed_observation_usable=configured.usable,
+        configured_pump_speed_observed_at=configured.observed_at,
         effective_heat_source=_heat_source(source.value),
         heat_source_observation_fresh=source.fresh,
         heat_source_observation_usable=source.usable,
@@ -588,6 +592,7 @@ def _shared_hydraulic_evidence(
                 fresh=state.fresh,
                 usable=state.usable,
                 safety_class=shared_hydraulic_safety_class(concept),
+                observed_at=state.observed_at,
             )
         )
     return tuple(evidence), complete
