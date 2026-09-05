@@ -10,7 +10,7 @@ should assume.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from typing import TypedDict
 
@@ -54,8 +54,6 @@ class _CommonAssessment(TypedDict):
     body: ThermalBody
     pump_action: ThermalTerminationPumpAction
     body_action: ThermalTerminationBodyAction
-    successor_circulation_required: bool
-    successor_owner: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +68,6 @@ class ThermalTerminationAssessment:
     source_action: ThermalTerminationSourceAction
     pump_action: ThermalTerminationPumpAction
     body_action: ThermalTerminationBodyAction
-    successor_circulation_required: bool
-    successor_owner: str | None
     operation: SetHeatMode | None = None
     monotonic: bool = True
     physical_action_required: bool = False
@@ -106,7 +102,6 @@ class ThermalTerminationPolicy:
         evidence: ThermalRuntimeOwnershipEvidence,
         *,
         desired_source: PhysicalHeatMode,
-        filtration_remaining: timedelta | None,
         verification_after: datetime | None = None,
     ) -> ThermalTerminationAssessment:
         if verification_after is not None and verification_after.tzinfo is None:
@@ -129,16 +124,6 @@ class ThermalTerminationPolicy:
                 ThermalTerminationBodyAction.KEEP_ACTIVE
                 if entitlement.body_activation is not None
                 else ThermalTerminationBodyAction.NONE
-            ),
-            successor_circulation_required=(
-                filtration_remaining is not None
-                and filtration_remaining > timedelta(0)
-            ),
-            successor_owner=(
-                "filtration"
-                if filtration_remaining is not None
-                and filtration_remaining > timedelta(0)
-                else None
             ),
         )
         if evidence.evaluated_at < entitlement.retained_at:
@@ -330,8 +315,6 @@ def _assessment(
     source_action: ThermalTerminationSourceAction = ThermalTerminationSourceAction.NONE,
     pump_action: ThermalTerminationPumpAction = ThermalTerminationPumpAction.NONE,
     body_action: ThermalTerminationBodyAction = ThermalTerminationBodyAction.NONE,
-    successor_circulation_required: bool = False,
-    successor_owner: str | None = None,
     operation: SetHeatMode | None = None,
     monotonic: bool = True,
     physical_action_required: bool = False,
@@ -345,8 +328,6 @@ def _assessment(
         source_action=source_action,
         pump_action=pump_action,
         body_action=body_action,
-        successor_circulation_required=successor_circulation_required,
-        successor_owner=successor_owner,
         operation=operation,
         monotonic=monotonic,
         physical_action_required=physical_action_required,

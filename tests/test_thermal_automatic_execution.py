@@ -5,8 +5,13 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+from poolos.circulation_successor import (
+    FiltrationSuccessorEvidence,
+    FiltrationTargetSemantics,
+)
 from poolos.hal import CommandReceipt, CommandStatus
 from poolos.external_change import ExternalChangeBatch, ExternalChangeEvent
+from poolos.filtration_policy import FiltrationDisposition
 from poolos.integration import PoolOperation, ThermalBody
 from poolos.native_configuration_policy import (
     NativeConfigurationGuard,
@@ -201,7 +206,29 @@ def _frame(
         orchestration=orchestration,
         live_policy=policy,
         physical_authority_ready=True,
-        filtration_remaining_runtime=filtration_remaining,
+        filtration_successor=(
+            None
+            if filtration_remaining is None
+            else FiltrationSuccessorEvidence(
+                evaluated_at=at,
+                disposition=(
+                    FiltrationDisposition.RUN_NOW
+                    if filtration_remaining > timedelta(0)
+                    else FiltrationDisposition.SATISFIED
+                ),
+                total_remaining_runtime=filtration_remaining,
+                currently_earning_credit=False,
+                immediate_circulation_required=filtration_remaining > timedelta(0),
+                successor_target_rpm=(
+                    2600 if filtration_remaining > timedelta(0) else None
+                ),
+                target_semantics=(
+                    FiltrationTargetSemantics.ORDINARY_POLICY_BASELINE
+                    if filtration_remaining > timedelta(0)
+                    else FiltrationTargetSemantics.NONE
+                ),
+            )
+        ),
     )
 
 
@@ -621,6 +648,17 @@ def test_owned_gas_source_is_deselected_then_verified_without_stopping_pool() ->
     assert len(delivery.calls) == 4
     assert driver.termination_attempt is None
     assert orchestrator.ownership.residual_termination is None
+    assert result.runtime_ownership_summary["circulation_successor_kind"] == (
+        "filtration"
+    )
+    assert result.runtime_ownership_summary[
+        "filtration_immediate_successor_need"
+    ] is True
+    assert result.runtime_ownership_summary["body_deactivation_eligible"] is False
+    assert result.runtime_ownership_summary["pump_handoff_eligible"] is True
+    assert result.runtime_ownership_summary[
+        "circulation_command_delivery_enabled"
+    ] is False
 
 
 def test_diagnostic_publication_cannot_invalidate_residual_entitlement() -> None:
@@ -640,6 +678,9 @@ def test_diagnostic_publication_cannot_invalidate_residual_entitlement() -> None
 
     assert first.runtime_ownership_summary["termination_disposition"] == "invalidated"
     assert second == third
+    assert orchestrator.ownership.residual_termination is residual
+    driver._circulation_assessment(invalid)
+    driver._circulation_assessment(invalid)
     assert orchestrator.ownership.residual_termination is residual
 
 

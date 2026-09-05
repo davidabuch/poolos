@@ -15,6 +15,7 @@ from poolos.physical_command_authority import (
     PhysicalRequestSource,
     PoolOSPhysicalCommandAuthority,
 )
+from poolos.circulation_successor import FiltrationSuccessorEvidence
 from poolos.integration import ThermalBody
 from poolos.external_change import ExternalChangeBatch
 from poolos.thermal_automatic_execution import (
@@ -162,11 +163,13 @@ class PoolOSThermalAutomaticRuntime:
             physical_authority_blocker=(
                 None if ready else f"physical_authority:{reason.value}"
             ),
-            filtration_remaining_runtime=(
+            filtration_successor=(
                 None
                 if getattr(self.thermal_runtime, "filtration_runtime", None) is None
                 or self.thermal_runtime.filtration_runtime.assessment is None
-                else self.thermal_runtime.filtration_runtime.assessment.total_remaining_runtime
+                else FiltrationSuccessorEvidence.from_accounting(
+                    self.thermal_runtime.filtration_runtime.assessment
+                )
             ),
             external_changes=external_changes,
         )

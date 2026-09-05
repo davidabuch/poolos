@@ -103,6 +103,64 @@ class ExternalChangeBatch:
     correlated_consequences: tuple[NativeConsequenceAttribution, ...] = ()
 
 
+THERMAL_RUNTIME_TAKEOVER_CONCEPTS = frozenset(
+    {
+        "pool.active",
+        "spa.active",
+        "pump.rpm",
+        "pump_circuit.p0102.configured_speed_rpm",
+        "pool.raw_heater_id",
+        "spa.raw_heater_id",
+        "waterfall.active",
+        "jets.active",
+        "slide.active",
+    }
+)
+
+POOL_CIRCULATION_TAKEOVER_CONCEPTS = (
+    THERMAL_RUNTIME_TAKEOVER_CONCEPTS - frozenset({"spa.raw_heater_id"})
+)
+
+
+@dataclass(slots=True)
+class ThermalRuntimeExternalChangeEvidence:
+    """Retain one latest takeover event per canonical thermal/hydraulic concept."""
+
+    _retained_by_concept: dict[str, ExternalChangeEvent] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+
+    def reset(self) -> None:
+        """Discard retained evidence at a connection-generation boundary."""
+
+        self._retained_by_concept.clear()
+
+    def update(self, batch: ExternalChangeBatch) -> ExternalChangeBatch:
+        """Return bounded evidence without losing earlier takeover facts."""
+
+        transient: list[ExternalChangeEvent] = []
+        for event in batch.events:
+            if event.concept in THERMAL_RUNTIME_TAKEOVER_CONCEPTS:
+                self._retained_by_concept.setdefault(event.concept, event)
+            else:
+                transient.append(event)
+
+        retained = tuple(
+            self._retained_by_concept[concept]
+            for concept in sorted(self._retained_by_concept)
+        )
+        return ExternalChangeBatch(
+            (*retained, *transient),
+            batch.correlated_consequences,
+        )
+
+    @property
+    def retained_count(self) -> int:
+        return len(self._retained_by_concept)
+
+
 _POLICIES: Mapping[str, tuple[ExternalChangePolicy, bool]] = MappingProxyType(
     {
         "pool.active": (ExternalChangePolicy.ACCEPT, True),
