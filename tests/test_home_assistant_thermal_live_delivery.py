@@ -18,6 +18,10 @@ from poolos.integration import (
     StartPump,
     ThermalBody,
 )
+from poolos.physical_command_authority import (
+    AutomaticThermalDispatchContext,
+    PhysicalRequestSource,
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,7 @@ ManualIntelliCenterThermalLiveDelivery = _load_adapter_class()
 class FakeManualControl:
     available: bool = True
     calls: list[tuple[str, object, object]] = field(default_factory=list)
+    call_options: list[dict[str, object]] = field(default_factory=list)
 
     async def async_set_body_active(
         self,
@@ -75,7 +80,7 @@ class FakeManualControl:
         active: bool,
         **kwargs: object,
     ) -> ManualCommandReceipt:
-        del kwargs
+        self.call_options.append(kwargs)
         self.calls.append(("body", target, active))
         return ManualCommandReceipt(target, "body_active", active)
 
@@ -85,7 +90,7 @@ class FakeManualControl:
         rpm: int,
         **kwargs: object,
     ) -> ManualCommandReceipt:
-        del kwargs
+        self.call_options.append(kwargs)
         self.calls.append(("pump", target, rpm))
         return ManualCommandReceipt(target, "pump_circuit_speed", rpm)
 
@@ -95,13 +100,22 @@ class FakeManualControl:
         heater_id: str,
         **kwargs: object,
     ) -> ManualCommandReceipt:
-        del kwargs
+        self.call_options.append(kwargs)
         self.calls.append(("heater", target, heater_id))
         return ManualCommandReceipt(target, "body_heat_source", heater_id)
 
 
 def adapter(manual: FakeManualControl):
     return ManualIntelliCenterThermalLiveDelivery(manual=manual)
+
+
+def automatic_context() -> AutomaticThermalDispatchContext:
+    return AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="epoch-1",
+        session_identity="session-1",
+        body="pool",
+    )
 
 
 def test_adapter_reuses_manual_gateway_for_commissioned_thermal_operations() -> None:
@@ -131,6 +145,50 @@ def test_adapter_reuses_manual_gateway_for_commissioned_thermal_operations() -> 
     assert pump.status is CommandStatus.ACKNOWLEDGED
     assert heater.status is CommandStatus.ACKNOWLEDGED
     assert pump.verification_required and heater.verification_required
+
+
+def test_automatic_adapter_binds_exact_context_to_manual_gateway() -> None:
+    manual = FakeManualControl()
+    context = automatic_context()
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2900),
+            correlation_id="automatic-pump",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.call_options == [
+        {
+            "request_source": PhysicalRequestSource.AUTOMATIC_THERMAL,
+            "automatic_thermal_context": context,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "context"),
+    (
+        (PhysicalRequestSource.AUTOMATIC_THERMAL, None),
+        (PhysicalRequestSource.AUTONOMOUS, automatic_context()),
+    ),
+)
+def test_adapter_rejects_incomplete_or_misapplied_automatic_context(
+    source: PhysicalRequestSource,
+    context: AutomaticThermalDispatchContext | None,
+) -> None:
+    with pytest.raises(ValueError, match="automatic thermal"):
+        ManualIntelliCenterThermalLiveDelivery(
+            manual=FakeManualControl(),
+            request_source=source,
+            automatic_thermal_context=context,
+        )
 
 
 def test_adapter_rejects_nonthermal_or_uncommissioned_operations_before_manual_call() -> None:

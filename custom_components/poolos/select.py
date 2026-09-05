@@ -276,6 +276,7 @@ class PoolOSThermalCommissioningScopeSelect(RestoreEntity, SelectEntity):
             self._runtime.thermal_runtime.set_commissioning_scope(
                 _COMMISSIONING_SCOPE_OPTION[previous.state]
             )
+            self._runtime.thermal_automatic_runtime.authority_configuration_changed()
 
     @property
     def current_option(self) -> str:
@@ -290,12 +291,15 @@ class PoolOSThermalCommissioningScopeSelect(RestoreEntity, SelectEntity):
         self._runtime.thermal_runtime.set_commissioning_scope(
             _COMMISSIONING_SCOPE_OPTION[option]
         )
+        self._runtime.thermal_automatic_runtime.authority_configuration_changed()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "configuration_only": True,
-            "automatic_execution_driver_enabled": False,
+            "automatic_execution_driver_enabled": (
+                self._runtime.thermal_automatic_runtime.enabled
+            ),
             "command_delivery_performed": False,
             "authority": "none",
         }

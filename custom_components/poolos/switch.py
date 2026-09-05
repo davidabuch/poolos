@@ -265,20 +265,68 @@ class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
         self._runtime.thermal_runtime.set_effective_live_enabled(True)
+        automatic = getattr(self._runtime, "thermal_automatic_runtime", None)
+        if automatic is not None:
+            automatic.authority_configuration_changed()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         del kwargs
         self._runtime.thermal_runtime.set_effective_live_enabled(False)
+        automatic = getattr(self._runtime, "thermal_automatic_runtime", None)
+        if automatic is not None:
+            automatic.authority_configuration_changed()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "effective_state_resets_off_on_restart": True,
             "configuration_only": True,
-            "automatic_execution_driver_enabled": False,
+            "automatic_execution_driver_enabled": bool(
+                getattr(
+                    getattr(self._runtime, "thermal_automatic_runtime", None),
+                    "enabled",
+                    False,
+                )
+            ),
             "command_delivery_performed": False,
             "manual_controls_unchanged": True,
             "authority": "none",
+        }
+
+
+class PoolOSThermalAutomaticExecutionSwitch(SwitchEntity):
+    """Dedicated restart-reset gate for event-driven thermal automation."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Automatic Thermal Execution"
+    _attr_icon = "mdi:robot-off-outline"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_automatic_thermal_execution"
+
+    @property
+    def is_on(self) -> bool:
+        return self._runtime.thermal_automatic_runtime.enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.thermal_automatic_runtime.set_enabled(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.thermal_automatic_runtime.set_enabled(False)
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **self._runtime.thermal_automatic_runtime.diagnostics(),
+            "effective_state_resets_off_on_restart": True,
+            "thermal_live_gate_is_independent": True,
+            "cached_candidate_executes_on_enable": False,
+            "fresh_authoritative_epoch_required": True,
         }
 
 
@@ -623,6 +671,7 @@ async def async_setup_entry(
                 entry,
             ),
             PoolOSThermalLiveExecutionSwitch(entry),
+            PoolOSThermalAutomaticExecutionSwitch(entry),
             PoolOSMaintenanceModeSwitch(entry),
         ]
     )

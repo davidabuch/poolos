@@ -295,6 +295,12 @@ def test_ha_entities_expose_exact_safe_configuration_contracts() -> None:
     assert '"Disabled": ThermalLiveCommissioningScope.DISABLED' in select
     assert '"Pool": ThermalLiveCommissioningScope.POOL' in select
     assert '"Hot Tub": ThermalLiveCommissioningScope.HOT_TUB' in select
+    assert "PoolOSThermalAutomaticExecutionSwitch" in switch
+    automatic = switch.split(
+        "class PoolOSThermalAutomaticExecutionSwitch", 1
+    )[1].split("class ", 1)[0]
+    assert "RestoreEntity" not in automatic
+    assert "fresh_authoritative_epoch_required" in automatic
 
 
 def test_configuration_refresh_never_regresses_stateful_policy_timestamp() -> None:

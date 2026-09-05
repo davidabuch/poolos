@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from poolos.physical_command_authority import (
+    AutomaticThermalDispatchContext,
     ExpectedNativeConsequence,
     PhysicalAuthorityReason,
     PhysicalCommandDeniedError,
@@ -204,3 +205,201 @@ def test_service_timeout_denial_does_not_replay_after_fresh_auto_recovery() -> N
     assert authority.diagnostics(
         now=NOW + timedelta(seconds=1)
     )["pending_expectation_count"] == 1
+
+
+def automatic_request(
+    context: AutomaticThermalDispatchContext | None,
+) -> PhysicalCommandRequest:
+    return PhysicalCommandRequest(
+        operation="body_active",
+        target="B1101",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=True,
+        automatic_thermal_context=context,
+    )
+
+
+def test_automatic_thermal_final_gateway_requires_both_independent_gates() -> None:
+    authority = ready()
+    authority.begin_automatic_thermal_epoch("epoch-1")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="session-1",
+        body="pool",
+    )
+
+    assert authority.assess(automatic_request(context)).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_GATE_DISABLED
+    )
+
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=False,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-2")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-2",
+        session_identity="session-2",
+        body="pool",
+    )
+    assert authority.assess(automatic_request(context)).reason is (
+        PhysicalAuthorityReason.THERMAL_LIVE_GATE_DISABLED
+    )
+
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-3")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-3",
+        session_identity="session-3",
+        body="pool",
+    )
+    assert authority.assess(automatic_request(context)).allowed
+
+
+def test_automatic_thermal_context_is_invalidated_by_epoch_or_gate_loss() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-1")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="session-1",
+        body="pool",
+    )
+    request_one = automatic_request(context)
+    assert authority.assess(request_one).allowed
+
+    authority.begin_automatic_thermal_epoch("epoch-2")
+    assert authority.assess(request_one).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+    context_two = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-2",
+        session_identity="session-1",
+        body="pool",
+    )
+    request_two = automatic_request(context_two)
+    assert authority.assess(request_two).allowed
+    authority.configure_automatic_thermal(
+        driver_enabled=False,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    assert authority.assess(request_two).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_GATE_DISABLED
+    )
+
+
+def test_automatic_thermal_scope_and_unload_fail_closed() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-1")
+    pool_context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="session-1",
+        body="pool",
+    )
+    assert authority.assess(automatic_request(pool_context)).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_SCOPE_MISMATCH
+    )
+
+    authority.unload_automatic_thermal_driver()
+    assert authority.assess(automatic_request(pool_context)).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_DRIVER_UNLOADED
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "target", "value"),
+    (
+        ("body_active", "B1202", True),
+        ("body_active", "B1101", False),
+        ("body_heat_source", "B1202", "H0002"),
+        ("body_heat_source", "B1101", "HXSLR"),
+        ("pump_circuit_speed", "p9999", 2900),
+        ("pump_circuit_speed", "p0102", 1500),
+        ("pump_circuit_speed", "p0102", 2600),
+        ("circuit_active", "C0002", True),
+    ),
+)
+def test_automatic_thermal_final_gateway_rejects_operation_scope_mismatch(
+    operation: str,
+    target: str,
+    value: bool | int | str,
+) -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-1")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="session-1",
+        body="pool",
+    )
+    proposed = PhysicalCommandRequest(
+        operation=operation,
+        target=target,
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=value,
+        automatic_thermal_context=context,
+    )
+
+    assert authority.assess(proposed).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "target", "value"),
+    (
+        ("body_active", "B1101", True),
+        ("body_heat_source", "B1101", "00000"),
+        ("body_heat_source", "B1101", "H0001"),
+        ("body_heat_source", "B1101", "H0002"),
+        ("pump_circuit_speed", "p0102", 2900),
+        ("pump_circuit_speed", "p0102", 3000),
+    ),
+)
+def test_automatic_thermal_final_gateway_allows_only_commissioned_envelope(
+    operation: str,
+    target: str,
+    value: bool | int | str,
+) -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-1")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="session-1",
+        body="pool",
+    )
+
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation=operation,
+            target=target,
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=value,
+            automatic_thermal_context=context,
+        )
+    ).allowed

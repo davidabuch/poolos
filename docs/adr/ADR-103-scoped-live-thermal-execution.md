@@ -107,7 +107,7 @@ authorization or authoritative verification. Expected PoolOS delivery progress
 may explain a shrinking residual, but a matching manual or external consequence
 cannot. Although the deterministic purpose ID can be recomputed after restart,
 sessions, receipts, verified progress, and ownership are in-memory and are never
-restored from that match. A future automatic driver must consume this contract
+restored from that match. The default-off automatic driver consumes this contract
 rather than defining another equivalence algorithm.
 
 Physical execution ownership is explicit accepted-delivery provenance scoped
@@ -126,11 +126,30 @@ evidence stops the execution.
 
 The core defines an async thermal delivery port and imports no Home Assistant
 code. The HA adapter wraps the existing `ManualIntelliCenterControl` methods
-for `p0102` RPM and commissioned body `HEATER` selection only. This adapter is
+for `p0102` RPM and commissioned body `HEATER` selection only. This adapter
 explicitly validates Pool/Hot Tub and Off/Gas/Solar before mapping them to the
 commissioned native IDs. Invalid values are rejected without calling manual
-control. The adapter is not registered at startup and no runtime configuration
-enables it in Phase 2. Manual controls remain separate.
+control. Manual controls remain separate.
+
+The production automatic driver has its own non-restored, default-Off HA switch.
+That gate does not replace the separate Thermal Live switch or one-body
+commissioning scope: all three plus existing dynamic safety and final physical
+authority are required. Enabling the driver never processes a cached candidate;
+a later authoritative snapshot must independently pass every gate.
+
+Before session creation, a command-free whole-plan structural preflight checks
+every operation against the canonical live operation and step contracts. One
+unsupported future operation rejects the plan before step zero. Static
+eligibility never replaces per-step dynamic authorization. Each unique
+authoritative snapshot may submit at most one new physical operation; a later
+snapshot may verify the prior operation and submit at most one next operation.
+
+The synchronous runtime callback uses at most one config-entry-owned one-shot
+async task to bridge to delivery. It has no scheduler, polling loop, sleep,
+retry worker, persistent queue, or restored session. Final physical authority
+receives a typed context bound to driver generation, snapshot, session, and body.
+Gate, scope, unload, or newer-snapshot changes invalidate that context, which is
+rechecked inside the existing command lock immediately before transport.
 
 The generic Pentair physical endpoint independently rejects `pump.set_speed`
 unless its target is `p0102`, its sole parameter is an integer `rpm`, and the
@@ -139,8 +158,8 @@ endpoint bounds remain unchanged.
 
 ## Safety consequences
 
-- Kill switch and body scope default disabled; this commit cannot actuate by
-  itself.
+- Thermal Live, body scope, and the automatic-driver switch default disabled;
+  startup cannot actuate by itself.
 - Disabling the switch stops new steps and emits no restoration command.
 - Pool and Hot Tub must already be active for source and RPM delivery. A
   cold-start plan may activate only its selected inactive body when the other
@@ -161,3 +180,7 @@ endpoint bounds remain unchanged.
   changes.
 - Inactive-body manual configuration remains available, but autonomous
   inactive-body `HEATER` preselection remains uncommissioned and prohibited.
+- Temperature-probe plans remain wholly rejected because 1500 RPM is not
+  commissioned thermal authority. Hot Tub automatic execution remains blocked
+  pending body-specific configured-pump ownership evidence. Physical outage
+  response and generic authority-loss cleanup remain separate work.

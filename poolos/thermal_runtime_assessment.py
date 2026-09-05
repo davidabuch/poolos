@@ -36,6 +36,7 @@ from .thermal_live_execution import (
     ThermalLiveAuthorizationEngine,
     ThermalLiveAuthorizationResult,
     ThermalLiveCommissioningScope,
+    ThermalLiveExecutionContext,
     ThermalLiveExecutionPolicy,
     ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
@@ -239,6 +240,7 @@ class ThermalBodyRuntimeAssessment:
     effective_heater_id: str | None
     actual_pump_rpm: int | None
     evidence_blockers: tuple[str, ...]
+    live_safety_evidence: ThermalLiveSafetyEvidence | None = None
 
     @property
     def execution_currentness(self) -> ThermalExecutionCurrentness:
@@ -247,6 +249,16 @@ class ThermalBodyRuntimeAssessment:
         return ThermalExecutionCurrentness.from_assessment(
             self.plan,
             evaluation_id=self.evaluation_id,
+        )
+
+    @property
+    def live_execution_context(self) -> ThermalLiveExecutionContext:
+        """Return the typed current context consumed by the live engine."""
+
+        return ThermalLiveExecutionContext(
+            evaluation_id=self.evaluation_id,
+            plan_id=self.plan.plan_id,
+            execution_currentness=self.execution_currentness,
         )
 
     def diagnostics(self, *, blocker_limit: int = 16) -> Mapping[str, Any]:
@@ -677,6 +689,7 @@ class ThermalRuntimeEvaluator:
             effective_heater_id=heater_id,
             actual_pump_rpm=pump_rpm,
             evidence_blockers=blockers,
+            live_safety_evidence=safety,
         )
 
     def _desired(

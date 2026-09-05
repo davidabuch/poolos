@@ -495,6 +495,96 @@ class ThermalRuntimeOwnershipManager:
             evidence.evaluated_at,
         )
 
+    def promote_session_provenance(
+        self,
+        ownership: ThermalLiveExecutionOwnership,
+        *,
+        promoted_at: datetime,
+        requested_mode: str,
+        originating_context: ThermalLiveExecutionContext,
+        execution_progress: ThermalExecutionProgress,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Promote new accepted provenance from the same active live session.
+
+        The first accepted operation establishes the lease.  Later accepted
+        operations may update only that exact session's concept provenance.
+        Observed hardware state is never an input to this transition.
+        """
+
+        _require_aware(promoted_at, "promoted_at")
+        lease = self._state.lease
+        if lease is None:
+            return self.establish(
+                ownership,
+                established_at=promoted_at,
+                requested_mode=requested_mode,
+                current_context=originating_context,
+                execution_progress=execution_progress,
+            )
+        previous = self._state.status
+        if lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_promotion_denied:ownership_terminal",
+                previous,
+                promoted_at,
+            )
+        if (
+            lease.execution_plan_id != ownership.execution_plan_id
+            or lease.body is not ownership.target_body
+            or lease.evaluation_id != ownership.evaluation_id
+            or lease.thermal_plan_id != ownership.thermal_plan_id
+        ):
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_promotion_denied:session_provenance_mismatch",
+                previous,
+                promoted_at,
+            )
+        if (
+            originating_context.evaluation_id != lease.evaluation_id
+            or originating_context.plan_id != lease.thermal_plan_id
+            or originating_context.execution_currentness
+            != lease.originating_currentness
+        ):
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_promotion_denied:originating_context_mismatch",
+                previous,
+                promoted_at,
+            )
+        try:
+            activation = _activation_provenance(ownership)
+            pump = _pump_provenance(ownership)
+            source = _source_provenance(ownership)
+        except ValueError:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_promotion_denied:provenance_incomplete",
+                previous,
+                promoted_at,
+            )
+        promoted = replace(
+            lease,
+            last_confirmed_at=promoted_at,
+            reason_code="runtime_ownership_promoted:accepted_session_delivery",
+            body_activation=activation or lease.body_activation,
+            pump_setpoint=pump or lease.pump_setpoint,
+            heat_source=source or lease.heat_source,
+            execution_progress=execution_progress,
+        )
+        self._state = ThermalRuntimeOwnershipState(
+            status=promoted.status,
+            lease=promoted,
+            reason_code=promoted.reason_code,
+        )
+        return self._decision(
+            ThermalRuntimeOwnershipDisposition.RETAINED,
+            promoted.reason_code,
+            previous,
+            promoted_at,
+        )
+
     def handoff(
         self,
         request: ThermalRuntimeHandoffRequest,

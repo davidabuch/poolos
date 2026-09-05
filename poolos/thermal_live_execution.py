@@ -289,6 +289,23 @@ class ThermalLiveAuthorizationResult:
         return self.disposition is ThermalLiveAuthorizationDisposition.AUTHORIZED
 
 
+@dataclass(frozen=True, slots=True)
+class ThermalLiveStructuralPreflightResult:
+    """Command-free proof that every immutable plan step is commissioned."""
+
+    plan_id: str
+    eligible: bool
+    blocking_reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.plan_id.strip():
+            raise ValueError("plan_id must not be empty")
+        reasons = tuple(self.blocking_reasons)
+        if self.eligible == bool(reasons):
+            raise ValueError("structural preflight eligibility must match blockers")
+        object.__setattr__(self, "blocking_reasons", reasons)
+
+
 class ThermalLiveDeliveryPort(Protocol):
     """Injected async port exposing only Phase 2 thermal operations."""
 
@@ -519,6 +536,58 @@ class ThermalLiveAuthorizationEngine:
     """Authorize exactly one current Phase 1 thermal step, default deny."""
 
     boundary_name: str = "poolos.thermal_live_authorization"
+
+    def structural_preflight(
+        self,
+        assessment: ThermalExecutionPlanAssessment,
+        *,
+        policy: ThermalLiveExecutionPolicy,
+    ) -> ThermalLiveStructuralPreflightResult:
+        """Inspect the complete plan without granting dynamic authority.
+
+        This reuses the canonical operation and immutable step contracts that
+        dynamic authorization enforces.  It deliberately omits evidence and
+        operator-state gates; those remain mandatory immediately before each
+        physical delivery.
+        """
+
+        reasons: list[str] = []
+        if assessment.disposition is not ThermalPlanDisposition.READY:
+            reasons.append("thermal_plan_not_ready")
+        if len(assessment.operations) != len(assessment.step_specifications):
+            reasons.append("thermal_plan_step_count_mismatch")
+        for step_index, operation in enumerate(assessment.operations):
+            prefix = f"step_{step_index}:"
+            if step_index >= len(assessment.step_specifications):
+                reasons.append(prefix + "thermal_step_specification_missing")
+                continue
+            specification = assessment.step_specifications[step_index]
+            if specification.operation_id != operation.operation_id:
+                reasons.append(prefix + "thermal_step_identity_mismatch")
+            if not specification.expected_observations:
+                reasons.append(prefix + "post_command_expectation_missing")
+            if (
+                specification.metadata.get("hydraulic_continuity_required")
+                != "true"
+                or specification.metadata.get("hydraulic_target_body")
+                != assessment.desired.body.value
+            ):
+                reasons.append(prefix + "hydraulic_continuity_contract_mismatch")
+            reasons.extend(
+                prefix + reason
+                for reason in self._operation_reasons(
+                    assessment,
+                    operation,
+                    policy,
+                    step_index=step_index,
+                )
+            )
+        deduplicated = tuple(dict.fromkeys(reasons))
+        return ThermalLiveStructuralPreflightResult(
+            plan_id=assessment.plan_id,
+            eligible=not deduplicated,
+            blocking_reasons=deduplicated,
+        )
 
     def authorize(
         self,
@@ -1849,5 +1918,6 @@ __all__ = [
     "ThermalLiveExecutionStatus",
     "ThermalHydraulicSafetyEvidence",
     "ThermalLiveSafetyEvidence",
+    "ThermalLiveStructuralPreflightResult",
     "ThermalLiveStepAttempt",
 ]

@@ -43,6 +43,7 @@ def test_required_integration_files_exist() -> None:
         "switch.py",
         "system_health.py",
         "thermal_live_delivery.py",
+        "thermal_automatic_runtime.py",
         "thermal_runtime.py",
         "translations/en.json",
     }

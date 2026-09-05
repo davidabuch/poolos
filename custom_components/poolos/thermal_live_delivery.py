@@ -20,7 +20,10 @@ from poolos.integration import (
     ThermalBody,
 )
 from poolos.operating_baselines import PumpOperatingBaselines
-from poolos.physical_command_authority import PhysicalRequestSource
+from poolos.physical_command_authority import (
+    AutomaticThermalDispatchContext,
+    PhysicalRequestSource,
+)
 from poolos.thermal_live_execution import COMMISSIONED_THERMAL_PUMP_ID
 
 from .manual_intellicenter import (
@@ -43,6 +46,16 @@ class ManualIntelliCenterThermalLiveDelivery:
 
     manual: ManualIntelliCenterControl
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    request_source: PhysicalRequestSource = PhysicalRequestSource.AUTONOMOUS
+    automatic_thermal_context: AutomaticThermalDispatchContext | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.request_source is PhysicalRequestSource.AUTOMATIC_THERMAL
+        ) != (self.automatic_thermal_context is not None):
+            raise ValueError(
+                "automatic thermal delivery requires its exact dispatch context"
+            )
 
     @property
     def available(self) -> bool:
@@ -63,21 +76,24 @@ class ManualIntelliCenterThermalLiveDelivery:
                 manual_receipt = await self.manual.async_set_body_active(
                     body_id,
                     True,
-                    request_source=PhysicalRequestSource.AUTONOMOUS,
+                    request_source=self.request_source,
+                    automatic_thermal_context=self.automatic_thermal_context,
                 )
             elif isinstance(operation, SetPumpSpeed):
                 self._validate_pump(operation)
                 manual_receipt = await self.manual.async_set_pump_circuit_speed(
                     COMMISSIONED_THERMAL_PUMP_ID,
                     operation.rpm,
-                    request_source=PhysicalRequestSource.AUTONOMOUS,
+                    request_source=self.request_source,
+                    automatic_thermal_context=self.automatic_thermal_context,
                 )
             elif isinstance(operation, SetHeatMode):
                 body_id, heater_id = self._validate_heat_mode(operation)
                 manual_receipt = await self.manual.async_set_body_heat_source(
                     body_id,
                     heater_id,
-                    request_source=PhysicalRequestSource.AUTONOMOUS,
+                    request_source=self.request_source,
+                    automatic_thermal_context=self.automatic_thermal_context,
                 )
             else:
                 return CommandReceipt(
