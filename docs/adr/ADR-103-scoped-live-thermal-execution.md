@@ -151,6 +151,16 @@ receives a typed context bound to driver generation, snapshot, session, and body
 Gate, scope, unload, or newer-snapshot changes invalidate that context, which is
 rechecked inside the existing command lock immediately before transport.
 
+Residual source de-selection reuses that same serialized task and final gateway
+with a distinct typed termination purpose. The final boundary admits only Pool
+`body_heat_source=00000` for that purpose; body activation/deactivation, Gas,
+Solar, RPM changes, routing, and pump stop are rejected. Thermal Live,
+commissioning scope, Maintenance, controller mode, authoritative epoch, and
+unload checks still apply. The normal automatic gate does not become a cleanup
+bypass: while it is Off no termination command is scheduled. An accepted Off
+receipt waits for a later authoritative `HEATER=00000` observation, and no
+subsequent action or retry is chained in the same epoch.
+
 The generic Pentair physical endpoint independently rejects `pump.set_speed`
 unless its target is `p0102`, its sole parameter is an integer `rpm`, and the
 value is the commissioned 2900 or 3000 thermal baseline. Existing body/heater
@@ -183,4 +193,5 @@ endpoint bounds remain unchanged.
 - Temperature-probe plans remain wholly rejected because 1500 RPM is not
   commissioned thermal authority. Hot Tub automatic execution remains blocked
   pending body-specific configured-pump ownership evidence. Physical outage
-  response and generic authority-loss cleanup remain separate work.
+  response and body/pump authority-loss cleanup remain separate work; the only
+  termination operation is ownership-scoped Pool source Off.

@@ -106,6 +106,59 @@ class ThermalRuntimeConceptProvenance:
 
 
 @dataclass(frozen=True, slots=True)
+class ThermalResidualTerminationEntitlement:
+    """Ephemeral proof of PoolOS-created effects eligible only for reduction.
+
+    This is copied from an accepted runtime lease before continuation ends. It
+    cannot establish or continue normal ownership and is never persisted.
+    """
+
+    entitlement_id: str
+    lease_id: str
+    generation: int
+    body: ThermalBody
+    originating_execution_plan_id: str
+    originating_lease_established_at: datetime
+    retained_at: datetime
+    reason_code: str
+    body_activation: ThermalRuntimeConceptProvenance | None = None
+    pump_setpoint: ThermalRuntimeConceptProvenance | None = None
+    heat_source: ThermalRuntimeConceptProvenance | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "entitlement_id",
+            "lease_id",
+            "originating_execution_plan_id",
+            "reason_code",
+        ):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        if self.generation < 1:
+            raise ValueError("termination entitlement generation must be positive")
+        _require_aware(self.retained_at, "retained_at")
+        _require_aware(
+            self.originating_lease_established_at,
+            "originating_lease_established_at",
+        )
+        if self.retained_at < self.originating_lease_established_at:
+            raise ValueError("termination retention cannot precede lease establishment")
+        object.__setattr__(self, "body", ThermalBody(self.body))
+
+    @property
+    def owned_concepts(self) -> tuple[ThermalRuntimeOwnedConcept, ...]:
+        return tuple(
+            concept
+            for concept, provenance in (
+                (ThermalRuntimeOwnedConcept.BODY_ACTIVATION, self.body_activation),
+                (ThermalRuntimeOwnedConcept.PUMP_SETPOINT, self.pump_setpoint),
+                (ThermalRuntimeOwnedConcept.HEAT_SOURCE, self.heat_source),
+            )
+            if provenance is not None
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SharedHydraulicCircuitEvidence:
     """One already-classified circuit observation supplied by an orchestrator."""
 
@@ -263,6 +316,7 @@ class ThermalRuntimeOwnershipEvidence:
     external_changes: ExternalChangeBatch = ExternalChangeBatch(())
     shared_hydraulic_circuits: tuple[SharedHydraulicCircuitEvidence, ...] = ()
     shared_hydraulic_inventory_complete: bool = False
+    heat_source_observed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at, "evaluated_at")
@@ -282,6 +336,8 @@ class ThermalRuntimeOwnershipEvidence:
                 "effective_heat_source",
                 PhysicalHeatMode(self.effective_heat_source),
             )
+        if self.heat_source_observed_at is not None:
+            _require_aware(self.heat_source_observed_at, "heat_source_observed_at")
         circuits = tuple(self.shared_hydraulic_circuits)
         concepts = tuple(item.concept for item in circuits)
         if len(concepts) != len(set(concepts)):
@@ -339,6 +395,11 @@ class ThermalRuntimeOwnershipManager:
         init=False,
         repr=False,
     )
+    _residual_termination: ThermalResidualTerminationEntitlement | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.pump_rpm_tolerance < 0:
@@ -347,6 +408,12 @@ class ThermalRuntimeOwnershipManager:
     @property
     def state(self) -> ThermalRuntimeOwnershipState:
         return self._state
+
+    @property
+    def residual_termination(self) -> ThermalResidualTerminationEntitlement | None:
+        """Return current in-memory termination proof, never normal authority."""
+
+        return self._residual_termination
 
     def establish(
         self,
@@ -441,6 +508,9 @@ class ThermalRuntimeOwnershipManager:
             originating_currentness=originating_currentness,
             execution_progress=execution_progress,
         )
+        # A new positively-proven session generation makes every older cleanup
+        # token stale. Hardware equality never recreates the discarded proof.
+        self._residual_termination = None
         self._state = ThermalRuntimeOwnershipState(
             status=lease.status,
             lease=lease,
@@ -632,6 +702,7 @@ class ThermalRuntimeOwnershipManager:
             lease=successor,
             reason_code=successor.reason_code,
         )
+        self._residual_termination = None
         return self._decision(
             ThermalRuntimeOwnershipDisposition.HANDED_OFF,
             successor.reason_code,
@@ -645,6 +716,7 @@ class ThermalRuntimeOwnershipManager:
         lease_id: str,
         relinquished_at: datetime,
         reason_code: str,
+        retain_termination_entitlement: bool = False,
     ) -> ThermalRuntimeOwnershipDecision:
         """Relinquish authority without issuing cleanup or restoration commands."""
 
@@ -676,12 +748,35 @@ class ThermalRuntimeOwnershipManager:
             lease=terminal,
             reason_code=reason,
         )
+        self._residual_termination = (
+            _residual_entitlement(lease, at=relinquished_at, reason=reason)
+            if retain_termination_entitlement
+            else None
+        )
         return self._decision(
             ThermalRuntimeOwnershipDisposition.RELINQUISHED,
             reason,
             previous,
             relinquished_at,
         )
+
+    def invalidate_residual_termination(self) -> None:
+        """Discard residual proof without issuing or authorizing a command."""
+
+        self._residual_termination = None
+
+    def consume_residual_termination(
+        self,
+        *,
+        entitlement_id: str,
+    ) -> bool:
+        """Relinquish all residual concepts after verified safe reduction."""
+
+        current = self._residual_termination
+        if current is None or current.entitlement_id != entitlement_id:
+            return False
+        self._residual_termination = None
+        return True
 
     def _continuation_failure_reason(
         self,
@@ -844,6 +939,11 @@ class ThermalRuntimeOwnershipManager:
             status=status,
             lease=terminal,
             reason_code=reason,
+        )
+        self._residual_termination = (
+            _residual_entitlement(lease, at=at, reason=reason)
+            if superseded
+            else None
         )
         return self._decision(disposition, reason, previous, at)
 
@@ -1050,6 +1150,40 @@ def _lease_id(
     return "thermal-runtime-ownership-" + sha256(payload.encode()).hexdigest()[:24]
 
 
+def _residual_entitlement(
+    lease: ThermalRuntimeOwnershipLease,
+    *,
+    at: datetime,
+    reason: str,
+) -> ThermalResidualTerminationEntitlement:
+    payload = json.dumps(
+        {
+            "lease_id": lease.lease_id,
+            "generation": lease.generation,
+            "execution_plan_id": lease.execution_plan_id,
+            "retained_at": at.isoformat(),
+            "reason": reason,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return ThermalResidualTerminationEntitlement(
+        entitlement_id=(
+            "thermal-residual-" + sha256(payload.encode()).hexdigest()[:24]
+        ),
+        lease_id=lease.lease_id,
+        generation=lease.generation,
+        body=lease.body,
+        originating_execution_plan_id=lease.execution_plan_id,
+        originating_lease_established_at=lease.established_at,
+        retained_at=at,
+        reason_code=reason,
+        body_activation=lease.body_activation,
+        pump_setpoint=lease.pump_setpoint,
+        heat_source=lease.heat_source,
+    )
+
+
 def _require_aware(value: datetime, label: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{label} must be timezone-aware")
@@ -1059,6 +1193,7 @@ __all__ = [
     "SHARED_HYDRAULIC_SAFETY_BY_CONCEPT",
     "SharedHydraulicCircuitEvidence",
     "SharedHydraulicSafetyClass",
+    "ThermalResidualTerminationEntitlement",
     "ThermalRuntimeConceptProvenance",
     "ThermalRuntimeHandoffRequest",
     "ThermalRuntimeOwnedConcept",

@@ -3,20 +3,21 @@
 The driver consumes the existing runtime assessment, command-free orchestrator,
 canonical currentness contract, scoped live engine, and runtime ownership
 manager.  It owns no scheduler, transport, polling loop, persistence, retry, or
-cleanup command.  One call represents one authoritative observation epoch and
-may submit at most one new physical operation.
+generic cleanup command.  One call represents one authoritative observation
+epoch and may submit at most one new physical operation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping, Protocol
 
-from .integration import SetBodyActive, ThermalBody
+from .external_change import ExternalChangeBatch
 from .grid_outage_confirmation import GridOutageDisposition
+from .integration import SetBodyActive, SetHeatMode, ThermalBody
 from .observations import ObservationStore, PoolObservation
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
@@ -34,8 +35,14 @@ from .thermal_runtime_orchestration import (
     ThermalOrchestrationLifecycle,
     ThermalRuntimeOrchestrationAssessment,
     ThermalRuntimeOrchestrator,
+    build_thermal_runtime_ownership_evidence,
 )
 from .thermal_runtime_ownership import ThermalRuntimeOwnershipStatus
+from .thermal_termination import (
+    ThermalTerminationAssessment,
+    ThermalTerminationDisposition,
+    ThermalTerminationPolicy,
+)
 
 
 class ThermalAutomaticDriverState(StrEnum):
@@ -51,6 +58,8 @@ class ThermalAutomaticDriverState(StrEnum):
     PREEMPTED = "preempted"
     SUPERSEDED = "superseded"
     FAILED = "failed"
+    TERMINATING = "terminating"
+    AWAITING_TERMINATION_VERIFICATION = "awaiting_termination_verification"
     UNLOADED = "unloaded"
 
 
@@ -66,6 +75,8 @@ class ThermalAutomaticExecutionFrame:
     live_policy: ThermalLiveExecutionPolicy
     physical_authority_ready: bool
     physical_authority_blocker: str | None = None
+    filtration_remaining_runtime: timedelta | None = None
+    external_changes: ExternalChangeBatch = ExternalChangeBatch(())
 
     def __post_init__(self) -> None:
         if not self.epoch_identity.strip():
@@ -77,6 +88,11 @@ class ThermalAutomaticExecutionFrame:
             raise ValueError("orchestration timestamp must match automatic frame")
         if self.physical_authority_ready == bool(self.physical_authority_blocker):
             raise ValueError("physical authority readiness must match blocker")
+        if (
+            self.filtration_remaining_runtime is not None
+            and self.filtration_remaining_runtime < timedelta(0)
+        ):
+            raise ValueError("filtration remaining runtime must not be negative")
         object.__setattr__(self, "observations", tuple(self.observations))
 
 
@@ -89,6 +105,26 @@ class ThermalAutomaticDeliveryFactory(Protocol):
         *,
         epoch_identity: str,
     ) -> ThermalLiveDeliveryPort: ...
+
+    def for_termination(
+        self,
+        *,
+        body: ThermalBody,
+        entitlement_id: str,
+        epoch_identity: str,
+    ) -> ThermalLiveDeliveryPort: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ThermalTerminationAttempt:
+    """One accepted source-Off request awaiting later native confirmation."""
+
+    entitlement_id: str
+    entitlement_generation: int
+    operation: SetHeatMode
+    correlation_id: str
+    delivered_at: datetime
+    deadline: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +177,10 @@ class ThermalAutomaticExecutionDriver:
     requested_enabled: bool = False
     assessment: ThermalAutomaticDriverAssessment | None = None
     active_session: ThermalLiveExecutionSession | None = None
+    termination_attempt: ThermalTerminationAttempt | None = None
+    termination_policy: ThermalTerminationPolicy = field(
+        default_factory=ThermalTerminationPolicy
+    )
     _last_epoch_identity: str | None = field(default=None, init=False, repr=False)
     _last_epoch_at: datetime | None = field(default=None, init=False, repr=False)
     _enabled_after_epoch_identity: str | None = field(
@@ -301,6 +341,13 @@ class ThermalAutomaticExecutionDriver:
                 frame,
                 "automatic_thermal_grid_not_authoritatively_on",
             )
+
+        termination_result = await self._process_termination(
+            frame,
+            delivery_factory=delivery_factory,
+        )
+        if termination_result is not None:
+            return termination_result
 
         body = self._session_body(frame)
         if self.active_session is not None:
@@ -537,6 +584,258 @@ class ThermalAutomaticExecutionDriver:
             command_delivery_performed=True,
         )
 
+    async def _process_termination(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+        *,
+        delivery_factory: ThermalAutomaticDeliveryFactory,
+    ) -> ThermalAutomaticDriverAssessment | None:
+        """Advance one residual source-Off lifecycle, never normal execution."""
+
+        assessment = self._termination_assessment(frame)
+        attempt = self.termination_attempt
+        if attempt is not None:
+            current = self.orchestrator.ownership.residual_termination
+            if (
+                current is None
+                or current.entitlement_id != attempt.entitlement_id
+                or current.generation != attempt.entitlement_generation
+            ):
+                self.termination_attempt = None
+                return self._blocked(
+                    frame,
+                    "thermal_termination_stale_entitlement_token",
+                )
+            if (
+                assessment is not None
+                and assessment.source_action.value == "already_off"
+            ):
+                self.orchestrator.ownership.consume_residual_termination(
+                    entitlement_id=attempt.entitlement_id,
+                )
+                self.termination_attempt = None
+                return self._publish(
+                    state=ThermalAutomaticDriverState.CONVERGED,
+                    evaluated_at=frame.observed_at,
+                    blocker=None,
+                    frame=frame,
+                    body=None,
+                    preflight=None,
+                    failure=None,
+                    command_delivery_performed=False,
+                )
+            if (
+                assessment is None
+                or assessment.disposition
+                in {
+                    ThermalTerminationDisposition.INVALIDATED,
+                    ThermalTerminationDisposition.NO_ENTITLEMENT,
+                }
+            ):
+                if (
+                    assessment is not None
+                    and assessment.disposition
+                    is ThermalTerminationDisposition.INVALIDATED
+                ):
+                    self.orchestrator.ownership.invalidate_residual_termination()
+                self.termination_attempt = None
+                return self._blocked(
+                    frame,
+                    "thermal_termination_verification_preempted",
+                )
+            if frame.observed_at >= attempt.deadline:
+                self.termination_attempt = None
+                self.orchestrator.ownership.invalidate_residual_termination()
+                return self._publish(
+                    state=ThermalAutomaticDriverState.FAILED,
+                    evaluated_at=frame.observed_at,
+                    blocker="thermal_termination_source_off_verification_timed_out",
+                    frame=frame,
+                    body=None,
+                    preflight=None,
+                    failure="thermal_termination_source_off_verification_timed_out",
+                    command_delivery_performed=False,
+                )
+            return self._publish(
+                state=ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION,
+                evaluated_at=frame.observed_at,
+                blocker=None,
+                frame=frame,
+                body=None,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=False,
+            )
+
+        if assessment is None:
+            return None
+        if self.active_session is not None:
+            self._retire_session(
+                at=frame.observed_at,
+                reason="automatic_thermal_residual_termination_required",
+            )
+            return self._publish(
+                state=ThermalAutomaticDriverState.TERMINATING,
+                evaluated_at=frame.observed_at,
+                blocker="thermal_termination_fresh_epoch_required",
+                frame=frame,
+                body=None,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=False,
+            )
+        if assessment.disposition is ThermalTerminationDisposition.INVALIDATED:
+            self.orchestrator.ownership.invalidate_residual_termination()
+            return self._blocked(frame, assessment.reason_code)
+        if assessment.disposition is ThermalTerminationDisposition.BLOCKED:
+            return self._blocked(frame, assessment.reason_code)
+        if assessment.disposition is ThermalTerminationDisposition.RELINQUISH_ONLY:
+            if assessment.entitlement_id is not None:
+                self.orchestrator.ownership.consume_residual_termination(
+                    entitlement_id=assessment.entitlement_id,
+                )
+            return self._publish(
+                state=ThermalAutomaticDriverState.CONVERGED,
+                evaluated_at=frame.observed_at,
+                blocker=assessment.reason_code,
+                frame=frame,
+                body=None,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=False,
+            )
+        if assessment.disposition is not ThermalTerminationDisposition.SOURCE_OFF_READY:
+            return None
+        assert assessment.operation is not None
+        assert assessment.body is ThermalBody.POOL
+        assert assessment.entitlement_id is not None
+        assert assessment.entitlement_generation is not None
+        if not frame.live_policy.thermal_live_execution_enabled:
+            return self._blocked(frame, "thermal_termination_thermal_live_disabled")
+        if frame.live_policy.commissioning_scope.value != assessment.body.value:
+            return self._blocked(frame, "thermal_termination_commissioning_scope_mismatch")
+        try:
+            delivery = delivery_factory.for_termination(
+                body=assessment.body,
+                entitlement_id=assessment.entitlement_id,
+                epoch_identity=frame.epoch_identity,
+            )
+        except (RuntimeError, ValueError) as exc:
+            return self._blocked(
+                frame,
+                f"thermal_termination_delivery_binding_failed:{_bounded(str(exc))}",
+            )
+        if not delivery.available:
+            return self._blocked(frame, "thermal_termination_delivery_unavailable")
+        correlation_id = (
+            f"thermal-termination:{assessment.entitlement_id}:"
+            f"{assessment.operation.operation_id}"
+        )
+        self._delivery_in_flight = True
+        try:
+            try:
+                receipt = await delivery.deliver(
+                    assessment.operation,
+                    correlation_id=correlation_id,
+                )
+            except Exception as exc:
+                self.orchestrator.ownership.invalidate_residual_termination()
+                return self._publish(
+                    state=ThermalAutomaticDriverState.FAILED,
+                    evaluated_at=frame.observed_at,
+                    blocker=f"thermal_termination_delivery_exception:{type(exc).__name__}",
+                    frame=frame,
+                    body=None,
+                    preflight=None,
+                    failure=f"thermal_termination_delivery_exception:{type(exc).__name__}",
+                    command_delivery_performed=False,
+                )
+        finally:
+            self._delivery_in_flight = False
+        if not receipt.accepted:
+            self.orchestrator.ownership.invalidate_residual_termination()
+            return self._publish(
+                state=ThermalAutomaticDriverState.FAILED,
+                evaluated_at=frame.observed_at,
+                blocker=f"thermal_termination_delivery_{receipt.status.value}",
+                frame=frame,
+                body=None,
+                preflight=None,
+                failure=f"thermal_termination_delivery_{receipt.status.value}",
+                command_delivery_performed=False,
+            )
+        if self._retire_after_inflight or not self.requested_enabled or self._unloaded:
+            self._retire_after_inflight = False
+            self.termination_attempt = None
+            return self._publish(
+                state=(
+                    ThermalAutomaticDriverState.UNLOADED
+                    if self._unloaded
+                    else ThermalAutomaticDriverState.DISABLED
+                ),
+                evaluated_at=frame.observed_at,
+                blocker=(
+                    "automatic_thermal_driver_unloaded"
+                    if self._unloaded
+                    else "automatic_thermal_driver_disabled"
+                ),
+                frame=frame,
+                body=None,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=True,
+            )
+        self.termination_attempt = ThermalTerminationAttempt(
+            entitlement_id=assessment.entitlement_id,
+            entitlement_generation=assessment.entitlement_generation,
+            operation=assessment.operation,
+            correlation_id=correlation_id,
+            delivered_at=frame.observed_at,
+            deadline=frame.observed_at + frame.live_policy.verification_timeout,
+        )
+        self._accepted_delivery_count += 1
+        self._last_accepted_correlation_id = correlation_id
+        return self._publish(
+            state=ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION,
+            evaluated_at=frame.observed_at,
+            blocker=None,
+            frame=frame,
+            body=None,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=True,
+        )
+
+    def _termination_assessment(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> ThermalTerminationAssessment | None:
+        entitlement = self.orchestrator.ownership.residual_termination
+        if entitlement is None or frame.thermal is None:
+            return None
+        body = (
+            frame.thermal.pool
+            if entitlement.body is ThermalBody.POOL
+            else frame.thermal.hot_tub
+        )
+        assessment = self.termination_policy.evaluate(
+            entitlement,
+            build_thermal_runtime_ownership_evidence(
+                generated_at=frame.observed_at,
+                observations={item.observation_id: item for item in frame.observations},
+                body=body,
+                external_changes=frame.external_changes,
+            ),
+            desired_source=body.plan.desired.selected_source,
+            filtration_remaining=frame.filtration_remaining_runtime,
+            verification_after=(
+                None
+                if self.termination_attempt is None
+                else self.termination_attempt.delivered_at
+            ),
+        )
+        return assessment
+
     def fail_closed(
         self,
         *,
@@ -568,6 +867,8 @@ class ThermalAutomaticExecutionDriver:
             at=unloaded_at,
             reason="automatic_thermal_driver_unloaded",
         )
+        self.termination_attempt = None
+        self.orchestrator.ownership.invalidate_residual_termination()
         return self._publish(
             state=ThermalAutomaticDriverState.UNLOADED,
             evaluated_at=unloaded_at,
@@ -677,6 +978,7 @@ class ThermalAutomaticExecutionDriver:
                 lease_id=lease.lease_id,
                 relinquished_at=at,
                 reason_code=reason,
+                retain_termination_entitlement=True,
             )
         self.active_session = None
 
@@ -748,12 +1050,46 @@ class ThermalAutomaticExecutionDriver:
         elif session is not None and session.current_attempt is not None:
             step = session.current_attempt.step
         lease = self.orchestrator.ownership.state.lease
+        residual = self.orchestrator.ownership.residual_termination
+        termination = None if frame is None else self._termination_assessment(frame)
         ownership_summary = {
             "body": None if lease is None else lease.body.value,
             "owns_body_activation": bool(lease and lease.owns_body_activation),
             "owns_pump_setpoint": bool(lease and lease.owns_pump_setpoint),
             "owns_heat_source": bool(lease and lease.owns_heat_source),
             "reason_code": self.orchestrator.ownership.state.reason_code,
+            "residual_termination_entitlement_id": (
+                None if residual is None else residual.entitlement_id
+            ),
+            "residual_termination_generation": (
+                None if residual is None else residual.generation
+            ),
+            "residual_owned_concepts": (
+                []
+                if residual is None
+                else [item.value for item in residual.owned_concepts]
+            ),
+            "termination_disposition": (
+                None if termination is None else termination.disposition.value
+            ),
+            "termination_reason_code": (
+                None if termination is None else termination.reason_code
+            ),
+            "termination_source_action": (
+                None if termination is None else termination.source_action.value
+            ),
+            "termination_pump_action": (
+                None if termination is None else termination.pump_action.value
+            ),
+            "termination_body_action": (
+                None if termination is None else termination.body_action.value
+            ),
+            "termination_successor_owner": (
+                None if termination is None else termination.successor_owner
+            ),
+            "termination_awaiting_verification": self.termination_attempt is not None,
+            "body_deactivation_authorized": False,
+            "stop_pump_authorized": False,
         }
         previous = self.assessment
         last_transition = (

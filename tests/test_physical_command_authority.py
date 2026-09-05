@@ -6,6 +6,7 @@ import pytest
 
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
+    AutomaticThermalDispatchPurpose,
     ExpectedNativeConsequence,
     PhysicalAuthorityReason,
     PhysicalCommandDeniedError,
@@ -403,3 +404,48 @@ def test_automatic_thermal_final_gateway_allows_only_commissioned_envelope(
             automatic_thermal_context=context,
         )
     ).allowed
+
+
+@pytest.mark.parametrize(
+    ("operation", "target", "value", "allowed"),
+    (
+        ("body_heat_source", "B1101", "00000", True),
+        ("body_heat_source", "B1101", "H0001", False),
+        ("body_heat_source", "B1101", "H0002", False),
+        ("body_active", "B1101", False, False),
+        ("body_active", "B1101", True, False),
+        ("pump_circuit_speed", "p0102", 2900, False),
+        ("pump_circuit_speed", "p0102", 2600, False),
+        ("body_heat_source", "B1202", "00000", False),
+    ),
+)
+def test_termination_context_is_final_gateway_bounded_to_pool_source_off(
+    operation: str,
+    target: str,
+    value: bool | int | str,
+    allowed: bool,
+) -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-termination")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-termination",
+        session_identity="termination:entitlement-1",
+        body="pool",
+        purpose=AutomaticThermalDispatchPurpose.TERMINATION,
+    )
+    decision = authority.assess(
+        PhysicalCommandRequest(
+            operation=operation,
+            target=target,
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=value,
+            automatic_thermal_context=context,
+        )
+    )
+
+    assert decision.allowed is allowed
