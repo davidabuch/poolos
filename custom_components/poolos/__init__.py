@@ -143,7 +143,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             thermal=assessment,
             external_changes=external_change_runtime.latest_batch,
         )
-        thermal_automatic_runtime.observe(snapshot, assessment, orchestration)
+        thermal_automatic_runtime.observe(
+            snapshot,
+            assessment,
+            orchestration,
+            external_change_runtime.latest_batch,
+        )
 
     thermal_runtime.set_orchestration_observer(observe_thermal_orchestration)
     def fail_thermal_orchestration_closed(

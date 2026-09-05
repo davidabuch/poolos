@@ -287,6 +287,7 @@ class ThermalRuntimeOrchestrator:
                 lease_id=lease.lease_id,
                 relinquished_at=failed_at,
                 reason_code="orchestration_processing_failed",
+                retain_termination_entitlement=True,
             )
         self.assessment = ThermalRuntimeOrchestrationAssessment(
             lifecycle=ThermalOrchestrationLifecycle.BLOCKED,
@@ -383,22 +384,25 @@ class ThermalRuntimeOrchestrator:
                 lease_id=lease.lease_id,
                 relinquished_at=generated_at,
                 reason_code="runtime_ownership_relinquished:grid_not_authoritatively_on",
+                retain_termination_entitlement=True,
             )
         if thermal is None:
             return self.ownership.relinquish(
                 lease_id=lease.lease_id,
                 relinquished_at=generated_at,
                 reason_code="runtime_ownership_relinquished:thermal_assessment_unavailable",
+                retain_termination_entitlement=True,
             )
         body = thermal.pool if lease.body is ThermalBody.POOL else thermal.hot_tub
         return self.ownership.evaluate(
-            _ownership_evidence(
+            build_thermal_runtime_ownership_evidence(
                 generated_at=generated_at,
                 observations=observations,
                 body=body,
                 external_changes=external_changes,
             )
         )
+
 
     def _lifecycle(
         self,
@@ -484,7 +488,7 @@ class ThermalRuntimeOrchestrator:
         )
 
 
-def _ownership_evidence(
+def build_thermal_runtime_ownership_evidence(
     *,
     generated_at: datetime,
     observations: dict[str, PoolObservation],
@@ -528,6 +532,7 @@ def _ownership_evidence(
         effective_heat_source=_heat_source(source.value),
         heat_source_observation_fresh=source.fresh,
         heat_source_observation_usable=source.usable,
+        heat_source_observed_at=source.observed_at,
         external_changes=external_changes,
         shared_hydraulic_circuits=circuits,
         shared_hydraulic_inventory_complete=complete,
@@ -539,6 +544,7 @@ class _ObservationState:
     value: object
     fresh: bool
     usable: bool
+    observed_at: datetime | None
 
 
 def _observation_state(
@@ -546,7 +552,7 @@ def _observation_state(
     evaluated_at: datetime,
 ) -> _ObservationState:
     if observation is None:
-        return _ObservationState(None, False, False)
+        return _ObservationState(None, False, False, None)
     freshness = observation.freshness(
         clock=FixedClock(evaluated_at),
         policy=_LIVE_FRESHNESS,
@@ -558,6 +564,7 @@ def _observation_state(
         and observation.quality in _LIVE_ACCEPTED_QUALITIES
         and observation.confidence >= _LIVE_MINIMUM_CONFIDENCE
         and freshness is ObservationFreshness.FRESH,
+        observation.observed_at,
     )
 
 
@@ -776,6 +783,7 @@ def _require_aware(value: datetime) -> None:
 
 
 __all__ = [
+    "build_thermal_runtime_ownership_evidence",
     "ThermalOrchestrationLifecycle",
     "ThermalRuntimeOrchestrationAssessment",
     "ThermalRuntimeOrchestrator",

@@ -10,10 +10,13 @@ import logging
 from homeassistant.core import HomeAssistant
 
 from poolos.physical_command_authority import (
+    AutomaticThermalDispatchPurpose,
     PhysicalAuthorityReason,
     PhysicalRequestSource,
     PoolOSPhysicalCommandAuthority,
 )
+from poolos.integration import ThermalBody
+from poolos.external_change import ExternalChangeBatch
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDeliveryFactory,
     ThermalAutomaticExecutionDriver,
@@ -54,6 +57,27 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
             body=session.assessment.desired.body.value,
+        )
+        return ManualIntelliCenterThermalLiveDelivery(
+            manual=self.manual,
+            request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            automatic_thermal_context=context,
+        )
+
+    def for_termination(
+        self,
+        *,
+        body: ThermalBody,
+        entitlement_id: str,
+        epoch_identity: str,
+    ) -> ManualIntelliCenterThermalLiveDelivery:
+        """Bind one residual source-Off request to the current authority epoch."""
+
+        context = self.authority.bind_automatic_thermal_dispatch(
+            epoch_identity=epoch_identity,
+            session_identity=f"termination:{entitlement_id}",
+            body=body.value,
+            purpose=AutomaticThermalDispatchPurpose.TERMINATION,
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,
@@ -114,6 +138,7 @@ class PoolOSThermalAutomaticRuntime:
         snapshot: ObservationSnapshot,
         thermal: ThermalRuntimeAssessment | None,
         orchestration: ThermalRuntimeOrchestrationAssessment,
+        external_changes: ExternalChangeBatch = ExternalChangeBatch(()),
     ) -> None:
         """Accept one serialized authoritative frame and schedule at most once."""
 
@@ -137,6 +162,13 @@ class PoolOSThermalAutomaticRuntime:
             physical_authority_blocker=(
                 None if ready else f"physical_authority:{reason.value}"
             ),
+            filtration_remaining_runtime=(
+                None
+                if getattr(self.thermal_runtime, "filtration_runtime", None) is None
+                or self.thermal_runtime.filtration_runtime.assessment is None
+                else self.thermal_runtime.filtration_runtime.assessment.total_remaining_runtime
+            ),
+            external_changes=external_changes,
         )
         if (
             self._latest_frame is not None

@@ -1004,6 +1004,67 @@ def test_relinquishment_is_terminal_and_command_free() -> None:
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.RELINQUISHED
     assert manager.state.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
     assert decision.command_delivery_enabled is False
+
+
+def test_relinquishment_can_retain_concept_specific_residual_provenance() -> None:
+    manager = full_manager()
+    lease = manager.state.lease
+    assert lease is not None
+
+    manager.relinquish(
+        lease_id=lease.lease_id,
+        relinquished_at=NOW + timedelta(seconds=1),
+        reason_code="thermal_target_converged",
+        retain_termination_entitlement=True,
+    )
+
+    residual = manager.residual_termination
+    assert residual is not None
+    assert residual.lease_id == lease.lease_id
+    assert residual.generation == lease.generation
+    assert residual.body_activation == lease.body_activation
+    assert residual.pump_setpoint == lease.pump_setpoint
+    assert residual.heat_source == lease.heat_source
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
+
+
+def test_residual_provenance_is_not_restored_or_reconstructed_from_truth() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+
+    decision = manager.evaluate(evidence(at=NOW, pump_rpm=2900))
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.NO_OWNERSHIP
+    assert manager.residual_termination is None
+
+
+def test_new_positive_session_provenance_invalidates_old_residual_token() -> None:
+    manager = full_manager()
+    lease = manager.state.lease
+    assert lease is not None
+    manager.relinquish(
+        lease_id=lease.lease_id,
+        relinquished_at=NOW + timedelta(seconds=1),
+        reason_code="interrupted",
+        retain_termination_entitlement=True,
+    )
+    assert manager.residual_termination is not None
+
+    ownership = execution_ownership(
+        activation=True,
+        execution_plan_id="execution-plan-new",
+    )
+    established = manager.establish(
+        ownership,
+        established_at=NOW + timedelta(seconds=2),
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            ownership.evaluation_id,
+            ownership.thermal_plan_id,
+        ),
+    )
+
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    assert manager.residual_termination is None
     assert not hasattr(manager, "deliver")
 
 
@@ -1342,6 +1403,7 @@ def test_incompatible_current_thermal_identity_supersedes_ownership(
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.SUPERSEDED
     assert manager.state.status is ThermalRuntimeOwnershipStatus.SUPERSEDED
     assert decision.reason_code == reason
+    assert manager.residual_termination is not None
 
 
 def test_terminal_ownership_never_silently_becomes_owned_again() -> None:

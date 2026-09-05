@@ -53,6 +53,13 @@ class PhysicalAuthorityReason(StrEnum):
     )
 
 
+class AutomaticThermalDispatchPurpose(StrEnum):
+    """Final-gateway authority class for normal work versus reduction only."""
+
+    NORMAL = "normal"
+    TERMINATION = "termination"
+
+
 @dataclass(frozen=True, slots=True)
 class AutomaticThermalDispatchContext:
     """Restrictive one-epoch authority proof for automatic thermal delivery."""
@@ -61,6 +68,7 @@ class AutomaticThermalDispatchContext:
     epoch_identity: str
     session_identity: str
     body: str
+    purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -70,6 +78,11 @@ class AutomaticThermalDispatchContext:
                 raise ValueError(f"{name} must not be empty")
         if self.body not in {"pool", "hot_tub"}:
             raise ValueError("unsupported automatic thermal body")
+        object.__setattr__(
+            self,
+            "purpose",
+            AutomaticThermalDispatchPurpose(self.purpose),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +276,7 @@ class PoolOSPhysicalCommandAuthority:
         epoch_identity: str,
         session_identity: str,
         body: str,
+        purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL,
     ) -> AutomaticThermalDispatchContext:
         """Bind one current session to the latest authoritative epoch."""
 
@@ -278,6 +292,7 @@ class PoolOSPhysicalCommandAuthority:
             epoch_identity=epoch_identity,
             session_identity=session_identity,
             body=body,
+            purpose=purpose,
         )
 
     def unload_automatic_thermal_driver(self) -> None:
@@ -480,6 +495,13 @@ def _automatic_thermal_request_matches_context(
     context: AutomaticThermalDispatchContext,
 ) -> bool:
     body_target = "B1101" if context.body == "pool" else "B1202"
+    if context.purpose is AutomaticThermalDispatchPurpose.TERMINATION:
+        return (
+            context.body == "pool"
+            and request.operation == "body_heat_source"
+            and request.target == "B1101"
+            and request.requested_value == "00000"
+        )
     if request.operation == "body_active":
         return request.target == body_target and request.requested_value is True
     if request.operation == "body_heat_source":
@@ -518,6 +540,7 @@ def _require_aware(value: datetime) -> None:
 
 
 __all__ = [
+    "AutomaticThermalDispatchPurpose",
     "AutomaticThermalDispatchContext",
     "ExpectedNativeConsequence",
     "NativeConsequenceAttribution",

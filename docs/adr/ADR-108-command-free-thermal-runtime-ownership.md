@@ -76,6 +76,24 @@ body, changing RPM, changing source, restoring an earlier value, or performing
 cleanup. Preempted, superseded, and relinquished leases are terminal and cannot
 silently become owned again.
 
+Before selected in-runtime relinquishment or semantic supersession, the manager
+may retain a separate residual termination entitlement copied from the lease's
+accepted, concept-specific provenance. The entitlement cannot continue normal
+execution. It is body-, lease-, and generation-bound, exists only in memory,
+and is discarded on external/hydraulic takeover, successor handoff, a new
+positively proven session, explicit consumption, unload, or restart. Matching
+hardware and historical receipts never recreate it.
+
+The bounded termination policy currently admits one physical reduction only:
+Pool `HEATER` Solar/Gas to Off when the source remains attributable, current
+policy requires Off, and current body, pump, source, shared-hydraulic, and
+external-change evidence remains usable and aligned. Pump ownership is
+relinquished without restoring an old RPM. Pool circulation remains active;
+body deactivation and `StopPump` remain unauthorized because the repository
+cannot yet prove exclusive circulation ownership or a filtration successor
+executor. A current filtration debt is represented as a command-free successor
+need, never as a duplicated filtration schedule or hard-coded RPM command.
+
 Runtime ownership is not persisted. A new process or manager begins unowned,
 even if current equipment and historical receipts match a former PoolOS
 thermal lifecycle. Fresh accepted execution provenance or a valid explicit
