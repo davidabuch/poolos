@@ -88,11 +88,15 @@ authoritative observation frame and current thermal assessment synchronously
 from the existing serialized refresh path. It retains bounded lifecycle,
 currentness, candidate, outage, and ownership diagnostics only.
 
-The orchestrator starts unowned and cannot establish ownership because it has
-no delivery port. Matching Pool, Spa, pump, or heat-source state therefore
-remains external/pre-existing after startup or restart. If accepted delivery
-provenance is supplied by a future explicit driver, the existing ownership
-manager evaluates it against current plan identity, external-change evidence,
+The orchestrator starts unowned and cannot establish ownership from observation.
+Matching Pool, Spa, pump, or heat-source state therefore remains
+external/pre-existing after startup or restart. The explicit default-off driver
+may promote only accepted typed provenance from its current live session. The
+first accepted operation establishes a lease; later accepted operations from
+that exact session may add concept-specific provenance and current execution
+progress. A different session, body, originating context, or incomplete
+receipt/correlation is denied. The ownership manager evaluates the resulting
+lease against current plan identity, external-change evidence,
 body topology, configured and actual RPM, heat source, and the complete
 repository-classified shared-hydraulic inventory. Non-authoritative grid state
 ends continuation entitlement command-free; authoritative grid return causes
@@ -104,10 +108,10 @@ stable purpose identity. A materially different purpose supersedes ownership;
 a same-purpose residual plan may retain it only when the removed prefix is
 proved by PoolOS execution progress. Unload unregisters the callback and
 discards in-memory ownership and outage state without cleanup or restoration.
-The orchestrator permanently reports
-`automatic_execution_driver_enabled=false` and
-`command_delivery_performed=false`; probe delivery, physical outage response,
-and any autonomous execution driver remain separate future work.
+The orchestrator itself remains command-free. Automatic delivery is owned by a
+separate lifecycle adapter and defaults Off. Promotion grants no operation; it
+records provenance only after scoped live delivery has returned an accepted
+receipt. Probe delivery and physical outage response remain separate work.
 
 Orchestration evidence uses the same live verification boundary as thermal
 execution: source kind must be `LIVE`, confidence must be at least `0.5`, and
@@ -143,6 +147,5 @@ valid authoritative frame can recover candidacy.
   typed, deterministic, and auditable.
 - Runtime thermal ownership does not imply filtration ownership and changes no
   filtration credit rule.
-- This decision adds no autonomous driver, RPM authorization, heat-source
-  authority, body-deactivation authority, command, service call, persistence,
-  polling, timer, task, or network activity.
+- Ownership promotion adds no RPM, heat-source, or body-deactivation authority.
+  It performs no service call, persistence, polling, timer, or network activity.

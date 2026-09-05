@@ -422,6 +422,66 @@ def test_only_commissioned_pump_and_thermal_baselines_are_authorized() -> None:
     ).blocking_reasons
 
 
+def test_whole_plan_structural_preflight_reuses_live_operation_contracts() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        0,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveAuthorizationEngine()
+
+    accepted = engine.structural_preflight(plan, policy=policy())
+
+    assert accepted.eligible
+    assert accepted.blocking_reasons == ()
+
+
+@pytest.mark.parametrize(
+    "operation",
+    (
+        StopPump(equipment_id=COMMISSIONED_THERMAL_PUMP_ID),
+        SetBodyActive(equipment_id=ThermalBody.POOL, active=False),
+        SetHydraulicRoute(
+            equipment_id="shared",
+            suction_body_id="pool",
+            return_body_id="hot_tub",
+        ),
+        PoolOperation(equipment_id="unknown"),
+        SetPumpSpeed(equipment_id=COMMISSIONED_THERMAL_PUMP_ID, rpm=1500),
+    ),
+)
+def test_whole_plan_preflight_rejects_any_unsupported_future_step(
+    operation: PoolOperation,
+) -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    assert len(plan.operations) >= 2
+    altered = replace(
+        plan,
+        operations=(plan.operations[0], operation),
+        step_specifications=(
+            plan.step_specifications[0],
+            replace(
+                plan.step_specifications[1],
+                operation_id=operation.operation_id,
+            ),
+        ),
+    )
+
+    result = ThermalLiveAuthorizationEngine().structural_preflight(
+        altered,
+        policy=policy(),
+    )
+
+    assert not result.eligible
+    assert any(reason.startswith("step_1:") for reason in result.blocking_reasons)
+
+
 @pytest.mark.parametrize(
     "operation",
     (

@@ -749,6 +749,15 @@ SENSORS = (
         "mdi:shield-search",
     ),
     PoolOSControlCenterSensorDescription(
+        "automatic_thermal_execution",
+        "Automatic Thermal Execution",
+        lambda coordinator, runtime: runtime.thermal_automatic_runtime.diagnostics()[
+            "state"
+        ].upper(),
+        lambda coordinator, runtime: runtime.thermal_automatic_runtime.diagnostics(),
+        "mdi:robot-industrial-outline",
+    ),
+    PoolOSControlCenterSensorDescription(
         "pool_thermal_plan",
         "Pool Thermal Plan",
         lambda coordinator, runtime: (

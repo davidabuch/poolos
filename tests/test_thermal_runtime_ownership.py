@@ -1205,6 +1205,90 @@ def test_typed_ownership_cannot_be_established_without_poolos_progress() -> None
     assert manager.state.status is ThermalRuntimeOwnershipStatus.UNOWNED
 
 
+def test_same_session_accepted_operations_promote_exact_owned_concepts() -> None:
+    plan = thermal_assessment(current_rpm=0)
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        plan,
+        evaluation_id="evaluation-1",
+    )
+    context = ThermalLiveExecutionContext(
+        currentness.evaluation_id,
+        currentness.plan_id,
+        currentness,
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    activation = execution_ownership(
+        activation=True,
+        plan_id=currentness.plan_id,
+    )
+    first_progress = ThermalExecutionProgress(
+        accepted_current=operation_signature(
+            plan.operations[0],
+            plan.step_specifications[0].metadata,
+        )
+    )
+
+    established = manager.promote_session_provenance(
+        activation,
+        promoted_at=NOW,
+        requested_mode="Solar",
+        originating_context=context,
+        execution_progress=first_progress,
+    )
+    combined = execution_ownership(
+        activation=True,
+        pump_rpm=2900,
+        source=PhysicalHeatMode.SOLAR,
+        plan_id=currentness.plan_id,
+    )
+    promoted = manager.promote_session_provenance(
+        combined,
+        promoted_at=NOW + timedelta(seconds=1),
+        requested_mode="Solar",
+        originating_context=context,
+        execution_progress=ThermalExecutionProgress(
+            accepted_current=operation_signature(
+                plan.operations[-1],
+                plan.step_specifications[-1].metadata,
+            )
+        ),
+    )
+
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    assert promoted.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.owns_body_activation
+    assert lease.owns_pump_setpoint
+    assert lease.owns_heat_source
+
+
+def test_session_provenance_promotion_rejects_different_session() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(activation=True))
+
+    decision = manager.promote_session_provenance(
+        execution_ownership(
+            pump_rpm=2900,
+            execution_plan_id="execution-plan-2",
+        ),
+        promoted_at=NOW + timedelta(seconds=1),
+        requested_mode="Solar",
+        originating_context=ThermalLiveExecutionContext(
+            "evaluation-1",
+            "plan-1",
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert decision.reason_code.endswith("session_provenance_mismatch")
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.owns_body_activation
+    assert not lease.owns_pump_setpoint
+
+
 def test_incomplete_delivery_provenance_is_denied_without_partial_ownership() -> None:
     manager = ThermalRuntimeOwnershipManager()
     incomplete = execution_ownership(pump_rpm=2900)

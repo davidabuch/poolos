@@ -29,6 +29,7 @@ from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
 
 from poolos.physical_command_authority import (
+    AutomaticThermalDispatchContext,
     ExpectedNativeConsequence,
     PhysicalCommandDeniedError,
     PhysicalCommandRequest,
@@ -249,6 +250,7 @@ class ManualIntelliCenterControl:
         active: bool,
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
+        automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Turn Pool/Spa body circulation on or off."""
 
@@ -263,6 +265,7 @@ class ManualIntelliCenterControl:
                 target=body_objnam,
                 source=request_source,
                 requested_value=active,
+                automatic_thermal_context=automatic_thermal_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=f"{prefix}.active",
@@ -379,6 +382,7 @@ class ManualIntelliCenterControl:
         heater_objnam: str,
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
+        automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Select one explicitly allow-listed heat source for a Pool/Spa body."""
 
@@ -396,6 +400,7 @@ class ManualIntelliCenterControl:
                 target=body_objnam,
                 source=request_source,
                 requested_value=heater_objnam,
+                automatic_thermal_context=automatic_thermal_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=f"{prefix}.raw_heater_id",
@@ -552,6 +557,7 @@ class ManualIntelliCenterControl:
         rpm: int | float,
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
+        automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
 
@@ -583,6 +589,7 @@ class ManualIntelliCenterControl:
                 target=pump_circuit_objnam,
                 source=request_source,
                 requested_value=target,
+                automatic_thermal_context=automatic_thermal_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,

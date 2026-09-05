@@ -16,12 +16,18 @@ from types import MappingProxyType
 from typing import Any, Mapping
 from uuid import uuid4
 
+from .operating_baselines import PumpOperatingBaselines
+
+
+_THERMAL_BASELINES = PumpOperatingBaselines()
+
 
 class PhysicalRequestSource(StrEnum):
     """Origin category for one PoolOS physical mutation request."""
 
     MANUAL = "manual"
     AUTONOMOUS = "autonomous"
+    AUTOMATIC_THERMAL = "automatic_thermal"
     RECONCILIATION = "reconciliation"
     SAFETY_INTERLOCK = "safety_interlock"
 
@@ -35,6 +41,35 @@ class PhysicalAuthorityReason(StrEnum):
     CONTROLLER_MODE_UNRESOLVED = "controller_mode_unresolved"
     CONTROLLER_SERVICE_MODE = "controller_service_mode"
     CONTROLLER_TIMEOUT_MODE = "controller_timeout_mode"
+    AUTOMATIC_THERMAL_GATE_DISABLED = "automatic_thermal_gate_disabled"
+    THERMAL_LIVE_GATE_DISABLED = "thermal_live_gate_disabled"
+    AUTOMATIC_THERMAL_SCOPE_DISABLED = "automatic_thermal_scope_disabled"
+    AUTOMATIC_THERMAL_SCOPE_MISMATCH = "automatic_thermal_scope_mismatch"
+    AUTOMATIC_THERMAL_CONTEXT_MISSING = "automatic_thermal_context_missing"
+    AUTOMATIC_THERMAL_CONTEXT_STALE = "automatic_thermal_context_stale"
+    AUTOMATIC_THERMAL_DRIVER_UNLOADED = "automatic_thermal_driver_unloaded"
+    AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED = (
+        "automatic_thermal_operation_unauthorized"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AutomaticThermalDispatchContext:
+    """Restrictive one-epoch authority proof for automatic thermal delivery."""
+
+    generation: int
+    epoch_identity: str
+    session_identity: str
+    body: str
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("automatic thermal generation must be positive")
+        for name in ("epoch_identity", "session_identity", "body"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        if self.body not in {"pool", "hot_tub"}:
+            raise ValueError("unsupported automatic thermal body")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,12 +81,20 @@ class PhysicalCommandRequest:
     source: PhysicalRequestSource
     requested_value: bool | int | float | str
     request_id: str = field(default_factory=lambda: str(uuid4()))
+    automatic_thermal_context: AutomaticThermalDispatchContext | None = None
 
     def __post_init__(self) -> None:
         if not self.operation.strip() or not self.target.strip():
             raise ValueError("physical command operation and target are required")
         if not self.request_id.strip():
             raise ValueError("physical command request_id is required")
+        if (
+            self.source is not PhysicalRequestSource.AUTOMATIC_THERMAL
+            and self.automatic_thermal_context is not None
+        ):
+            raise ValueError(
+                "automatic thermal context requires automatic thermal source"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +167,23 @@ class PoolOSPhysicalCommandAuthority:
     _native_truth: dict[tuple[str, str], Any] = field(
         default_factory=dict, init=False, repr=False
     )
+    _automatic_thermal_driver_enabled: bool = field(
+        default=False, init=False, repr=False
+    )
+    _automatic_thermal_live_enabled: bool = field(
+        default=False, init=False, repr=False
+    )
+    _automatic_thermal_scope: str = field(
+        default="disabled", init=False, repr=False
+    )
+    _automatic_thermal_loaded: bool = field(default=True, init=False, repr=False)
+    _automatic_thermal_generation: int = field(default=0, init=False, repr=False)
+    _automatic_thermal_epoch_identity: str | None = field(
+        default=None, init=False, repr=False
+    )
+    _automatic_thermal_session_identity: str | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.expectation_ttl <= timedelta(0):
@@ -163,21 +223,84 @@ class PoolOSPhysicalCommandAuthority:
         if changed:
             self.invalidate_expectations()
 
+    def configure_automatic_thermal(
+        self,
+        *,
+        driver_enabled: bool,
+        thermal_live_enabled: bool,
+        commissioning_scope: str,
+    ) -> None:
+        """Set restrictive automatic gates and invalidate queued authority."""
+
+        scope = str(commissioning_scope).strip().casefold()
+        if scope not in {"disabled", "pool", "hot_tub"}:
+            raise ValueError("unsupported automatic thermal commissioning scope")
+        changed = (
+            self._automatic_thermal_driver_enabled != bool(driver_enabled)
+            or self._automatic_thermal_live_enabled != bool(thermal_live_enabled)
+            or self._automatic_thermal_scope != scope
+        )
+        self._automatic_thermal_driver_enabled = bool(driver_enabled)
+        self._automatic_thermal_live_enabled = bool(thermal_live_enabled)
+        self._automatic_thermal_scope = scope
+        if changed:
+            self._invalidate_automatic_thermal_context()
+
+    def begin_automatic_thermal_epoch(self, epoch_identity: str) -> None:
+        """Invalidate older queued work at each authoritative runtime epoch."""
+
+        if not epoch_identity.strip():
+            raise ValueError("automatic thermal epoch identity must not be empty")
+        if epoch_identity == self._automatic_thermal_epoch_identity:
+            return
+        self._automatic_thermal_generation += 1
+        self._automatic_thermal_epoch_identity = epoch_identity
+        self._automatic_thermal_session_identity = None
+
+    def bind_automatic_thermal_dispatch(
+        self,
+        *,
+        epoch_identity: str,
+        session_identity: str,
+        body: str,
+    ) -> AutomaticThermalDispatchContext:
+        """Bind one current session to the latest authoritative epoch."""
+
+        if epoch_identity != self._automatic_thermal_epoch_identity:
+            raise ValueError("automatic thermal epoch is not current")
+        if not session_identity.strip():
+            raise ValueError("automatic thermal session identity must not be empty")
+        if body not in {"pool", "hot_tub"}:
+            raise ValueError("unsupported automatic thermal body")
+        self._automatic_thermal_session_identity = session_identity
+        return AutomaticThermalDispatchContext(
+            generation=self._automatic_thermal_generation,
+            epoch_identity=epoch_identity,
+            session_identity=session_identity,
+            body=body,
+        )
+
+    def unload_automatic_thermal_driver(self) -> None:
+        """Make all late automatic work inert without issuing cleanup."""
+
+        self._automatic_thermal_loaded = False
+        self._invalidate_automatic_thermal_context()
+
+    def _invalidate_automatic_thermal_context(self) -> None:
+        self._automatic_thermal_generation += 1
+        self._automatic_thermal_epoch_identity = None
+        self._automatic_thermal_session_identity = None
+        self.invalidate_expectations()
+
     def assess(self, request: PhysicalCommandRequest) -> PhysicalAuthorityDecision:
         """Answer whether this request may physically dispatch right now."""
 
-        if self._maintenance_mode is None:
-            reason = PhysicalAuthorityReason.AUTHORITY_UNRESOLVED
-        elif self._maintenance_mode:
-            reason = PhysicalAuthorityReason.MAINTENANCE_MODE
-        elif self._controller_mode is None:
-            reason = PhysicalAuthorityReason.CONTROLLER_MODE_UNRESOLVED
-        elif self._controller_mode == "service":
-            reason = PhysicalAuthorityReason.CONTROLLER_SERVICE_MODE
-        elif self._controller_mode == "timeout":
-            reason = PhysicalAuthorityReason.CONTROLLER_TIMEOUT_MODE
-        else:
-            reason = PhysicalAuthorityReason.ALLOWED
+        reason = self.base_authority_reason
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source is PhysicalRequestSource.AUTOMATIC_THERMAL
+        ):
+            reason = self._automatic_thermal_reason(request)
         return PhysicalAuthorityDecision(
             allowed=reason is PhysicalAuthorityReason.ALLOWED,
             reason=reason,
@@ -185,6 +308,49 @@ class PoolOSPhysicalCommandAuthority:
             maintenance_mode=self._maintenance_mode,
             controller_mode=self._controller_mode,
         )
+
+    @property
+    def base_authority_reason(self) -> PhysicalAuthorityReason:
+        """Return current Maintenance/controller authority without a request."""
+
+        if self._maintenance_mode is None:
+            return PhysicalAuthorityReason.AUTHORITY_UNRESOLVED
+        if self._maintenance_mode:
+            return PhysicalAuthorityReason.MAINTENANCE_MODE
+        if self._controller_mode is None:
+            return PhysicalAuthorityReason.CONTROLLER_MODE_UNRESOLVED
+        if self._controller_mode == "service":
+            return PhysicalAuthorityReason.CONTROLLER_SERVICE_MODE
+        if self._controller_mode == "timeout":
+            return PhysicalAuthorityReason.CONTROLLER_TIMEOUT_MODE
+        return PhysicalAuthorityReason.ALLOWED
+
+    def _automatic_thermal_reason(
+        self,
+        request: PhysicalCommandRequest,
+    ) -> PhysicalAuthorityReason:
+        context = request.automatic_thermal_context
+        if not self._automatic_thermal_loaded:
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_DRIVER_UNLOADED
+        if not self._automatic_thermal_driver_enabled:
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_GATE_DISABLED
+        if not self._automatic_thermal_live_enabled:
+            return PhysicalAuthorityReason.THERMAL_LIVE_GATE_DISABLED
+        if self._automatic_thermal_scope == "disabled":
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_SCOPE_DISABLED
+        if context is None:
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_MISSING
+        if not _automatic_thermal_request_matches_context(request, context):
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+        if self._automatic_thermal_scope != context.body:
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_SCOPE_MISMATCH
+        if (
+            context.generation != self._automatic_thermal_generation
+            or context.epoch_identity != self._automatic_thermal_epoch_identity
+            or context.session_identity != self._automatic_thermal_session_identity
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+        return PhysicalAuthorityReason.ALLOWED
 
     def require_allowed(self, request: PhysicalCommandRequest) -> None:
         decision = self.assess(request)
@@ -298,8 +464,41 @@ class PoolOSPhysicalCommandAuthority:
                 "pending_expectation_count": len(self._expectations),
                 "pending_expectation_limit": self.expectation_limit,
                 "expectation_ttl_seconds": self.expectation_ttl.total_seconds(),
+                "automatic_thermal_driver_enabled": (
+                    self._automatic_thermal_driver_enabled
+                ),
+                "automatic_thermal_live_enabled": self._automatic_thermal_live_enabled,
+                "automatic_thermal_scope": self._automatic_thermal_scope,
+                "automatic_thermal_loaded": self._automatic_thermal_loaded,
+                "automatic_thermal_generation": self._automatic_thermal_generation,
             }
         )
+
+
+def _automatic_thermal_request_matches_context(
+    request: PhysicalCommandRequest,
+    context: AutomaticThermalDispatchContext,
+) -> bool:
+    body_target = "B1101" if context.body == "pool" else "B1202"
+    if request.operation == "body_active":
+        return request.target == body_target and request.requested_value is True
+    if request.operation == "body_heat_source":
+        return (
+            request.target == body_target
+            and request.requested_value in {"00000", "H0001", "H0002"}
+        )
+    if request.operation == "pump_circuit_speed":
+        return (
+            request.target == "p0102"
+            and not isinstance(request.requested_value, bool)
+            and request.requested_value
+            in {
+                _THERMAL_BASELINES.solar_heating_rpm,
+                _THERMAL_BASELINES.gas_heating_rpm,
+                _THERMAL_BASELINES.priming_rpm,
+            }
+        )
+    return False
 
 
 def _matches(expected: ExpectedNativeConsequence, value: Any) -> bool:
@@ -319,6 +518,7 @@ def _require_aware(value: datetime) -> None:
 
 
 __all__ = [
+    "AutomaticThermalDispatchContext",
     "ExpectedNativeConsequence",
     "NativeConsequenceAttribution",
     "PhysicalAuthorityDecision",
