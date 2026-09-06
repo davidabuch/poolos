@@ -30,6 +30,12 @@ from .integration import (
     ThermalBody,
 )
 from .observations import ObservationStore, PoolObservation
+from .pool_temperature_probe_execution import (
+    PoolTemperatureProbeExecutionEvidence,
+    PoolTemperatureProbeExecutionPhase,
+)
+from .operating_baselines import PumpOperatingBaselines
+from .thermal_execution_currentness import ThermalExecutionPurposeKind
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
     ThermalLiveExecutionEngine,
@@ -223,10 +229,44 @@ class ThermalAutomaticExecutionDriver:
     _last_accepted_correlation_id: str | None = field(
         default=None, init=False, repr=False
     )
+    _probe_acquisition: PoolTemperatureProbeExecutionEvidence | None = field(
+        default=None, init=False, repr=False
+    )
 
     @property
     def last_epoch_identity(self) -> str | None:
         return self._last_epoch_identity
+
+    def probe_execution_evidence(self) -> PoolTemperatureProbeExecutionEvidence | None:
+        """Return positive in-memory probe provenance for the evaluator."""
+
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            lease is None
+            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+            or lease.originating_currentness is None
+            or lease.originating_currentness.purpose.kind
+            is not ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+        ):
+            return None
+        if self._probe_acquisition is not None:
+            if (
+                self._probe_acquisition.ownership_lease_id == lease.lease_id
+                and self._probe_acquisition.ownership_generation == lease.generation
+            ):
+                return self._probe_acquisition
+            return None
+        if not (lease.owns_body_activation or lease.owns_pump_setpoint):
+            return None
+        return PoolTemperatureProbeExecutionEvidence(
+            phase=PoolTemperatureProbeExecutionPhase.PREPARING,
+            execution_purpose_id=lease.originating_currentness.purpose.purpose_id,
+            execution_plan_id=lease.execution_plan_id,
+            ownership_lease_id=lease.lease_id,
+            ownership_generation=lease.generation,
+            body_activation_owned=lease.owns_body_activation,
+            pump_setpoint_owned=lease.owns_pump_setpoint,
+        )
 
     def set_enabled(
         self,
@@ -247,6 +287,7 @@ class ThermalAutomaticExecutionDriver:
         )
         if not enabled:
             self._clear_cleanup()
+            self._probe_acquisition = None
             if self._delivery_in_flight:
                 self._retire_after_inflight = True
             else:
@@ -300,6 +341,7 @@ class ThermalAutomaticExecutionDriver:
 
         _require_aware(changed_at)
         self._clear_cleanup()
+        self._probe_acquisition = None
         if self._delivery_in_flight:
             self._retire_after_inflight = True
         else:
@@ -430,6 +472,10 @@ class ThermalAutomaticExecutionDriver:
                 if promotion_failure is not None:
                     return self._terminate_for_frame(frame, promotion_failure)
                 if verified.status is ThermalLiveExecutionStatus.COMPLETED:
+                    self._begin_verified_probe_acquisition(
+                        verified,
+                        started_at=frame.observed_at,
+                    )
                     self.active_session = None
                     return self._publish(
                         state=ThermalAutomaticDriverState.CONVERGED,
@@ -1296,6 +1342,7 @@ class ThermalAutomaticExecutionDriver:
 
         _require_aware(failed_at)
         self._clear_cleanup()
+        self._probe_acquisition = None
         self._retire_session(at=failed_at, reason=reason)
         return self._publish(
             state=ThermalAutomaticDriverState.FAILED,
@@ -1315,6 +1362,7 @@ class ThermalAutomaticExecutionDriver:
         self._unloaded = True
         self.requested_enabled = False
         self._clear_cleanup()
+        self._probe_acquisition = None
         self._retire_session(
             at=unloaded_at,
             reason="automatic_thermal_driver_unloaded",
@@ -1434,6 +1482,38 @@ class ThermalAutomaticExecutionDriver:
             )
         self.active_session = None
 
+    def _begin_verified_probe_acquisition(
+        self,
+        session: ThermalLiveExecutionSession,
+        *,
+        started_at: datetime,
+    ) -> None:
+        """Start acquisition only after exact probe RPM plan verification."""
+
+        purpose = session.originating_currentness.purpose
+        if purpose.kind is not ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
+            return
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            lease is None
+            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+            or not lease.owns_pump_setpoint
+            or lease.pump_setpoint is None
+            or lease.pump_setpoint.intended_value
+            != PumpOperatingBaselines().temperature_probe_rpm
+        ):
+            return
+        self._probe_acquisition = PoolTemperatureProbeExecutionEvidence(
+            phase=PoolTemperatureProbeExecutionPhase.ACQUIRING,
+            execution_purpose_id=purpose.purpose_id,
+            execution_plan_id=lease.execution_plan_id,
+            ownership_lease_id=lease.lease_id,
+            ownership_generation=lease.generation,
+            body_activation_owned=lease.owns_body_activation,
+            pump_setpoint_owned=True,
+            acquisition_started_at=started_at,
+        )
+
     def _terminate_for_frame(
         self,
         frame: ThermalAutomaticExecutionFrame,
@@ -1449,6 +1529,7 @@ class ThermalAutomaticExecutionDriver:
             )
         )
         self._clear_cleanup()
+        self._probe_acquisition = None
         self._retire_session(at=frame.observed_at, reason=reason)
         return self._publish(
             state=state,
@@ -1579,6 +1660,26 @@ class ThermalAutomaticExecutionDriver:
             ),
             "stop_pump_authorized": False,
         }
+        probe = self.probe_execution_evidence()
+        ownership_summary.update(
+            {
+                "pool_temperature_probe_phase": (
+                    None if probe is None else probe.phase.value
+                ),
+                "pool_temperature_probe_ownership_present": probe is not None,
+                "pool_temperature_probe_body_provenance_present": bool(
+                    probe and probe.body_activation_owned
+                ),
+                "pool_temperature_probe_pump_provenance_present": bool(
+                    probe and probe.pump_setpoint_owned
+                ),
+                "pool_temperature_probe_acquisition_started_at": (
+                    None
+                    if probe is None or probe.acquisition_started_at is None
+                    else probe.acquisition_started_at.isoformat()
+                ),
+            }
+        )
         if circulation is not None:
             ownership_summary.update(circulation.diagnostics())
         previous = self.assessment

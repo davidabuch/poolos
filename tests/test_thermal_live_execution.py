@@ -1606,7 +1606,7 @@ def test_nonpriming_verified_step_still_advances_immediately() -> None:
     assert session.status is ThermalLiveExecutionStatus.COMPLETED
 
 
-def test_pool_temperature_probe_rpm_remains_outside_live_authority() -> None:
+def test_exact_pool_temperature_probe_rpm_has_narrow_live_authority() -> None:
     probe_desired = ThermalDesiredState(
         evaluated_at=NOW,
         body=ThermalBody.POOL,
@@ -1635,8 +1635,190 @@ def test_pool_temperature_probe_rpm_remains_outside_live_authority() -> None:
 
     result = authorize(plan)
 
-    assert result.authorized is False
+    assert result.authorized is True
+    assert result.blocking_reasons == ()
+
+
+def _probe_plan_for_authority() -> ThermalExecutionPlanAssessment:
+    desired_state = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.POOL,
+        requested_mode="solar",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="pool_temperature_probe_required",
+        rpm_reason_code="baseline:1500",
+        rationale=("Trusted Pool water temperature is required.",),
+        criteria=("pool_temperature_untrusted",),
+        evidence={},
+    )
+    return ThermalExecutionPlanBuilder().build(
+        desired_state,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=3000,
+            body_active=True,
+        ),
+    )
+
+
+def test_probe_authority_rejects_missing_step_provenance() -> None:
+    plan = _probe_plan_for_authority()
+    specification = replace(
+        plan.step_specifications[0],
+        metadata={
+            key: value
+            for key, value in plan.step_specifications[0].metadata.items()
+            if key != "pool_temperature_probe_step"
+        },
+    )
+    tampered = replace(plan, step_specifications=(specification,))
+
+    result = authorize(tampered)
+
+    assert not result.authorized
     assert "nonthermal_or_uncommissioned_pump_rpm" in result.blocking_reasons
+
+
+def test_probe_authority_requires_probe_and_general_native_pump_ownership() -> None:
+    plan = _probe_plan_for_authority()
+
+    probe_conflict = authorize(
+        plan,
+        live_evidence=evidence(
+            plan,
+            configuration=NativeConfigurationInput(
+                rpm_assignments=(NativeRpmAssignment("temperature probe", 1500),)
+            ),
+        ),
+    )
+    general_conflict = authorize(
+        plan,
+        live_evidence=evidence(
+            plan,
+            configuration=NativeConfigurationInput(
+                rpm_assignments=(NativeRpmAssignment("unclassified", 1500),)
+            ),
+        ),
+    )
+
+    assert not probe_conflict.authorized
+    assert not general_conflict.authorized
+    assert all(
+        "native_configuration_conflict:native_rpm_assignment_conflict"
+        in result.blocking_reasons
+        for result in (probe_conflict, general_conflict)
+    )
+
+
+def test_probe_authority_rejects_heat_source_mutation_and_hot_tub() -> None:
+    desired = _probe_plan_for_authority().desired
+    source_mutation = ThermalExecutionPlanBuilder().build(
+        desired,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.SOLAR,
+            pump_rpm=3000,
+            body_active=True,
+        ),
+    )
+    hot_tub = ThermalExecutionPlanBuilder().build(
+        replace(desired, body=ThermalBody.HOT_TUB),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=3000,
+            body_active=True,
+        ),
+    )
+
+    source_result = authorize(source_mutation)
+    hot_tub_result = authorize(hot_tub)
+
+    assert not source_result.authorized
+    assert "temperature_probe_heat_source_mutation_not_authorized" in (
+        source_result.blocking_reasons
+    )
+    assert not hot_tub_result.authorized
+    assert "temperature_probe_requires_pool_body" in hot_tub_result.blocking_reasons
+
+
+def test_unrelated_off_source_1500_rpm_is_rejected_by_canonical_model() -> None:
+    with pytest.raises(
+        ValueError,
+        match="off heat source may require pump RPM only for pool temperature probe",
+    ):
+        replace(
+            _probe_plan_for_authority().desired,
+            reason_code="unrelated_off_source_circulation",
+        )
+
+
+def _probe_verification_store(at: datetime) -> ObservationStore:
+    observations = hydraulic_store(at=at, pump_rpm=1500)
+    observations.put(
+        PoolObservation(
+            observation_id="pump_circuit.p0102.configured_speed_rpm",
+            value=1500,
+            observed_at=at,
+            source_kind=ObservationSourceKind.LIVE,
+            source_id="native-intellicenter",
+            quality=ObservationQuality.GOOD,
+            confidence=1.0,
+        )
+    )
+    return observations
+
+
+def test_probe_verification_requires_configured_and_actual_later_evidence() -> None:
+    plan = _probe_plan_for_authority()
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+
+    same_epoch = engine.verify_current_step(
+        session,
+        _probe_verification_store(NOW),
+        current_context=session.originating_context,
+        policy=policy(),
+        evaluated_at=NOW,
+        source_id="native-intellicenter",
+    )
+
+    assert same_epoch.status is ThermalLiveExecutionStatus.FAILED
+    assert same_epoch.failure_reason == "authoritative_verification_evidence_unusable"
+
+    fresh_session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    fresh_session = asyncio.run(
+        engine.deliver_current_step(
+            fresh_session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    later = NOW + timedelta(seconds=1)
+    verified = engine.verify_current_step(
+        fresh_session,
+        _probe_verification_store(later),
+        current_context=fresh_session.originating_context,
+        policy=policy(),
+        evaluated_at=later,
+        source_id="native-intellicenter",
+    )
+
+    assert verified.status is ThermalLiveExecutionStatus.COMPLETED
 
 
 def test_inactive_body_may_authorize_only_its_activation_step() -> None:

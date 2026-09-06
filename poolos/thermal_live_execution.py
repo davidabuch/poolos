@@ -906,6 +906,33 @@ class ThermalLiveAuthorizationEngine:
                     return ("priming_hold_contract_missing",)
                 return ()
 
+            probe_step = (
+                specification is not None
+                and specification.metadata.get("pool_temperature_probe_step") == "true"
+            )
+            if probe_step:
+                assert specification is not None
+                if assessment.desired.body is not ThermalBody.POOL:
+                    return ("temperature_probe_requires_pool_body",)
+                if assessment.desired.selected_source is not PhysicalHeatMode.OFF:
+                    return ("temperature_probe_requires_heat_source_off",)
+                if (
+                    assessment.desired.reason_code != "pool_temperature_probe_required"
+                    or operation.metadata.get("reason_code")
+                    != "pool_temperature_probe_required"
+                ):
+                    return ("temperature_probe_reason_mismatch",)
+                if operation.rpm != policy.baselines.temperature_probe_rpm:
+                    return ("uncommissioned_temperature_probe_pump_rpm",)
+                if assessment.desired.required_pump_rpm != operation.rpm:
+                    return ("pump_rpm_does_not_match_thermal_plan",)
+                if dict(specification.expected_observations) != {
+                    "pump.rpm": operation.rpm,
+                    "pump_circuit.p0102.configured_speed_rpm": operation.rpm,
+                }:
+                    return ("temperature_probe_verification_contract_mismatch",)
+                return ()
+
             expected_rpm = {
                 PhysicalHeatMode.SOLAR: policy.baselines.solar_heating_rpm,
                 PhysicalHeatMode.GAS: policy.baselines.gas_heating_rpm,
@@ -916,6 +943,8 @@ class ThermalLiveAuthorizationEngine:
                 return ("pump_rpm_does_not_match_thermal_plan",)
             return ()
         if isinstance(operation, SetHeatMode):
+            if assessment.desired.reason_code == "pool_temperature_probe_required":
+                return ("temperature_probe_heat_source_mutation_not_authorized",)
             if operation.equipment_id != assessment.desired.body.value:
                 return ("heat_mode_body_mismatch",)
             if operation.mode is not assessment.desired.selected_source:
@@ -940,6 +969,11 @@ class ThermalLiveAuthorizationEngine:
             },
             PhysicalHeatMode.OFF: set(),
         }[assessment.desired.selected_source]
+        if assessment.desired.reason_code == "pool_temperature_probe_required":
+            relevant = {
+                AutonomousCapability.TEMPERATURE_PROBE_PUMP_BASELINE,
+                AutonomousCapability.GENERAL_PUMP_RPM_OWNERSHIP,
+            }
         disabled = set(evidence.native_configuration.disabled_capabilities)
         affected = relevant & disabled
         if not affected:

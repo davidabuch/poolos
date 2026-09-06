@@ -38,6 +38,8 @@ from .thermal_runtime_ownership import (
     ThermalRuntimeOwnershipStatus,
     shared_hydraulic_safety_class,
 )
+from .pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
+from .operating_baselines import PumpOperatingBaselines
 
 _LIVE_FRESHNESS = FreshnessPolicy(max_age=timedelta(seconds=30))
 _LIVE_MINIMUM_CONFIDENCE = 0.5
@@ -633,6 +635,63 @@ def _body_topology_blocker(
     if target is ThermalBody.HOT_TUB and pool_active:
         return "thermal_orchestration_pool_takeover"
     return None
+
+
+def assess_pool_temperature_probe_continuity(
+    *,
+    generated_at: datetime,
+    observations: Iterable[PoolObservation],
+    prior_grid_disposition: GridOutageDisposition | None,
+    lifecycle_blocker: str | None = None,
+    external_preemption_reason: str | None = None,
+    pump_rpm_tolerance: int = 25,
+) -> PoolTemperatureProbeContinuityEvidence:
+    """Prove current Pool probe hydraulics before accepting a sample."""
+
+    by_id = {item.observation_id: item for item in observations}
+    blocker = lifecycle_blocker or external_preemption_reason
+    if blocker is None and prior_grid_disposition is not GridOutageDisposition.ON_GRID:
+        blocker = "temperature_probe_grid_not_authoritatively_on"
+    if blocker is None:
+        grid = _observation_state(by_id.get("grid.outage_active"), generated_at)
+        if not grid.usable or _boolean(grid.value) is not False:
+            blocker = "temperature_probe_current_grid_evidence_unusable"
+    if blocker is None:
+        blocker = _body_topology_blocker(
+            by_id,
+            evaluated_at=generated_at,
+            target=ThermalBody.POOL,
+        )
+    if blocker is None:
+        pool = _observation_state(by_id.get("pool.active"), generated_at)
+        if _boolean(pool.value) is not True:
+            blocker = "temperature_probe_pool_inactive"
+    if blocker is None:
+        blocker = _shared_hydraulic_blocker(by_id, evaluated_at=generated_at)
+    baseline = PumpOperatingBaselines().temperature_probe_rpm
+    if blocker is None:
+        configured = _observation_state(
+            by_id.get("pump_circuit.p0102.configured_speed_rpm"), generated_at
+        )
+        configured_rpm = _integer(configured.value)
+        if not configured.usable or configured_rpm != baseline:
+            blocker = "temperature_probe_configured_speed_not_verified"
+    if blocker is None:
+        pump = _observation_state(by_id.get("pump.rpm"), generated_at)
+        pump_rpm = _integer(pump.value)
+        if (
+            not pump.usable
+            or pump_rpm is None
+            or abs(pump_rpm - baseline) > pump_rpm_tolerance
+        ):
+            blocker = "temperature_probe_actual_rpm_not_verified"
+    temperature = _observation_state(by_id.get("pool.temperature"), generated_at)
+    return PoolTemperatureProbeContinuityEvidence(
+        evaluated_at=generated_at,
+        valid=blocker is None,
+        blocker=blocker,
+        temperature_sample_usable=temperature.usable,
+    )
 
 
 def _body_assessment(
