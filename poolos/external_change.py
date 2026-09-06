@@ -143,7 +143,12 @@ class ThermalRuntimeExternalChangeEvidence:
         transient: list[ExternalChangeEvent] = []
         for event in batch.events:
             if event.concept in THERMAL_RUNTIME_TAKEOVER_CONCEPTS:
-                self._retained_by_concept.setdefault(event.concept, event)
+                retained_event = self._retained_by_concept.get(event.concept)
+                if (
+                    retained_event is None
+                    or event.observed_at >= retained_event.observed_at
+                ):
+                    self._retained_by_concept[event.concept] = event
             else:
                 transient.append(event)
 

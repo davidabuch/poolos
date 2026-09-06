@@ -111,10 +111,18 @@ readiness, but performs none of them and never mutates or consumes the residual
 entitlement. Diagnostic publication snapshots the result before the existing
 explicit source-termination lifecycle consumes its entitlement.
 
-The next physical cleanup change, if separately authorized, must bind a fresh
-positive arbitration result to the final command boundary. It must independently
-commission exact Pool body deactivation and/or a typed filtration RPM handoff;
-neither capability exists here.
+Physical post-thermal cleanup binds a fresh positive arbitration result to the
+final command boundary without changing this command-free policy. Before the
+source residual is consumed, the automatic driver may copy only its accepted
+Pool body-activation and pump-setpoint provenance into a distinct ephemeral
+cleanup token. The token is not dispatch authority. Each command requires a new
+one-epoch candidate and a matching typed final-gateway context. Exact Pool body
+deactivation requires body provenance; one-time `p0102` normalization requires
+pump provenance and the current canonical filtration target. Verification uses
+later authoritative Pool activity or configured-speed plus actual-RPM truth.
+Verified normalization consumes only pump cleanup capability, while independent
+body provenance may wait for filtration to stop being an immediate successor.
+This does not establish filtration ownership or a generic filtration executor.
 
 Runtime ownership is not persisted. A new process or manager begins unowned,
 even if current equipment and historical receipts match a former PoolOS

@@ -16,12 +16,16 @@ from poolos.physical_command_authority import (
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.circulation_successor import FiltrationSuccessorEvidence
-from poolos.integration import ThermalBody
+from poolos.integration import SetBodyActive, SetPumpSpeed, ThermalBody
 from poolos.external_change import ExternalChangeBatch
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDeliveryFactory,
     ThermalAutomaticExecutionDriver,
     ThermalAutomaticExecutionFrame,
+)
+from poolos.thermal_circulation_cleanup import (
+    ThermalCirculationCleanupAction,
+    ThermalCirculationCleanupCandidate,
 )
 from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
@@ -79,6 +83,49 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             session_identity=f"termination:{entitlement_id}",
             body=body.value,
             purpose=AutomaticThermalDispatchPurpose.TERMINATION,
+        )
+        return ManualIntelliCenterThermalLiveDelivery(
+            manual=self.manual,
+            request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            automatic_thermal_context=context,
+        )
+
+    def for_cleanup(
+        self,
+        candidate: ThermalCirculationCleanupCandidate,
+        *,
+        epoch_identity: str,
+    ) -> ManualIntelliCenterThermalLiveDelivery:
+        """Bind exactly one canonical cleanup candidate to this authority epoch."""
+
+        operation = candidate.operation
+        if candidate.action is ThermalCirculationCleanupAction.BODY_DEACTIVATION:
+            assert isinstance(operation, SetBodyActive)
+            purpose = AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            physical_operation = "body_active"
+            target = "B1101"
+            value: bool | int = operation.active
+        else:
+            assert isinstance(operation, SetPumpSpeed)
+            purpose = AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION
+            physical_operation = "pump_circuit_speed"
+            target = "p0102"
+            value = operation.rpm
+        self.authority.register_automatic_thermal_cleanup(
+            epoch_identity=epoch_identity,
+            candidate_identity=candidate.candidate_id,
+            body=ThermalBody.POOL.value,
+            purpose=purpose,
+            operation=physical_operation,
+            target=target,
+            requested_value=value,
+        )
+        context = self.authority.bind_automatic_thermal_dispatch(
+            epoch_identity=epoch_identity,
+            session_identity=f"cleanup:{candidate.provenance_id}",
+            body=ThermalBody.POOL.value,
+            purpose=purpose,
+            cleanup_candidate_identity=candidate.candidate_id,
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,

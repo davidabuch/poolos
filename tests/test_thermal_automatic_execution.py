@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from poolos.circulation_successor import (
     FiltrationSuccessorEvidence,
     FiltrationTargetSemantics,
@@ -12,7 +14,7 @@ from poolos.circulation_successor import (
 from poolos.hal import CommandReceipt, CommandStatus
 from poolos.external_change import ExternalChangeBatch, ExternalChangeEvent
 from poolos.filtration_policy import FiltrationDisposition
-from poolos.integration import PoolOperation, ThermalBody
+from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
 from poolos.native_configuration_policy import (
     NativeConfigurationGuard,
     NativeConfigurationInput,
@@ -26,6 +28,10 @@ from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
     ThermalAutomaticExecutionFrame,
+)
+from poolos.thermal_circulation_cleanup import (
+    ThermalCirculationCleanupCandidate,
+    ThermalCirculationCleanupProvenance,
 )
 from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
@@ -75,6 +81,15 @@ class FakeDeliveryFactory:
 
     def for_termination(self, *, body, entitlement_id: str, epoch_identity: str):
         self.bindings.append((f"termination:{entitlement_id}", epoch_identity))
+        return self.delivery
+
+    def for_cleanup(
+        self,
+        candidate: ThermalCirculationCleanupCandidate,
+        *,
+        epoch_identity: str,
+    ):
+        self.bindings.append((f"cleanup:{candidate.candidate_id}", epoch_identity))
         return self.delivery
 
 
@@ -865,6 +880,507 @@ def test_same_timestamp_command_callback_cannot_verify_termination() -> None:
     assert driver.termination_attempt is not None
     assert orchestrator.ownership.residual_termination is not None
     assert len(factory.delivery.calls) == 4
+
+
+def test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body(
+) -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    verified = asyncio.run(
+        driver.process_epoch(source_verified, delivery_factory=factory)
+    )
+    assert verified.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.body_activation is not None
+    assert driver.cleanup_provenance.pump_setpoint is not None
+
+    normalize = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    requested = asyncio.run(driver.process_epoch(normalize, delivery_factory=factory))
+    assert requested.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert isinstance(factory.delivery.calls[-1], SetPumpSpeed)
+    assert factory.delivery.calls[-1].equipment_id == "p0102"
+    assert factory.delivery.calls[-1].rpm == 2600
+
+    normalized = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=68),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    complete = asyncio.run(driver.process_epoch(normalized, delivery_factory=factory))
+    assert complete.state is ThermalAutomaticDriverState.CLEANUP_WAITING
+    assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.body_activation is not None
+    assert driver.cleanup_provenance.pump_setpoint is None
+    command_count = len(factory.delivery.calls)
+
+    still_needed = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=69),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=1),
+    )
+    waiting = asyncio.run(driver.process_epoch(still_needed, delivery_factory=factory))
+    assert waiting.state is ThermalAutomaticDriverState.CLEANUP_WAITING
+    assert len(factory.delivery.calls) == command_count
+
+    satisfied = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=70),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    body_requested = asyncio.run(
+        driver.process_epoch(satisfied, delivery_factory=factory)
+    )
+    assert body_requested.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert isinstance(factory.delivery.calls[-1], SetBodyActive)
+    assert factory.delivery.calls[-1].equipment_id == ThermalBody.POOL.value
+    assert factory.delivery.calls[-1].active is False
+
+    body_off = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=71),
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    body_verified = asyncio.run(
+        driver.process_epoch(body_off, delivery_factory=factory)
+    )
+    assert body_verified.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+
+
+def test_body_cleanup_receipt_is_not_verification() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    next_epoch = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+
+    requested = asyncio.run(driver.process_epoch(next_epoch, delivery_factory=factory))
+
+    assert requested.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert driver.cleanup_attempt is not None
+    assert driver.cleanup_provenance is not None
+
+
+@pytest.mark.parametrize(
+    ("pump_rpm", "configured_rpm"),
+    ((2600, 3000), (3000, 2600)),
+)
+def test_pump_cleanup_requires_later_configured_and_actual_native_truth(
+    pump_rpm: int,
+    configured_rpm: int,
+) -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    normalize = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    asyncio.run(driver.process_epoch(normalize, delivery_factory=factory))
+    incomplete = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=68),
+        pool_active=True,
+        pump_rpm=pump_rpm,
+        configured_rpm=configured_rpm,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+
+    result = asyncio.run(driver.process_epoch(incomplete, delivery_factory=factory))
+
+    assert result.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert driver.cleanup_attempt is not None
+    assert len(factory.delivery.calls) == 5
+
+
+def test_source_no_longer_off_preempts_cleanup_verification() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    body_request = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(body_request, delivery_factory=factory))
+    source_returned = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=68),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="H0001",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(source_returned, delivery_factory=factory)
+    )
+
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert result.blocker == "thermal_cleanup_source_off_not_current"
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+
+
+def test_new_immediate_filtration_preempts_pending_body_cleanup() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    body_request = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(body_request, delivery_factory=factory))
+    calls_before = len(factory.delivery.calls)
+    filtration_now = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=68),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=1),
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(filtration_now, delivery_factory=factory)
+    )
+
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert result.blocker == "thermal_cleanup_circulation_successor_changed"
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+    assert len(factory.delivery.calls) == calls_before
+
+
+def test_transient_spa_takeover_preempts_pending_cleanup_verification() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+
+    body_request = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    requested = asyncio.run(
+        driver.process_epoch(body_request, delivery_factory=factory)
+    )
+
+    assert (
+        requested.state
+        is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    )
+    assert driver.cleanup_attempt is not None
+    calls_before = len(factory.delivery.calls)
+
+    transient_spa_takeover = ExternalChangeEvent(
+        concept="spa.active",
+        semantic_event_type="native_value_changed",
+        native_object_id="B1202",
+        previous_value=False,
+        new_value=True,
+        observed_at=NOW + timedelta(seconds=67, milliseconds=500),
+        external_policy="accept",
+        action_taken="observe",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    returned_to_pool_topology = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=68),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(
+            replace(
+                returned_to_pool_topology,
+                external_changes=ExternalChangeBatch(
+                    (transient_spa_takeover,)
+                ),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert result.blocker == "thermal_cleanup_external_takeover"
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+    assert len(factory.delivery.calls) == calls_before
+
+
+def test_cleanup_takeover_invalidates_provenance_without_command() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    assert driver.cleanup_provenance is not None
+    calls_before = len(factory.delivery.calls)
+    takeover_frame = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+    )
+    takeover = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=3000,
+        new_value=2600,
+        observed_at=takeover_frame.observed_at,
+        external_policy="accept",
+        action_taken="observe",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(
+            replace(
+                takeover_frame,
+                external_changes=ExternalChangeBatch((takeover,)),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert driver.cleanup_provenance is None
+    assert len(factory.delivery.calls) == calls_before
+
+
+def test_preexisting_body_with_owned_pump_can_normalize_but_never_stop_body() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    residual = orchestrator.ownership.residual_termination
+    assert residual is not None and residual.pump_setpoint is not None
+    pump_only = replace(residual, body_activation=None, heat_source=None)
+    provenance = ThermalCirculationCleanupProvenance.from_residual(
+        pump_only,
+        established_at=NOW + timedelta(seconds=66),
+    )
+    assert provenance is not None
+    driver.cleanup_provenance = provenance
+    driver.termination_attempt = None
+    orchestrator.ownership.invalidate_residual_termination()
+    calls_before = len(factory.delivery.calls)
+    normalize = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=67),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=1),
+    )
+
+    requested = asyncio.run(driver.process_epoch(normalize, delivery_factory=factory))
+
+    assert requested.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert isinstance(factory.delivery.calls[-1], SetPumpSpeed)
+    assert len(factory.delivery.calls) == calls_before + 1
+
+    verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=68),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=1),
+    )
+    asyncio.run(driver.process_epoch(verified, delivery_factory=factory))
+    assert driver.cleanup_provenance is None
+
+    satisfied = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=69),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    result = asyncio.run(driver.process_epoch(satisfied, delivery_factory=factory))
+
+    assert result.state is ThermalAutomaticDriverState.BLOCKED
+    assert not any(
+        isinstance(operation, SetBodyActive) and operation.active is False
+        for operation in factory.delivery.calls
+    )
+
+
+def test_restart_with_matching_pool_state_reconstructs_no_cleanup_authority() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    driver.set_enabled(True, changed_at=NOW, current_epoch_identity=None)
+    running = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(running, delivery_factory=FakeDeliveryFactory(delivery))
+    )
+
+    assert result.state is ThermalAutomaticDriverState.BLOCKED
+    assert driver.cleanup_provenance is None
+    assert delivery.calls == []
+
+
+def test_unload_discards_cleanup_provenance_without_compensating_command() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    assert driver.cleanup_provenance is not None
+    calls_before = len(factory.delivery.calls)
+
+    driver.unload(unloaded_at=NOW + timedelta(seconds=67))
+
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+    assert len(factory.delivery.calls) == calls_before
 
 
 def test_external_source_takeover_explicitly_invalidates_termination_attempt() -> None:

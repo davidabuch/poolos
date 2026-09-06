@@ -22,6 +22,8 @@ from poolos.integration import (
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
+    AutomaticThermalDispatchPurpose,
+    PhysicalCommandDeniedError,
     PhysicalRequestSource,
 )
 from poolos.thermal_live_execution import COMMISSIONED_THERMAL_PUMP_ID
@@ -75,7 +77,7 @@ class ManualIntelliCenterThermalLiveDelivery:
                 body_id = self._validate_body_activation(operation)
                 manual_receipt = await self.manual.async_set_body_active(
                     body_id,
-                    True,
+                    operation.active,
                     request_source=self.request_source,
                     automatic_thermal_context=self.automatic_thermal_context,
                 )
@@ -104,6 +106,9 @@ class ManualIntelliCenterThermalLiveDelivery:
                     verification_required=True,
                 )
         except (ManualIntelliCenterCommandError, ValueError) as exc:
+            authority_reason = None
+            if isinstance(exc.__cause__, PhysicalCommandDeniedError):
+                authority_reason = exc.__cause__.decision.reason.value
             return CommandReceipt(
                 status=(
                     CommandStatus.FAILED
@@ -114,7 +119,10 @@ class ManualIntelliCenterThermalLiveDelivery:
                 message=str(exc),
                 issued_at=issued_at,
                 verification_required=True,
-                details={"error_type": type(exc).__name__},
+                details={
+                    "error_type": type(exc).__name__,
+                    "authority_reason": authority_reason,
+                },
             )
         return CommandReceipt(
             status=CommandStatus.ACKNOWLEDGED,
@@ -130,14 +138,26 @@ class ManualIntelliCenterThermalLiveDelivery:
             },
         )
 
-    @staticmethod
-    def _validate_body_activation(operation: SetBodyActive) -> str:
+    def _validate_body_activation(self, operation: SetBodyActive) -> str:
         try:
             body = ThermalBody(operation.equipment_id)
         except (TypeError, ValueError) as exc:
             raise ValueError("unsupported thermal body") from exc
 
-        if operation.active is not True:
+        cleanup = self.automatic_thermal_context
+        if (
+            cleanup is not None
+            and cleanup.purpose
+            is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            and operation.active is not False
+        ):
+            raise ValueError("Pool cleanup authority permits only body deactivation")
+        if operation.active is False and not (
+            cleanup is not None
+            and cleanup.purpose
+            is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            and body is ThermalBody.POOL
+        ):
             raise ValueError(
                 "autonomous thermal body deactivation is not commissioned"
             )
@@ -147,6 +167,16 @@ class ManualIntelliCenterThermalLiveDelivery:
     def _validate_pump(self, operation: SetPumpSpeed) -> None:
         if operation.equipment_id != COMMISSIONED_THERMAL_PUMP_ID:
             raise ValueError("unsupported thermal pump circuit")
+        cleanup = self.automatic_thermal_context
+        if (
+            cleanup is not None
+            and cleanup.purpose
+            is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION
+        ):
+            authority = cleanup.cleanup_authority
+            if authority is None or operation.rpm != authority.requested_value:
+                raise ValueError("pump cleanup RPM does not match bound authority")
+            return
         if operation.rpm not in {
             self.baselines.solar_heating_rpm,
             self.baselines.gas_heating_rpm,

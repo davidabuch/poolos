@@ -58,6 +58,50 @@ class AutomaticThermalDispatchPurpose(StrEnum):
 
     NORMAL = "normal"
     TERMINATION = "termination"
+    CIRCULATION_BODY_CLEANUP = "circulation_body_cleanup"
+    CIRCULATION_PUMP_NORMALIZATION = "circulation_pump_normalization"
+
+
+@dataclass(frozen=True, slots=True)
+class AutomaticThermalCleanupAuthority:
+    """Exact one-epoch cleanup operation admitted by canonical supervision."""
+
+    generation: int
+    epoch_identity: str
+    candidate_identity: str
+    body: str
+    purpose: AutomaticThermalDispatchPurpose
+    operation: str
+    target: str
+    requested_value: bool | int
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("cleanup authority generation must be positive")
+        for name in ("epoch_identity", "candidate_identity", "body", "operation", "target"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        object.__setattr__(self, "purpose", AutomaticThermalDispatchPurpose(self.purpose))
+        if self.body != "pool":
+            raise ValueError("automatic circulation cleanup is Pool-only")
+        if self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP:
+            if not (
+                self.operation == "body_active"
+                and self.target == "B1101"
+                and self.requested_value is False
+            ):
+                raise ValueError("body cleanup authority must be exact Pool Off")
+        elif self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION:
+            if not (
+                self.operation == "pump_circuit_speed"
+                and self.target == "p0102"
+                and isinstance(self.requested_value, int)
+                and not isinstance(self.requested_value, bool)
+                and self.requested_value > 0
+            ):
+                raise ValueError("pump cleanup authority must bind one positive p0102 RPM")
+        else:
+            raise ValueError("unsupported circulation cleanup authority purpose")
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +113,7 @@ class AutomaticThermalDispatchContext:
     session_identity: str
     body: str
     purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL
+    cleanup_authority: AutomaticThermalCleanupAuthority | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -83,6 +128,22 @@ class AutomaticThermalDispatchContext:
             "purpose",
             AutomaticThermalDispatchPurpose(self.purpose),
         )
+        cleanup_purposes = {
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+        }
+        if self.purpose in cleanup_purposes:
+            if self.cleanup_authority is None:
+                raise ValueError("cleanup dispatch requires exact cleanup authority")
+            if (
+                self.cleanup_authority.generation != self.generation
+                or self.cleanup_authority.epoch_identity != self.epoch_identity
+                or self.cleanup_authority.body != self.body
+                or self.cleanup_authority.purpose is not self.purpose
+            ):
+                raise ValueError("cleanup dispatch context does not match authority")
+        elif self.cleanup_authority is not None:
+            raise ValueError("normal or source termination context cannot carry cleanup authority")
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +258,9 @@ class PoolOSPhysicalCommandAuthority:
     _automatic_thermal_session_identity: str | None = field(
         default=None, init=False, repr=False
     )
+    _automatic_thermal_cleanup_authority: AutomaticThermalCleanupAuthority | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.expectation_ttl <= timedelta(0):
@@ -269,6 +333,35 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_thermal_generation += 1
         self._automatic_thermal_epoch_identity = epoch_identity
         self._automatic_thermal_session_identity = None
+        self._automatic_thermal_cleanup_authority = None
+
+    def register_automatic_thermal_cleanup(
+        self,
+        *,
+        epoch_identity: str,
+        candidate_identity: str,
+        body: str,
+        purpose: AutomaticThermalDispatchPurpose,
+        operation: str,
+        target: str,
+        requested_value: bool | int,
+    ) -> AutomaticThermalCleanupAuthority:
+        """Register one exact current cleanup candidate, without dispatching it."""
+
+        if epoch_identity != self._automatic_thermal_epoch_identity:
+            raise ValueError("automatic thermal cleanup epoch is not current")
+        authority = AutomaticThermalCleanupAuthority(
+            generation=self._automatic_thermal_generation,
+            epoch_identity=epoch_identity,
+            candidate_identity=candidate_identity,
+            body=body,
+            purpose=purpose,
+            operation=operation,
+            target=target,
+            requested_value=requested_value,
+        )
+        self._automatic_thermal_cleanup_authority = authority
+        return authority
 
     def bind_automatic_thermal_dispatch(
         self,
@@ -277,6 +370,7 @@ class PoolOSPhysicalCommandAuthority:
         session_identity: str,
         body: str,
         purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL,
+        cleanup_candidate_identity: str | None = None,
     ) -> AutomaticThermalDispatchContext:
         """Bind one current session to the latest authoritative epoch."""
 
@@ -286,6 +380,23 @@ class PoolOSPhysicalCommandAuthority:
             raise ValueError("automatic thermal session identity must not be empty")
         if body not in {"pool", "hot_tub"}:
             raise ValueError("unsupported automatic thermal body")
+        purpose = AutomaticThermalDispatchPurpose(purpose)
+        cleanup = None
+        if purpose in {
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+        }:
+            cleanup = self._automatic_thermal_cleanup_authority
+            if (
+                cleanup is None
+                or cleanup_candidate_identity != cleanup.candidate_identity
+                or cleanup.epoch_identity != epoch_identity
+                or cleanup.body != body
+                or cleanup.purpose is not purpose
+            ):
+                raise ValueError("automatic thermal cleanup candidate is not current")
+        elif cleanup_candidate_identity is not None:
+            raise ValueError("cleanup candidate requires cleanup dispatch purpose")
         self._automatic_thermal_session_identity = session_identity
         return AutomaticThermalDispatchContext(
             generation=self._automatic_thermal_generation,
@@ -293,6 +404,7 @@ class PoolOSPhysicalCommandAuthority:
             session_identity=session_identity,
             body=body,
             purpose=purpose,
+            cleanup_authority=cleanup,
         )
 
     def unload_automatic_thermal_driver(self) -> None:
@@ -305,6 +417,7 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_thermal_generation += 1
         self._automatic_thermal_epoch_identity = None
         self._automatic_thermal_session_identity = None
+        self._automatic_thermal_cleanup_authority = None
         self.invalidate_expectations()
 
     def assess(self, request: PhysicalCommandRequest) -> PhysicalAuthorityDecision:
@@ -486,6 +599,11 @@ class PoolOSPhysicalCommandAuthority:
                 "automatic_thermal_scope": self._automatic_thermal_scope,
                 "automatic_thermal_loaded": self._automatic_thermal_loaded,
                 "automatic_thermal_generation": self._automatic_thermal_generation,
+                "automatic_thermal_cleanup_candidate": (
+                    None
+                    if self._automatic_thermal_cleanup_authority is None
+                    else self._automatic_thermal_cleanup_authority.candidate_identity
+                ),
             }
         )
 
@@ -501,6 +619,17 @@ def _automatic_thermal_request_matches_context(
             and request.operation == "body_heat_source"
             and request.target == "B1101"
             and request.requested_value == "00000"
+        )
+    if context.purpose in {
+        AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+    }:
+        cleanup = context.cleanup_authority
+        return bool(
+            cleanup is not None
+            and request.operation == cleanup.operation
+            and request.target == cleanup.target
+            and request.requested_value == cleanup.requested_value
         )
     if request.operation == "body_active":
         return request.target == body_target and request.requested_value is True
@@ -540,6 +669,7 @@ def _require_aware(value: datetime) -> None:
 
 
 __all__ = [
+    "AutomaticThermalCleanupAuthority",
     "AutomaticThermalDispatchPurpose",
     "AutomaticThermalDispatchContext",
     "ExpectedNativeConsequence",

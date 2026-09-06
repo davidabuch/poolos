@@ -161,6 +161,21 @@ bypass: while it is Off no termination command is scheduled. An accepted Off
 receipt waits for a later authoritative `HEATER=00000` observation, and no
 subsequent action or retry is chained in the same epoch.
 
+After authoritative Pool source-Off confirmation, the driver may retain a
+separate, in-memory circulation-cleanup provenance copied only from accepted
+body-activation and pump-setpoint provenance. A fresh canonical circulation-
+successor assessment may bind one exact Pool body-Off candidate, or one exact
+`p0102` filtration-successor RPM candidate, to the current authoritative epoch.
+These use distinct typed final-gateway purposes; neither extends normal thermal
+authority. Body-Off requires accepted PoolOS body-activation provenance. Pump
+normalization requires accepted pump-setpoint provenance and the exact current
+canonical filtration target. Accepted delivery waits for a later authoritative
+native consequence. Verified pump normalization consumes the pump cleanup
+capability, so later target changes cannot create repeated filtration control;
+independent body provenance may remain until filtration ceases to be an
+immediate successor. Restart, unload, gate loss, or external/hydraulic takeover
+discards cleanup provenance without a compensating command.
+
 The generic Pentair physical endpoint independently rejects `pump.set_speed`
 unless its target is `p0102`, its sole parameter is an integer `rpm`, and the
 value is the commissioned 2900 or 3000 thermal baseline. Existing body/heater
@@ -184,14 +199,16 @@ endpoint bounds remain unchanged.
 - Delivery rejection/failure/timeout, verification failure/timeout, stale
   evidence, unavailable transport, or a safety/configuration blocker stops the
   plan without retry.
-- No authority is granted to `StartPump`, `StopPump`, `SetHydraulicRoute`, body
-  deactivation, arbitrary circuits or vendor commands, Spillway, filtration,
-  probing, grid outage, lighting, chemistry, schedules, or configuration
-  changes.
+- No authority is granted to `StartPump`, `StopPump`, `SetHydraulicRoute`,
+  arbitrary body deactivation, arbitrary circuits or vendor commands,
+  Spillway, generic filtration execution, probing, grid outage, lighting,
+  chemistry, schedules, or configuration changes. The sole body-deactivation
+  envelope is provenance-bound Pool cleanup after thermal purpose ends.
 - Inactive-body manual configuration remains available, but autonomous
   inactive-body `HEATER` preselection remains uncommissioned and prohibited.
 - Temperature-probe plans remain wholly rejected because 1500 RPM is not
   commissioned thermal authority. Hot Tub automatic execution remains blocked
   pending body-specific configured-pump ownership evidence. Physical outage
-  response and body/pump authority-loss cleanup remain separate work; the only
-  termination operation is ownership-scoped Pool source Off.
+  response remains separate work. Source termination remains ownership-scoped
+  Pool source Off; post-source circulation cleanup is separately provenance-
+  and epoch-bound as described above.
