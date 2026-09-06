@@ -758,6 +758,15 @@ SENSORS = (
         "mdi:robot-industrial-outline",
     ),
     PoolOSControlCenterSensorDescription(
+        "grid_outage_physical_safety",
+        "Grid Outage Physical Safety",
+        lambda coordinator, runtime: runtime.grid_outage_safety_runtime.diagnostics()[
+            "state"
+        ].upper(),
+        lambda coordinator, runtime: runtime.grid_outage_safety_runtime.diagnostics(),
+        "mdi:transmission-tower-off",
+    ),
+    PoolOSControlCenterSensorDescription(
         "pool_thermal_plan",
         "Pool Thermal Plan",
         lambda coordinator, runtime: (

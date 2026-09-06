@@ -32,6 +32,7 @@ from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
 from .coordinator import PoolOSCoordinator  # noqa: E402
 from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
 from .external_change_runtime import PoolOSExternalChangeRuntime  # noqa: E402
+from .grid_outage_runtime import PoolOSGridOutageSafetyRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .observation import ObservationSnapshot  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
@@ -67,6 +68,7 @@ class PoolOSRuntimeData:
     external_change_runtime: PoolOSExternalChangeRuntime
     thermal_runtime_orchestrator: ThermalRuntimeOrchestrator
     thermal_automatic_runtime: PoolOSThermalAutomaticRuntime
+    grid_outage_safety_runtime: PoolOSGridOutageSafetyRuntime
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
@@ -120,6 +122,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
     )
+    grid_outage_safety_runtime = PoolOSGridOutageSafetyRuntime(
+        hass=hass,
+        coordinator=coordinator,
+        thermal_runtime=thermal_runtime,
+        authority=physical_command_authority,
+        manual=manual_intellicenter,
+    )
     thermal_runtime.set_probe_execution_provider(
         thermal_automatic_runtime.driver.probe_execution_evidence
     )
@@ -163,6 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         external_change_runtime=external_change_runtime,
         thermal_runtime_orchestrator=thermal_runtime_orchestrator,
         thermal_automatic_runtime=thermal_automatic_runtime,
+        grid_outage_safety_runtime=grid_outage_safety_runtime,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
     coordinator.set_native_snapshot_observer(external_change_runtime.process)
@@ -187,6 +197,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             orchestration,
             external_change_runtime.latest_batch,
         )
+        grid_outage_safety_runtime.observe(
+            snapshot,
+            orchestration,
+            external_change_runtime.latest_batch,
+        )
 
     thermal_runtime.set_orchestration_observer(observe_thermal_orchestration)
     def fail_thermal_orchestration_closed(
@@ -201,6 +216,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             ),
         )
         thermal_automatic_runtime.orchestration_failed(snapshot, error)
+        grid_outage_safety_runtime.orchestration_failed(snapshot, error)
 
     thermal_runtime.set_orchestration_failure_observer(
         fail_thermal_orchestration_closed
@@ -265,6 +281,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> b
 
     entry.runtime_data.thermal_runtime.set_orchestration_observer(None)
     entry.runtime_data.thermal_runtime.set_orchestration_failure_observer(None)
+    await entry.runtime_data.grid_outage_safety_runtime.async_unload()
     await entry.runtime_data.thermal_automatic_runtime.async_unload()
     entry.runtime_data.thermal_runtime_orchestrator.unload(
         unloaded_at=datetime.now(UTC)

@@ -30,6 +30,7 @@ class PhysicalRequestSource(StrEnum):
     AUTOMATIC_THERMAL = "automatic_thermal"
     RECONCILIATION = "reconciliation"
     SAFETY_INTERLOCK = "safety_interlock"
+    GRID_OUTAGE_SAFETY = "grid_outage_safety"
 
 
 class PhysicalAuthorityReason(StrEnum):
@@ -51,6 +52,130 @@ class PhysicalAuthorityReason(StrEnum):
     AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED = (
         "automatic_thermal_operation_unauthorized"
     )
+    GRID_OUTAGE_GATE_DISABLED = "grid_outage_gate_disabled"
+    GRID_OUTAGE_CONTEXT_MISSING = "grid_outage_context_missing"
+    GRID_OUTAGE_CONTEXT_STALE = "grid_outage_context_stale"
+    GRID_OUTAGE_OPERATION_UNAUTHORIZED = "grid_outage_operation_unauthorized"
+    GRID_OUTAGE_DRIVER_UNLOADED = "grid_outage_driver_unloaded"
+
+
+class GridOutageDispatchPurpose(StrEnum):
+    """Exact reduction-only purpose at the final physical boundary."""
+
+    SPA_SOURCE_OFF = "spa_source_off"
+    POOL_SOURCE_OFF = "pool_source_off"
+    POOL_LIGHT_OFF = "pool_light_off"
+    JETS_OFF = "jets_off"
+    SLIDE_OFF = "slide_off"
+    WATERFALL_OFF = "waterfall_off"
+    SPA_BODY_OFF = "spa_body_off"
+    POOL_PUMP_REDUCTION = "pool_pump_reduction"
+
+
+_GRID_OUTAGE_SHAPES: Mapping[
+    GridOutageDispatchPurpose,
+    tuple[str, str, bool | int | str],
+] = MappingProxyType(
+    {
+        GridOutageDispatchPurpose.SPA_SOURCE_OFF: (
+            "body_heat_source",
+            "B1202",
+            "00000",
+        ),
+        GridOutageDispatchPurpose.POOL_SOURCE_OFF: (
+            "body_heat_source",
+            "B1101",
+            "00000",
+        ),
+        GridOutageDispatchPurpose.POOL_LIGHT_OFF: (
+            "circuit_active",
+            "C0002",
+            False,
+        ),
+        GridOutageDispatchPurpose.JETS_OFF: (
+            "circuit_active",
+            "C0003",
+            False,
+        ),
+        GridOutageDispatchPurpose.SLIDE_OFF: (
+            "circuit_active",
+            "C0004",
+            False,
+        ),
+        GridOutageDispatchPurpose.WATERFALL_OFF: (
+            "circuit_active",
+            "FTR01",
+            False,
+        ),
+        GridOutageDispatchPurpose.SPA_BODY_OFF: (
+            "body_active",
+            "B1202",
+            False,
+        ),
+            GridOutageDispatchPurpose.POOL_PUMP_REDUCTION: (
+                "pump_circuit_speed",
+                "p0102",
+                _THERMAL_BASELINES.grid_outage_rpm,
+            ),
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GridOutageDispatchAuthority:
+    """One registered candidate in one current confirmed-outage frame."""
+
+    generation: int
+    outage_epoch_id: str
+    frame_identity: str
+    candidate_id: str
+    purpose: GridOutageDispatchPurpose
+    operation: str
+    target: str
+    requested_value: bool | int | str
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("outage authority generation must be positive")
+        for name in (
+            "outage_epoch_id",
+            "frame_identity",
+            "candidate_id",
+            "operation",
+            "target",
+        ):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        object.__setattr__(self, "purpose", GridOutageDispatchPurpose(self.purpose))
+        if not _grid_outage_shape_matches(
+            self.operation,
+            self.target,
+            self.requested_value,
+            _GRID_OUTAGE_SHAPES[self.purpose],
+        ):
+            raise ValueError(
+                "outage authority does not match exact reduction envelope"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class GridOutageDispatchContext:
+    """Immutable final-gateway binding for one outage candidate."""
+
+    generation: int
+    outage_epoch_id: str
+    frame_identity: str
+    candidate_id: str
+    authority: GridOutageDispatchAuthority
+
+    def __post_init__(self) -> None:
+        if (
+            self.generation != self.authority.generation
+            or self.outage_epoch_id != self.authority.outage_epoch_id
+            or self.frame_identity != self.authority.frame_identity
+            or self.candidate_id != self.authority.candidate_id
+        ):
+            raise ValueError("outage dispatch context does not match authority")
 
 
 class AutomaticThermalDispatchPurpose(StrEnum):
@@ -195,6 +320,7 @@ class PhysicalCommandRequest:
     requested_value: bool | int | float | str
     request_id: str = field(default_factory=lambda: str(uuid4()))
     automatic_thermal_context: AutomaticThermalDispatchContext | None = None
+    grid_outage_context: GridOutageDispatchContext | None = None
 
     def __post_init__(self) -> None:
         if not self.operation.strip() or not self.target.strip():
@@ -208,6 +334,16 @@ class PhysicalCommandRequest:
             raise ValueError(
                 "automatic thermal context requires automatic thermal source"
             )
+        if (
+            self.source is not PhysicalRequestSource.GRID_OUTAGE_SAFETY
+            and self.grid_outage_context is not None
+        ):
+            raise ValueError("grid outage context requires grid outage safety source")
+        if (
+            self.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+            and self.automatic_thermal_context is not None
+        ):
+            raise ValueError("grid outage requests cannot carry thermal context")
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +437,14 @@ class PoolOSPhysicalCommandAuthority:
         default=None, init=False, repr=False
     )
     _automatic_thermal_probe_authority: AutomaticThermalProbeAuthority | None = field(
+        default=None, init=False, repr=False
+    )
+    _grid_outage_gate_enabled: bool = field(default=False, init=False, repr=False)
+    _grid_outage_loaded: bool = field(default=True, init=False, repr=False)
+    _grid_outage_generation: int = field(default=0, init=False, repr=False)
+    _grid_outage_epoch_id: str | None = field(default=None, init=False, repr=False)
+    _grid_outage_frame_identity: str | None = field(default=None, init=False, repr=False)
+    _grid_outage_authority: GridOutageDispatchAuthority | None = field(
         default=None, init=False, repr=False
     )
 
@@ -496,13 +640,115 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_thermal_loaded = False
         self._invalidate_automatic_thermal_context()
 
+    def configure_grid_outage_safety(self, *, enabled: bool) -> None:
+        """Set the independent default-off outage gate and invalidate old work."""
+
+        if self._grid_outage_gate_enabled == bool(enabled):
+            return
+        self._grid_outage_gate_enabled = bool(enabled)
+        self._invalidate_grid_outage_context()
+
+    def begin_grid_outage_frame(
+        self,
+        *,
+        outage_epoch_id: str | None,
+        frame_identity: str,
+    ) -> None:
+        """Make every candidate from an older authoritative frame stale."""
+
+        if not frame_identity.strip():
+            raise ValueError("outage frame identity must not be empty")
+        if (
+            outage_epoch_id == self._grid_outage_epoch_id
+            and frame_identity == self._grid_outage_frame_identity
+        ):
+            return
+        self._grid_outage_generation += 1
+        self._grid_outage_epoch_id = outage_epoch_id
+        self._grid_outage_frame_identity = frame_identity
+        self._grid_outage_authority = None
+        self._invalidate_undispatched_grid_outage_expectations()
+
+    def register_grid_outage_candidate(
+        self,
+        *,
+        outage_epoch_id: str,
+        frame_identity: str,
+        candidate_id: str,
+        purpose: GridOutageDispatchPurpose,
+        operation: str,
+        target: str,
+        requested_value: bool | int | str,
+    ) -> GridOutageDispatchAuthority:
+        """Register one exact candidate in the current outage frame."""
+
+        if (
+            outage_epoch_id != self._grid_outage_epoch_id
+            or frame_identity != self._grid_outage_frame_identity
+        ):
+            raise ValueError("grid outage candidate frame is not current")
+        authority = GridOutageDispatchAuthority(
+            generation=self._grid_outage_generation,
+            outage_epoch_id=outage_epoch_id,
+            frame_identity=frame_identity,
+            candidate_id=candidate_id,
+            purpose=purpose,
+            operation=operation,
+            target=target,
+            requested_value=requested_value,
+        )
+        self._grid_outage_authority = authority
+        return authority
+
+    def bind_grid_outage_dispatch(
+        self,
+        authority: GridOutageDispatchAuthority,
+    ) -> GridOutageDispatchContext:
+        """Bind delivery to the exact currently registered outage candidate."""
+
+        if authority != self._grid_outage_authority:
+            raise ValueError("grid outage candidate is not current")
+        return GridOutageDispatchContext(
+            generation=authority.generation,
+            outage_epoch_id=authority.outage_epoch_id,
+            frame_identity=authority.frame_identity,
+            candidate_id=authority.candidate_id,
+            authority=authority,
+        )
+
+    def unload_grid_outage_safety(self) -> None:
+        """Invalidate all outage authority without restoring equipment."""
+
+        self._grid_outage_loaded = False
+        self._grid_outage_gate_enabled = False
+        self._invalidate_grid_outage_context()
+
+    def _invalidate_grid_outage_context(self) -> None:
+        self._grid_outage_generation += 1
+        self._grid_outage_epoch_id = None
+        self._grid_outage_frame_identity = None
+        self._grid_outage_authority = None
+        self._invalidate_undispatched_grid_outage_expectations()
+
+    def _invalidate_undispatched_grid_outage_expectations(self) -> None:
+        self._expectations = {
+            key: item
+            for key, item in self._expectations.items()
+            if item.request.source is not PhysicalRequestSource.GRID_OUTAGE_SAFETY
+            or item.dispatch_started
+        }
+
     def _invalidate_automatic_thermal_context(self) -> None:
         self._automatic_thermal_generation += 1
         self._automatic_thermal_epoch_identity = None
         self._automatic_thermal_session_identity = None
         self._automatic_thermal_cleanup_authority = None
         self._automatic_thermal_probe_authority = None
-        self.invalidate_expectations()
+        self._expectations = {
+            key: item
+            for key, item in self._expectations.items()
+            if item.request.source is not PhysicalRequestSource.AUTOMATIC_THERMAL
+        }
 
     def assess(self, request: PhysicalCommandRequest) -> PhysicalAuthorityDecision:
         """Answer whether this request may physically dispatch right now."""
@@ -513,6 +759,11 @@ class PoolOSPhysicalCommandAuthority:
             and request.source is PhysicalRequestSource.AUTOMATIC_THERMAL
         ):
             reason = self._automatic_thermal_reason(request)
+        elif (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+        ):
+            reason = self._grid_outage_reason(request)
         return PhysicalAuthorityDecision(
             allowed=reason is PhysicalAuthorityReason.ALLOWED,
             reason=reason,
@@ -567,6 +818,35 @@ class PoolOSPhysicalCommandAuthority:
             and context.probe_authority != self._automatic_thermal_probe_authority
         ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+        return PhysicalAuthorityReason.ALLOWED
+
+    def _grid_outage_reason(
+        self,
+        request: PhysicalCommandRequest,
+    ) -> PhysicalAuthorityReason:
+        if not self._grid_outage_loaded:
+            return PhysicalAuthorityReason.GRID_OUTAGE_DRIVER_UNLOADED
+        if not self._grid_outage_gate_enabled:
+            return PhysicalAuthorityReason.GRID_OUTAGE_GATE_DISABLED
+        context = request.grid_outage_context
+        if context is None:
+            return PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_MISSING
+        if context.authority != self._grid_outage_authority:
+            return PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_STALE
+        if (
+            context.generation != self._grid_outage_generation
+            or context.outage_epoch_id != self._grid_outage_epoch_id
+            or context.frame_identity != self._grid_outage_frame_identity
+        ):
+            return PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_STALE
+        expected = context.authority
+        if not (
+            request.operation == expected.operation
+            and request.target == expected.target
+            and type(request.requested_value) is type(expected.requested_value)
+            and request.requested_value == expected.requested_value
+        ):
+            return PhysicalAuthorityReason.GRID_OUTAGE_OPERATION_UNAUTHORIZED
         return PhysicalAuthorityReason.ALLOWED
 
     def require_allowed(self, request: PhysicalCommandRequest) -> None:
@@ -693,6 +973,14 @@ class PoolOSPhysicalCommandAuthority:
                     if self._automatic_thermal_cleanup_authority is None
                     else self._automatic_thermal_cleanup_authority.candidate_identity
                 ),
+                "grid_outage_safety_gate_enabled": self._grid_outage_gate_enabled,
+                "grid_outage_safety_loaded": self._grid_outage_loaded,
+                "grid_outage_generation": self._grid_outage_generation,
+                "grid_outage_candidate": (
+                    None
+                    if self._grid_outage_authority is None
+                    else self._grid_outage_authority.candidate_id
+                ),
             }
         )
 
@@ -761,6 +1049,20 @@ def _matches(expected: ExpectedNativeConsequence, value: Any) -> bool:
     return value == expected.expected_value
 
 
+def _grid_outage_shape_matches(
+    operation: str,
+    target: str,
+    value: bool | int | str,
+    shape: tuple[str, str, bool | int | str],
+) -> bool:
+    return (
+        operation == shape[0]
+        and target == shape[1]
+        and type(value) is type(shape[2])
+        and value == shape[2]
+    )
+
+
 def _require_aware(value: datetime) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamp must be timezone-aware")
@@ -772,6 +1074,9 @@ __all__ = [
     "AutomaticThermalDispatchPurpose",
     "AutomaticThermalDispatchContext",
     "ExpectedNativeConsequence",
+    "GridOutageDispatchAuthority",
+    "GridOutageDispatchContext",
+    "GridOutageDispatchPurpose",
     "NativeConsequenceAttribution",
     "PhysicalAuthorityDecision",
     "PhysicalAuthorityReason",

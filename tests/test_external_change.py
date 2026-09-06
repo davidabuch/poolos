@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from poolos.external_change import (
+    ExternalChangeBatch,
+    ExternalChangeEvent,
     ExternalChangePolicy,
     ExternalNativeChangeMonitor,
     ExternalOwnershipContext,
     ExternalSemanticEventType,
+    ThermalRuntimeExternalChangeEvidence,
 )
 from poolos.intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
@@ -134,6 +137,44 @@ def test_product_policy_distinguishes_adopt_accept_observe_and_notifications() -
     assert events["intellichlor.pool_output_percent"].notification_recommended
     assert not events["pool_light.active"].notification_recommended
     assert events["freeze.active"].external_policy is ExternalChangePolicy.OBSERVE
+
+
+def test_configured_pool_pump_speed_is_classified_as_canonical_external_change() -> None:
+    monitor = ExternalNativeChangeMonitor(authority())
+    concept = POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+    process(monitor, NOW, {concept: (2600, "p0102")})
+
+    batch = process(
+        monitor,
+        NOW + timedelta(seconds=1),
+        {concept: (1500, "p0102")},
+    )
+
+    assert len(batch.events) == 1
+    assert batch.events[0].concept == concept
+    assert batch.events[0].external_policy is ExternalChangePolicy.ACCEPT
+    assert not batch.events[0].reconciliation_required
+
+
+def test_outage_relevant_external_evidence_is_retained_boundedly() -> None:
+    retained = ThermalRuntimeExternalChangeEvidence()
+    event = ExternalChangeEvent(
+        concept="freeze.active",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="FRE01",
+        previous_value=False,
+        new_value=True,
+        observed_at=NOW,
+        external_policy=ExternalChangePolicy.OBSERVE,
+        action_taken="observed_native_value",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    retained.update(ExternalChangeBatch((event,)))
+
+    assert retained.update(ExternalChangeBatch(())).events == (event,)
+    assert retained.retained_count == 1
 
 
 def test_contextual_rpm_and_heater_ownership_create_current_drift_only_when_owned() -> None:

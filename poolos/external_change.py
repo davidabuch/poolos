@@ -117,6 +117,26 @@ THERMAL_RUNTIME_TAKEOVER_CONCEPTS = frozenset(
     }
 )
 
+GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS = frozenset(
+    {
+        "pool.active",
+        "spa.active",
+        "pump.rpm",
+        "pump_circuit.p0102.configured_speed_rpm",
+        "pool.raw_heater_id",
+        "spa.raw_heater_id",
+        "pool_light.active",
+        "jets.active",
+        "slide.active",
+        "waterfall.active",
+        "freeze.active",
+    }
+)
+
+_RETAINED_RUNTIME_TAKEOVER_CONCEPTS = (
+    THERMAL_RUNTIME_TAKEOVER_CONCEPTS | GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS
+)
+
 POOL_CIRCULATION_TAKEOVER_CONCEPTS = (
     THERMAL_RUNTIME_TAKEOVER_CONCEPTS - frozenset({"spa.raw_heater_id"})
 )
@@ -124,7 +144,7 @@ POOL_CIRCULATION_TAKEOVER_CONCEPTS = (
 
 @dataclass(slots=True)
 class ThermalRuntimeExternalChangeEvidence:
-    """Retain one latest takeover event per canonical thermal/hydraulic concept."""
+    """Retain one latest takeover event per canonical runtime safety concept."""
 
     _retained_by_concept: dict[str, ExternalChangeEvent] = field(
         default_factory=dict,
@@ -142,7 +162,7 @@ class ThermalRuntimeExternalChangeEvidence:
 
         transient: list[ExternalChangeEvent] = []
         for event in batch.events:
-            if event.concept in THERMAL_RUNTIME_TAKEOVER_CONCEPTS:
+            if event.concept in _RETAINED_RUNTIME_TAKEOVER_CONCEPTS:
                 retained_event = self._retained_by_concept.get(event.concept)
                 if (
                     retained_event is None
@@ -170,6 +190,10 @@ _POLICIES: Mapping[str, tuple[ExternalChangePolicy, bool]] = MappingProxyType(
     {
         "pool.active": (ExternalChangePolicy.ACCEPT, True),
         "spa.active": (ExternalChangePolicy.ACCEPT, False),
+        "pump_circuit.p0102.configured_speed_rpm": (
+            ExternalChangePolicy.ACCEPT,
+            False,
+        ),
         "pool.target_temperature": (ExternalChangePolicy.ADOPT, True),
         "spa.target_temperature": (ExternalChangePolicy.ADOPT, False),
         "intellichlor.pool_output_percent": (ExternalChangePolicy.ADOPT, True),
@@ -599,4 +623,5 @@ __all__ = [
     "ExternalNativeChangeMonitor",
     "ExternalOwnershipContext",
     "ExternalSemanticEventType",
+    "GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS",
 ]
