@@ -330,6 +330,36 @@ class PoolOSThermalAutomaticExecutionSwitch(SwitchEntity):
         }
 
 
+class PoolOSGridOutagePhysicalSafetySwitch(SwitchEntity):
+    """Independent restart-reset gate for confirmed-outage reductions."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Grid Outage Physical Safety"
+    _attr_icon = "mdi:transmission-tower-off"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_grid_outage_physical_safety"
+
+    @property
+    def is_on(self) -> bool:
+        return self._runtime.grid_outage_safety_runtime.enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.grid_outage_safety_runtime.set_enabled(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.grid_outage_safety_runtime.set_enabled(False)
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self._runtime.grid_outage_safety_runtime.diagnostics()
+
+
 class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
     """Persistent global deny for every PoolOS physical mutation."""
 
@@ -672,6 +702,7 @@ async def async_setup_entry(
             ),
             PoolOSThermalLiveExecutionSwitch(entry),
             PoolOSThermalAutomaticExecutionSwitch(entry),
+            PoolOSGridOutagePhysicalSafetySwitch(entry),
             PoolOSMaintenanceModeSwitch(entry),
         ]
     )

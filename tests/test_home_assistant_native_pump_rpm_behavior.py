@@ -18,6 +18,7 @@ from poolos.intellicenter_readonly import (
 
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchPurpose,
+    GridOutageDispatchPurpose,
     PhysicalRequestSource,
     PoolOSPhysicalCommandAuthority,
 )
@@ -101,6 +102,9 @@ finally:
 
 ManualIntelliCenterCommandError = (
     manual_module.ManualIntelliCenterCommandError
+)
+ManualIntelliCenterCommandNotDispatchedError = (
+    manual_module.ManualIntelliCenterCommandNotDispatchedError
 )
 ManualIntelliCenterControl = manual_module.ManualIntelliCenterControl
 ManualIntelliCenterState = manual_module.ManualIntelliCenterState
@@ -451,6 +455,9 @@ def test_command_failure_is_not_reported_as_success(
 
     assert recorder.calls == []
     assert gateway._last_error_code == "RUNTIMEERROR"
+    assert gateway._command_authority.diagnostics(
+        now=datetime.now(UTC)
+    )["pending_expectation_count"] == 1
 
 
 def test_pump_speed_expectation_tracks_configured_pmpcirc_not_actual_rpm(
@@ -525,7 +532,7 @@ def test_unavailable_manual_transport_rejects_before_delivery(
     gateway._state = ManualIntelliCenterState.DISCONNECTED
 
     with pytest.raises(
-        ManualIntelliCenterCommandError,
+        ManualIntelliCenterCommandNotDispatchedError,
         match="command connection is unavailable",
     ):
         _run(
@@ -640,8 +647,16 @@ def test_body_heat_source_transport_failure_is_not_success() -> None:
         gateway._command_authority.diagnostics(
             now=datetime.now(UTC)
         )["pending_expectation_count"]
-        == 0
+        == 1
     )
+    attribution = gateway._command_authority.correlate(
+        concept="pool.raw_heater_id",
+        native_object_id="B1101",
+        value="H0001",
+        observed_at=datetime.now(UTC),
+    )
+    assert attribution is not None
+    assert attribution.request_source is PhysicalRequestSource.MANUAL
 
 
 def test_queued_command_rechecks_maintenance_inside_command_lock() -> None:
@@ -768,6 +783,57 @@ def test_queued_probe_rpm_loses_stale_epoch_authority_inside_command_lock(
         with pytest.raises(
             ManualIntelliCenterCommandError,
             match="automatic_thermal_context_stale",
+        ):
+            await task
+        assert recorder.calls == []
+
+    asyncio.run(scenario())
+
+
+def test_queued_outage_reduction_loses_stale_frame_authority_inside_command_lock(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    async def scenario() -> None:
+        gateway, recorder = _gateway(
+            [pump_object_factory(), pump_circuit_object_factory(objnam="p0102")]
+        )
+        authority = gateway._command_authority
+        authority.configure_grid_outage_safety(enabled=True)
+        authority.begin_grid_outage_frame(
+            outage_epoch_id="outage-epoch",
+            frame_identity="outage-frame-1",
+        )
+        registered = authority.register_grid_outage_candidate(
+            outage_epoch_id="outage-epoch",
+            frame_identity="outage-frame-1",
+            candidate_id="outage-pump-candidate",
+            purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+            operation="pump_circuit_speed",
+            target="p0102",
+            requested_value=1500,
+        )
+        context = authority.bind_grid_outage_dispatch(registered)
+        await gateway._command_lock.acquire()
+        task = asyncio.create_task(
+            gateway.async_set_pump_circuit_speed(
+                "p0102",
+                1500,
+                request_source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+                grid_outage_context=context,
+            )
+        )
+        await asyncio.sleep(0)
+
+        authority.begin_grid_outage_frame(
+            outage_epoch_id=None,
+            frame_identity="grid-return-frame",
+        )
+        gateway._command_lock.release()
+
+        with pytest.raises(
+            ManualIntelliCenterCommandNotDispatchedError,
+            match="grid_outage_context_stale",
         ):
             await task
         assert recorder.calls == []

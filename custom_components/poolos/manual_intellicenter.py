@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable, Mapping
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
     ExpectedNativeConsequence,
+    GridOutageDispatchContext,
     PhysicalCommandDeniedError,
     PhysicalCommandRequest,
     PhysicalRequestSource,
@@ -110,6 +111,10 @@ class ManualIntelliCenterState(str, Enum):
 
 class ManualIntelliCenterCommandError(RuntimeError):
     """Raised when a manual IntelliCenter command cannot be delivered safely."""
+
+
+class ManualIntelliCenterCommandNotDispatchedError(ManualIntelliCenterCommandError):
+    """Raised when PoolOS positively rejected a request before transport."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +256,7 @@ class ManualIntelliCenterControl:
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
+        grid_outage_context: GridOutageDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Turn Pool/Spa body circulation on or off."""
 
@@ -266,6 +272,7 @@ class ManualIntelliCenterControl:
                 source=request_source,
                 requested_value=active,
                 automatic_thermal_context=automatic_thermal_context,
+                grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=f"{prefix}.active",
@@ -292,6 +299,7 @@ class ManualIntelliCenterControl:
         active: bool,
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
+        grid_outage_context: GridOutageDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Turn one explicitly allow-listed IntelliCenter circuit on or off."""
 
@@ -312,6 +320,7 @@ class ManualIntelliCenterControl:
                 target=circuit_objnam,
                 source=request_source,
                 requested_value=active,
+                grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=concept,
@@ -383,6 +392,7 @@ class ManualIntelliCenterControl:
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
+        grid_outage_context: GridOutageDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Select one explicitly allow-listed heat source for a Pool/Spa body."""
 
@@ -401,6 +411,7 @@ class ManualIntelliCenterControl:
                 source=request_source,
                 requested_value=heater_objnam,
                 automatic_thermal_context=automatic_thermal_context,
+                grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=f"{prefix}.raw_heater_id",
@@ -558,6 +569,7 @@ class ManualIntelliCenterControl:
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
+        grid_outage_context: GridOutageDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
 
@@ -590,6 +602,7 @@ class ManualIntelliCenterControl:
                 source=request_source,
                 requested_value=target,
                 automatic_thermal_context=automatic_thermal_context,
+                grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
@@ -667,8 +680,9 @@ class ManualIntelliCenterControl:
                 request, consequence, now=now
             )
         except PhysicalCommandDeniedError as exc:
-            raise ManualIntelliCenterCommandError(str(exc)) from exc
+            raise ManualIntelliCenterCommandNotDispatchedError(str(exc)) from exc
 
+        dispatch_started = False
         async with self._command_lock:
             try:
                 # This is the final PoolOS check immediately before invoking
@@ -677,24 +691,25 @@ class ManualIntelliCenterControl:
                 self._command_authority.require_allowed(request)
                 if expectation_id is not None:
                     self._command_authority.mark_dispatch_started(expectation_id)
+                dispatch_started = True
                 await dispatch()
             except PhysicalCommandDeniedError as exc:
                 if expectation_id is not None:
                     self._command_authority.cancel(expectation_id)
-                raise ManualIntelliCenterCommandError(str(exc)) from exc
+                raise ManualIntelliCenterCommandNotDispatchedError(str(exc)) from exc
             except ManualIntelliCenterCommandError:
-                if expectation_id is not None:
+                if expectation_id is not None and not dispatch_started:
                     self._command_authority.cancel(expectation_id)
                 raise
             except Exception as exc:
-                if expectation_id is not None:
+                if expectation_id is not None and not dispatch_started:
                     self._command_authority.cancel(expectation_id)
                 self._last_error_code = type(exc).__name__.upper()
                 raise ManualIntelliCenterCommandError(failure_message) from exc
 
     async def _require_available(self) -> None:
         if not self.available:
-            raise ManualIntelliCenterCommandError(
+            raise ManualIntelliCenterCommandNotDispatchedError(
                 "manual IntelliCenter command connection is unavailable"
             )
 
@@ -798,6 +813,7 @@ class ManualIntelliCenterControl:
 __all__ = [
     "ManualCommandReceipt",
     "ManualIntelliCenterCommandError",
+    "ManualIntelliCenterCommandNotDispatchedError",
     "ManualIntelliCenterControl",
     "ManualIntelliCenterState",
 ]

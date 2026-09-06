@@ -8,6 +8,7 @@ from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
     AutomaticThermalDispatchPurpose,
     ExpectedNativeConsequence,
+    GridOutageDispatchPurpose,
     PhysicalAuthorityReason,
     PhysicalCommandDeniedError,
     PhysicalCommandRequest,
@@ -170,6 +171,312 @@ def test_native_no_op_does_not_reserve_a_stale_transition_expectation() -> None:
         value=True,
         observed_at=NOW + timedelta(seconds=2),
     ) is None
+
+
+def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
+    authority = ready()
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-1", frame_identity="frame-1"
+    )
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage-1",
+        frame_identity="frame-1",
+        candidate_id="candidate-1",
+        purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=1500,
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    exact = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value=1500,
+        grid_outage_context=context,
+    )
+    assert authority.assess(exact).reason is PhysicalAuthorityReason.GRID_OUTAGE_GATE_DISABLED
+
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-1", frame_identity="frame-2"
+    )
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage-1",
+        frame_identity="frame-2",
+        candidate_id="candidate-2",
+        purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=1500,
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    exact = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value=1500,
+        grid_outage_context=context,
+    )
+    assert authority.assess(exact).allowed
+
+    wrong = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value=1800,
+        grid_outage_context=context,
+    )
+    assert authority.assess(wrong).reason is PhysicalAuthorityReason.GRID_OUTAGE_OPERATION_UNAUTHORIZED
+
+
+def test_grid_outage_context_is_invalidated_by_new_frame_gate_or_unload() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="one")
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage",
+        frame_identity="one",
+        candidate_id="candidate",
+        purpose=GridOutageDispatchPurpose.POOL_SOURCE_OFF,
+        operation="body_heat_source",
+        target="B1101",
+        requested_value="00000",
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    request = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value="00000",
+        grid_outage_context=context,
+    )
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="two")
+    assert authority.assess(request).reason is PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_STALE
+    authority.configure_grid_outage_safety(enabled=False)
+    assert authority.assess(request).reason is PhysicalAuthorityReason.GRID_OUTAGE_GATE_DISABLED
+    authority.unload_grid_outage_safety()
+    authority.configure_grid_outage_safety(enabled=True)
+    assert authority.assess(request).reason is PhysicalAuthorityReason.GRID_OUTAGE_DRIVER_UNLOADED
+
+
+def test_outage_invalidation_preserves_only_dispatched_attribution() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="one")
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage",
+        frame_identity="one",
+        candidate_id="candidate",
+        purpose=GridOutageDispatchPurpose.POOL_SOURCE_OFF,
+        operation="body_heat_source",
+        target="B1101",
+        requested_value="00000",
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    request = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value="00000",
+        grid_outage_context=context,
+    )
+    pending = authority.reserve(
+        request,
+        ExpectedNativeConsequence("pool.raw_heater_id", "B1101", "00000"),
+        now=NOW,
+    )
+    assert pending is not None
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="two")
+    assert authority.diagnostics(now=NOW)["pending_expectation_count"] == 0
+
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="three")
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage",
+        frame_identity="three",
+        candidate_id="accepted",
+        purpose=GridOutageDispatchPurpose.POOL_SOURCE_OFF,
+        operation="body_heat_source",
+        target="B1101",
+        requested_value="00000",
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    accepted_request = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value="00000",
+        grid_outage_context=context,
+    )
+    dispatched = authority.reserve(
+        accepted_request,
+        ExpectedNativeConsequence("pool.raw_heater_id", "B1101", "00000"),
+        now=NOW,
+    )
+    assert dispatched is not None
+    authority.mark_dispatch_started(dispatched)
+    authority.begin_grid_outage_frame(outage_epoch_id=None, frame_identity="grid-return")
+    attribution = authority.correlate(
+        concept="pool.raw_heater_id",
+        native_object_id="B1101",
+        value="00000",
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    assert attribution is not None
+    assert attribution.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+
+
+def test_normal_thermal_epoch_change_cannot_erase_dispatched_outage_attribution() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="outage-frame",
+    )
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage",
+        frame_identity="outage-frame",
+        candidate_id="outage-source-off",
+        purpose=GridOutageDispatchPurpose.POOL_SOURCE_OFF,
+        operation="body_heat_source",
+        target="B1101",
+        requested_value="00000",
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    outage_request = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value="00000",
+        grid_outage_context=context,
+    )
+    expectation = authority.reserve(
+        outage_request,
+        ExpectedNativeConsequence("pool.raw_heater_id", "B1101", "00000"),
+        now=NOW,
+    )
+    assert expectation is not None
+    authority.mark_dispatch_started(expectation)
+
+    authority.begin_automatic_thermal_epoch("new-normal-thermal-frame")
+
+    attribution = authority.correlate(
+        concept="pool.raw_heater_id",
+        native_object_id="B1101",
+        value="00000",
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    assert attribution is not None
+    assert attribution.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+
+
+@pytest.mark.parametrize(
+    ("purpose", "operation", "target", "value"),
+    (
+        (GridOutageDispatchPurpose.SPA_SOURCE_OFF, "body_heat_source", "B1202", "00000"),
+        (GridOutageDispatchPurpose.POOL_SOURCE_OFF, "body_heat_source", "B1101", "00000"),
+        (GridOutageDispatchPurpose.POOL_LIGHT_OFF, "circuit_active", "C0002", False),
+        (GridOutageDispatchPurpose.JETS_OFF, "circuit_active", "C0003", False),
+        (GridOutageDispatchPurpose.SLIDE_OFF, "circuit_active", "C0004", False),
+        (GridOutageDispatchPurpose.WATERFALL_OFF, "circuit_active", "FTR01", False),
+        (GridOutageDispatchPurpose.SPA_BODY_OFF, "body_active", "B1202", False),
+        (GridOutageDispatchPurpose.POOL_PUMP_REDUCTION, "pump_circuit_speed", "p0102", 1500),
+    ),
+)
+def test_grid_outage_exact_envelope_allowlist(
+    purpose: GridOutageDispatchPurpose,
+    operation: str,
+    target: str,
+    value: bool | int | str,
+) -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="frame")
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage",
+        frame_identity="frame",
+        candidate_id=purpose.value,
+        purpose=purpose,
+        operation=operation,
+        target=target,
+        requested_value=value,
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+    request = PhysicalCommandRequest(
+        operation=operation,
+        target=target,
+        source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+        requested_value=value,
+        grid_outage_context=context,
+    )
+    assert authority.assess(request).allowed
+
+
+def test_grid_outage_envelopes_reject_bool_int_equivalence() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(outage_epoch_id="outage", frame_identity="frame")
+    with pytest.raises(ValueError, match="exact reduction envelope"):
+        authority.register_grid_outage_candidate(
+            outage_epoch_id="outage",
+            frame_identity="frame",
+            candidate_id="wrong-type",
+            purpose=GridOutageDispatchPurpose.POOL_LIGHT_OFF,
+            operation="circuit_active",
+            target="C0002",
+            requested_value=0,
+        )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "operation", "target", "value"),
+    (
+        (GridOutageDispatchPurpose.SPA_BODY_OFF, "body_active", "B1101", False),
+        (GridOutageDispatchPurpose.SPA_BODY_OFF, "body_active", "B1202", True),
+        (
+            GridOutageDispatchPurpose.POOL_SOURCE_OFF,
+            "body_heat_source",
+            "B1101",
+            "H0001",
+        ),
+        (GridOutageDispatchPurpose.POOL_LIGHT_OFF, "circuit_active", "C0002", True),
+        (GridOutageDispatchPurpose.POOL_LIGHT_OFF, "circuit_active", "C9999", False),
+        (
+            GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+            "pump_circuit_speed",
+            "p0102",
+            2600,
+        ),
+        (
+            GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+            "pump_circuit_speed",
+            "p9999",
+            1500,
+        ),
+    ),
+)
+def test_grid_outage_registration_rejects_every_broader_physical_shape(
+    purpose: GridOutageDispatchPurpose,
+    operation: str,
+    target: str,
+    value: bool | int | str,
+) -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="frame",
+    )
+    with pytest.raises(ValueError, match="exact reduction envelope"):
+        authority.register_grid_outage_candidate(
+            outage_epoch_id="outage",
+            frame_identity="frame",
+            candidate_id="broader-shape",
+            purpose=purpose,
+            operation=operation,
+            target=target,
+            requested_value=value,
+        )
 
 
 def test_real_transition_still_correlates_after_native_truth_sync() -> None:
