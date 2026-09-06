@@ -38,10 +38,16 @@ from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 from .thermal_automatic_runtime import PoolOSThermalAutomaticRuntime  # noqa: E402
 from poolos.thermal_runtime_orchestration import (  # noqa: E402
     ThermalRuntimeOrchestrator,
+    assess_pool_temperature_probe_continuity,
+)
+from poolos.pool_temperature_probe_execution import (  # noqa: E402
+    PoolTemperatureProbeContinuityEvidence,
 )
 from poolos.physical_command_authority import (  # noqa: E402
+    PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
 )
+from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import (  # noqa: E402
     ThermalRuntimeAssessment,
 )
@@ -114,6 +120,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
     )
+    thermal_runtime.set_probe_execution_provider(
+        thermal_automatic_runtime.driver.probe_execution_evidence
+    )
+    def probe_continuity(
+        snapshot: ObservationSnapshot,
+    ) -> PoolTemperatureProbeContinuityEvidence:
+        outage = thermal_runtime_orchestrator.assessment
+        base_reason = physical_command_authority.base_authority_reason
+        lifecycle_blocker = None
+        if not thermal_automatic_runtime.driver.requested_enabled:
+            lifecycle_blocker = "temperature_probe_automatic_execution_disabled"
+        elif not thermal_runtime.effective_live_enabled:
+            lifecycle_blocker = "temperature_probe_thermal_live_disabled"
+        elif thermal_runtime.commissioning_scope is not ThermalLiveCommissioningScope.POOL:
+            lifecycle_blocker = "temperature_probe_pool_scope_not_commissioned"
+        elif base_reason is not PhysicalAuthorityReason.ALLOWED:
+            lifecycle_blocker = f"physical_authority:{base_reason.value}"
+        return assess_pool_temperature_probe_continuity(
+            generated_at=snapshot.generated_at,
+            observations=snapshot.observations,
+            prior_grid_disposition=(
+                None if outage is None or outage.outage is None else outage.outage.disposition
+            ),
+            lifecycle_blocker=lifecycle_blocker,
+            external_preemption_reason=(
+                thermal_runtime_orchestrator.ownership.current_external_preemption_reason(
+                    external_change_runtime.latest_batch
+                )
+            ),
+        )
+
+    thermal_runtime.set_probe_continuity_provider(probe_continuity)
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),

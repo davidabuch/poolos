@@ -57,6 +57,7 @@ class AutomaticThermalDispatchPurpose(StrEnum):
     """Final-gateway authority class for normal work versus reduction only."""
 
     NORMAL = "normal"
+    POOL_TEMPERATURE_PROBE = "pool_temperature_probe"
     TERMINATION = "termination"
     CIRCULATION_BODY_CLEANUP = "circulation_body_cleanup"
     CIRCULATION_PUMP_NORMALIZATION = "circulation_pump_normalization"
@@ -105,6 +106,34 @@ class AutomaticThermalCleanupAuthority:
 
 
 @dataclass(frozen=True, slots=True)
+class AutomaticThermalProbeAuthority:
+    """Exact one-epoch Pool probe operation admitted by supervision."""
+
+    generation: int
+    epoch_identity: str
+    operation_id: str
+    operation: str
+    target: str
+    requested_value: bool | int
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("probe authority generation must be positive")
+        for name in ("epoch_identity", "operation_id", "operation", "target"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        allowed = (
+            self.operation == "pump_circuit_speed"
+            and self.target == "p0102"
+            and isinstance(self.requested_value, int)
+            and not isinstance(self.requested_value, bool)
+            and self.requested_value == _THERMAL_BASELINES.temperature_probe_rpm
+        )
+        if not allowed:
+            raise ValueError("unsupported Pool temperature-probe operation")
+
+
+@dataclass(frozen=True, slots=True)
 class AutomaticThermalDispatchContext:
     """Restrictive one-epoch authority proof for automatic thermal delivery."""
 
@@ -114,6 +143,7 @@ class AutomaticThermalDispatchContext:
     body: str
     purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL
     cleanup_authority: AutomaticThermalCleanupAuthority | None = None
+    probe_authority: AutomaticThermalProbeAuthority | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -142,7 +172,16 @@ class AutomaticThermalDispatchContext:
                 or self.cleanup_authority.purpose is not self.purpose
             ):
                 raise ValueError("cleanup dispatch context does not match authority")
-        elif self.cleanup_authority is not None:
+        elif self.purpose is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE:
+            if (
+                self.body != "pool"
+                or self.probe_authority is None
+                or self.cleanup_authority is not None
+                or self.probe_authority.generation != self.generation
+                or self.probe_authority.epoch_identity != self.epoch_identity
+            ):
+                raise ValueError("probe dispatch requires exact current Pool authority")
+        elif self.cleanup_authority is not None or self.probe_authority is not None:
             raise ValueError("normal or source termination context cannot carry cleanup authority")
 
 
@@ -261,6 +300,9 @@ class PoolOSPhysicalCommandAuthority:
     _automatic_thermal_cleanup_authority: AutomaticThermalCleanupAuthority | None = field(
         default=None, init=False, repr=False
     )
+    _automatic_thermal_probe_authority: AutomaticThermalProbeAuthority | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.expectation_ttl <= timedelta(0):
@@ -334,6 +376,32 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_thermal_epoch_identity = epoch_identity
         self._automatic_thermal_session_identity = None
         self._automatic_thermal_cleanup_authority = None
+        self._automatic_thermal_probe_authority = None
+
+    def register_automatic_thermal_probe(
+        self,
+        *,
+        epoch_identity: str,
+        operation_id: str,
+        operation: str,
+        target: str,
+        requested_value: bool | int,
+    ) -> AutomaticThermalProbeAuthority:
+        """Register exactly one current Pool probe operation."""
+
+        if epoch_identity != self._automatic_thermal_epoch_identity:
+            raise ValueError("automatic thermal probe epoch is not current")
+        authority = AutomaticThermalProbeAuthority(
+            generation=self._automatic_thermal_generation,
+            epoch_identity=epoch_identity,
+            operation_id=operation_id,
+            operation=operation,
+            target=target,
+            requested_value=requested_value,
+        )
+        self._automatic_thermal_probe_authority = authority
+        self._automatic_thermal_cleanup_authority = None
+        return authority
 
     def register_automatic_thermal_cleanup(
         self,
@@ -361,6 +429,7 @@ class PoolOSPhysicalCommandAuthority:
             requested_value=requested_value,
         )
         self._automatic_thermal_cleanup_authority = authority
+        self._automatic_thermal_probe_authority = None
         return authority
 
     def bind_automatic_thermal_dispatch(
@@ -371,6 +440,7 @@ class PoolOSPhysicalCommandAuthority:
         body: str,
         purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL,
         cleanup_candidate_identity: str | None = None,
+        probe_operation_id: str | None = None,
     ) -> AutomaticThermalDispatchContext:
         """Bind one current session to the latest authoritative epoch."""
 
@@ -382,6 +452,7 @@ class PoolOSPhysicalCommandAuthority:
             raise ValueError("unsupported automatic thermal body")
         purpose = AutomaticThermalDispatchPurpose(purpose)
         cleanup = None
+        probe = None
         if purpose in {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
@@ -397,6 +468,17 @@ class PoolOSPhysicalCommandAuthority:
                 raise ValueError("automatic thermal cleanup candidate is not current")
         elif cleanup_candidate_identity is not None:
             raise ValueError("cleanup candidate requires cleanup dispatch purpose")
+        if purpose is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE:
+            probe = self._automatic_thermal_probe_authority
+            if (
+                probe is None
+                or probe_operation_id != probe.operation_id
+                or probe.epoch_identity != epoch_identity
+                or body != "pool"
+            ):
+                raise ValueError("automatic thermal probe operation is not current")
+        elif probe_operation_id is not None:
+            raise ValueError("probe operation requires probe dispatch purpose")
         self._automatic_thermal_session_identity = session_identity
         return AutomaticThermalDispatchContext(
             generation=self._automatic_thermal_generation,
@@ -405,6 +487,7 @@ class PoolOSPhysicalCommandAuthority:
             body=body,
             purpose=purpose,
             cleanup_authority=cleanup,
+            probe_authority=probe,
         )
 
     def unload_automatic_thermal_driver(self) -> None:
@@ -418,6 +501,7 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_thermal_epoch_identity = None
         self._automatic_thermal_session_identity = None
         self._automatic_thermal_cleanup_authority = None
+        self._automatic_thermal_probe_authority = None
         self.invalidate_expectations()
 
     def assess(self, request: PhysicalCommandRequest) -> PhysicalAuthorityDecision:
@@ -476,6 +560,11 @@ class PoolOSPhysicalCommandAuthority:
             context.generation != self._automatic_thermal_generation
             or context.epoch_identity != self._automatic_thermal_epoch_identity
             or context.session_identity != self._automatic_thermal_session_identity
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+        if (
+            context.purpose is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+            and context.probe_authority != self._automatic_thermal_probe_authority
         ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
         return PhysicalAuthorityReason.ALLOWED
@@ -613,6 +702,15 @@ def _automatic_thermal_request_matches_context(
     context: AutomaticThermalDispatchContext,
 ) -> bool:
     body_target = "B1101" if context.body == "pool" else "B1202"
+    if context.purpose is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE:
+        probe = context.probe_authority
+        return bool(
+            probe is not None
+            and request.operation == probe.operation
+            and request.target == probe.target
+            and type(request.requested_value) is type(probe.requested_value)
+            and request.requested_value == probe.requested_value
+        )
     if context.purpose is AutomaticThermalDispatchPurpose.TERMINATION:
         return (
             context.body == "pool"
@@ -670,6 +768,7 @@ def _require_aware(value: datetime) -> None:
 
 __all__ = [
     "AutomaticThermalCleanupAuthority",
+    "AutomaticThermalProbeAuthority",
     "AutomaticThermalDispatchPurpose",
     "AutomaticThermalDispatchContext",
     "ExpectedNativeConsequence",

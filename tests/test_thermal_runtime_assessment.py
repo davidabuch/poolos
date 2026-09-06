@@ -12,6 +12,11 @@ from poolos.native_configuration_policy import (
     NativeConfigurationInput,
     NativeRpmAssignment,
 )
+from poolos.pool_temperature_probe_execution import (
+    PoolTemperatureProbeContinuityEvidence,
+    PoolTemperatureProbeExecutionEvidence,
+    PoolTemperatureProbeExecutionPhase,
+)
 from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionPolicy,
@@ -62,6 +67,8 @@ def evidence(
     pending: bool = False,
     confirmed: bool = False,
     observed_at: dict[str, datetime] | None = None,
+    probe_execution: PoolTemperatureProbeExecutionEvidence | None = None,
+    probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None,
 ) -> ThermalRuntimeEvidence:
     return ThermalRuntimeEvidence(
         evaluated_at=at,
@@ -78,6 +85,21 @@ def evidence(
         filtration_debt=filtration_debt,
         pending_durable_incident_confirmation=pending,
         durable_incident_confirmed=confirmed,
+        pool_temperature_probe_execution=probe_execution,
+        pool_temperature_probe_continuity=(
+            probe_continuity
+            if probe_continuity is not None
+            else (
+                PoolTemperatureProbeContinuityEvidence(
+                    evaluated_at=at,
+                    valid=True,
+                )
+                if probe_execution is not None
+                and probe_execution.phase
+                is PoolTemperatureProbeExecutionPhase.ACQUIRING
+                else None
+            )
+        ),
     )
 
 
@@ -672,6 +694,7 @@ def _probe_values(
     native = values(pool_active=active, spa_active=spa_active)
     native["pool.raw_heater_id"] = "00000"
     native["pump.rpm"] = rpm
+    native["pump_circuit.p0102.configured_speed_rpm"] = rpm
     native["pool.temperature"] = temperature
     native["pool.target_temperature"] = 90.0
     native["solar.temperature"] = 110.0
@@ -690,6 +713,32 @@ def _evaluate_probe(
     stale: tuple[str, ...] = (),
     missing: tuple[str, ...] = (),
 ) -> object:
+    probe = evaluator.pool_temperature_probe
+    execution = None
+    if probe.execution_purpose_id is not None and active and not spa_active and rpm > 0:
+        acquiring = rpm == 1500
+        started_at = (
+            probe.started_at
+            if probe.started_at is not None
+            else (at if acquiring else None)
+        )
+        generation = probe.ownership_generation or 1
+        if probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED and acquiring:
+            generation += 1 if probe.ownership_generation is not None else 0
+        execution = PoolTemperatureProbeExecutionEvidence(
+            phase=(
+                PoolTemperatureProbeExecutionPhase.ACQUIRING
+                if acquiring
+                else PoolTemperatureProbeExecutionPhase.PREPARING
+            ),
+            execution_purpose_id=probe.execution_purpose_id,
+            execution_plan_id="test-probe-plan",
+            ownership_lease_id=f"test-probe-lease-{generation}",
+            ownership_generation=generation,
+            body_activation_owned=True,
+            pump_setpoint_owned=acquiring,
+            acquisition_started_at=started_at,
+        )
     return evaluator.evaluate(
         evidence(
             at=at,
@@ -703,8 +752,32 @@ def _evaluate_probe(
             observed_at={"pool.temperature": at},
             stale=stale,
             missing=missing,
+            probe_execution=execution,
         ),
         live_policy=disabled_policy(),
+    )
+
+
+def _active_probe_execution(
+    evaluator: ThermalRuntimeEvaluator,
+    started_at: datetime,
+    *,
+    purpose_id: str | None = None,
+    generation: int = 1,
+) -> PoolTemperatureProbeExecutionEvidence:
+    bound_purpose_id = evaluator.pool_temperature_probe.execution_purpose_id
+    assert bound_purpose_id is not None
+    return PoolTemperatureProbeExecutionEvidence(
+        phase=PoolTemperatureProbeExecutionPhase.ACQUIRING,
+        execution_purpose_id=(
+            bound_purpose_id if purpose_id is None else purpose_id
+        ),
+        execution_plan_id="test-probe-plan",
+        ownership_lease_id=f"test-probe-lease-{generation}",
+        ownership_generation=generation,
+        body_activation_owned=True,
+        pump_setpoint_owned=True,
+        acquisition_started_at=started_at,
     )
 
 
@@ -723,9 +796,16 @@ def test_probe_requirement_creates_explicit_runtime_ownership() -> None:
     assert evaluator.pool_temperature_probe.started_at is None
 
 
-@pytest.mark.parametrize("first_rpm", (1500, 3000))
+@pytest.mark.parametrize(
+    ("first_rpm", "expected_phase"),
+    (
+        (1500, PoolTemperatureProbePhase.PROBING),
+        (3000, PoolTemperatureProbePhase.PROBE_REQUIRED),
+    ),
+)
 def test_probe_owned_circulation_cannot_immediately_trust_pipe_temperature(
     first_rpm: int,
+    expected_phase: PoolTemperatureProbePhase,
 ) -> None:
     evaluator = ThermalRuntimeEvaluator()
     _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
@@ -739,11 +819,22 @@ def test_probe_owned_circulation_cannot_immediately_trust_pipe_temperature(
     )
 
     probe = evaluator.pool_temperature_probe
-    assert probe.phase is PoolTemperatureProbePhase.PROBING
-    assert probe.started_at == NOW + timedelta(seconds=30)
+    assert probe.phase is expected_phase
+    assert probe.started_at == (
+        NOW + timedelta(seconds=30)
+        if expected_phase is PoolTemperatureProbePhase.PROBING
+        else None
+    )
     assert probe.last_assessment is not None
-    assert probe.last_assessment.disposition.value == "probing"
-    assert probe.last_assessment.reason_code == "probe_minimum_duration"
+    assert probe.last_assessment.disposition.value == (
+        "probing"
+        if expected_phase is PoolTemperatureProbePhase.PROBING
+        else "probe_required"
+    )
+    assert probe.last_assessment.reason_code in {
+        "probe_minimum_duration",
+        "thermal_decision_requires_trusted_water",
+    }
     assert probe.last_assessment.trusted_temperature_f is None
     assert result.pool.plan.desired.evidence["pool_temperature_f"] is None
     assert result.pool.plan.desired.required_pump_rpm == 1500
@@ -796,6 +887,7 @@ def test_probe_samples_use_authoritative_observation_time_and_ignore_duplicates(
             native_values=native,
             pool_mode=ThermalRequestedMode.SOLAR,
             observed_at={"pool.temperature": observed_at},
+            probe_execution=_active_probe_execution(evaluator, started),
         ),
         live_policy=disabled_policy(),
     )
@@ -805,6 +897,7 @@ def test_probe_samples_use_authoritative_observation_time_and_ignore_duplicates(
             native_values=native,
             pool_mode=ThermalRequestedMode.SOLAR,
             observed_at={"pool.temperature": observed_at},
+            probe_execution=_active_probe_execution(evaluator, started),
         ),
         live_policy=disabled_policy(),
     )
@@ -814,6 +907,206 @@ def test_probe_samples_use_authoritative_observation_time_and_ignore_duplicates(
         sample.observed_at == observed_at
         for sample in evaluator.pool_temperature_probe.samples
     ) == 1
+
+
+def test_probe_execution_purpose_change_discards_acquisition_epoch() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    original_purpose_id = evaluator.pool_temperature_probe.execution_purpose_id
+    assert original_purpose_id is not None
+    started = NOW + timedelta(seconds=30)
+    execution = _active_probe_execution(evaluator, started)
+
+    evaluator.evaluate(
+        evidence(
+            at=started,
+            native_values=_probe_values(active=True, rpm=1500, temperature=90.0),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": started},
+            probe_execution=execution,
+        ),
+        live_policy=disabled_policy(),
+    )
+    sample_at = started + timedelta(seconds=30)
+    evaluator.evaluate(
+        evidence(
+            at=sample_at,
+            native_values=_probe_values(active=True, rpm=1500, temperature=89.5),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": sample_at},
+            probe_execution=execution,
+        ),
+        live_policy=disabled_policy(),
+    )
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBING
+    assert probe.started_at == started
+    assert len(probe.samples) == 1
+
+    mismatch_at = started + timedelta(seconds=45)
+    mismatched = _active_probe_execution(
+        evaluator,
+        started,
+        purpose_id="different-probe-purpose",
+    )
+    result = evaluator.evaluate(
+        evidence(
+            at=mismatch_at,
+            native_values=_probe_values(active=True, rpm=1500, temperature=89.0),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": mismatch_at},
+            probe_execution=mismatched,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert probe.started_at is None
+    assert probe.samples == ()
+    assert probe.ownership_generation is None
+    assert probe.execution_purpose_id == original_purpose_id
+    assert result.pool.plan.desired.evidence["pool_temperature_f"] is None
+
+    restarted_at = started + timedelta(seconds=60)
+    evaluator.evaluate(
+        evidence(
+            at=restarted_at,
+            native_values=_probe_values(active=True, rpm=1500, temperature=88.5),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": restarted_at},
+            probe_execution=_active_probe_execution(
+                evaluator,
+                restarted_at,
+                generation=2,
+            ),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert probe.phase is PoolTemperatureProbePhase.PROBING
+    assert probe.started_at == restarted_at
+    assert probe.samples == ()
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.reason_code == "probe_minimum_duration"
+
+
+def test_probe_ownership_generation_change_discards_acquisition_epoch() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    execution = _active_probe_execution(evaluator, started)
+    sample_at = started + timedelta(seconds=30)
+    evaluator.evaluate(
+        evidence(
+            at=sample_at,
+            native_values=_probe_values(active=True, rpm=1500, temperature=89.5),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": sample_at},
+            probe_execution=execution,
+        ),
+        live_policy=disabled_policy(),
+    )
+    probe = evaluator.pool_temperature_probe
+    assert probe.started_at == started
+    assert len(probe.samples) == 1
+
+    next_started = started + timedelta(seconds=45)
+    evaluator.evaluate(
+        evidence(
+            at=next_started,
+            native_values=_probe_values(active=True, rpm=1500, temperature=89.0),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": next_started},
+            probe_execution=_active_probe_execution(
+                evaluator,
+                next_started,
+                generation=2,
+            ),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert probe.phase is PoolTemperatureProbePhase.PROBING
+    assert probe.started_at == next_started
+    assert probe.ownership_generation == 2
+    assert probe.samples == ()
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.reason_code == "probe_minimum_duration"
+
+
+def test_mismatched_preparing_evidence_does_not_rebind_probe_requirement() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    canonical_purpose_id = evaluator.pool_temperature_probe.execution_purpose_id
+    assert canonical_purpose_id is not None
+
+    evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=10),
+            native_values=_probe_values(active=False, rpm=0),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            probe_execution=PoolTemperatureProbeExecutionEvidence(
+                phase=PoolTemperatureProbeExecutionPhase.PREPARING,
+                execution_purpose_id="different-probe-purpose",
+                execution_plan_id="different-probe-plan",
+                ownership_lease_id="different-probe-lease",
+                ownership_generation=2,
+                body_activation_owned=False,
+                pump_setpoint_owned=False,
+            ),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert probe.execution_purpose_id == canonical_purpose_id
+    assert probe.ownership_generation is None
+    assert probe.started_at is None
+    assert probe.samples == ()
+
+
+def test_purpose_change_after_trust_clears_probe_epoch_but_preserves_canonical_reuse() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    _evaluate_probe(evaluator, at=NOW + timedelta(seconds=30), active=True, rpm=3000)
+    for elapsed_seconds, temperature in ((90, 87.0), (150, 86.5), (210, 86.0)):
+        _evaluate_probe(
+            evaluator,
+            at=NOW + timedelta(seconds=elapsed_seconds),
+            active=True,
+            rpm=1500,
+            temperature=temperature,
+        )
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.TRUSTED
+    assert probe.samples
+    acquisition_started_at = probe.started_at
+    assert acquisition_started_at is not None
+
+    evaluated_at = NOW + timedelta(seconds=220)
+    evaluator.evaluate(
+        evidence(
+            at=evaluated_at,
+            native_values=_probe_values(active=True, rpm=1500, temperature=85.5),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": evaluated_at},
+            probe_execution=_active_probe_execution(
+                evaluator,
+                acquisition_started_at,
+                purpose_id="different-probe-purpose",
+            ),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert probe.phase is PoolTemperatureProbePhase.IDLE
+    assert probe.execution_purpose_id is None
+    assert probe.ownership_generation is None
+    assert probe.started_at is None
+    assert probe.samples == ()
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.reason_code == "trusted_temperature_within_reuse_window"
 
 
 def test_pool_stop_discards_probe_epoch_and_requires_fresh_acquisition() -> None:
@@ -859,7 +1152,7 @@ def test_pool_stop_discards_probe_epoch_and_requires_fresh_acquisition() -> None
 
     assert interrupted.phase is PoolTemperatureProbePhase.PROBING
     assert interrupted.started_at == second_started
-    assert [sample.temperature_f for sample in interrupted.samples] == [89.0]
+    assert interrupted.samples == ()
     assert interrupted.last_assessment is not None
     assert interrupted.last_assessment.trusted_temperature_f is None
     assert resumed.pool.plan.desired.evidence["pool_temperature_f"] is None
@@ -902,7 +1195,7 @@ def test_old_samples_cannot_bridge_a_short_probe_interruption() -> None:
     probe = evaluator.pool_temperature_probe
     assert probe.phase is PoolTemperatureProbePhase.PROBING
     assert probe.started_at == second_started
-    assert tuple(sample.observed_at for sample in probe.samples) == (second_started,)
+    assert probe.samples == ()
     assert probe.last_assessment is not None
     assert probe.last_assessment.reason_code == "probe_minimum_duration"
     assert result.pool.plan.desired.evidence["pool_temperature_f"] is None
@@ -1069,7 +1362,7 @@ def test_probe_succeeds_only_after_minimum_duration_and_stable_window() -> None:
     )
     _evaluate_probe(
         evaluator,
-        at=NOW + timedelta(seconds=120),
+        at=NOW + timedelta(seconds=150),
         active=True,
         rpm=1500,
         temperature=86.5,
@@ -1077,7 +1370,7 @@ def test_probe_succeeds_only_after_minimum_duration_and_stable_window() -> None:
 
     result = _evaluate_probe(
         evaluator,
-        at=NOW + timedelta(seconds=150),
+        at=NOW + timedelta(seconds=210),
         active=True,
         rpm=1500,
         temperature=86.0,
@@ -1102,15 +1395,16 @@ def test_probe_transients_never_become_trusted_and_fail_closed_at_five_minutes()
         rpm=3000,
         temperature=98.0,
     )
+    acquisition_started = started + timedelta(seconds=60)
     for elapsed_seconds, temperature in (
-        (60, 94.0),
-        (120, 88.0),
-        (180, 93.0),
+        (0, 94.0),
+        (60, 88.0),
+        (120, 93.0),
         (240, 86.0),
     ):
         result = _evaluate_probe(
             evaluator,
-            at=started + timedelta(seconds=elapsed_seconds),
+            at=acquisition_started + timedelta(seconds=elapsed_seconds),
             active=True,
             rpm=1500,
             temperature=temperature,
@@ -1123,7 +1417,7 @@ def test_probe_transients_never_become_trusted_and_fail_closed_at_five_minutes()
 
     failed = _evaluate_probe(
         evaluator,
-        at=started + timedelta(minutes=5),
+        at=acquisition_started + timedelta(minutes=5),
         active=True,
         rpm=1500,
         temperature=89.0,
@@ -1137,7 +1431,7 @@ def test_probe_transients_never_become_trusted_and_fail_closed_at_five_minutes()
 
     _evaluate_probe(
         evaluator,
-        at=started + timedelta(minutes=5, seconds=30),
+        at=acquisition_started + timedelta(minutes=5, seconds=30),
         active=True,
         rpm=1500,
         temperature=89.0,
@@ -1237,6 +1531,7 @@ def test_probe_does_not_synthesize_sample_timestamp_when_authoritative_time_miss
             ),
             pool_mode=ThermalRequestedMode.SOLAR,
             observed_at={},
+            probe_execution=_active_probe_execution(evaluator, started),
         ),
         live_policy=disabled_policy(),
     )
@@ -1249,3 +1544,122 @@ def test_probe_does_not_synthesize_sample_timestamp_when_authoritative_time_miss
         sample.observed_at != started + timedelta(seconds=30)
         for sample in probe.samples
     )
+
+
+def test_matching_probe_rpm_without_execution_provenance_is_ordinary_trust() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=30),
+            native_values=_probe_values(active=True, rpm=1500, temperature=84.0),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": NOW + timedelta(seconds=30)},
+            probe_execution=None,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    probe = evaluator.pool_temperature_probe
+    assert probe.phase is PoolTemperatureProbePhase.IDLE
+    assert probe.started_at is None
+    assert probe.samples == ()
+    assert probe.last_assessment is not None
+    assert probe.last_assessment.reason_code == "existing_circulation"
+    assert result.pool.plan.desired.reason_code != "pool_temperature_probe_required"
+
+
+@pytest.mark.parametrize(
+    ("actual_rpm", "configured_rpm"),
+    ((1526, 1500), (1500, 1499)),
+)
+def test_probe_rpm_or_configured_speed_break_discards_acquisition_epoch(
+    actual_rpm: int,
+    configured_rpm: int,
+) -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=started, active=True, rpm=1500)
+    _evaluate_probe(
+        evaluator,
+        at=started + timedelta(seconds=60),
+        active=True,
+        rpm=1500,
+        temperature=89.0,
+    )
+    native = _probe_values(active=True, rpm=actual_rpm, temperature=89.0)
+    native["pump_circuit.p0102.configured_speed_rpm"] = configured_rpm
+
+    evaluator.evaluate(
+        evidence(
+            at=started + timedelta(seconds=90),
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": started + timedelta(seconds=90)},
+            probe_execution=_active_probe_execution(evaluator, started),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert evaluator.pool_temperature_probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert evaluator.pool_temperature_probe.started_at is None
+    assert evaluator.pool_temperature_probe.samples == ()
+
+
+def test_probe_diagnostics_are_bounded_and_observational() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    result = _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    before = (
+        evaluator.pool_temperature_probe.phase,
+        evaluator.pool_temperature_probe.started_at,
+        evaluator.pool_temperature_probe.samples,
+    )
+
+    first = dict(result.pool.diagnostics())
+    second = dict(result.pool.diagnostics())
+
+    assert first == second
+    assert first["probe_lifecycle_state"] == "probe_required"
+    assert first["probe_sample_count"] == 0
+    assert (
+        evaluator.pool_temperature_probe.phase,
+        evaluator.pool_temperature_probe.started_at,
+        evaluator.pool_temperature_probe.samples,
+    ) == before
+
+
+def test_current_frame_continuity_blocker_prevents_probe_trust() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    _evaluate_probe(evaluator, at=started, active=True, rpm=1500, temperature=86.0)
+    _evaluate_probe(
+        evaluator,
+        at=started + timedelta(seconds=60),
+        active=True,
+        rpm=1500,
+        temperature=86.0,
+    )
+    execution = _active_probe_execution(evaluator, started)
+
+    evaluator.evaluate(
+        evidence(
+            at=started + timedelta(minutes=2),
+            native_values=_probe_values(active=True, rpm=1500, temperature=86.0),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": started + timedelta(minutes=2)},
+            probe_execution=execution,
+            probe_continuity=PoolTemperatureProbeContinuityEvidence(
+                evaluated_at=started + timedelta(minutes=2),
+                valid=False,
+                blocker="runtime_ownership_preempted:pump_external_change",
+            ),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert evaluator.pool_temperature_probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert evaluator.pool_temperature_probe.last_assessment is not None
+    assert evaluator.pool_temperature_probe.last_assessment.trusted_temperature_f is None

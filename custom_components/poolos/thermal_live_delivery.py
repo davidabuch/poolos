@@ -171,6 +171,21 @@ class ManualIntelliCenterThermalLiveDelivery:
         if (
             cleanup is not None
             and cleanup.purpose
+            is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+        ):
+            authority = cleanup.probe_authority
+            if (
+                authority is None
+                or operation.operation_id != authority.operation_id
+                or authority.operation != "pump_circuit_speed"
+                or type(operation.rpm) is not type(authority.requested_value)
+                or operation.rpm != authority.requested_value
+            ):
+                raise ValueError("probe pump operation does not match bound authority")
+            return
+        if (
+            cleanup is not None
+            and cleanup.purpose
             is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION
         ):
             authority = cleanup.cleanup_authority

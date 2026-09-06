@@ -39,7 +39,7 @@ before delivery. Authorization requires:
 - required post-command expectations; and
 - no native configuration conflict affecting the selected thermal capability.
 
-Only `SetBodyActive(Pool/Hot Tub, True)`,
+Normal thermal authority admits only `SetBodyActive(Pool/Hot Tub, True)`,
 `SetPumpSpeed(p0102, solar_heating_rpm/gas_heating_rpm/priming_rpm)`, and
 body-matching `SetHeatMode(Off/Solar/Gas)` are admitted. Body activation
 requires both body observations to be fresh and usable, the target to be
@@ -50,6 +50,40 @@ numerically equal.
 Solar is blocked by native Solar Preferred, Solar RPM, or general RPM ownership
 conflicts. Gas is blocked by native Gas/Heater/Spa RPM or general RPM ownership
 conflicts. Native configuration is never rewritten.
+
+Pool water-temperature acquisition has a separate, narrower authority purpose.
+It admits only the exact current Pool `p0102` operation at the canonical
+temperature-probe RPM after the existing Pool body-establishment and verified
+priming steps. The operation must retain the canonical probe reason, plan/step
+metadata, execution-purpose identity, current epoch, and both actual-RPM and
+configured-speed expectations. No arbitrary Off-source circulation, Hot Tub
+operation, heat-source mutation, or unrelated 1500-RPM purpose can use this
+envelope. Final matching is type-exact so boolean/integer equality cannot widen
+the boundary.
+
+Accepted probe-RPM delivery is not acquisition. Later authoritative evidence
+must prove Pool active, Spa inactive, complete inactive shared hydraulics,
+authoritatively on-grid state, exact configured `p0102` speed, and actual RPM
+within the existing inclusive 25-RPM tolerance. That verification evidence must
+be strictly later than delivery. Only then does one in-memory acquisition epoch
+start. Verified priming time contributes zero acquisition time.
+
+The command-free water-temperature tracker remains the policy authority for the
+two-minute minimum acquisition, one-minute stability window, 2 F/minute smooth-
+rate limit, five-minute fail-closed maximum, and 30-minute trusted-temperature
+reuse. Samples are authoritative, chronological, bounded, strictly later than
+the acquisition boundary, and never combined across a topology, RPM,
+configured-speed, shared-hydraulic, grid, external-takeover, currentness, or
+ownership break. Matching hardware without accepted PoolOS provenance cannot
+start or restore an acquisition.
+
+Probe success publishes canonical trusted water evidence only. A fresh normal
+thermal evaluation independently selects Solar, Gas fallback, Off, or no eligible
+source under all normal gates. Probe authority cannot authorize the successor.
+When the existing typed ownership handoff cannot retain every owned concept
+compatibly, the established circulation-successor and cleanup lifecycle performs
+the safe relinquishment path; it never restores a remembered RPM or turns off a
+pre-existing body.
 
 `ThermalLiveExecutionEngine` converts the authorized thermal assessment into
 the existing immutable proposal/authorization/plan models and reuses the
@@ -201,14 +235,14 @@ endpoint bounds remain unchanged.
   plan without retry.
 - No authority is granted to `StartPump`, `StopPump`, `SetHydraulicRoute`,
   arbitrary body deactivation, arbitrary circuits or vendor commands,
-  Spillway, generic filtration execution, probing, grid outage, lighting,
+  Spillway, generic filtration execution, Hot Tub probing, grid outage, lighting,
   chemistry, schedules, or configuration changes. The sole body-deactivation
   envelope is provenance-bound Pool cleanup after thermal purpose ends.
 - Inactive-body manual configuration remains available, but autonomous
   inactive-body `HEATER` preselection remains uncommissioned and prohibited.
-- Temperature-probe plans remain wholly rejected because 1500 RPM is not
-  commissioned thermal authority. Hot Tub automatic execution remains blocked
-  pending body-specific configured-pump ownership evidence. Physical outage
+- Pool temperature-probe authority is limited to the provenance-bound acquisition
+  envelope above; 1500 RPM remains rejected everywhere else. Hot Tub automatic
+  execution remains blocked pending body-specific configured-pump ownership evidence. Physical outage
   response remains separate work. Source termination remains ownership-scoped
   Pool source Off; post-source circulation cleanup is separately provenance-
   and epoch-bound as described above.

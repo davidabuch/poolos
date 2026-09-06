@@ -580,6 +580,17 @@ class ThermalRuntimeOwnershipManager:
             evidence.evaluated_at,
         )
 
+    def current_external_preemption_reason(
+        self,
+        batch: ExternalChangeBatch,
+    ) -> str | None:
+        """Assess current-lease external takeover without mutating ownership."""
+
+        lease = self._state.lease
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            return None
+        return _external_preemption_reason(lease, batch)
+
     def promote_session_provenance(
         self,
         ownership: ThermalLiveExecutionOwnership,

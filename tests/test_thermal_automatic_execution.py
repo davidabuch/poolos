@@ -24,6 +24,10 @@ from poolos.observations import (
     ObservationSourceKind,
     PoolObservation,
 )
+from poolos.pool_temperature_probe_execution import (
+    PoolTemperatureProbeContinuityEvidence,
+    PoolTemperatureProbeExecutionPhase,
+)
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
@@ -150,6 +154,7 @@ def _frame(
     grid_outage_active: bool = False,
     body: ThermalBody = ThermalBody.POOL,
     filtration_remaining: timedelta | None = None,
+    driver: ThermalAutomaticExecutionDriver | None = None,
 ) -> ThermalAutomaticExecutionFrame:
     values = _values(
         pool_active=pool_active,
@@ -186,6 +191,7 @@ def _frame(
             else ThermalLiveCommissioningScope.HOT_TUB
         ),
     )
+    probe_execution = None if driver is None else driver.probe_execution_evidence()
     thermal = (evaluator or ThermalRuntimeEvaluator()).evaluate(
         ThermalRuntimeEvidence(
             evaluated_at=at,
@@ -204,6 +210,14 @@ def _frame(
             missing_native_concepts=missing,
             native_configuration=NativeConfigurationGuard().evaluate(
                 NativeConfigurationInput()
+            ),
+            pool_temperature_probe_execution=probe_execution,
+            pool_temperature_probe_continuity=(
+                PoolTemperatureProbeContinuityEvidence(evaluated_at=at, valid=True)
+                if probe_execution is not None
+                and probe_execution.phase
+                is PoolTemperatureProbeExecutionPhase.ACQUIRING
+                else None
             ),
         ),
         live_policy=policy,
@@ -421,7 +435,7 @@ def test_priming_hold_uses_later_epochs_and_never_chains_delivery() -> None:
     ]
 
 
-def test_probe_plan_is_rejected_whole_before_body_activation() -> None:
+def test_probe_plan_can_begin_with_exact_pool_body_activation() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
     delivery = FakeDelivery()
@@ -448,10 +462,84 @@ def test_probe_plan_is_rejected_whole_before_body_activation() -> None:
 
     result = asyncio.run(driver.process_epoch(probe, delivery_factory=factory))
 
-    assert result.state is ThermalAutomaticDriverState.BLOCKED
-    assert result.blocker is not None
-    assert "nonthermal_or_uncommissioned_pump_rpm" in result.blocker
-    assert delivery.calls == []
+    assert result.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetBodyActive)
+
+
+def test_cold_start_probe_reaches_verified_acquisition_after_priming() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(True, changed_at=NOW, current_epoch_identity=baseline.epoch_identity)
+
+    sequence = (
+        (1, False, 0, 2600),
+        (2, True, 0, 2600),
+        (3, True, 3000, 3000),
+        (63, True, 3000, 3000),
+        (64, True, 1500, 1500),
+    )
+    for seconds, active, rpm, configured in sequence:
+        frame = _frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=active,
+            pump_rpm=rpm,
+            configured_rpm=configured,
+            mode=ThermalRequestedMode.SOLAR,
+            missing=("pool.temperature",),
+            evaluator=evaluator,
+            driver=driver,
+        )
+        result = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
+        assert result.blocker is None, (seconds, result.state, result.blocker)
+
+    probe = driver.probe_execution_evidence()
+    assert probe is not None
+    assert probe.phase.value == "acquiring"
+    assert probe.acquisition_started_at == NOW + timedelta(seconds=64)
+    assert [type(operation).__name__ for operation in delivery.calls] == [
+        "SetBodyActive",
+        "SetPumpSpeed",
+        "SetPumpSpeed",
+    ]
+    assert [
+        operation.rpm for operation in delivery.calls if isinstance(operation, SetPumpSpeed)
+    ] == [3000, 1500]
+
+    final = None
+    for seconds in (94, 124, 184):
+        frame = _frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=True,
+            pump_rpm=1500,
+            configured_rpm=1500,
+            mode=ThermalRequestedMode.SOLAR,
+            evaluator=evaluator,
+            driver=driver,
+        )
+        final = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
+
+    assert evaluator.pool_temperature_probe.started_at == NOW + timedelta(seconds=64)
+    assert evaluator.pool_temperature_probe.last_assessment is not None
+    assert evaluator.pool_temperature_probe.last_assessment.reason_code == "probe_settled"
+    assert final is not None
+    assert driver.probe_execution_evidence() is None
+    assert len(delivery.calls) == 3
 
 
 def test_preexisting_pool_circulation_and_hot_tub_fail_closed() -> None:

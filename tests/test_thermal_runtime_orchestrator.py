@@ -24,6 +24,7 @@ from poolos.thermal_runtime_assessment import ThermalRequestedMode
 from poolos.thermal_runtime_orchestration import (
     ThermalOrchestrationLifecycle,
     ThermalRuntimeOrchestrator,
+    assess_pool_temperature_probe_continuity,
 )
 from poolos.thermal_runtime_ownership import ThermalRuntimeOwnershipStatus
 
@@ -1023,3 +1024,71 @@ def test_production_module_contains_no_delivery_or_filtration_dependency() -> No
     assert "1500" not in source
     assert "StopPump" not in source
     assert "SetBodyActive" not in source
+
+
+def test_probe_continuity_requires_exact_current_hydraulic_state() -> None:
+    valid = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=_observations(NOW, pump_rpm=1500, configured_rpm=1500),
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+    )
+    wrong_rpm = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=_observations(NOW, pump_rpm=1526, configured_rpm=1500),
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+    )
+    shared = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=_observations(
+            NOW,
+            pump_rpm=1500,
+            configured_rpm=1500,
+            jets=True,
+        ),
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+    )
+    unusable_temperature = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=(
+            *_observations(NOW, pump_rpm=1500, configured_rpm=1500),
+            _observation(
+                "pool.temperature",
+                86.0,
+                at=NOW,
+                quality=ObservationQuality.INVALID,
+            ),
+        ),
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+    )
+
+    assert valid.valid
+    assert wrong_rpm.blocker == "temperature_probe_actual_rpm_not_verified"
+    assert shared.blocker == "thermal_orchestration_shared_hydraulic_conflict:jets.active"
+    assert unusable_temperature.valid
+    assert not unusable_temperature.temperature_sample_usable
+
+
+def test_probe_continuity_fails_closed_for_grid_or_external_takeover() -> None:
+    observations = _observations(NOW, pump_rpm=1500, configured_rpm=1500)
+
+    stale_grid_state = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=observations,
+        prior_grid_disposition=GridOutageDisposition.CONFIRMED_OUTAGE,
+    )
+    external = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=observations,
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+        external_preemption_reason="runtime_ownership_preempted:pump_external_change",
+    )
+    disabled = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=observations,
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+        lifecycle_blocker="temperature_probe_thermal_live_disabled",
+    )
+
+    assert stale_grid_state.blocker == "temperature_probe_grid_not_authoritatively_on"
+    assert external.blocker == "runtime_ownership_preempted:pump_external_change"
+    assert disabled.blocker == "temperature_probe_thermal_live_disabled"

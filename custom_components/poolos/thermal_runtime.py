@@ -13,6 +13,8 @@ from poolos.native_configuration_policy import (
     NativeConfigurationInput,
     NativeRpmAssignment,
 )
+from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionEvidence
+from poolos.pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
 from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionPolicy,
@@ -74,6 +76,31 @@ class PoolOSThermalRuntime:
         [ObservationSnapshot, Exception],
         None,
     ] | None = field(default=None, init=False, repr=False)
+    _probe_execution_provider: Callable[
+        [], PoolTemperatureProbeExecutionEvidence | None
+    ] | None = field(default=None, init=False, repr=False)
+    _probe_continuity_provider: Callable[
+        [ObservationSnapshot], PoolTemperatureProbeContinuityEvidence
+    ] | None = field(default=None, init=False, repr=False)
+
+    def set_probe_execution_provider(
+        self,
+        provider: Callable[[], PoolTemperatureProbeExecutionEvidence | None] | None,
+    ) -> None:
+        """Attach in-memory positive execution provenance; never infer it."""
+
+        self._probe_execution_provider = provider
+
+    def set_probe_continuity_provider(
+        self,
+        provider: Callable[
+            [ObservationSnapshot], PoolTemperatureProbeContinuityEvidence
+        ]
+        | None,
+    ) -> None:
+        """Attach current-frame command-free acquisition continuity proof."""
+
+        self._probe_continuity_provider = provider
 
     def set_assessment_observer(self, observer: Callable[[], None]) -> None:
         """Register bounded diagnostics that follow assessment changes."""
@@ -226,6 +253,16 @@ class PoolOSThermalRuntime:
                     ),
                     durable_incident_confirmed=bool(
                         health.get("unhealthy_seen_since_start", False)
+                    ),
+                    pool_temperature_probe_execution=(
+                        None
+                        if self._probe_execution_provider is None
+                        else self._probe_execution_provider()
+                    ),
+                    pool_temperature_probe_continuity=(
+                        None
+                        if self._probe_continuity_provider is None
+                        else self._probe_continuity_provider(authoritative)
                     ),
                 ),
                 live_policy=policy,

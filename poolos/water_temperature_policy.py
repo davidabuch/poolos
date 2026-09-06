@@ -64,6 +64,12 @@ class WaterTemperatureTracker:
         self._trusted_at: datetime | None = None
         self._last_evaluated_at: datetime | None = None
 
+    @property
+    def policy(self) -> WaterTemperaturePolicy:
+        """Expose the immutable canonical policy for lifecycle diagnostics."""
+
+        return self._policy
+
     def _result(
         self,
         at: datetime,
@@ -91,6 +97,7 @@ class WaterTemperatureTracker:
         samples: tuple[TemperatureSample, ...] = (),
         collector_temperature_f: float | None,
         thermal_decision_requested: bool,
+        existing_circulation_trust_allowed: bool = True,
     ) -> WaterTemperatureAssessment:
         if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
             raise ValueError("evaluated_at must be timezone-aware")
@@ -98,7 +105,12 @@ class WaterTemperatureTracker:
             raise ValueError("temperature evaluations must be chronological")
         self._last_evaluated_at = evaluated_at
 
-        if pool_circulating and not probe_active and observed_temperature_f is not None:
+        if (
+            existing_circulation_trust_allowed
+            and pool_circulating
+            and not probe_active
+            and observed_temperature_f is not None
+        ):
             self._trusted_temperature_f = observed_temperature_f
             self._trusted_at = evaluated_at
             return self._result(evaluated_at, WaterTemperatureDisposition.TRUSTED, "existing_circulation")

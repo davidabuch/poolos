@@ -321,6 +321,16 @@ class ExecutionVerificationEngine:
                 disposition=VerificationEvidenceDisposition.LOW_CONFIDENCE,
                 reason="observation_confidence_below_minimum",
             )
+        if (
+            request.step.metadata.get("strict_post_delivery_observation") == "true"
+            and observation.observed_at is not None
+            and observation.observed_at <= request.verification_started_at
+        ):
+            return ExecutionVerificationEvidence(
+                **common,
+                disposition=VerificationEvidenceDisposition.UNUSABLE,
+                reason="observation_not_later_than_delivery",
+            )
         tolerance = _numeric_tolerance(request.step, observation_id)
         exact_match = observation.value == expected_value
         tolerance_match = (

@@ -18,6 +18,7 @@ from poolos.physical_command_authority import (
 from poolos.circulation_successor import FiltrationSuccessorEvidence
 from poolos.integration import SetBodyActive, SetPumpSpeed, ThermalBody
 from poolos.external_change import ExternalChangeBatch
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDeliveryFactory,
     ThermalAutomaticExecutionDriver,
@@ -31,6 +32,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
 )
+from poolos.thermal_execution_currentness import ThermalExecutionPurposeKind
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment
 from poolos.thermal_runtime_orchestration import (
     ThermalRuntimeOrchestrationAssessment,
@@ -58,10 +60,34 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         *,
         epoch_identity: str,
     ) -> ManualIntelliCenterThermalLiveDelivery:
+        purpose = AutomaticThermalDispatchPurpose.NORMAL
+        probe_operation_id = None
+        currentness = session.originating_currentness
+        if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
+            sequence = session.coordination.current_step_sequence
+            if sequence is None:
+                raise ValueError("probe session has no current operation")
+            step = session.execution_plan.steps[sequence - 1]
+            operation = step.operation
+            if (
+                isinstance(operation, SetPumpSpeed)
+                and operation.rpm == PumpOperatingBaselines().temperature_probe_rpm
+            ):
+                purpose = AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+                self.authority.register_automatic_thermal_probe(
+                    epoch_identity=epoch_identity,
+                    operation_id=operation.operation_id,
+                    operation="pump_circuit_speed",
+                    target="p0102",
+                    requested_value=operation.rpm,
+                )
+                probe_operation_id = operation.operation_id
         context = self.authority.bind_automatic_thermal_dispatch(
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
             body=session.assessment.desired.body.value,
+            purpose=purpose,
+            probe_operation_id=probe_operation_id,
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,

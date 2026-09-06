@@ -492,19 +492,37 @@ class ThermalExecutionPlanBuilder:
                 }
             else:
                 assert desired.required_pump_rpm is not None
+                probe_step = desired.reason_code == "pool_temperature_probe_required"
                 operation = SetPumpSpeed(
                     equipment_id=self.pump_equipment_id,
                     rpm=desired.required_pump_rpm,
                     operation_id=operation_id,
                     metadata={
-                        "reason_code": desired.rpm_reason_code or "thermal_pump_baseline",
+                        "reason_code": (
+                            desired.reason_code
+                            if probe_step
+                            else desired.rpm_reason_code or "thermal_pump_baseline"
+                        ),
                         "command_delivery_enabled": False,
                     },
                 )
                 expected = {"pump.rpm": desired.required_pump_rpm}
+                if probe_step:
+                    expected["pump_circuit.p0102.configured_speed_rpm"] = (
+                        desired.required_pump_rpm
+                    )
                 metadata = {
                     "verification_truth": "authoritative_native_pump_rpm",
                     "numeric_tolerance:pump.rpm": str(self.pump_rpm_tolerance),
+                    **(
+                        {
+                            "pool_temperature_probe_step": "true",
+                            "strict_post_delivery_observation": "true",
+                            "numeric_tolerance:pump_circuit.p0102.configured_speed_rpm": "0",
+                        }
+                        if probe_step
+                        else {}
+                    ),
                 }
             operations.append(operation)
             specifications.append(

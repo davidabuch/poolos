@@ -17,6 +17,12 @@ from typing import Any, ClassVar, Mapping
 
 from .integration import PhysicalHeatMode, ThermalBody
 from .native_configuration_policy import NativeConfigurationAssessment
+from .operating_baselines import PumpOperatingBaselines
+from .pool_temperature_probe_execution import (
+    PoolTemperatureProbeContinuityEvidence,
+    PoolTemperatureProbeExecutionEvidence,
+    PoolTemperatureProbeExecutionPhase,
+)
 from .spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
@@ -81,6 +87,8 @@ class PoolTemperatureProbeRuntimeState:
     started_at: datetime | None = None
     samples: tuple[TemperatureSample, ...] = ()
     last_assessment: WaterTemperatureAssessment | None = None
+    execution_purpose_id: str | None = None
+    ownership_generation: int | None = None
     sample_limit: ClassVar[int] = 64
 
     @property
@@ -107,13 +115,122 @@ class PoolTemperatureProbeRuntimeState:
             self.started_at = None
             self.samples = ()
 
-    def begin_if_required(self, at: datetime, *, pool_circulating: bool) -> None:
+    def synchronize_execution(
+        self,
+        execution: PoolTemperatureProbeExecutionEvidence | None,
+        *,
+        at: datetime,
+    ) -> None:
+        """Start acquisition only from verified PoolOS execution provenance."""
+
+        if execution is None:
+            if self.phase is PoolTemperatureProbePhase.PROBING:
+                self.phase = PoolTemperatureProbePhase.PROBE_REQUIRED
+                self.requested_at = at
+                self.started_at = None
+                self.samples = ()
+                self.last_assessment = None
+            self.execution_purpose_id = None
+            self.ownership_generation = None
+            return
+        if self.execution_purpose_id is None:
+            return
+        if execution.execution_purpose_id != self.execution_purpose_id:
+            self._invalidate_execution_epoch(at)
+            return
+        if execution.phase is PoolTemperatureProbeExecutionPhase.PREPARING:
+            if self.phase is PoolTemperatureProbePhase.PROBING:
+                self.phase = PoolTemperatureProbePhase.PROBE_REQUIRED
+                self.started_at = None
+                self.samples = ()
+                self.last_assessment = None
+            self.execution_purpose_id = execution.execution_purpose_id
+            self.ownership_generation = execution.ownership_generation
+            return
+        assert execution.acquisition_started_at is not None
         if (
-            self.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
-            and pool_circulating
+            self.execution_purpose_id != execution.execution_purpose_id
+            or self.ownership_generation != execution.ownership_generation
+            or self.started_at != execution.acquisition_started_at
         ):
             self.phase = PoolTemperatureProbePhase.PROBING
-            self.started_at = at
+            self.started_at = execution.acquisition_started_at
+            self.samples = ()
+            self.last_assessment = None
+        self.execution_purpose_id = execution.execution_purpose_id
+        self.ownership_generation = execution.ownership_generation
+
+    def _invalidate_execution_epoch(self, at: datetime) -> None:
+        """Discard acquisition state that cannot cross a provenance boundary."""
+
+        if self.phase in {
+            PoolTemperatureProbePhase.PROBE_REQUIRED,
+            PoolTemperatureProbePhase.PROBING,
+        }:
+            self.phase = PoolTemperatureProbePhase.PROBE_REQUIRED
+            self.requested_at = at
+        else:
+            self.phase = PoolTemperatureProbePhase.IDLE
+            self.requested_at = None
+        self.started_at = None
+        self.samples = ()
+        self.last_assessment = None
+        self.execution_purpose_id = None
+        self.ownership_generation = None
+
+    def bind_required_purpose(self, purpose_id: str) -> None:
+        """Bind a recommendation to its canonical semantic probe purpose."""
+
+        if not purpose_id.strip():
+            raise ValueError("probe execution purpose must not be empty")
+        if self.phase is PoolTemperatureProbePhase.PROBE_REQUIRED:
+            self.execution_purpose_id = purpose_id
+
+    def diagnostics(
+        self,
+        *,
+        evaluated_at: datetime,
+        maximum_duration: timedelta,
+    ) -> Mapping[str, object]:
+        """Return a bounded, observational snapshot of acquisition state."""
+
+        _require_aware(evaluated_at)
+        latest = None if not self.samples else self.samples[-1]
+        oldest = None if not self.samples else self.samples[0]
+        started_at = self.started_at
+        return MappingProxyType(
+            {
+                "probe_required": self.phase is PoolTemperatureProbePhase.PROBE_REQUIRED,
+                "probe_lifecycle_state": self.phase.value,
+                "probe_execution_purpose_id": self.execution_purpose_id,
+                "probe_ownership_generation": self.ownership_generation,
+                "probe_acquisition_started_at": (
+                    None if started_at is None else started_at.isoformat()
+                ),
+                "probe_acquisition_elapsed_seconds": (
+                    None
+                    if started_at is None
+                    else max(0.0, (evaluated_at - started_at).total_seconds())
+                ),
+                "probe_acquisition_deadline": (
+                    None
+                    if started_at is None
+                    else (started_at + maximum_duration).isoformat()
+                ),
+                "probe_rpm_target": PumpOperatingBaselines().temperature_probe_rpm,
+                "probe_sample_count": len(self.samples),
+                "probe_oldest_sample_at": (
+                    None if oldest is None else oldest.observed_at.isoformat()
+                ),
+                "probe_latest_sample_at": (
+                    None if latest is None else latest.observed_at.isoformat()
+                ),
+                "probe_latest_sample_f": None if latest is None else latest.temperature_f,
+                "probe_stability_disposition": (
+                    None if self.last_assessment is None else self.last_assessment.reason_code
+                ),
+            }
+        )
 
     def invalidate_if_probing(
         self,
@@ -139,7 +256,7 @@ class PoolTemperatureProbeRuntimeState:
     ) -> tuple[TemperatureSample, ...]:
         if not self.tracker_probe_active or sample is None:
             return self.samples
-        if self.started_at is not None and sample.observed_at < self.started_at:
+        if self.started_at is not None and sample.observed_at <= self.started_at:
             return self.samples
         if self.samples and sample.observed_at <= self.samples[-1].observed_at:
             return self.samples
@@ -152,11 +269,18 @@ class PoolTemperatureProbeRuntimeState:
     ) -> None:
         self.last_assessment = assessment
         self.samples = samples
-        if (
-            assessment.disposition is WaterTemperatureDisposition.TRUSTED
-            and self.phase is PoolTemperatureProbePhase.PROBING
-        ):
-            self.phase = PoolTemperatureProbePhase.TRUSTED
+        if assessment.disposition is WaterTemperatureDisposition.TRUSTED:
+            if self.phase is PoolTemperatureProbePhase.PROBING:
+                self.phase = PoolTemperatureProbePhase.TRUSTED
+            elif self.phase is PoolTemperatureProbePhase.PROBE_REQUIRED:
+                # Independently established ordinary circulation may supersede
+                # the need for acquisition, but it is not probe success.
+                self.phase = PoolTemperatureProbePhase.IDLE
+                self.requested_at = None
+                self.started_at = None
+                self.samples = ()
+                self.execution_purpose_id = None
+                self.ownership_generation = None
         elif (
             assessment.disposition
             is WaterTemperatureDisposition.ACQUISITION_FAILED
@@ -177,6 +301,8 @@ class PoolTemperatureProbeRuntimeState:
         self.started_at = None
         self.samples = ()
         self.last_assessment = None
+        self.execution_purpose_id = None
+        self.ownership_generation = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +323,8 @@ class ThermalRuntimeEvidence:
     filtration_debt: timedelta | None = None
     pending_durable_incident_confirmation: bool = False
     durable_incident_confirmed: bool = False
+    pool_temperature_probe_execution: PoolTemperatureProbeExecutionEvidence | None = None
+    pool_temperature_probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at)
@@ -241,6 +369,17 @@ class ThermalBodyRuntimeAssessment:
     actual_pump_rpm: int | None
     evidence_blockers: tuple[str, ...]
     live_safety_evidence: ThermalLiveSafetyEvidence | None = None
+    water_temperature: WaterTemperatureAssessment | None = None
+    pool_temperature_probe_diagnostics: Mapping[str, object] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "pool_temperature_probe_diagnostics",
+            MappingProxyType(dict(self.pool_temperature_probe_diagnostics)),
+        )
 
     @property
     def execution_currentness(self) -> ThermalExecutionCurrentness:
@@ -263,8 +402,7 @@ class ThermalBodyRuntimeAssessment:
 
     def diagnostics(self, *, blocker_limit: int = 16) -> Mapping[str, Any]:
         desired = self.plan.desired
-        return MappingProxyType(
-            {
+        attributes: dict[str, Any] = {
                 "body": self.body.value,
                 "requested_mode": self.requested_mode.value,
                 "planned_source": desired.selected_source.value,
@@ -293,11 +431,23 @@ class ThermalBodyRuntimeAssessment:
                     self.technical_preflight.blocking_reasons[:blocker_limit]
                 ),
                 "evidence_blockers": list(self.evidence_blockers[:blocker_limit]),
+                "water_temperature_disposition": (
+                    None if self.water_temperature is None else self.water_temperature.disposition.value
+                ),
+                "trusted_pool_temperature_f": (
+                    None if self.water_temperature is None else self.water_temperature.trusted_temperature_f
+                ),
+                "trusted_pool_temperature_at": (
+                    None
+                    if self.water_temperature is None or self.water_temperature.trusted_at is None
+                    else self.water_temperature.trusted_at.isoformat()
+                ),
                 "authority": "none",
                 "automatic_execution_driver_enabled": False,
                 "command_delivery_performed": False,
             }
-        )
+        attributes.update(self.pool_temperature_probe_diagnostics)
+        return MappingProxyType(attributes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,6 +632,36 @@ class ThermalRuntimeEvaluator:
                 "spa.active",
                 "pump.rpm",
             }
+            execution_claim = evidence.pool_temperature_probe_execution
+            execution = execution_claim
+            continuity = evidence.pool_temperature_probe_continuity
+            if (
+                execution is not None
+                and execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+                and (
+                    continuity is None
+                    or continuity.evaluated_at != evidence.evaluated_at
+                    or not continuity.valid
+                )
+            ):
+                execution = None
+            if (
+                execution_claim is not None
+                and execution_claim.phase
+                is PoolTemperatureProbeExecutionPhase.ACQUIRING
+                and continuity is not None
+            ):
+                pool_temperature_usable = (
+                    pool_temperature_usable
+                    and continuity.temperature_sample_usable
+                )
+            if (
+                execution is not None
+                and execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+            ):
+                probe_hydraulic_concepts.add(
+                    "pump_circuit.p0102.configured_speed_rpm"
+                )
             probe_hydraulic_evidence_usable = not (
                 probe_hydraulic_concepts
                 & (
@@ -496,11 +676,25 @@ class ThermalRuntimeEvaluator:
                 and pump_rpm is not None
                 and pump_rpm > 0
             )
-            self.pool_temperature_probe.invalidate_if_probing(
-                evidence.evaluated_at,
-                pool_circulating=pool_circulating,
+            if (
+                pool_circulating
+                and execution is not None
+                and execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+            ):
+                probe_rpm = PumpOperatingBaselines().temperature_probe_rpm
+                configured_probe_rpm = _int_or_none(
+                    values.get("pump_circuit.p0102.configured_speed_rpm")
+                )
+                pool_circulating = bool(
+                    configured_probe_rpm == probe_rpm
+                    and pump_rpm is not None
+                    and abs(pump_rpm - probe_rpm) <= self.planner.pump_rpm_tolerance
+                )
+            self.pool_temperature_probe.synchronize_execution(
+                execution,
+                at=evidence.evaluated_at,
             )
-            self.pool_temperature_probe.begin_if_required(
+            self.pool_temperature_probe.invalidate_if_probing(
                 evidence.evaluated_at,
                 pool_circulating=pool_circulating,
             )
@@ -543,6 +737,7 @@ class ThermalRuntimeEvaluator:
                         else None
                     ),
                     thermal_decision_requested=True,
+                    existing_circulation_trust_allowed=execution_claim is None,
                 )
             except ValueError as exc:
                 if str(exc) == "temperature evaluations must be chronological":
@@ -603,6 +798,13 @@ class ThermalRuntimeEvaluator:
             plan,
             evaluation_id=evaluation_id,
         )
+        if (
+            body is ThermalBody.POOL
+            and plan.desired.reason_code == "pool_temperature_probe_required"
+        ):
+            self.pool_temperature_probe.bind_required_purpose(
+                execution_currentness.purpose.purpose_id
+            )
         pool_active = _bool_or_none(values.get("pool.active"))
         spa_active = _bool_or_none(values.get("spa.active"))
         missing_native = set(evidence.missing_native_concepts)
@@ -690,6 +892,17 @@ class ThermalRuntimeEvaluator:
             actual_pump_rpm=pump_rpm,
             evidence_blockers=blockers,
             live_safety_evidence=safety,
+            water_temperature=water_temperature,
+            pool_temperature_probe_diagnostics=(
+                self.pool_temperature_probe.diagnostics(
+                    evaluated_at=evidence.evaluated_at,
+                    maximum_duration=(
+                        self.water_temperature_tracker.policy.maximum_probe_duration
+                    ),
+                )
+                if body is ThermalBody.POOL
+                else MappingProxyType({})
+            ),
         )
 
     def _desired(

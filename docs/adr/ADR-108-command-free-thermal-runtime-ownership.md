@@ -142,7 +142,9 @@ external/pre-existing after startup or restart. The explicit default-off driver
 may promote only accepted typed provenance from its current live session. The
 first accepted operation establishes a lease; later accepted operations from
 that exact session may add concept-specific provenance and current execution
-progress. A different session, body, originating context, or incomplete
+progress. Pool temperature acquisition reuses that exact lease and requires
+accepted probe-setpoint provenance; matching Pool activity or 1500-RPM hardware
+never creates acquisition ownership. A different session, body, originating context, or incomplete
 receipt/correlation is denied. The ownership manager evaluates the resulting
 lease against current plan identity, external-change evidence,
 body topology, configured and actual RPM, heat source, and the complete
@@ -159,7 +161,9 @@ discards in-memory ownership and outage state without cleanup or restoration.
 The orchestrator itself remains command-free. Automatic delivery is owned by a
 separate lifecycle adapter and defaults Off. Promotion grants no operation; it
 records provenance only after scoped live delivery has returned an accepted
-receipt. Probe delivery and physical outage response remain separate work.
+receipt. The separately scoped Pool probe delivery envelope grants no normal
+thermal, filtration, Hot Tub, or outage authority. Physical outage response
+remains separate work.
 
 Orchestration evidence uses the same live verification boundary as thermal
 execution: source kind must be `LIVE`, confidence must be at least `0.5`, and

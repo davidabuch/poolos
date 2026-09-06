@@ -22,6 +22,7 @@ from poolos.physical_command_authority import (
     AutomaticThermalCleanupAuthority,
     AutomaticThermalDispatchContext,
     AutomaticThermalDispatchPurpose,
+    AutomaticThermalProbeAuthority,
     PhysicalRequestSource,
 )
 
@@ -147,6 +148,25 @@ def cleanup_context(
     )
 
 
+def probe_context(*, operation_id: str = "probe-step") -> AutomaticThermalDispatchContext:
+    authority = AutomaticThermalProbeAuthority(
+        generation=1,
+        epoch_identity="probe-epoch",
+        operation_id=operation_id,
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=1500,
+    )
+    return AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="probe-epoch",
+        session_identity="probe-session",
+        body="pool",
+        purpose=AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE,
+        probe_authority=authority,
+    )
+
+
 def test_adapter_reuses_manual_gateway_for_commissioned_thermal_operations() -> None:
     manual = FakeManualControl()
     delivery = adapter(manual)
@@ -258,6 +278,40 @@ def test_adapter_rejects_nonthermal_or_uncommissioned_operations_before_manual_c
     } == {
         CommandStatus.REJECTED
     }
+
+
+def test_adapter_admits_only_exact_bound_probe_rpm_operation() -> None:
+    manual = FakeManualControl()
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=probe_context(),
+    )
+
+    accepted = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(
+                operation_id="probe-step",
+                equipment_id="p0102",
+                rpm=1500,
+            ),
+            correlation_id="probe",
+        )
+    )
+    wrong_operation = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(
+                operation_id="other-step",
+                equipment_id="p0102",
+                rpm=1500,
+            ),
+            correlation_id="wrong-probe",
+        )
+    )
+
+    assert accepted.status is CommandStatus.ACKNOWLEDGED
+    assert wrong_operation.status is CommandStatus.REJECTED
+    assert manual.calls == [("pump", "p0102", 1500)]
 
 
 @pytest.mark.parametrize(

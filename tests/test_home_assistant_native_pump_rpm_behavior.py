@@ -722,6 +722,59 @@ def test_queued_pool_cleanup_loses_stale_epoch_authority_inside_command_lock(
     asyncio.run(scenario())
 
 
+def test_queued_probe_rpm_loses_stale_epoch_authority_inside_command_lock(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    async def scenario() -> None:
+        gateway, recorder = _gateway(
+            [pump_object_factory(), pump_circuit_object_factory(objnam="p0102")]
+        )
+        authority = gateway._command_authority
+        authority.configure_automatic_thermal(
+            driver_enabled=True,
+            thermal_live_enabled=True,
+            commissioning_scope="pool",
+        )
+        authority.begin_automatic_thermal_epoch("probe-epoch")
+        authority.register_automatic_thermal_probe(
+            epoch_identity="probe-epoch",
+            operation_id="probe-operation",
+            operation="pump_circuit_speed",
+            target="p0102",
+            requested_value=1500,
+        )
+        context = authority.bind_automatic_thermal_dispatch(
+            epoch_identity="probe-epoch",
+            session_identity="probe-session",
+            body="pool",
+            purpose=AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE,
+            probe_operation_id="probe-operation",
+        )
+        await gateway._command_lock.acquire()
+        task = asyncio.create_task(
+            gateway.async_set_pump_circuit_speed(
+                "p0102",
+                1500,
+                request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+                automatic_thermal_context=context,
+            )
+        )
+        await asyncio.sleep(0)
+
+        authority.begin_automatic_thermal_epoch("newer-epoch")
+        gateway._command_lock.release()
+
+        with pytest.raises(
+            ManualIntelliCenterCommandError,
+            match="automatic_thermal_context_stale",
+        ):
+            await task
+        assert recorder.calls == []
+
+    asyncio.run(scenario())
+
+
 def test_already_dispatched_command_may_finish_after_maintenance_turns_on() -> None:
     class BlockingController(_RecordingController):
         def __init__(self) -> None:
