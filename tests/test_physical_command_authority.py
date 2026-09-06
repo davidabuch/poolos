@@ -449,3 +449,148 @@ def test_termination_context_is_final_gateway_bounded_to_pool_source_off(
     )
 
     assert decision.allowed is allowed
+
+
+def _cleanup_context(
+    authority: PoolOSPhysicalCommandAuthority,
+    *,
+    purpose: AutomaticThermalDispatchPurpose,
+    operation: str,
+    target: str,
+    value: bool | int,
+) -> AutomaticThermalDispatchContext:
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("cleanup-epoch")
+    candidate = f"candidate:{purpose.value}"
+    authority.register_automatic_thermal_cleanup(
+        epoch_identity="cleanup-epoch",
+        candidate_identity=candidate,
+        body="pool",
+        purpose=purpose,
+        operation=operation,
+        target=target,
+        requested_value=value,
+    )
+    return authority.bind_automatic_thermal_dispatch(
+        epoch_identity="cleanup-epoch",
+        session_identity="cleanup:provenance",
+        body="pool",
+        purpose=purpose,
+        cleanup_candidate_identity=candidate,
+    )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "operation", "target", "value"),
+    (
+        (
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            "body_active",
+            "B1101",
+            False,
+        ),
+        (
+            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            "pump_circuit_speed",
+            "p0102",
+            2475,
+        ),
+    ),
+)
+def test_cleanup_authority_allows_only_exact_epoch_bound_candidate(
+    purpose: AutomaticThermalDispatchPurpose,
+    operation: str,
+    target: str,
+    value: bool | int,
+) -> None:
+    authority = ready()
+    context = _cleanup_context(
+        authority,
+        purpose=purpose,
+        operation=operation,
+        target=target,
+        value=value,
+    )
+    exact = PhysicalCommandRequest(
+        operation=operation,
+        target=target,
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=value,
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(exact).allowed
+
+    wrong_value = PhysicalCommandRequest(
+        operation=operation,
+        target=target,
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=(True if value is False else int(value) + 1),
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(wrong_value).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+
+    authority.begin_automatic_thermal_epoch("newer-epoch")
+    assert authority.assess(exact).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "operation", "target", "value"),
+    (
+        (
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            "body_active",
+            "B1202",
+            False,
+        ),
+        (
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            "body_active",
+            "B1101",
+            True,
+        ),
+        (
+            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            "pump_circuit_speed",
+            "p9999",
+            2600,
+        ),
+        (
+            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            "body_heat_source",
+            "B1101",
+            2600,
+        ),
+    ),
+)
+def test_cleanup_candidate_registration_rejects_cross_purpose_shapes(
+    purpose: AutomaticThermalDispatchPurpose,
+    operation: str,
+    target: str,
+    value: bool | int,
+) -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("cleanup-epoch")
+
+    with pytest.raises(ValueError, match="cleanup authority"):
+        authority.register_automatic_thermal_cleanup(
+            epoch_identity="cleanup-epoch",
+            candidate_identity="forged",
+            body="pool",
+            purpose=purpose,
+            operation=operation,
+            target=target,
+            requested_value=value,
+        )

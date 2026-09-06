@@ -16,7 +16,11 @@ from poolos.intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
 
-from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+from poolos.physical_command_authority import (
+    AutomaticThermalDispatchPurpose,
+    PhysicalRequestSource,
+    PoolOSPhysicalCommandAuthority,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -663,6 +667,57 @@ def test_queued_command_rechecks_maintenance_inside_command_lock() -> None:
         assert gateway._command_authority.diagnostics(
             now=datetime.now(UTC)
         )["pending_expectation_count"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_queued_pool_cleanup_loses_stale_epoch_authority_inside_command_lock(
+) -> None:
+    async def scenario() -> None:
+        gateway, recorder = _gateway([])
+        authority = gateway._command_authority
+        authority.configure_automatic_thermal(
+            driver_enabled=True,
+            thermal_live_enabled=True,
+            commissioning_scope="pool",
+        )
+        authority.begin_automatic_thermal_epoch("cleanup-epoch")
+        authority.register_automatic_thermal_cleanup(
+            epoch_identity="cleanup-epoch",
+            candidate_identity="body-cleanup-candidate",
+            body="pool",
+            purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            operation="body_active",
+            target="B1101",
+            requested_value=False,
+        )
+        context = authority.bind_automatic_thermal_dispatch(
+            epoch_identity="cleanup-epoch",
+            session_identity="cleanup:provenance",
+            body="pool",
+            purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            cleanup_candidate_identity="body-cleanup-candidate",
+        )
+        await gateway._command_lock.acquire()
+        task = asyncio.create_task(
+            gateway.async_set_body_active(
+                "B1101",
+                False,
+                request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+                automatic_thermal_context=context,
+            )
+        )
+        await asyncio.sleep(0)
+
+        authority.begin_automatic_thermal_epoch("newer-epoch")
+        gateway._command_lock.release()
+
+        with pytest.raises(
+            ManualIntelliCenterCommandError,
+            match="automatic_thermal_context_stale",
+        ):
+            await task
+        assert recorder.calls == []
 
     asyncio.run(scenario())
 

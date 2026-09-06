@@ -19,7 +19,9 @@ from poolos.integration import (
     ThermalBody,
 )
 from poolos.physical_command_authority import (
+    AutomaticThermalCleanupAuthority,
     AutomaticThermalDispatchContext,
+    AutomaticThermalDispatchPurpose,
     PhysicalRequestSource,
 )
 
@@ -115,6 +117,33 @@ def automatic_context() -> AutomaticThermalDispatchContext:
         epoch_identity="epoch-1",
         session_identity="session-1",
         body="pool",
+    )
+
+
+def cleanup_context(
+    *,
+    purpose: AutomaticThermalDispatchPurpose,
+    operation: str,
+    target: str,
+    value: bool | int,
+) -> AutomaticThermalDispatchContext:
+    cleanup = AutomaticThermalCleanupAuthority(
+        generation=1,
+        epoch_identity="cleanup-epoch",
+        candidate_identity="cleanup-candidate",
+        body="pool",
+        purpose=purpose,
+        operation=operation,
+        target=target,
+        requested_value=value,
+    )
+    return AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="cleanup-epoch",
+        session_identity="cleanup:provenance",
+        body="pool",
+        purpose=purpose,
+        cleanup_authority=cleanup,
     )
 
 
@@ -337,6 +366,63 @@ def test_adapter_rejects_autonomous_body_deactivation_before_manual_call() -> No
     assert receipt.status is CommandStatus.REJECTED
     assert receipt.details["error_type"] == "ValueError"
     assert manual.calls == []
+
+
+def test_adapter_delivers_exact_pool_body_cleanup_as_false() -> None:
+    manual = FakeManualControl()
+    context = cleanup_context(
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        operation="body_active",
+        target="B1101",
+        value=False,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetBodyActive(equipment_id=ThermalBody.POOL, active=False),
+            correlation_id="pool-cleanup-off",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.calls == [("body", "B1101", False)]
+
+
+def test_adapter_delivers_only_exact_bound_dynamic_pump_cleanup_target() -> None:
+    manual = FakeManualControl()
+    context = cleanup_context(
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+        operation="pump_circuit_speed",
+        target="p0102",
+        value=2475,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    exact = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2475),
+            correlation_id="exact-cleanup-rpm",
+        )
+    )
+    forged = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2476),
+            correlation_id="forged-cleanup-rpm",
+        )
+    )
+
+    assert exact.status is CommandStatus.ACKNOWLEDGED
+    assert forged.status is CommandStatus.REJECTED
+    assert manual.calls == [("pump", "p0102", 2475)]
 
 
 def test_adapter_accepts_explicit_priming_rpm_baseline() -> None:

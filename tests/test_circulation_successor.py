@@ -240,6 +240,24 @@ def test_pump_or_source_provenance_cannot_manufacture_body_origin() -> None:
     assert result.pump_handoff_eligible is False
 
 
+def test_preexisting_body_with_owned_pump_can_normalize_immediate_filtration_only(
+) -> None:
+    result = _evaluate(
+        entitlement=_entitlement(body_owned=False, pump_owned=True),
+        filtration=_filtration(
+            FiltrationDisposition.RUN_NOW,
+            debt=timedelta(hours=1),
+            target=2600,
+        ),
+    )
+
+    assert result.circulation_origin is CirculationOrigin.PREEXISTING_OR_EXTERNAL
+    assert result.successor_kind is CirculationSuccessorKind.FILTRATION
+    assert result.pump_handoff_eligible
+    assert not result.body_deactivation_eligible
+    assert result.keep_body_active
+
+
 @pytest.mark.parametrize(
     "disposition",
     [FiltrationDisposition.RUN_NOW, FiltrationDisposition.CREDITING],
@@ -537,7 +555,7 @@ def test_bounded_takeover_retention_survives_empty_and_unrelated_batches() -> No
     assert after_unrelated.events == (takeover,)
 
 
-def test_later_same_concept_transition_does_not_erase_first_takeover() -> None:
+def test_later_same_concept_transition_replaces_older_takeover() -> None:
     retained = ThermalRuntimeExternalChangeEvidence()
     takeover = _change_event("pool.active", at=NOW)
     later = _change_event("pool.active", at=AT)
@@ -545,7 +563,7 @@ def test_later_same_concept_transition_does_not_erase_first_takeover() -> None:
     retained.update(ExternalChangeBatch((takeover,)))
     current = retained.update(ExternalChangeBatch((later,)))
 
-    assert current.events == (takeover,)
+    assert current.events == (later,)
     assert retained.retained_count == 1
 
 
@@ -693,6 +711,31 @@ def test_pump_handoff_requires_current_owned_pump_provenance() -> None:
 
     assert not no_pump.pump_handoff_eligible
     assert not stale_pump.pump_handoff_eligible
+
+
+@pytest.mark.parametrize(
+    ("pump_rpm", "configured_rpm", "eligible"),
+    (
+        (2875, 2875, True),
+        (2874, 2900, False),
+        (2900, 2874, False),
+    ),
+)
+def test_pump_handoff_uses_inclusive_tolerance_for_actual_and_configured_truth(
+    pump_rpm: int,
+    configured_rpm: int,
+    eligible: bool,
+) -> None:
+    result = _evaluate(
+        evidence=_evidence(pump_rpm=pump_rpm, configured_rpm=configured_rpm),
+        filtration=_filtration(
+            FiltrationDisposition.RUN_NOW,
+            debt=timedelta(hours=1),
+            target=2600,
+        ),
+    )
+
+    assert result.pump_handoff_eligible is eligible
 
 
 def test_repeated_arbitration_is_pure_and_does_not_consume_entitlement() -> None:

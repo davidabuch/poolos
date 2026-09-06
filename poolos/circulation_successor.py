@@ -228,7 +228,7 @@ class CirculationSuccessorArbitrator:
         at = evidence.evaluated_at
         if entitlement is not None and entitlement.body is not ThermalBody.POOL:
             return _blocked(at, "circulation_hot_tub_not_commissioned", facts)
-        if entitlement is None or entitlement.body_activation is None:
+        if entitlement is None:
             return _result(
                 at,
                 CirculationArbitrationDisposition.RETAIN_PREEXISTING,
@@ -272,7 +272,7 @@ class CirculationSuccessorArbitrator:
                 CirculationOrigin.PREEXISTING_OR_EXTERNAL,
                 facts,
             )
-        if not facts.body_provenance_current:
+        if entitlement.body_activation is not None and not facts.body_provenance_current:
             return _blocked(at, "circulation_body_provenance_not_current", facts)
         if not facts.source_cleanup_complete:
             return _blocked(at, "circulation_source_cleanup_not_complete", facts)
@@ -287,10 +287,23 @@ class CirculationSuccessorArbitrator:
                 CirculationArbitrationDisposition.RETAIN_FOR_SUCCESSOR,
                 CirculationSuccessorKind.FILTRATION,
                 "circulation_retained_for_immediate_filtration",
-                CirculationOrigin.POOLOS_THERMAL,
+                (
+                    CirculationOrigin.POOLOS_THERMAL
+                    if entitlement.body_activation is not None
+                    else CirculationOrigin.PREEXISTING_OR_EXTERNAL
+                ),
                 facts,
                 pump_handoff_eligible=pump_eligible,
                 physical_handoff_ready=pump_eligible,
+            )
+        if entitlement.body_activation is None:
+            return _result(
+                at,
+                CirculationArbitrationDisposition.RETAIN_PREEXISTING,
+                CirculationSuccessorKind.PREEXISTING_OR_EXTERNAL,
+                "circulation_retained_preexisting_or_external",
+                CirculationOrigin.PREEXISTING_OR_EXTERNAL,
+                facts,
             )
         return _result(
             at,
