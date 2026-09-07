@@ -17,6 +17,7 @@ from .grid_outage_confirmation import (
     GridOutageDisposition,
 )
 from .integration import PhysicalHeatMode, ThermalBody
+from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -53,7 +54,7 @@ _ORCHESTRATION_OBSERVATION_IDS = frozenset(
         "pool.active",
         "spa.active",
         "pump.rpm",
-        "pump_circuit.p0102.configured_speed_rpm",
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         *SHARED_HYDRAULIC_SAFETY_BY_CONCEPT,
@@ -501,7 +502,7 @@ def build_thermal_runtime_ownership_evidence(
     spa = _observation_state(observations.get("spa.active"), generated_at)
     pump = _observation_state(observations.get("pump.rpm"), generated_at)
     configured = _observation_state(
-        observations.get("pump_circuit.p0102.configured_speed_rpm"),
+        observations.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
         generated_at,
     )
     source_concept = (
@@ -671,7 +672,7 @@ def assess_pool_temperature_probe_continuity(
     baseline = PumpOperatingBaselines().temperature_probe_rpm
     if blocker is None:
         configured = _observation_state(
-            by_id.get("pump_circuit.p0102.configured_speed_rpm"), generated_at
+            by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT), generated_at
         )
         configured_rpm = _integer(configured.value)
         if not configured.usable or configured_rpm != baseline:

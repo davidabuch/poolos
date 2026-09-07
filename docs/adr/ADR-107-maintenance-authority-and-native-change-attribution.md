@@ -72,9 +72,11 @@ and restart.
 Before reserving a transition expectation, the gateway compares the requested
 consequence with the latest authoritative native truth. A true no-op may still
 be dispatched for manual API compatibility, but it retains no transition
-expectation. The configured Pool PMPCIRC `p0102` `SPEED` consequence is mapped
-separately from parent-pump actual RPM; configured setpoint and physical speed
-are never treated as the same fact.
+expectation. The configured `SPEED` consequence from the unique Pool `C0006`
+PMPCIRC is mapped to the stable
+`pool.pump_circuit.configured_speed_rpm` concept while retaining the current
+concrete `p01xx` source identity. Configured setpoint and parent-pump physical
+speed are never treated as the same fact.
 
 ### External/unattributed changes
 

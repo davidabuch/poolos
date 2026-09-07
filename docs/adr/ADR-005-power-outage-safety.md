@@ -100,12 +100,16 @@ body source configuration is not rewritten. Unknown active-body source values
 block dependent hydraulic work. Freeze permits source deselection and Pool
 Light Off, but blocks circuit, body, and pump reductions.
 
-The only outage pump target is the configured outage baseline on `p0102`. It is
-a reduction ceiling for already-established, positively required Pool
-circulation: a configured value above the baseline may be reduced to it, an
-equal value is already safe, and a lower value is never increased. Zero actual
-RPM never authorizes a start. This numeric baseline is semantically distinct
-from the Pool temperature-probe baseline even when both values are equal.
+The only outage pump target is the configured outage baseline on the unique
+current PMPCIRC RPM assignment associated with Pool circuit `C0006`. Its
+concrete `p01xx` native ID is captured in the outage frame and bound through
+candidate, authority, delivery, and verification; identity churn invalidates
+stale work rather than retargeting it. The baseline is a reduction ceiling for
+already-established, positively required Pool circulation: a configured value
+above the baseline may be reduced to it, an equal value is already safe, and a
+lower value is never increased. Zero actual RPM never authorizes a start. This
+numeric baseline is semantically distinct from the Pool temperature-probe
+baseline even when both values are equal.
 
 At most one new operation is delivered from one authoritative frame. Accepted
 delivery is not completion. A strictly later authoritative native observation

@@ -17,6 +17,7 @@ from .intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
     NativeRawObject,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
 from .physical_command_authority import (
     NativeConsequenceAttribution,
@@ -108,7 +109,7 @@ THERMAL_RUNTIME_TAKEOVER_CONCEPTS = frozenset(
         "pool.active",
         "spa.active",
         "pump.rpm",
-        "pump_circuit.p0102.configured_speed_rpm",
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         "waterfall.active",
@@ -122,7 +123,7 @@ GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS = frozenset(
         "pool.active",
         "spa.active",
         "pump.rpm",
-        "pump_circuit.p0102.configured_speed_rpm",
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         "pool_light.active",
@@ -190,7 +191,7 @@ _POLICIES: Mapping[str, tuple[ExternalChangePolicy, bool]] = MappingProxyType(
     {
         "pool.active": (ExternalChangePolicy.ACCEPT, True),
         "spa.active": (ExternalChangePolicy.ACCEPT, False),
-        "pump_circuit.p0102.configured_speed_rpm": (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT: (
             ExternalChangePolicy.ACCEPT,
             False,
         ),

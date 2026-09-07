@@ -196,6 +196,20 @@ def test_adapter_reuses_manual_gateway_for_commissioned_thermal_operations() -> 
     assert pump.verification_required and heater.verification_required
 
 
+def test_adapter_delivers_exact_recycled_pmpcirc_from_operation() -> None:
+    manual = FakeManualControl()
+
+    receipt = asyncio.run(
+        adapter(manual).deliver(
+            SetPumpSpeed(equipment_id="p0199", rpm=2900),
+            correlation_id="recycled-pump-step",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.calls == [("pump", "p0199", 2900)]
+
+
 def test_automatic_adapter_binds_exact_context_to_manual_gateway() -> None:
     manual = FakeManualControl()
     context = automatic_context()

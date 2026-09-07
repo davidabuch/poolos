@@ -7,7 +7,7 @@ commands.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Mapping
 
 from .integration import PhysicalHeatMode, ThermalBody
+from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
 from .native_configuration_policy import NativeConfigurationAssessment
 from .operating_baselines import PumpOperatingBaselines
 from .pool_temperature_probe_execution import (
@@ -319,6 +320,7 @@ class ThermalRuntimeEvidence:
     stale_native_concepts: tuple[str, ...]
     missing_native_concepts: tuple[str, ...]
     native_configuration: NativeConfigurationAssessment
+    pool_pump_circuit_id: str | None = None
     native_observed_at: Mapping[str, datetime] = field(default_factory=dict)
     filtration_debt: timedelta | None = None
     pending_durable_incident_confirmation: bool = False
@@ -464,6 +466,7 @@ class ThermalRuntimeAssessment:
     pending_durable_incident_confirmation: bool
     durable_incident_confirmed: bool
     native_conflict_codes: tuple[str, ...]
+    pool_pump_circuit_id: str | None = None
 
     def global_diagnostics(self) -> Mapping[str, Any]:
         blockers = tuple(
@@ -499,6 +502,7 @@ class ThermalRuntimeAssessment:
                 ),
                 "current_blockers": list(blockers[:20]),
                 "native_conflict_codes": list(self.native_conflict_codes[:20]),
+                "pool_pump_circuit_id": self.pool_pump_circuit_id,
                 "authority": "none",
                 "automatic_execution_driver_enabled": False,
                 "command_delivery_performed": False,
@@ -571,6 +575,7 @@ class ThermalRuntimeEvaluator:
             native_conflict_codes=tuple(
                 item.code for item in evidence.native_configuration.conflicts
             ),
+            pool_pump_circuit_id=evidence.pool_pump_circuit_id,
         )
 
     def _evaluate_body(
@@ -660,7 +665,7 @@ class ThermalRuntimeEvaluator:
                 and execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
             ):
                 probe_hydraulic_concepts.add(
-                    "pump_circuit.p0102.configured_speed_rpm"
+                    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
                 )
             probe_hydraulic_evidence_usable = not (
                 probe_hydraulic_concepts
@@ -683,7 +688,7 @@ class ThermalRuntimeEvaluator:
             ):
                 probe_rpm = PumpOperatingBaselines().temperature_probe_rpm
                 configured_probe_rpm = _int_or_none(
-                    values.get("pump_circuit.p0102.configured_speed_rpm")
+                    values.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT)
                 )
                 pool_circulating = bool(
                     configured_probe_rpm == probe_rpm
@@ -782,6 +787,26 @@ class ThermalRuntimeEvaluator:
             blockers=blockers,
             water_temperature=water_temperature,
         )
+        if desired.required_pump_rpm is not None:
+            if (
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                in evidence.missing_native_concepts
+                or values.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT) is None
+            ):
+                blockers = tuple(
+                    dict.fromkeys(
+                        (*blockers, f"missing_native:{POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT}")
+                    )
+                )
+            if (
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                in evidence.stale_native_concepts
+            ):
+                blockers = tuple(
+                    dict.fromkeys(
+                        (*blockers, f"stale_native:{POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT}")
+                    )
+                )
         current = ThermalCurrentState(
             observed_at=evidence.evaluated_at,
             body=body,
@@ -793,7 +818,11 @@ class ThermalRuntimeEvaluator:
             blockers=blockers,
             htmode=_string_or_none(values.get(f"{prefix}.raw_htmode")),
         )
-        plan = self.planner.build(desired, current)
+        planner = replace(
+            self.planner,
+            pump_equipment_id=evidence.pool_pump_circuit_id,
+        )
+        plan = planner.build(desired, current)
         execution_currentness = ThermalExecutionCurrentness.from_assessment(
             plan,
             evaluation_id=evaluation_id,
@@ -851,6 +880,7 @@ class ThermalRuntimeEvaluator:
                 spa_activity_usable=spa_activity_usable,
             ),
             native_configuration=evidence.native_configuration,
+            pool_pump_circuit_id=evidence.pool_pump_circuit_id,
             contradictory_evidence=(
                 ("pool_and_hot_tub_active",)
                 if values.get("pool.active") is True
@@ -1050,6 +1080,7 @@ def _evaluation_id(evidence: ThermalRuntimeEvidence) -> str:
         "pool_requested_mode": evidence.pool_requested_mode.value,
         "hot_tub_requested_mode": evidence.hot_tub_requested_mode.value,
         "native_values": dict(sorted(evidence.native_values.items())),
+        "pool_pump_circuit_id": evidence.pool_pump_circuit_id,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return "thermal-runtime-evaluation-" + sha256(canonical.encode()).hexdigest()[:24]

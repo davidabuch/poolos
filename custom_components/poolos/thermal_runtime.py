@@ -13,6 +13,7 @@ from poolos.native_configuration_policy import (
     NativeConfigurationInput,
     NativeRpmAssignment,
 )
+from poolos.intellicenter_readonly import resolve_pool_pump_circuit
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionEvidence
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
 from poolos.thermal_live_execution import (
@@ -223,6 +224,15 @@ class PoolOSThermalRuntime:
             else self.filtration_runtime.assessment
         )
         try:
+            transport = self.coordinator.independent_intellicenter_transport
+            transport_snapshot = (
+                None if transport is None else transport.latest_snapshot
+            )
+            pool_pump_circuit = (
+                None
+                if transport_snapshot is None
+                else resolve_pool_pump_circuit(transport_snapshot)
+            )
             self.assessment = self.evaluator.evaluate(
                 ThermalRuntimeEvidence(
                     evaluated_at=authoritative.generated_at,
@@ -242,6 +252,11 @@ class PoolOSThermalRuntime:
                     missing_native_concepts=tuple(missing),
                     native_configuration=NativeConfigurationGuard().evaluate(
                         self._native_configuration_input()
+                    ),
+                    pool_pump_circuit_id=(
+                        None
+                        if pool_pump_circuit is None
+                        else pool_pump_circuit.native_id
                     ),
                     filtration_debt=(
                         None
@@ -337,8 +352,12 @@ class PoolOSThermalRuntime:
             for body in snapshot.bodies
         )
         assignments: list[NativeRpmAssignment] = []
+        pool_pump_circuit = resolve_pool_pump_circuit(snapshot)
         for item in snapshot.raw_inventory:
-            if item.object_type.upper() != "PMPCIRC" or item.native_id == "p0102":
+            if item.object_type.upper() != "PMPCIRC" or (
+                pool_pump_circuit is not None
+                and item.native_id == pool_pump_circuit.native_id
+            ):
                 continue
             attributes = {attribute.name.upper(): attribute.value for attribute in item.attributes}
             rpm = _integer(attributes.get("RPM"))

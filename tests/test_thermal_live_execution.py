@@ -44,7 +44,6 @@ from poolos.thermal_execution_currentness import (
     ThermalExecutionProgress,
 )
 from poolos.thermal_live_execution import (
-    COMMISSIONED_THERMAL_PUMP_ID,
     ThermalLiveAuthorizationDisposition,
     ThermalLiveAuthorizationEngine,
     ThermalLiveAuthorizationResult,
@@ -60,6 +59,7 @@ from poolos.thermal_live_execution import (
 
 
 NOW = datetime(2026, 8, 27, 18, 0, tzinfo=timezone.utc)
+TEST_POOL_PUMP_ID = "p0102"
 
 
 def desired(
@@ -90,7 +90,7 @@ def thermal_plan(
     *,
     body: ThermalBody = ThermalBody.POOL,
 ) -> ThermalExecutionPlanAssessment:
-    return ThermalExecutionPlanBuilder().build(
+    return ThermalExecutionPlanBuilder(pump_equipment_id=TEST_POOL_PUMP_ID).build(
         desired(desired_source, desired_rpm, body=body),
         ThermalCurrentState(
             observed_at=NOW,
@@ -162,6 +162,7 @@ def evidence(
         hydraulic_safety_acceptable=hydraulic_safe,
         hydraulic=hydraulic,
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
+        pool_pump_circuit_id=TEST_POOL_PUMP_ID,
         contradictory_evidence=contradictions,
         interrupted_execution_present=interrupted,
         execution_currentness=execution_currentness,
@@ -295,7 +296,7 @@ def priming_plan(
         if body is ThermalBody.POOL
         else PhysicalHeatMode.GAS
     )
-    return ThermalExecutionPlanBuilder().build(
+    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired(
             source,
             2900 if body is ThermalBody.POOL else 3000,
@@ -338,7 +339,7 @@ def delivered_priming_session(
 
 
 def inactive_body_plan(body: ThermalBody) -> ThermalExecutionPlanAssessment:
-    return ThermalExecutionPlanBuilder().build(
+    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired(PhysicalHeatMode.SOLAR, 2900, body=body),
         ThermalCurrentState(
             observed_at=NOW,
@@ -405,7 +406,7 @@ def test_one_body_commissioning_scope_is_exact(
 def test_only_commissioned_pump_and_thermal_baselines_are_authorized() -> None:
     plan = thermal_plan(PhysicalHeatMode.OFF, 2600, PhysicalHeatMode.SOLAR, 2900)
     assert isinstance(plan.operations[0], SetPumpSpeed)
-    assert plan.operations[0].equipment_id == COMMISSIONED_THERMAL_PUMP_ID
+    assert plan.operations[0].equipment_id == TEST_POOL_PUMP_ID
     assert authorize(plan).authorized
 
     wrong_pump = replace(
@@ -416,10 +417,22 @@ def test_only_commissioned_pump_and_thermal_baselines_are_authorized() -> None:
     wrong_rpm = replace(plan.operations[0], rpm=2600)
     nonthermal_rpm = replace(plan, operations=(wrong_rpm, *plan.operations[1:]))
 
-    assert "uncommissioned_thermal_pump" in authorize(altered).blocking_reasons
+    assert "thermal_pump_identity_stale" in authorize(altered).blocking_reasons
     assert "nonthermal_or_uncommissioned_pump_rpm" in authorize(
         nonthermal_rpm
     ).blocking_reasons
+
+
+def test_live_authority_rejects_plan_bound_to_recycled_previous_pmpcirc() -> None:
+    plan = thermal_plan(PhysicalHeatMode.OFF, 2600, PhysicalHeatMode.SOLAR, 2900)
+
+    result = authorize(
+        plan,
+        live_evidence=replace(evidence(plan), pool_pump_circuit_id="p0101"),
+    )
+
+    assert not result.authorized
+    assert "thermal_pump_identity_stale" in result.blocking_reasons
 
 
 def test_whole_plan_structural_preflight_reuses_live_operation_contracts() -> None:
@@ -440,7 +453,7 @@ def test_whole_plan_structural_preflight_reuses_live_operation_contracts() -> No
 @pytest.mark.parametrize(
     "operation",
     (
-        StopPump(equipment_id=COMMISSIONED_THERMAL_PUMP_ID),
+        StopPump(equipment_id=TEST_POOL_PUMP_ID),
         SetBodyActive(equipment_id=ThermalBody.POOL, active=False),
         SetHydraulicRoute(
             equipment_id="shared",
@@ -448,7 +461,7 @@ def test_whole_plan_structural_preflight_reuses_live_operation_contracts() -> No
             return_body_id="hot_tub",
         ),
         PoolOperation(equipment_id="unknown"),
-        SetPumpSpeed(equipment_id=COMMISSIONED_THERMAL_PUMP_ID, rpm=1500),
+        SetPumpSpeed(equipment_id=TEST_POOL_PUMP_ID, rpm=1500),
     ),
 )
 def test_whole_plan_preflight_rejects_any_unsupported_future_step(
@@ -485,8 +498,8 @@ def test_whole_plan_preflight_rejects_any_unsupported_future_step(
 @pytest.mark.parametrize(
     "operation",
     (
-        StartPump(equipment_id=COMMISSIONED_THERMAL_PUMP_ID),
-        StopPump(equipment_id=COMMISSIONED_THERMAL_PUMP_ID),
+        StartPump(equipment_id=TEST_POOL_PUMP_ID),
+        StopPump(equipment_id=TEST_POOL_PUMP_ID),
         SetHydraulicRoute(
             equipment_id="shared",
             suction_body_id="pool",
@@ -1619,7 +1632,7 @@ def test_exact_pool_temperature_probe_rpm_has_narrow_live_authority() -> None:
         criteria=("pool_temperature_untrusted",),
         evidence={},
     )
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         probe_desired,
         ThermalCurrentState(
             observed_at=NOW,
@@ -1652,7 +1665,7 @@ def _probe_plan_for_authority() -> ThermalExecutionPlanAssessment:
         criteria=("pool_temperature_untrusted",),
         evidence={},
     )
-    return ThermalExecutionPlanBuilder().build(
+    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired_state,
         ThermalCurrentState(
             observed_at=NOW,
@@ -1715,7 +1728,7 @@ def test_probe_authority_requires_probe_and_general_native_pump_ownership() -> N
 
 def test_probe_authority_rejects_heat_source_mutation_and_hot_tub() -> None:
     desired = _probe_plan_for_authority().desired
-    source_mutation = ThermalExecutionPlanBuilder().build(
+    source_mutation = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired,
         ThermalCurrentState(
             observed_at=NOW,
@@ -1725,7 +1738,7 @@ def test_probe_authority_rejects_heat_source_mutation_and_hot_tub() -> None:
             body_active=True,
         ),
     )
-    hot_tub = ThermalExecutionPlanBuilder().build(
+    hot_tub = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         replace(desired, body=ThermalBody.HOT_TUB),
         ThermalCurrentState(
             observed_at=NOW,
@@ -1762,7 +1775,7 @@ def _probe_verification_store(at: datetime) -> ObservationStore:
     observations = hydraulic_store(at=at, pump_rpm=1500)
     observations.put(
         PoolObservation(
-            observation_id="pump_circuit.p0102.configured_speed_rpm",
+            observation_id="pool.pump_circuit.configured_speed_rpm",
             value=1500,
             observed_at=at,
             source_kind=ObservationSourceKind.LIVE,
@@ -2019,7 +2032,7 @@ def test_body_activation_verification_rejects_other_body_takeover() -> None:
 
 
 def test_inactive_body_still_blocks_priming_step_until_activation_verified() -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired(
             PhysicalHeatMode.SOLAR,
             2900,
@@ -2053,7 +2066,7 @@ def test_inactive_body_still_blocks_priming_step_until_activation_verified() -> 
 
 
 def test_verified_body_activation_allows_following_priming_step() -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired(
             PhysicalHeatMode.SOLAR,
             2900,
@@ -2344,7 +2357,7 @@ def test_new_epoch_same_purpose_residual_plan_verifies_without_false_supersessio
             delivery=delivery,
         )
     )
-    current_plan = ThermalExecutionPlanBuilder().build(
+    current_plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         replace(plan.desired, evaluated_at=NOW + timedelta(seconds=1)),
         ThermalCurrentState(
             observed_at=NOW + timedelta(seconds=1),
@@ -2396,7 +2409,7 @@ def test_current_convergence_does_not_skip_delivered_step_verification() -> None
             delivery=FakeThermalDelivery(),
         )
     )
-    converged_plan = ThermalExecutionPlanBuilder().build(
+    converged_plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         replace(plan.desired, evaluated_at=NOW + timedelta(seconds=1)),
         ThermalCurrentState(
             observed_at=NOW + timedelta(seconds=1),
@@ -2477,7 +2490,7 @@ def test_new_epoch_changed_purpose_still_supersedes_before_verification() -> Non
             delivery=FakeThermalDelivery(),
         )
     )
-    gas_plan = ThermalExecutionPlanBuilder().build(
+    gas_plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         replace(
             plan.desired,
             evaluated_at=NOW + timedelta(seconds=1),
@@ -2520,7 +2533,7 @@ def test_new_epoch_changed_purpose_still_supersedes_before_verification() -> Non
 def test_priming_hold_continues_across_compatible_runtime_epochs() -> None:
     engine, live_policy, waiting = delivered_priming_session()
     first_verified_at = NOW + timedelta(seconds=2)
-    after_priming = ThermalExecutionPlanBuilder().build(
+    after_priming = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         replace(
             waiting.assessment.desired,
             evaluated_at=first_verified_at,

@@ -46,6 +46,7 @@ def values(*, pool_active: bool = True, spa_active: bool = False) -> dict[str, o
         "spa.raw_heater_id": "00000",
         "spa.raw_htmode": "0",
         "pump.rpm": 2900,
+        "pool.pump_circuit.configured_speed_rpm": 2900,
         "solar.temperature": 110.0,
         "solar.active": False,
     }
@@ -82,6 +83,7 @@ def evidence(
         stale_native_concepts=stale,
         missing_native_concepts=missing,
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
+        pool_pump_circuit_id="p0102",
         filtration_debt=filtration_debt,
         pending_durable_incident_confirmation=pending,
         durable_incident_confirmed=confirmed,
@@ -334,6 +336,7 @@ def live_values(
         "spa.raw_heater_id": spa_heater,
         "spa.raw_htmode": "0",
         "pump.rpm": pump_rpm,
+        "pool.pump_circuit.configured_speed_rpm": pump_rpm,
         "solar.temperature": solar_temperature,
         "solar.active": solar_active,
     }
@@ -694,7 +697,7 @@ def _probe_values(
     native = values(pool_active=active, spa_active=spa_active)
     native["pool.raw_heater_id"] = "00000"
     native["pump.rpm"] = rpm
-    native["pump_circuit.p0102.configured_speed_rpm"] = rpm
+    native["pool.pump_circuit.configured_speed_rpm"] = rpm
     native["pool.temperature"] = temperature
     native["pool.target_temperature"] = 90.0
     native["solar.temperature"] = 110.0
@@ -1590,7 +1593,7 @@ def test_probe_rpm_or_configured_speed_break_discards_acquisition_epoch(
         temperature=89.0,
     )
     native = _probe_values(active=True, rpm=actual_rpm, temperature=89.0)
-    native["pump_circuit.p0102.configured_speed_rpm"] = configured_rpm
+    native["pool.pump_circuit.configured_speed_rpm"] = configured_rpm
 
     evaluator.evaluate(
         evidence(

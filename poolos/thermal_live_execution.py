@@ -64,6 +64,10 @@ from .integration import (
     SetPumpSpeed,
     ThermalBody,
 )
+from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    is_pmpcirc_native_id,
+)
 from .native_configuration_policy import (
     AutonomousCapability,
     NativeConfigurationAssessment,
@@ -88,9 +92,6 @@ from .thermal_execution_currentness import (
     assess_execution_compatibility,
     operation_signature,
 )
-
-
-COMMISSIONED_THERMAL_PUMP_ID = "p0102"
 
 
 class ThermalLiveCommissioningScope(StrEnum):
@@ -225,6 +226,7 @@ class ThermalLiveSafetyEvidence:
     hydraulic_safety_acceptable: bool
     hydraulic: ThermalHydraulicSafetyEvidence
     native_configuration: NativeConfigurationAssessment
+    pool_pump_circuit_id: str | None = None
     contradictory_evidence: tuple[str, ...] = ()
     interrupted_execution_present: bool = False
     metadata: Mapping[str, str] = field(default_factory=dict)
@@ -777,6 +779,11 @@ class ThermalLiveAuthorizationEngine:
             )
         )
         if operation is not None:
+            if isinstance(operation, SetPumpSpeed):
+                if evidence.pool_pump_circuit_id is None:
+                    reasons.append("pool_pump_circuit_unresolved")
+                elif operation.equipment_id != evidence.pool_pump_circuit_id:
+                    reasons.append("thermal_pump_identity_stale")
             reasons.extend(
                 self._operation_reasons(
                     assessment,
@@ -881,7 +888,7 @@ class ThermalLiveAuthorizationEngine:
             return ()
 
         if isinstance(operation, SetPumpSpeed):
-            if operation.equipment_id != COMMISSIONED_THERMAL_PUMP_ID:
+            if not is_pmpcirc_native_id(operation.equipment_id):
                 return ("uncommissioned_thermal_pump",)
 
             specification = (
@@ -928,7 +935,7 @@ class ThermalLiveAuthorizationEngine:
                     return ("pump_rpm_does_not_match_thermal_plan",)
                 if dict(specification.expected_observations) != {
                     "pump.rpm": operation.rpm,
-                    "pump_circuit.p0102.configured_speed_rpm": operation.rpm,
+                    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT: operation.rpm,
                 }:
                     return ("temperature_probe_verification_contract_mismatch",)
                 return ()
@@ -1940,7 +1947,6 @@ def _minimum_verified_hold(step: ExecutionStep) -> timedelta:
 
 
 __all__ = [
-    "COMMISSIONED_THERMAL_PUMP_ID",
     "ThermalLiveAuthorizationDisposition",
     "ThermalLiveAuthorizationEngine",
     "ThermalLiveAuthorizationResult",

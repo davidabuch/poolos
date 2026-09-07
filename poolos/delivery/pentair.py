@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Mapping, Protocol
 from ..hal import CommandReceipt, CommandStatus
 from ..integration import VendorCommand
 from ..integration.pentair import PentairCommandOperation, PentairCommandParameter
+from ..intellicenter_readonly import is_pmpcirc_native_id
 from .endpoint import DeliveryEndpointKind
 
 
@@ -100,15 +101,23 @@ class PentairVendorCommandEndpoint:
     endpoint_id: str
     client: PentairCommandClient
     vendor: str = "pentair"
+    pool_pump_circuit_id: str | None = None
 
     def __init__(
         self,
         endpoint_id: str,
         client: PentairCommandClient,
+        *,
+        pool_pump_circuit_id: str | None = None,
     ) -> None:
         self.endpoint_id = self._require_text(endpoint_id, "endpoint_id")
         self.client = client
         self.vendor = "pentair"
+        if pool_pump_circuit_id is not None and not is_pmpcirc_native_id(
+            pool_pump_circuit_id
+        ):
+            raise ValueError("Pool pump circuit must be a concrete p01xx identity")
+        self.pool_pump_circuit_id = pool_pump_circuit_id
 
     def deliver(
         self,
@@ -185,16 +194,21 @@ class PentairVendorCommandEndpoint:
         if command.parameters[expected_key] not in {"00000", "H0001", "H0002"}:
             raise ValueError("body.set_heater heater_id is not commissioned")
 
-    @staticmethod
     def _validate_bounded_pump_speed_command(
+        self,
         command: VendorCommand,
         *,
         operation: str,
     ) -> None:
         if operation != PentairCommandOperation.SET_PUMP_SPEED.value:
             return
-        if command.target != "p0102":
-            raise ValueError("pump.set_speed target is not the commissioned pump circuit")
+        if (
+            self.pool_pump_circuit_id is None
+            or command.target != self.pool_pump_circuit_id
+        ):
+            raise ValueError(
+                "pump.set_speed target is not the currently resolved Pool pump circuit"
+            )
         expected_key = PentairCommandParameter.RPM.value
         if set(command.parameters) != {expected_key}:
             raise ValueError("pump.set_speed requires exactly one rpm parameter")

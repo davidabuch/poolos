@@ -26,6 +26,7 @@ from poolos.intellicenter_readonly import (
     NativeTemperatureKind,
     NativeTemperatureState,
     NativeSystemState,
+    resolve_pool_pump_circuit,
 )
 from poolos.observations import ObservationQuality
 from poolos.observation_parity import ObservationParityEngine
@@ -113,6 +114,22 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
                 subtype="INTELLI",
             ),
         ),
+        raw_inventory=(
+            NativeRawObject(
+                native_id="p0102",
+                object_type="PMPCIRC",
+                subtype=None,
+                name="Pool",
+                parent_id="PMP01",
+                observed_at=NOW,
+                attributes=(
+                    NativeRawAttribute("CIRCUIT", "C0006"),
+                    NativeRawAttribute("SELECT", "RPM"),
+                    NativeRawAttribute("PARENT", "PMP01"),
+                    NativeRawAttribute("SPEED", "2200"),
+                ),
+            ),
+        ),
     )
 
 
@@ -120,6 +137,201 @@ def test_native_models_are_immutable_and_adapter_surface_is_read_only() -> None:
     snapshot = transport()
     with pytest.raises(FrozenInstanceError):
         snapshot.connected = False  # type: ignore[misc]
+
+
+
+@pytest.mark.parametrize("native_id", ("p0101", "p0199"))
+def test_pool_pmpcirc_speed_survives_recycled_native_object_id(
+    native_id: str,
+) -> None:
+    base = transport()
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        pumps=(
+            NativePumpState(
+                "PMP01",
+                "Filter Pump",
+                True,
+                2900.0,
+                55.0,
+                1240.0,
+                minimum_rpm=600.0,
+                maximum_rpm=3450.0,
+            ),
+        ),
+        raw_inventory=(
+            NativeRawObject(
+                native_id=native_id,
+                object_type="PMPCIRC",
+                subtype=None,
+                name="Pool",
+                parent_id="PMP01",
+                observed_at=NOW,
+                attributes=(
+                    NativeRawAttribute("CIRCUIT", "C0006"),
+                    NativeRawAttribute("SELECT", "RPM"),
+                    NativeRawAttribute("PARENT", "PMP01"),
+                    NativeRawAttribute("SPEED", "2900"),
+                ),
+            ),
+        ),
+    )
+
+    result = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=NOW,
+    )
+
+    values = {item.observation_id: item for item in result.observations}
+
+    configured = values[POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT]
+
+    assert configured.value == 2900.0
+    assert configured.source_id == f"intellicenter_native:panel-main:{native_id}"
+    assert values["pump.rpm"].value == 2900.0
+
+
+@pytest.mark.parametrize("native_id", ("p0101", "p0102", "p0199"))
+def test_pool_pmpcirc_resolution_accepts_recycled_native_identity(
+    native_id: str,
+) -> None:
+    base = transport()
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        pumps=base.pumps,
+        raw_inventory=(
+            NativeRawObject(
+                native_id=native_id,
+                object_type="PMPCIRC",
+                subtype=None,
+                name="Pool",
+                parent_id="PMP01",
+                observed_at=NOW,
+                attributes=(
+                    NativeRawAttribute("CIRCUIT", "C0006"),
+                    NativeRawAttribute("SELECT", "RPM"),
+                    NativeRawAttribute("PARENT", "PMP01"),
+                    NativeRawAttribute("SPEED", "2900"),
+                ),
+            ),
+        ),
+    )
+
+    resolved = resolve_pool_pump_circuit(snapshot)
+
+    assert resolved is not None
+    assert resolved.native_id == native_id
+    assert resolved.parent_pump_id == "PMP01"
+    assert resolved.minimum_rpm == 950
+    assert resolved.maximum_rpm == 3450
+
+
+@pytest.mark.parametrize(
+    ("circuit", "mode", "parent"),
+    (
+        ("C0007", "RPM", "PMP01"),
+        ("C0006", "GPM", "PMP01"),
+        ("C0006", "RPM", ""),
+        ("C0006", "RPM", "MISSING"),
+    ),
+)
+def test_pool_pmpcirc_resolution_fails_closed_on_invalid_association(
+    circuit: str,
+    mode: str,
+    parent: str,
+) -> None:
+    base = transport()
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        pumps=base.pumps,
+        raw_inventory=(
+            NativeRawObject(
+                native_id="p0107",
+                object_type="PMPCIRC",
+                subtype=None,
+                name="Pool",
+                parent_id=parent or None,
+                observed_at=NOW,
+                attributes=(
+                    NativeRawAttribute("CIRCUIT", circuit),
+                    NativeRawAttribute("SELECT", mode),
+                    NativeRawAttribute("PARENT", parent),
+                    NativeRawAttribute("SPEED", "2900"),
+                ),
+            ),
+        ),
+    )
+
+    assert resolve_pool_pump_circuit(snapshot) is None
+
+
+def test_pool_pmpcirc_resolution_rejects_ambiguous_or_invalid_parent_limits() -> None:
+    base = transport()
+    assignment = base.raw_inventory[0]
+    duplicate = NativeRawObject(
+        native_id="p0108",
+        object_type=assignment.object_type,
+        subtype=assignment.subtype,
+        name=assignment.name,
+        parent_id=assignment.parent_id,
+        observed_at=assignment.observed_at,
+        attributes=assignment.attributes,
+    )
+    ambiguous = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        pumps=base.pumps,
+        raw_inventory=(assignment, duplicate),
+    )
+    invalid_limits = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        pumps=(
+            NativePumpState(
+                "PMP01", "Filter Pump", True, 2200, 42, 1234, None, 3450
+            ),
+        ),
+        raw_inventory=(assignment,),
+    )
+
+    assert resolve_pool_pump_circuit(ambiguous) is None
+    assert resolve_pool_pump_circuit(invalid_limits) is None
+    assert resolve_pool_pump_circuit(transport(connected=False)) is None
+
+
+def test_pool_pmpcirc_resolution_rejects_nonpump_parent_object() -> None:
+    base = transport()
+    nonpump_parent = NativeRawObject(
+        native_id="PMP01",
+        object_type="BODY",
+        subtype=None,
+        name="Not a pump",
+        parent_id=None,
+        observed_at=NOW,
+    )
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=NOW,
+        connected=True,
+        temperature_unit="°F",
+        pumps=(),
+        raw_inventory=(*base.raw_inventory, nonpump_parent),
+    )
+
+    assert resolve_pool_pump_circuit(snapshot) is None
 
 
 def test_commissioned_pmpcirc_speed_is_distinct_from_actual_pump_rpm() -> None:
@@ -149,7 +361,12 @@ def test_commissioned_pmpcirc_speed_is_distinct_from_actual_pump_rpm() -> None:
                 name="Pool",
                 parent_id="PMP01",
                 observed_at=NOW,
-                attributes=(NativeRawAttribute("SPEED", "2900"),),
+                attributes=(
+                    NativeRawAttribute("CIRCUIT", "C0006"),
+                    NativeRawAttribute("SELECT", "RPM"),
+                    NativeRawAttribute("PARENT", "PMP01"),
+                    NativeRawAttribute("SPEED", "2900"),
+                ),
             ),
         ),
     )

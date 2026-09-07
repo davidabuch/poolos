@@ -73,7 +73,7 @@ def test_endpoint_adapts_vendor_command_to_client_request() -> None:
             details={"service": "number.set_value"},
         )
     )
-    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client, pool_pump_circuit_id="p0102")
 
     receipt = endpoint.deliver(
         command(),
@@ -100,11 +100,48 @@ def test_endpoint_adapts_vendor_command_to_client_request() -> None:
     }
 
 
+def test_endpoint_binds_exact_recycled_pool_pmpcirc_target() -> None:
+    client = RecordingPentairClient(
+        PentairCommandResponse(accepted=True, acknowledged=True)
+    )
+    endpoint = PentairVendorCommandEndpoint(
+        "intellicenter-main",
+        client,
+        pool_pump_circuit_id="p0199",
+    )
+    current = VendorCommand(
+        vendor="pentair",
+        operation="pump.set_speed",
+        target="p0199",
+        parameters={"rpm": 2900},
+    )
+    stale = VendorCommand(
+        vendor="pentair",
+        operation="pump.set_speed",
+        target="p0102",
+        parameters={"rpm": 2900},
+    )
+
+    endpoint.deliver(current, correlation_id="current-dynamic-target")
+    with pytest.raises(ValueError, match="currently resolved Pool pump circuit"):
+        endpoint.deliver(stale, correlation_id="stale-dynamic-target")
+
+    assert len(client.calls) == 1
+    assert client.calls[0][0].target == "p0199"
+
+    with pytest.raises(ValueError, match="concrete p01xx"):
+        PentairVendorCommandEndpoint(
+            "intellicenter-main",
+            client,
+            pool_pump_circuit_id="other-pump",
+        )
+
+
 def test_endpoint_accepts_bounded_body_heater_command_without_policy_inference() -> None:
     client = RecordingPentairClient(
         PentairCommandResponse(accepted=True, acknowledged=True)
     )
-    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client, pool_pump_circuit_id="p0102")
     heat_command = VendorCommand(
         vendor="pentair",
         operation="body.set_heater",
@@ -144,7 +181,7 @@ def test_endpoint_rejects_unbounded_direct_body_heater_commands(
     message: str,
 ) -> None:
     client = RecordingPentairClient(PentairCommandResponse(accepted=True))
-    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client, pool_pump_circuit_id="p0102")
     heat_command = VendorCommand(
         vendor="pentair",
         operation="body.set_heater",
@@ -161,7 +198,7 @@ def test_endpoint_rejects_unbounded_direct_body_heater_commands(
 @pytest.mark.parametrize(
     ("target", "parameters", "message"),
     (
-        ("other-pump", {"rpm": 2900}, "commissioned pump circuit"),
+        ("other-pump", {"rpm": 2900}, "currently resolved Pool pump circuit"),
         ("p0102", {"rpm": 2600}, "commissioned thermal baseline"),
         ("p0102", {"rpm": 2900, "mode": "RPM"}, "exactly one rpm"),
         ("p0102", {"rpm": 2900.5}, "whole number"),
@@ -173,7 +210,7 @@ def test_endpoint_rejects_unbounded_direct_pump_speed_commands(
     message: str,
 ) -> None:
     client = RecordingPentairClient(PentairCommandResponse(accepted=True))
-    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client, pool_pump_circuit_id="p0102")
     pump_command = VendorCommand(
         vendor="pentair",
         operation="pump.set_speed",
@@ -207,6 +244,7 @@ def test_endpoint_maps_client_outcomes_to_receipts(
     endpoint = PentairVendorCommandEndpoint(
         "intellicenter-main",
         RecordingPentairClient(response),
+        pool_pump_circuit_id="p0102",
     )
 
     receipt = endpoint.deliver(command(), correlation_id="correlation-123")
@@ -235,6 +273,7 @@ def test_endpoint_maps_known_client_errors_to_receipts(
     endpoint = PentairVendorCommandEndpoint(
         "intellicenter-main",
         ErrorPentairClient(error),
+        pool_pump_circuit_id="p0102",
     )
 
     receipt = endpoint.deliver(command(), correlation_id="correlation-123")
@@ -246,7 +285,7 @@ def test_endpoint_maps_known_client_errors_to_receipts(
 
 def test_endpoint_rejects_vendor_mismatch_and_unknown_operation() -> None:
     client = RecordingPentairClient(PentairCommandResponse(accepted=True))
-    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client, pool_pump_circuit_id="p0102")
 
     with pytest.raises(ValueError, match="does not match"):
         endpoint.deliver(command(vendor="hayward"), correlation_id="one")
@@ -263,7 +302,7 @@ def test_endpoint_validates_identity_and_correlation() -> None:
     with pytest.raises(ValueError, match="endpoint_id"):
         PentairVendorCommandEndpoint(" ", client)
 
-    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client)
+    endpoint = PentairVendorCommandEndpoint("intellicenter-main", client, pool_pump_circuit_id="p0102")
     with pytest.raises(ValueError, match="correlation_id"):
         endpoint.deliver(command(), correlation_id=" ")
 
@@ -292,6 +331,7 @@ def test_unexpected_client_error_remains_an_endpoint_exception() -> None:
     endpoint = PentairVendorCommandEndpoint(
         "intellicenter-main",
         ErrorPentairClient(RuntimeError("programming error")),
+        pool_pump_circuit_id="p0102",
     )
 
     with pytest.raises(RuntimeError, match="programming error"):
@@ -304,6 +344,7 @@ def test_endpoint_composes_with_registry_and_gateway() -> None:
         RecordingPentairClient(
             PentairCommandResponse(accepted=True, acknowledged=True)
         ),
+        pool_pump_circuit_id="p0102",
     )
     registry = EndpointRegistry()
     registry.register(endpoint)

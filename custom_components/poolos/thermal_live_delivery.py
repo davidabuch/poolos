@@ -19,6 +19,7 @@ from poolos.integration import (
     SetPumpSpeed,
     ThermalBody,
 )
+from poolos.intellicenter_readonly import is_pmpcirc_native_id
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
@@ -26,7 +27,6 @@ from poolos.physical_command_authority import (
     PhysicalCommandDeniedError,
     PhysicalRequestSource,
 )
-from poolos.thermal_live_execution import COMMISSIONED_THERMAL_PUMP_ID
 
 from .manual_intellicenter import (
     ManualIntelliCenterCommandError,
@@ -84,7 +84,7 @@ class ManualIntelliCenterThermalLiveDelivery:
             elif isinstance(operation, SetPumpSpeed):
                 self._validate_pump(operation)
                 manual_receipt = await self.manual.async_set_pump_circuit_speed(
-                    COMMISSIONED_THERMAL_PUMP_ID,
+                    operation.equipment_id,
                     operation.rpm,
                     request_source=self.request_source,
                     automatic_thermal_context=self.automatic_thermal_context,
@@ -165,7 +165,7 @@ class ManualIntelliCenterThermalLiveDelivery:
         return _BODY_ID[body]
 
     def _validate_pump(self, operation: SetPumpSpeed) -> None:
-        if operation.equipment_id != COMMISSIONED_THERMAL_PUMP_ID:
+        if not is_pmpcirc_native_id(operation.equipment_id):
             raise ValueError("unsupported thermal pump circuit")
         cleanup = self.automatic_thermal_context
         if (

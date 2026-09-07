@@ -32,7 +32,8 @@ in missing progress. Each owned concept retains its exact operation, accepted
 receipt, and delivery-correlation identities. Provenance remains concept-specific:
 
 - accepted target-body activation may own body activation;
-- accepted `p0102` thermal setpoint delivery may own the pump setpoint; and
+- accepted delivery to the bound current Pool `C0006` PMPCIRC may own the pump
+  setpoint; and
 - accepted target-body heater delivery may own heat-source selection.
 
 An operation that was merely planned, authorized, observed, or verified does
@@ -46,9 +47,11 @@ progress-compatible residual-plan contract. Continued ownership also requires
 chronological evidence, the originating requested mode, a fresh and usable
 target-body topology, fresh and usable pump evidence for an owned setpoint, and
 fresh and usable heater evidence for an owned source. Pump-setpoint ownership
-distinguishes the authoritative `p0102.SPEED` configuration from actual
-parent-pump RPM and requires both to remain aligned within the existing
-inclusive 25-RPM tolerance.
+distinguishes the authoritative stable Pool PMPCIRC configured-speed concept
+from actual parent-pump RPM and requires both to remain aligned within the
+existing inclusive 25-RPM tolerance. The configured-speed observation retains
+the current concrete `p01xx` source identity without making that recycled ID a
+stable semantic identity.
 
 Pool and Spa simultaneously active, target-body loss, other-body takeover,
 missing or degraded relevant evidence, incompatible native values, and an
@@ -117,8 +120,9 @@ source residual is consumed, the automatic driver may copy only its accepted
 Pool body-activation and pump-setpoint provenance into a distinct ephemeral
 cleanup token. The token is not dispatch authority. Each command requires a new
 one-epoch candidate and a matching typed final-gateway context. Exact Pool body
-deactivation requires body provenance; one-time `p0102` normalization requires
-pump provenance and the current canonical filtration target. Verification uses
+deactivation requires body provenance; one-time normalization of the exact
+currently resolved Pool PMPCIRC requires pump provenance and the current
+canonical filtration target. Verification uses
 later authoritative Pool activity or configured-speed plus actual-RPM truth.
 Verified normalization consumes only pump cleanup capability, while independent
 body provenance may wait for filtration to stop being an immediate successor.

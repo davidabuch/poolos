@@ -1033,6 +1033,11 @@ class ThermalAutomaticExecutionDriver:
             provenance=provenance,
             assessment=assessment,
             epoch_identity=frame.epoch_identity,
+            pump_circuit_id=(
+                None
+                if frame.thermal is None
+                else frame.thermal.pool_pump_circuit_id
+            ),
         )
         if candidate is None:
             return self._publish(

@@ -62,6 +62,14 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
     ) -> ManualIntelliCenterThermalLiveDelivery:
         purpose = AutomaticThermalDispatchPurpose.NORMAL
         probe_operation_id = None
+        pump_targets = {
+            operation.equipment_id
+            for operation in session.assessment.operations
+            if isinstance(operation, SetPumpSpeed)
+        }
+        if len(pump_targets) > 1:
+            raise ValueError("thermal plan contains conflicting pump identities")
+        pump_circuit_id = next(iter(pump_targets), None)
         currentness = session.originating_currentness
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
             sequence = session.coordination.current_step_sequence
@@ -78,7 +86,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                     epoch_identity=epoch_identity,
                     operation_id=operation.operation_id,
                     operation="pump_circuit_speed",
-                    target="p0102",
+                    target=operation.equipment_id,
                     requested_value=operation.rpm,
                 )
                 probe_operation_id = operation.operation_id
@@ -86,6 +94,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
             body=session.assessment.desired.body.value,
+            pump_circuit_id=pump_circuit_id,
             purpose=purpose,
             probe_operation_id=probe_operation_id,
         )
@@ -135,7 +144,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             assert isinstance(operation, SetPumpSpeed)
             purpose = AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION
             physical_operation = "pump_circuit_speed"
-            target = "p0102"
+            target = operation.equipment_id
             value = operation.rpm
         self.authority.register_automatic_thermal_cleanup(
             epoch_identity=epoch_identity,
@@ -150,6 +159,11 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             epoch_identity=epoch_identity,
             session_identity=f"cleanup:{candidate.provenance_id}",
             body=ThermalBody.POOL.value,
+            pump_circuit_id=(
+                operation.equipment_id
+                if isinstance(operation, SetPumpSpeed)
+                else None
+            ),
             purpose=purpose,
             cleanup_candidate_identity=candidate.candidate_id,
         )

@@ -17,6 +17,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from .operating_baselines import PumpOperatingBaselines
+from .intellicenter_readonly import is_pmpcirc_native_id
 
 
 _THERMAL_BASELINES = PumpOperatingBaselines()
@@ -112,11 +113,6 @@ _GRID_OUTAGE_SHAPES: Mapping[
             "B1202",
             False,
         ),
-            GridOutageDispatchPurpose.POOL_PUMP_REDUCTION: (
-                "pump_circuit_speed",
-                "p0102",
-                _THERMAL_BASELINES.grid_outage_rpm,
-            ),
     }
 )
 
@@ -147,12 +143,20 @@ class GridOutageDispatchAuthority:
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         object.__setattr__(self, "purpose", GridOutageDispatchPurpose(self.purpose))
-        if not _grid_outage_shape_matches(
-            self.operation,
-            self.target,
-            self.requested_value,
-            _GRID_OUTAGE_SHAPES[self.purpose],
-        ):
+        allowed = (
+            self.operation == "pump_circuit_speed"
+            and is_pmpcirc_native_id(self.target)
+            and type(self.requested_value) is int
+            and self.requested_value == _THERMAL_BASELINES.grid_outage_rpm
+            if self.purpose is GridOutageDispatchPurpose.POOL_PUMP_REDUCTION
+            else _grid_outage_shape_matches(
+                self.operation,
+                self.target,
+                self.requested_value,
+                _GRID_OUTAGE_SHAPES[self.purpose],
+            )
+        )
+        if not allowed:
             raise ValueError(
                 "outage authority does not match exact reduction envelope"
             )
@@ -220,12 +224,12 @@ class AutomaticThermalCleanupAuthority:
         elif self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION:
             if not (
                 self.operation == "pump_circuit_speed"
-                and self.target == "p0102"
+                and is_pmpcirc_native_id(self.target)
                 and isinstance(self.requested_value, int)
                 and not isinstance(self.requested_value, bool)
                 and self.requested_value > 0
             ):
-                raise ValueError("pump cleanup authority must bind one positive p0102 RPM")
+                raise ValueError("pump cleanup authority must bind one positive Pool RPM")
         else:
             raise ValueError("unsupported circulation cleanup authority purpose")
 
@@ -249,7 +253,7 @@ class AutomaticThermalProbeAuthority:
                 raise ValueError(f"{name} must not be empty")
         allowed = (
             self.operation == "pump_circuit_speed"
-            and self.target == "p0102"
+            and is_pmpcirc_native_id(self.target)
             and isinstance(self.requested_value, int)
             and not isinstance(self.requested_value, bool)
             and self.requested_value == _THERMAL_BASELINES.temperature_probe_rpm
@@ -266,6 +270,7 @@ class AutomaticThermalDispatchContext:
     epoch_identity: str
     session_identity: str
     body: str
+    pump_circuit_id: str | None = None
     purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL
     cleanup_authority: AutomaticThermalCleanupAuthority | None = None
     probe_authority: AutomaticThermalProbeAuthority | None = None
@@ -283,6 +288,12 @@ class AutomaticThermalDispatchContext:
             "purpose",
             AutomaticThermalDispatchPurpose(self.purpose),
         )
+        if self.pump_circuit_id is not None and not is_pmpcirc_native_id(
+            self.pump_circuit_id
+        ):
+            raise ValueError(
+                "automatic thermal pump circuit must be a concrete p01xx identity"
+            )
         cleanup_purposes = {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
@@ -582,6 +593,7 @@ class PoolOSPhysicalCommandAuthority:
         epoch_identity: str,
         session_identity: str,
         body: str,
+        pump_circuit_id: str | None = None,
         purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL,
         cleanup_candidate_identity: str | None = None,
         probe_operation_id: str | None = None,
@@ -629,6 +641,7 @@ class PoolOSPhysicalCommandAuthority:
             epoch_identity=epoch_identity,
             session_identity=session_identity,
             body=body,
+            pump_circuit_id=pump_circuit_id,
             purpose=purpose,
             cleanup_authority=cleanup,
             probe_authority=probe,
@@ -1026,7 +1039,8 @@ def _automatic_thermal_request_matches_context(
         )
     if request.operation == "pump_circuit_speed":
         return (
-            request.target == "p0102"
+            context.pump_circuit_id is not None
+            and request.target == context.pump_circuit_id
             and not isinstance(request.requested_value, bool)
             and request.requested_value
             in {

@@ -146,6 +146,7 @@ class PoolOSGridOutageSafetyRuntime:
             authority_not_before=authority_not_before,
             evaluated_at=snapshot.generated_at,
         )
+        thermal_assessment = getattr(self.thermal_runtime, "assessment", None)
         frame = GridOutageSafetyFrame(
             frame_identity=orchestration.snapshot_identity,
             observed_at=snapshot.generated_at,
@@ -154,6 +155,11 @@ class PoolOSGridOutageSafetyRuntime:
             filtration=(None if filtration_runtime is None else filtration_runtime.assessment),
             physical_authority_ready=(base_reason is PhysicalAuthorityReason.ALLOWED),
             transport_ready=manual_ready,
+            pool_pump_circuit_id=(
+                None
+                if thermal_assessment is None
+                else thermal_assessment.pool_pump_circuit_id
+            ),
             external_preemption_reason=external_preemption_reason,
         )
         assessment = self.engine.evaluate(frame)

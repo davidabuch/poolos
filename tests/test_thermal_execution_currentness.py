@@ -61,7 +61,7 @@ def _assessment(
         pump_rpm=current_rpm,
         body_active=body_active,
     )
-    return ThermalExecutionPlanBuilder().build(desired, current)
+    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(desired, current)
 
 
 def _currentness(
@@ -432,7 +432,7 @@ def test_reordered_or_unexpectedly_grown_residual_plan_fails_closed() -> None:
 def test_blocked_same_purpose_plan_fails_closed() -> None:
     original_assessment = _assessment()
     originating = _currentness(original_assessment, "evaluation-origin")
-    blocked_assessment = ThermalExecutionPlanBuilder().build(
+    blocked_assessment = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         replace(
             original_assessment.desired,
             evaluated_at=NOW + timedelta(seconds=1),

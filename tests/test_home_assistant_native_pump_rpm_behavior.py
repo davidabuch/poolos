@@ -211,7 +211,7 @@ def test_pmpcirc_must_be_assigned_to_pool_circuit(
 
     with pytest.raises(
         ManualIntelliCenterCommandError,
-        match="not assigned to the Pool circuit",
+        match="unique live Pool PMPCIRC",
     ):
         _run(
             gateway.async_set_pump_circuit_speed(
@@ -256,6 +256,43 @@ def test_pool_pmpcirc_native_id_is_not_hard_coded(
     assert receipt.value == 2900
 
 
+def test_manual_gateway_rejects_stale_or_ambiguous_pool_pmpcirc_identity(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory()
+    current = pump_circuit_object_factory(objnam="p0101", circuit_id="C0006")
+    stale = pump_circuit_object_factory(objnam="p0102", circuit_id="C0007")
+    gateway, recorder = _gateway([pump, current, stale])
+
+    with pytest.raises(ManualIntelliCenterCommandError, match="unique live Pool PMPCIRC"):
+        _run(gateway.async_set_pump_circuit_speed("p0102", 2900))
+
+    duplicate = pump_circuit_object_factory(objnam="p0199", circuit_id="C0006")
+    gateway, recorder = _gateway([pump, current, duplicate])
+    with pytest.raises(ManualIntelliCenterCommandError, match="unique live Pool PMPCIRC"):
+        _run(gateway.async_set_pump_circuit_speed("p0101", 2900))
+
+    assert recorder.calls == []
+
+
+def test_manual_gateway_rejects_non_p01xx_pool_assignment(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory()
+    malformed = pump_circuit_object_factory(
+        objnam="arbitrary",
+        circuit_id="C0006",
+    )
+    gateway, recorder = _gateway([pump, malformed])
+
+    with pytest.raises(ManualIntelliCenterCommandError, match="unique live Pool PMPCIRC"):
+        _run(gateway.async_set_pump_circuit_speed("arbitrary", 2900))
+
+    assert recorder.calls == []
+
+
 def test_allowlisted_id_must_be_live_pmpcirc(
     pump_object_factory,
 ) -> None:
@@ -264,7 +301,7 @@ def test_allowlisted_id_must_be_live_pmpcirc(
 
     with pytest.raises(
         ManualIntelliCenterCommandError,
-        match="not a live PMPCIRC",
+        match="unique live Pool PMPCIRC",
     ):
         _run(
             gateway.async_set_pump_circuit_speed(
@@ -292,7 +329,7 @@ def test_pmpcirc_requires_explicit_rpm_mode(
 
         with pytest.raises(
             ManualIntelliCenterCommandError,
-            match="not configured for RPM control",
+            match="unique live Pool PMPCIRC",
         ):
             _run(
                 gateway.async_set_pump_circuit_speed(
@@ -316,7 +353,7 @@ def test_pmpcirc_parent_must_be_live_pump(
 
     with pytest.raises(
         ManualIntelliCenterCommandError,
-        match="parent is not a live pump object",
+        match="unique live Pool PMPCIRC",
     ):
         _run(
             gateway.async_set_pump_circuit_speed(
@@ -348,7 +385,7 @@ def test_native_parent_min_max_are_required(
 
         with pytest.raises(
             ManualIntelliCenterCommandError,
-            match="native RPM limits are unavailable",
+            match="unique live Pool PMPCIRC",
         ):
             _run(
                 gateway.async_set_pump_circuit_speed(
@@ -373,7 +410,7 @@ def test_native_parent_min_max_order_must_be_valid(
 
     with pytest.raises(
         ManualIntelliCenterCommandError,
-        match="RPM limits are invalid",
+        match="unique live Pool PMPCIRC",
     ):
         _run(
             gateway.async_set_pump_circuit_speed(

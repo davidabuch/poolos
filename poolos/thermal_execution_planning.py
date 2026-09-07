@@ -24,6 +24,10 @@ from .integration import (
     SetPumpSpeed,
     ThermalBody,
 )
+from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    is_pmpcirc_native_id,
+)
 from .pump_priming_policy import PumpPrimingPolicy
 from .spa_thermal_policy import SpaHeatingMode, SpaPolicyAssessment, SpaPolicyInput
 from .thermal_source_policy import (
@@ -320,12 +324,14 @@ def desired_spa_state(
 class ThermalExecutionPlanBuilder:
     """Create ordered canonical operations without authorizing or delivering them."""
 
-    pump_equipment_id: str = "p0102"
+    pump_equipment_id: str | None = None
     pump_rpm_tolerance: int = 25
 
     def __post_init__(self) -> None:
-        if not self.pump_equipment_id.strip():
-            raise ValueError("pump_equipment_id must not be empty")
+        if self.pump_equipment_id is not None and not is_pmpcirc_native_id(
+            self.pump_equipment_id
+        ):
+            raise ValueError("pump_equipment_id must be a concrete p01xx identity")
         if self.pump_rpm_tolerance < 0:
             raise ValueError("pump_rpm_tolerance must not be negative")
 
@@ -358,6 +364,12 @@ class ThermalExecutionPlanBuilder:
                         if desired.selected_source is PhysicalHeatMode.OFF
                         or current.pump_rpm is not None
                         else ("pump_observation_missing",)
+                    ),
+                    *(
+                        ()
+                        if desired.required_pump_rpm is None
+                        or self.pump_equipment_id is not None
+                        else ("pool_pump_circuit_unresolved",)
                     ),
                 )
             )
@@ -450,6 +462,7 @@ class ThermalExecutionPlanBuilder:
                     "verification_truth": "authoritative_native_body_active",
                 }
             elif kind == "prime":
+                assert self.pump_equipment_id is not None
                 assert priming.priming_rpm is not None
                 assert priming.minimum_duration is not None
 
@@ -492,6 +505,7 @@ class ThermalExecutionPlanBuilder:
                 }
             else:
                 assert desired.required_pump_rpm is not None
+                assert self.pump_equipment_id is not None
                 probe_step = desired.reason_code == "pool_temperature_probe_required"
                 operation = SetPumpSpeed(
                     equipment_id=self.pump_equipment_id,
@@ -508,7 +522,7 @@ class ThermalExecutionPlanBuilder:
                 )
                 expected = {"pump.rpm": desired.required_pump_rpm}
                 if probe_step:
-                    expected["pump_circuit.p0102.configured_speed_rpm"] = (
+                    expected[POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT] = (
                         desired.required_pump_rpm
                     )
                 metadata = {
@@ -518,7 +532,7 @@ class ThermalExecutionPlanBuilder:
                         {
                             "pool_temperature_probe_step": "true",
                             "strict_post_delivery_observation": "true",
-                            "numeric_tolerance:pump_circuit.p0102.configured_speed_rpm": "0",
+                            f"numeric_tolerance:{POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT}": "0",
                         }
                         if probe_step
                         else {}
@@ -604,6 +618,7 @@ class ThermalExecutionPlanBuilder:
             "current_source": current.selected_source.value,
             "evaluated_at": desired.evaluated_at.isoformat(),
             "ordering": ordering,
+            "pump_equipment_id": self.pump_equipment_id,
             "reason_code": desired.reason_code,
             "requested_mode": desired.requested_mode,
             "required_rpm": desired.required_pump_rpm,

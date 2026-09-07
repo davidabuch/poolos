@@ -22,11 +22,8 @@ def test_pool_rpm_number_discovers_native_pool_pmpcirc() -> None:
     source = _source()
 
     assert '_POOL_PMPCIRC_TYPE = "PMPCIRC"' in source
-    assert '_POOL_CIRCUIT_OBJNAM = "C0006"' in source
     assert '_RPM_MODE = "RPM"' in source
-    assert 'attributes.get("CIRCUIT")' in source
-    assert 'attributes.get("SELECT")' in source
-    assert "len(matches) != 1" in source
+    assert "resolve_pool_pump_circuit" in source
     assert "_POOL_PMPCIRC_OBJNAM" not in source
     assert '"p0102"' not in source
 

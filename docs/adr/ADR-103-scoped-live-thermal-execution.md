@@ -9,9 +9,12 @@ ADR-102 created command-disabled coupled Pool/Hot Tub plans containing only
 correctly rejects LIVE runtime and physical endpoints. Removing those global
 guards would grant authority far beyond thermal commissioning.
 
-The commissioned thermal identities are PMPCIRC `p0102`, Pool `B1101`, Hot Tub
-`B1202`, Off `00000`, Gas `H0001`, and Solar `H0002`. Phase 2 must provide a
-production-capable path without activating it, changing hydraulic routes,
+The commissioned stable identities are Pool circuit `C0006`, Pool body `B1101`,
+Hot Tub body `B1202`, Off `00000`, Gas `H0001`, and Solar `H0002`. IntelliCenter
+may recycle the concrete `p01xx` PMPCIRC object representing the Pool circuit's
+RPM assignment, so the current native target must be uniquely resolved from
+`PMPCIRC + CIRCUIT=C0006 + SELECT=RPM + valid PUMP parent`. Phase 2 must provide
+a production-capable path without activating it, changing hydraulic routes,
 rewriting IntelliCenter configuration, or resuming work after restart. A later
 cold-start extension added narrowly bounded activation of the selected body,
 without granting route selection or body-deactivation authority.
@@ -40,8 +43,9 @@ before delivery. Authorization requires:
 - no native configuration conflict affecting the selected thermal capability.
 
 Normal thermal authority admits only `SetBodyActive(Pool/Hot Tub, True)`,
-`SetPumpSpeed(p0102, solar_heating_rpm/gas_heating_rpm/priming_rpm)`, and
-body-matching `SetHeatMode(Off/Solar/Gas)` are admitted. Body activation
+`SetPumpSpeed(current Pool C0006 PMPCIRC,
+solar_heating_rpm/gas_heating_rpm/priming_rpm)`, and body-matching
+`SetHeatMode(Off/Solar/Gas)`. Body activation
 requires both body observations to be fresh and usable, the target to be
 explicitly inactive, the other body to be explicitly inactive, and no separate
 hydraulic veto. Body deactivation remains prohibited. Filtration, probe,
@@ -52,7 +56,7 @@ conflicts. Gas is blocked by native Gas/Heater/Spa RPM or general RPM ownership
 conflicts. Native configuration is never rewritten.
 
 Pool water-temperature acquisition has a separate, narrower authority purpose.
-It admits only the exact current Pool `p0102` operation at the canonical
+It admits only the exact current Pool `C0006` PMPCIRC operation at the canonical
 temperature-probe RPM after the existing Pool body-establishment and verified
 priming steps. The operation must retain the canonical probe reason, plan/step
 metadata, execution-purpose identity, current epoch, and both actual-RPM and
@@ -63,7 +67,7 @@ the boundary.
 
 Accepted probe-RPM delivery is not acquisition. Later authoritative evidence
 must prove Pool active, Spa inactive, complete inactive shared hydraulics,
-authoritatively on-grid state, exact configured `p0102` speed, and actual RPM
+authoritatively on-grid state, exact configured Pool PMPCIRC speed, and actual RPM
 within the existing inclusive 25-RPM tolerance. That verification evidence must
 be strictly later than delivery. Only then does one in-memory acquisition epoch
 start. Verified priming time contributes zero acquisition time.
@@ -160,7 +164,8 @@ evidence stops the execution.
 
 The core defines an async thermal delivery port and imports no Home Assistant
 code. The HA adapter wraps the existing `ManualIntelliCenterControl` methods
-for `p0102` RPM and commissioned body `HEATER` selection only. This adapter
+for the exact current Pool `C0006` PMPCIRC RPM target and commissioned body
+`HEATER` selection only. This adapter
 explicitly validates Pool/Hot Tub and Off/Gas/Solar before mapping them to the
 commissioned native IDs. Invalid values are rejected without calling manual
 control. Manual controls remain separate.
@@ -199,7 +204,8 @@ After authoritative Pool source-Off confirmation, the driver may retain a
 separate, in-memory circulation-cleanup provenance copied only from accepted
 body-activation and pump-setpoint provenance. A fresh canonical circulation-
 successor assessment may bind one exact Pool body-Off candidate, or one exact
-`p0102` filtration-successor RPM candidate, to the current authoritative epoch.
+current Pool PMPCIRC filtration-successor RPM candidate, to the current
+authoritative epoch.
 These use distinct typed final-gateway purposes; neither extends normal thermal
 authority. Body-Off requires accepted PoolOS body-activation provenance. Pump
 normalization requires accepted pump-setpoint provenance and the exact current
@@ -211,9 +217,10 @@ immediate successor. Restart, unload, gate loss, or external/hydraulic takeover
 discards cleanup provenance without a compensating command.
 
 The generic Pentair physical endpoint independently rejects `pump.set_speed`
-unless its target is `p0102`, its sole parameter is an integer `rpm`, and the
-value is the commissioned 2900 or 3000 thermal baseline. Existing body/heater
-endpoint bounds remain unchanged.
+unless its target exactly matches the Pool PMPCIRC identity bound into that
+endpoint, its sole parameter is an integer `rpm`, and the value is the
+commissioned 2900 or 3000 thermal baseline. Existing body/heater endpoint bounds
+remain unchanged.
 
 ## Safety consequences
 

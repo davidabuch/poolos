@@ -24,6 +24,10 @@ from .external_change import (
 )
 from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
+from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    is_pmpcirc_native_id,
+)
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -127,6 +131,23 @@ class GridOutageReductionCandidate:
         ):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
+        if self.kind is GridOutageReductionKind.POOL_PUMP_REDUCTION:
+            if not (
+                self.operation == "pump_circuit_speed"
+                and is_pmpcirc_native_id(self.target)
+                and type(self.requested_value) is int
+                and self.requested_value == _OUTAGE_RPM
+                and self.expected_concept
+                == POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                and self.expected_native_object_id == self.target
+                and self.priority == 9
+            ):
+                raise ValueError(
+                    "outage pump candidate does not match its bound Pool PMPCIRC"
+                )
+            if self.formed_at is not None:
+                _require_aware(self.formed_at)
+            return
         expected = _CANDIDATE_SHAPES[self.kind]
         actual = (
             self.operation,
@@ -206,14 +227,6 @@ _CANDIDATE_SHAPES: Mapping[
             "B1202",
             7,
         ),
-        GridOutageReductionKind.POOL_PUMP_REDUCTION: (
-            "pump_circuit_speed",
-            "p0102",
-            _OUTAGE_RPM,
-            "pump_circuit.p0102.configured_speed_rpm",
-            "p0102",
-            9,
-        ),
     }
 )
 
@@ -229,6 +242,7 @@ class GridOutageSafetyFrame:
     filtration: FiltrationAccountingSnapshot | None
     physical_authority_ready: bool
     transport_ready: bool
+    pool_pump_circuit_id: str | None = None
     external_preemption_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -939,12 +953,21 @@ def _select_candidate(
             return None, "grid_outage_pool_routing_not_established"
         if pool_source != "00000":
             return None, "grid_outage_source_shutdown_not_complete"
-        configured = state("pump_circuit.p0102.configured_speed_rpm")
+        if frame.pool_pump_circuit_id is None:
+            return None, "grid_outage_pool_pump_circuit_unresolved"
+        configured = state(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT)
         actual = state("pump.rpm")
         configured_rpm = _number(configured)
         actual_rpm = _number(actual)
         if not configured.usable or configured_rpm is None:
             return None, "grid_outage_configured_pump_evidence_unusable"
+        if (
+            _native_object_id(
+                by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT)
+            )
+            != frame.pool_pump_circuit_id
+        ):
+            return None, "grid_outage_pool_pump_identity_stale"
         if not actual.usable or actual_rpm is None:
             return None, "grid_outage_actual_pump_evidence_unusable"
         if actual_rpm <= 0:
@@ -967,7 +990,19 @@ def _candidate(
     frame: GridOutageSafetyFrame,
     epoch: str,
 ) -> GridOutageReductionCandidate:
-    shape = _CANDIDATE_SHAPES[kind]
+    shape = (
+        (
+            "pump_circuit_speed",
+            frame.pool_pump_circuit_id,
+            _OUTAGE_RPM,
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+            frame.pool_pump_circuit_id,
+            9,
+        )
+        if kind is GridOutageReductionKind.POOL_PUMP_REDUCTION
+        and frame.pool_pump_circuit_id is not None
+        else _CANDIDATE_SHAPES[kind]
+    )
     fingerprint = _evidence_fingerprint(frame.observations)
     identity = sha256(
         f"{epoch}|{frame.frame_identity}|{kind.value}|{fingerprint}".encode()
@@ -1053,7 +1088,7 @@ def _evidence_fingerprint(observations: Iterable[PoolObservation]) -> str:
         "pool.active",
         "spa.active",
         "pump.rpm",
-        "pump_circuit.p0102.configured_speed_rpm",
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         "pool_light.active",
