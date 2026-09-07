@@ -18,8 +18,8 @@ from .coordinator import PoolOSCoordinator
 from .manual_intellicenter import ManualIntelliCenterCommandError
 
 
-_POOL_PMPCIRC_OBJNAM = "p0102"
 _POOL_PMPCIRC_TYPE = "PMPCIRC"
+_POOL_CIRCUIT_OBJNAM = "C0006"
 _RPM_MODE = "RPM"
 _DEFAULT_MIN_RPM = 450
 _DEFAULT_MAX_RPM = 3450
@@ -80,15 +80,36 @@ def _positive_int(value: Any) -> int | None:
 def _pool_pump_circuit(
     coordinator: PoolOSCoordinator,
 ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
-    item = _raw_object(coordinator, _POOL_PMPCIRC_OBJNAM)
+    """Return the unique live RPM PMPCIRC assigned to the Pool circuit."""
 
-    if item is None:
+    snapshot = _raw_snapshot(coordinator)
+
+    if snapshot is None:
         return None, {}
 
-    if str(item.object_type).upper() != _POOL_PMPCIRC_TYPE:
+    matches: list[tuple[Any, dict[str, Any]]] = []
+
+    for item in snapshot.raw_inventory:
+        if str(item.object_type).upper() != _POOL_PMPCIRC_TYPE:
+            continue
+
+        attributes = _raw_attributes(item)
+
+        if str(attributes.get("CIRCUIT") or "") != _POOL_CIRCUIT_OBJNAM:
+            continue
+
+        if str(attributes.get("SELECT") or "").upper() != _RPM_MODE:
+            continue
+
+        if not str(attributes.get("PARENT") or "").strip():
+            continue
+
+        matches.append((item, attributes))
+
+    if len(matches) != 1:
         return None, {}
 
-    return item, _raw_attributes(item)
+    return matches[0]
 
 
 def _rpm_limits(
@@ -175,7 +196,7 @@ class PoolOSNativeIntelliCenterPoolRPM(
 
     @property
     def native_value(self) -> int | None:
-        """Return native-authoritative p0102 SPEED."""
+        """Return native-authoritative Pool PMPCIRC SPEED."""
 
         _item, attributes = _pool_pump_circuit(self.coordinator)
         return _positive_int(attributes.get("SPEED"))
@@ -206,8 +227,15 @@ class PoolOSNativeIntelliCenterPoolRPM(
                 "manual IntelliCenter command connection is not configured"
             )
 
+        item, _attributes = _pool_pump_circuit(self.coordinator)
+
+        if item is None:
+            raise ManualIntelliCenterCommandError(
+                "unique live Pool PMPCIRC is unavailable"
+            )
+
         await manual.async_set_pump_circuit_speed(
-            _POOL_PMPCIRC_OBJNAM,
+            str(item.native_id),
             value,
         )
 
@@ -223,7 +251,7 @@ class PoolOSNativeIntelliCenterPoolRPM(
         )
 
         return {
-            "pmpcirc_objnam": _POOL_PMPCIRC_OBJNAM,
+            "pmpcirc_objnam": None if item is None else str(item.native_id),
             "native_object_type": (
                 None if item is None else item.object_type
             ),

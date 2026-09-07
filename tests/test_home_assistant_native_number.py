@@ -18,12 +18,17 @@ def test_number_platform_is_registered() -> None:
     assert SOURCE.is_file()
 
 
-def test_pool_rpm_number_targets_exact_native_pmpcirc() -> None:
+def test_pool_rpm_number_discovers_native_pool_pmpcirc() -> None:
     source = _source()
 
-    assert '_POOL_PMPCIRC_OBJNAM = "p0102"' in source
     assert '_POOL_PMPCIRC_TYPE = "PMPCIRC"' in source
+    assert '_POOL_CIRCUIT_OBJNAM = "C0006"' in source
     assert '_RPM_MODE = "RPM"' in source
+    assert 'attributes.get("CIRCUIT")' in source
+    assert 'attributes.get("SELECT")' in source
+    assert "len(matches) != 1" in source
+    assert "_POOL_PMPCIRC_OBJNAM" not in source
+    assert '"p0102"' not in source
 
 
 def test_pool_rpm_number_is_native_authoritative_and_not_optimistic() -> None:
@@ -68,10 +73,12 @@ def test_manual_gateway_validates_pmpcirc_identity_mode_and_parent() -> None:
         encoding="utf-8"
     )
 
-    assert "_ALLOWED_PUMP_CIRCUIT_IDS" in source
+    assert "_POOL_CIRCUIT_OBJNAM" in source
     assert "PMPCIRC_TYPE" in source
+    assert "CIRCUIT_ATTR" in source
     assert "SELECT_ATTR" in source
     assert "PARENT_ATTR" in source
+    assert "_ALLOWED_PUMP_CIRCUIT_IDS" not in source
     assert "PUMP_TYPE" in source
     assert "MIN_ATTR" in source
     assert "MAX_ATTR" in source

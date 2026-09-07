@@ -62,6 +62,7 @@ private_pyintellicenter.PoolModel = _StubPoolModel
 private_pyintellicenter.LIGHT_EFFECTS = {}
 private_pyintellicenter.BODY_ATTR = "BODY"
 private_pyintellicenter.CHEM_TYPE = "CHEM"
+private_pyintellicenter.CIRCUIT_ATTR = "CIRCUIT"
 private_pyintellicenter.HEATER_ATTR = "HEATER"
 private_pyintellicenter.MAX_ATTR = "MAX"
 private_pyintellicenter.MIN_ATTR = "MIN"
@@ -195,17 +196,22 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_only_exact_pool_pmpcirc_id_is_accepted(
+def test_pmpcirc_must_be_assigned_to_pool_circuit(
     pump_object_factory,
     pump_circuit_object_factory,
 ) -> None:
     pump = pump_object_factory()
-    circuit = pump_circuit_object_factory(objnam="p0102")
-    gateway, recorder = _gateway([pump, circuit])
+
+    wrong_circuit = pump_circuit_object_factory(
+        objnam="p9999",
+        circuit_id="C0001",
+    )
+
+    gateway, recorder = _gateway([pump, wrong_circuit])
 
     with pytest.raises(
-        ValueError,
-        match="unsupported manual-control pump circuit",
+        ManualIntelliCenterCommandError,
+        match="not assigned to the Pool circuit",
     ):
         _run(
             gateway.async_set_pump_circuit_speed(
@@ -215,6 +221,39 @@ def test_only_exact_pool_pmpcirc_id_is_accepted(
         )
 
     assert recorder.calls == []
+
+
+def test_pool_pmpcirc_native_id_is_not_hard_coded(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory()
+
+    circuit = pump_circuit_object_factory(
+        objnam="p0101",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=950,
+    )
+
+    gateway, recorder = _gateway([pump, circuit])
+
+    receipt = _run(
+        gateway.async_set_pump_circuit_speed(
+            "p0101",
+            2900,
+        )
+    )
+
+    assert recorder.calls == [
+        (
+            "p0101",
+            {"SPEED": "2900"},
+        )
+    ]
+    assert receipt.body_objnam == "p0101"
+    assert receipt.operation == "pump_circuit_speed"
+    assert receipt.value == 2900
 
 
 def test_allowlisted_id_must_be_live_pmpcirc(
@@ -246,6 +285,7 @@ def test_pmpcirc_requires_explicit_rpm_mode(
     for mode in ("GPM", None):
         circuit = pump_circuit_object_factory(
             objnam="p0102",
+            circuit_id="C0006",
             mode=mode,
         )
         gateway, recorder = _gateway([pump, circuit])
@@ -270,6 +310,7 @@ def test_pmpcirc_parent_must_be_live_pump(
     circuit = pump_circuit_object_factory(
         objnam="p0102",
         pump_id="P404",
+        circuit_id="C0006",
     )
     gateway, recorder = _gateway([circuit])
 
@@ -291,7 +332,7 @@ def test_native_parent_min_max_are_required(
     pump_object_factory,
     pump_circuit_object_factory,
 ) -> None:
-    circuit = pump_circuit_object_factory(objnam="p0102")
+    circuit = pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")
 
     for minimum, maximum in (
         (None, 3450),
@@ -327,7 +368,7 @@ def test_native_parent_min_max_order_must_be_valid(
         minimum_rpm=3000,
         maximum_rpm=2000,
     )
-    circuit = pump_circuit_object_factory(objnam="p0102")
+    circuit = pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")
     gateway, recorder = _gateway([pump, circuit])
 
     with pytest.raises(
@@ -352,7 +393,7 @@ def test_requested_rpm_must_be_inside_native_bounds(
         minimum_rpm=450,
         maximum_rpm=3450,
     )
-    circuit = pump_circuit_object_factory(objnam="p0102")
+    circuit = pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")
 
     for rpm in (449, 3451):
         gateway, recorder = _gateway([pump, circuit])
@@ -376,7 +417,7 @@ def test_fractional_or_non_numeric_rpm_is_rejected_before_delivery(
     pump_circuit_object_factory,
 ) -> None:
     pump = pump_object_factory()
-    circuit = pump_circuit_object_factory(objnam="p0102")
+    circuit = pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")
 
     gateway, recorder = _gateway([pump, circuit])
 
@@ -392,7 +433,7 @@ def test_fractional_or_non_numeric_rpm_is_rejected_before_delivery(
     assert recorder.calls == []
 
 
-def test_valid_2900_request_sends_exact_speed_payload_to_p0102(
+def test_valid_2900_request_sends_exact_speed_payload_to_selected_pmpcirc(
     pump_object_factory,
     pump_circuit_object_factory,
 ) -> None:
@@ -402,6 +443,7 @@ def test_valid_2900_request_sends_exact_speed_payload_to_p0102(
     )
     circuit = pump_circuit_object_factory(
         objnam="p0102",
+        circuit_id="C0006",
         mode="RPM",
         rpm_setpoint=2600,
     )
@@ -432,7 +474,7 @@ def test_command_failure_is_not_reported_as_success(
     pump_circuit_object_factory,
 ) -> None:
     pump = pump_object_factory()
-    circuit = pump_circuit_object_factory(objnam="p0102")
+    circuit = pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")
 
     recorder = _RecordingController()
     recorder.error = RuntimeError("synthetic transport failure")
@@ -468,6 +510,7 @@ def test_pump_speed_expectation_tracks_configured_pmpcirc_not_actual_rpm(
     circuit = pump_circuit_object_factory(
         objnam="p0102",
         pump_id="PMP01",
+        circuit_id="C0006",
         rpm_setpoint=2600,
     )
     gateway, recorder = _gateway([pump, circuit])
@@ -526,7 +569,7 @@ def test_unavailable_manual_transport_rejects_before_delivery(
     pump_circuit_object_factory,
 ) -> None:
     pump = pump_object_factory()
-    circuit = pump_circuit_object_factory(objnam="p0102")
+    circuit = pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")
 
     gateway, recorder = _gateway([pump, circuit])
     gateway._state = ManualIntelliCenterState.DISCONNECTED
@@ -743,7 +786,7 @@ def test_queued_probe_rpm_loses_stale_epoch_authority_inside_command_lock(
 ) -> None:
     async def scenario() -> None:
         gateway, recorder = _gateway(
-            [pump_object_factory(), pump_circuit_object_factory(objnam="p0102")]
+            [pump_object_factory(), pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")]
         )
         authority = gateway._command_authority
         authority.configure_automatic_thermal(
@@ -796,7 +839,7 @@ def test_queued_outage_reduction_loses_stale_frame_authority_inside_command_lock
 ) -> None:
     async def scenario() -> None:
         gateway, recorder = _gateway(
-            [pump_object_factory(), pump_circuit_object_factory(objnam="p0102")]
+            [pump_object_factory(), pump_circuit_object_factory(objnam="p0102", circuit_id="C0006")]
         )
         authority = gateway._command_authority
         authority.configure_grid_outage_safety(enabled=True)
@@ -891,6 +934,7 @@ def test_maintenance_blocks_every_public_mutation_surface(
     circuit = pump_circuit_object_factory(
         objnam="p0102",
         pump_id="PMP01",
+        circuit_id="C0006",
     )
     gateway, recorder = _gateway([chlorinator, pump, circuit])
     gateway._command_authority.resolve_maintenance(True)

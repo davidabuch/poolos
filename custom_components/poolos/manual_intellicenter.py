@@ -13,7 +13,7 @@ exposes a deliberately tiny mutation surface:
 * set one commissioned IntelliChlor Pool/Spa output percentage
 * turn explicitly allow-listed Jets, Slide, Spillway, and Pool Light circuits on or off
 * change the Pool Light IntelliBrite effect on C0002
-* change the explicitly allow-listed Pool PMPCIRC RPM setpoint on p0102
+* change the dynamically identified Pool PMPCIRC RPM setpoint
 
 No generic SETPARAMLIST interface is exposed to Home Assistant entities.
 """
@@ -44,6 +44,7 @@ from poolos.intellicenter_readonly import (
 from pyintellicenter import (
     BODY_ATTR,
     CHEM_TYPE,
+    CIRCUIT_ATTR,
     ICBaseController,
     ICConnectionHandler,
     ICModelController,
@@ -78,10 +79,10 @@ _ALLOWED_HEAT_SOURCE_IDS = frozenset(
     }
 )
 
-# p0102 is the native IntelliCenter PMPCIRC backing the existing
-# number.buch_family_rpm_pool entity. This is a circuit speed setpoint,
-# not the physical pump RPM telemetry value.
-_ALLOWED_PUMP_CIRCUIT_IDS = frozenset({"p0102"})
+# Pool PMPCIRC identity is discovered dynamically because IntelliCenter may
+# recycle p01xx object IDs when pump-speed assignments are deleted/recreated.
+# Only a PMPCIRC assigned to the commissioned Pool circuit may be mutated.
+_POOL_CIRCUIT_OBJNAM = "C0006"
 _PUMP_RPM_MODE = "RPM"
 
 _MIN_TARGET_TEMPERATURE = 40
@@ -573,8 +574,6 @@ class ManualIntelliCenterControl:
     ) -> ManualCommandReceipt:
         """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
 
-        self._require_pump_circuit_id(pump_circuit_objnam)
-
         if isinstance(rpm, bool) or not isinstance(rpm, (int, float)):
             raise ValueError("pump RPM must be numeric")
 
@@ -644,9 +643,8 @@ class ManualIntelliCenterControl:
                 ],
                 "allowed_body_ids": sorted(_ALLOWED_BODY_IDS),
                 "allowed_circuit_ids": sorted(_ALLOWED_CIRCUIT_IDS),
-                "allowed_pump_circuit_ids": sorted(
-                    _ALLOWED_PUMP_CIRCUIT_IDS
-                ),
+                "pool_pump_circuit_selection": "dynamic_native_circuit",
+                "pool_circuit_objnam": _POOL_CIRCUIT_OBJNAM,
                 "pump_rpm_requires_native_limits": True,
                 "pump_rpm_requires_explicit_rpm_mode": True,
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
@@ -729,14 +727,6 @@ class ManualIntelliCenterControl:
 
 
     @staticmethod
-    def _require_pump_circuit_id(pump_circuit_objnam: str) -> None:
-        if pump_circuit_objnam not in _ALLOWED_PUMP_CIRCUIT_IDS:
-            raise ValueError(
-                "unsupported manual-control pump circuit: "
-                f"{pump_circuit_objnam}"
-            )
-
-    @staticmethod
     def _coerce_positive_int(value: object) -> int | None:
         if isinstance(value, bool) or value is None:
             return None
@@ -759,6 +749,13 @@ class ManualIntelliCenterControl:
         if item is None or str(item.objtype).upper() != str(PMPCIRC_TYPE).upper():
             raise ManualIntelliCenterCommandError(
                 f"{pump_circuit_objnam} is not a live PMPCIRC object"
+            )
+
+        circuit_id = item[CIRCUIT_ATTR]
+
+        if circuit_id is None or str(circuit_id) != _POOL_CIRCUIT_OBJNAM:
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} is not assigned to the Pool circuit"
             )
 
         mode = item[SELECT_ATTR]

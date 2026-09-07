@@ -88,7 +88,9 @@ def test_manual_gateway_uses_pyintellicenter_supported_write_methods() -> None:
     assert "self._controller.set_circuit_state(" in source
     assert "self._controller.set_light_effect(" in source
     assert "SPEED_ATTR: str(target)" in source
-    assert '"p0102"' in source
+    assert '_POOL_CIRCUIT_OBJNAM = "C0006"' in source
+    assert "CIRCUIT_ATTR" in source
+    assert '"p0102"' not in source
     assert "self._controller.set_chlorinator_output(" in source
     assert '"CHR01"' in source
 
