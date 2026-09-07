@@ -184,13 +184,13 @@ def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
         candidate_id="candidate-1",
         purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
         operation="pump_circuit_speed",
-        target="p0102",
+        target="p0199",
         requested_value=1500,
     )
     context = authority.bind_grid_outage_dispatch(registered)
     exact = PhysicalCommandRequest(
         operation="pump_circuit_speed",
-        target="p0102",
+        target="p0199",
         source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
         requested_value=1500,
         grid_outage_context=context,
@@ -207,13 +207,13 @@ def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
         candidate_id="candidate-2",
         purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
         operation="pump_circuit_speed",
-        target="p0102",
+        target="p0199",
         requested_value=1500,
     )
     context = authority.bind_grid_outage_dispatch(registered)
     exact = PhysicalCommandRequest(
         operation="pump_circuit_speed",
-        target="p0102",
+        target="p0199",
         source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
         requested_value=1500,
         grid_outage_context=context,
@@ -222,7 +222,7 @@ def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
 
     wrong = PhysicalCommandRequest(
         operation="pump_circuit_speed",
-        target="p0102",
+        target="p0199",
         source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
         requested_value=1800,
         grid_outage_context=context,
@@ -534,6 +534,7 @@ def test_automatic_thermal_final_gateway_requires_both_independent_gates() -> No
         epoch_identity="epoch-1",
         session_identity="session-1",
         body="pool",
+        pump_circuit_id="p0102",
     )
 
     assert authority.assess(automatic_request(context)).reason is (
@@ -700,6 +701,7 @@ def test_automatic_thermal_final_gateway_allows_only_commissioned_envelope(
         epoch_identity="epoch-1",
         session_identity="session-1",
         body="pool",
+        pump_circuit_id="p0102",
     )
 
     assert authority.assess(
@@ -711,6 +713,50 @@ def test_automatic_thermal_final_gateway_allows_only_commissioned_envelope(
             automatic_thermal_context=context,
         )
     ).allowed
+
+
+def test_automatic_thermal_authority_binds_exact_recycled_pool_pmpcirc() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-dynamic-pump")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-dynamic-pump",
+        session_identity="session-dynamic-pump",
+        body="pool",
+        pump_circuit_id="p0199",
+    )
+
+    exact = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0199",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2900,
+        automatic_thermal_context=context,
+    )
+    stale = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2900,
+        automatic_thermal_context=context,
+    )
+
+    assert authority.assess(exact).allowed
+    assert authority.assess(stale).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+
+    with pytest.raises(ValueError, match="concrete p01xx"):
+        authority.bind_automatic_thermal_dispatch(
+            epoch_identity="epoch-dynamic-pump",
+            session_identity="session-invalid-pump",
+            body="pool",
+            pump_circuit_id="other-pump",
+        )
 
 
 @pytest.mark.parametrize(
@@ -854,6 +900,25 @@ def test_probe_authority_allows_only_exact_pool_probe_operation() -> None:
         )
 
 
+def test_probe_authority_binds_recycled_target_without_retargeting() -> None:
+    authority = ready()
+    context = _probe_context(authority, target="p0199")
+
+    def request_for(target: str) -> PhysicalCommandRequest:
+        return PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target=target,
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=1500,
+            automatic_thermal_context=context,
+        )
+
+    assert authority.assess(request_for("p0199")).allowed
+    assert authority.assess(request_for("p0102")).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+
+
 def test_probe_authority_is_invalidated_by_new_epoch() -> None:
     authority = ready()
     context = _probe_context(authority)
@@ -945,6 +1010,37 @@ def test_cleanup_authority_allows_only_exact_epoch_bound_candidate(
     authority.begin_automatic_thermal_epoch("newer-epoch")
     assert authority.assess(exact).reason is (
         PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+
+def test_cleanup_authority_binds_recycled_target_without_retargeting() -> None:
+    authority = ready()
+    context = _cleanup_context(
+        authority,
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+        operation="pump_circuit_speed",
+        target="p0199",
+        value=2600,
+    )
+
+    exact = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0199",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2600,
+        automatic_thermal_context=context,
+    )
+    stale = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2600,
+        automatic_thermal_context=context,
+    )
+
+    assert authority.assess(exact).allowed
+    assert authority.assess(stale).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
     )
 
 

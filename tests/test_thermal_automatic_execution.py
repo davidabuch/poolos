@@ -130,7 +130,7 @@ def _values(
         "spa.raw_heater_id": "00000",
         "spa.raw_htmode": "0",
         "pump.rpm": pump_rpm,
-        "pump_circuit.p0102.configured_speed_rpm": configured_rpm,
+        "pool.pump_circuit.configured_speed_rpm": configured_rpm,
         "solar.temperature": 110.0,
         "solar.active": False,
         "grid.outage_active": grid_outage_active,
@@ -174,7 +174,7 @@ def _frame(
             "pool.active",
             "spa.active",
             "pump.rpm",
-            "pump_circuit.p0102.configured_speed_rpm",
+            "pool.pump_circuit.configured_speed_rpm",
             "pool.raw_heater_id",
             "spa.raw_heater_id",
             "grid.outage_active",
@@ -211,6 +211,7 @@ def _frame(
             native_configuration=NativeConfigurationGuard().evaluate(
                 NativeConfigurationInput()
             ),
+            pool_pump_circuit_id="p0102",
             pool_temperature_probe_execution=probe_execution,
             pool_temperature_probe_continuity=(
                 PoolTemperatureProbeContinuityEvidence(evaluated_at=at, valid=True)

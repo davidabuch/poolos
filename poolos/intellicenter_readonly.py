@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+import math
+import re
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol
 
@@ -20,11 +22,19 @@ from .observations import (
 )
 
 NATIVE_ADAPTER_ID = "poolos.native_intellicenter.readonly.v1"
+POOL_CIRCUIT_NATIVE_ID = "C0006"
 POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT = (
-    "pump_circuit.p0102.configured_speed_rpm"
+    "pool.pump_circuit.configured_speed_rpm"
 )
 RAW_INVENTORY_DIAGNOSTIC_LIMIT = 20
 RAW_ATTRIBUTE_DIAGNOSTIC_LIMIT = 16
+_PMPCIRC_NATIVE_ID = re.compile(r"p01\d{2}")
+
+
+def is_pmpcirc_native_id(value: str) -> bool:
+    """Return whether a concrete native ID has the IntelliCenter p01xx shape."""
+
+    return bool(_PMPCIRC_NATIVE_ID.fullmatch(value))
 
 
 class NativeIntelliCenterStatus(str, Enum):
@@ -118,6 +128,26 @@ class NativePumpState:
     power_watts: float | None
     minimum_rpm: float | None = None
     maximum_rpm: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PoolPumpCircuitIdentity:
+    """One uniquely resolved native Pool RPM assignment and parent limits."""
+
+    native_id: str
+    parent_pump_id: str
+    minimum_rpm: int
+    maximum_rpm: int
+
+    def __post_init__(self) -> None:
+        if not is_pmpcirc_native_id(self.native_id) or not self.parent_pump_id.strip():
+            raise ValueError(
+                "Pool pump circuit identity must bind concrete p01xx and parent"
+            )
+        if self.minimum_rpm <= 0 or self.maximum_rpm <= 0:
+            raise ValueError("Pool pump native RPM limits must be positive")
+        if self.minimum_rpm > self.maximum_rpm:
+            raise ValueError("Pool pump native RPM limits are invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,6 +360,7 @@ NATIVE_TARGET_CONCEPTS = (
     "pool.command_active",
     "pool.heating_demand_active",
     "pool.maximum_temperature",
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     "pool.raw_heater_id",
     "pool.raw_htmode",
     "pool.target_temperature",
@@ -430,18 +461,20 @@ class NativeIntelliCenterReadAdapter:
                 _put(values, "pump.minimum_rpm", pump.minimum_rpm, "rpm", pump.native_id)
                 _put(values, "pump.maximum_rpm", pump.maximum_rpm, "rpm", pump.native_id)
 
-        # PMPCIRC SPEED is the configured circuit setpoint written by the
-        # commissioned p0102 command. It is deliberately distinct from the
-        # parent pump's observed/actual RPM, which may remain zero while the
-        # pump is off.
-        pump_circuit = next(
-            (
+        # PMPCIRC SPEED is the configured Pool-circuit setpoint. IntelliCenter
+        # may recycle p01xx native object IDs when speed assignments are
+        # deleted/recreated, so identity is bound to the stable Pool circuit
+        # rather than to a commissioned p01xx literal.
+        pump_identity = resolve_pool_pump_circuit(transport)
+        pump_circuit = (
+            None
+            if pump_identity is None
+            else next(
                 item
                 for item in transport.raw_inventory
-                if item.object_type.upper() == "PMPCIRC"
-                and item.native_id == "p0102"
-            ),
-            None,
+                if item.native_id == pump_identity.native_id
+                and item.object_type.upper() == "PMPCIRC"
+            )
         )
         if pump_circuit is not None:
             configured_speed = _raw_numeric_attribute(pump_circuit, "SPEED")
@@ -810,6 +843,71 @@ def _put(
         values[concept] = (value, unit, native_id)
 
 
+def _raw_attribute(
+    item: NativeRawObject,
+    name: str,
+) -> NativeRawScalar:
+    """Return one raw native attribute by case-insensitive name."""
+
+    expected = name.upper()
+    for attribute in item.attributes:
+        if attribute.name.upper() == expected:
+            return attribute.value
+    return None
+
+
+def resolve_pool_pump_circuit(
+    snapshot: NativeIntelliCenterTransportSnapshot,
+) -> PoolPumpCircuitIdentity | None:
+    """Resolve the unique valid native RPM assignment for Pool circuit C0006."""
+
+    if not snapshot.connected:
+        return None
+    matches: list[PoolPumpCircuitIdentity] = []
+    pumps = {
+        item.native_id: item for item in getattr(snapshot, "pumps", ())
+    }
+    for item in getattr(snapshot, "raw_inventory", ()):
+        if item.object_type.upper() != "PMPCIRC":
+            continue
+        if not is_pmpcirc_native_id(item.native_id):
+            continue
+        if str(_raw_attribute(item, "CIRCUIT") or "") != POOL_CIRCUIT_NATIVE_ID:
+            continue
+        if str(_raw_attribute(item, "SELECT") or "").upper() != "RPM":
+            continue
+        parent_id = str(_raw_attribute(item, "PARENT") or "").strip()
+        if not parent_id:
+            continue
+        parent = pumps.get(parent_id)
+        if parent is None:
+            continue
+        minimum = _positive_whole_number(parent.minimum_rpm)
+        maximum = _positive_whole_number(parent.maximum_rpm)
+        if minimum is None or maximum is None or minimum > maximum:
+            continue
+        matches.append(
+            PoolPumpCircuitIdentity(
+                native_id=item.native_id,
+                parent_pump_id=parent_id,
+                minimum_rpm=minimum,
+                maximum_rpm=maximum,
+            )
+        )
+
+    if len(matches) != 1:
+        return None
+
+    return matches[0]
+
+
+def _positive_whole_number(value: float | None) -> int | None:
+    if value is None or isinstance(value, bool) or not math.isfinite(value):
+        return None
+    result = int(value)
+    return result if float(result) == value and result > 0 else None
+
+
 def _raw_numeric_attribute(
     item: NativeRawObject,
     name: str,
@@ -851,6 +949,7 @@ def _compact_diagnostic_value(value: Any) -> Any:
 __all__ = [
     "INTELLICENTER_PARITY_ELIGIBLE_CONCEPTS",
     "NATIVE_ADAPTER_ID",
+    "POOL_CIRCUIT_NATIVE_ID",
     "POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT",
     "NATIVE_TARGET_CONCEPTS",
     "NativeBodyKind",
@@ -864,9 +963,12 @@ __all__ = [
     "NativeIntelliCenterTransportSnapshot",
     "NativeIntelliChlorState",
     "NativePumpState",
+    "PoolPumpCircuitIdentity",
     "NativeRawAttribute",
     "NativeRawObject",
     "NativeRawScalar",
+    "resolve_pool_pump_circuit",
+    "is_pmpcirc_native_id",
     "NativeTemperatureKind",
     "NativeTemperatureState",
     "NativeSystemState",

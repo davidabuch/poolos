@@ -152,7 +152,7 @@ def test_pool_permission_veto_and_missing_evidence_block_actuation_plan() -> Non
         90.0,
         100.0,
     )
-    builder = ThermalExecutionPlanBuilder()
+    builder = ThermalExecutionPlanBuilder(pump_equipment_id="p0102")
 
     veto = builder.build(
         desired_pool_state(veto_input, ThermalSourceSelector().evaluate(veto_input)),
@@ -311,7 +311,7 @@ def test_coupled_transition_order_is_explicit_and_avoids_unnecessary_commands(
     desired_rpm: int | None,
     types: tuple[type[object], ...],
 ) -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(desired_source, desired_rpm),
         _current(current_source, current_rpm),
     )
@@ -325,7 +325,7 @@ def test_coupled_transition_order_is_explicit_and_avoids_unnecessary_commands(
 
 
 def test_already_converged_is_a_command_free_noop() -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.SOLAR, 2900),
         _current(PhysicalHeatMode.SOLAR, 2900),
     )
@@ -333,6 +333,43 @@ def test_already_converged_is_a_command_free_noop() -> None:
     assert plan.disposition is ThermalPlanDisposition.ALREADY_CONVERGED
     assert plan.operations == ()
     assert plan.step_specifications == ()
+
+
+@pytest.mark.parametrize("native_id", ("p0101", "p0102", "p0199"))
+def test_planner_binds_every_pump_step_to_resolved_pool_pmpcirc(
+    native_id: str,
+) -> None:
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id=native_id).build(
+        _desired(PhysicalHeatMode.SOLAR, 2900),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    pump_operations = tuple(
+        operation for operation in plan.operations if isinstance(operation, SetPumpSpeed)
+    )
+    assert len(pump_operations) == 2
+    assert {operation.equipment_id for operation in pump_operations} == {native_id}
+    assert {operation.rpm for operation in pump_operations} == {2900, 3000}
+
+
+def test_planner_has_no_default_pump_identity_and_fails_closed_when_unresolved() -> None:
+    plan = ThermalExecutionPlanBuilder().build(
+        _desired(PhysicalHeatMode.SOLAR, 2900),
+        _current(PhysicalHeatMode.OFF, 2600),
+    )
+
+    assert plan.disposition is ThermalPlanDisposition.BLOCKED
+    assert "pool_pump_circuit_unresolved" in plan.blocking_reasons
+    assert not any(isinstance(operation, SetPumpSpeed) for operation in plan.operations)
+
+    with pytest.raises(ValueError, match="concrete p01xx"):
+        ThermalExecutionPlanBuilder(pump_equipment_id="other-pump")
 
 
 @pytest.mark.parametrize(
@@ -348,7 +385,10 @@ def test_planning_uses_the_same_rpm_tolerance_as_verification(
     expected_disposition: ThermalPlanDisposition,
     expects_rpm_command: bool,
 ) -> None:
-    plan = ThermalExecutionPlanBuilder(pump_rpm_tolerance=25).build(
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0102",
+        pump_rpm_tolerance=25,
+    ).build(
         _desired(PhysicalHeatMode.SOLAR, 2900),
         _current(PhysicalHeatMode.SOLAR, observed_rpm),
     )
@@ -358,7 +398,7 @@ def test_planning_uses_the_same_rpm_tolerance_as_verification(
 
 
 def test_correct_source_and_rpm_within_tolerance_is_already_converged() -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.GAS, 3000),
         _current(PhysicalHeatMode.GAS, 2975),
     )
@@ -372,7 +412,7 @@ def test_missing_authoritative_rpm_blocks_active_thermal_plan(
     source: PhysicalHeatMode,
 ) -> None:
     rpm = 2900 if source is PhysicalHeatMode.SOLAR else 3000
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(source, rpm),
         _current(PhysicalHeatMode.OFF, None),
     )
@@ -383,7 +423,7 @@ def test_missing_authoritative_rpm_blocks_active_thermal_plan(
 
 
 def test_off_does_not_require_pump_rpm_and_only_deselects_heat_source() -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.OFF, None),
         _current(PhysicalHeatMode.SOLAR, None),
     )
@@ -405,7 +445,7 @@ def test_pool_safe_off_is_not_blocked_by_irrelevant_missing_collector() -> None:
         PoolHeatingMode.SOLAR_ONLY,
     )
     desired = desired_pool_state(observation, ThermalSourceSelector().evaluate(observation))
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired,
         _current(PhysicalHeatMode.SOLAR, 2900),
     )
@@ -427,7 +467,7 @@ def test_spa_safe_off_is_not_blocked_by_irrelevant_missing_collector() -> None:
         pool_demand_satisfied=True,
     )
     desired = desired_spa_state(observation, SpaThermalPolicyTracker().evaluate(observation))
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired,
         _current(
             PhysicalHeatMode.SOLAR,
@@ -478,7 +518,7 @@ def test_missing_collector_blocks_solar_activation_selected_from_prior_evidence(
     )
 
     desired = desired_pool_state(missing, assessment)
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired,
         _current(PhysicalHeatMode.OFF, 2600),
     )
@@ -512,7 +552,7 @@ def test_missing_pool_temperature_blocks_gas_activation() -> None:
         PoolHeatingMode.GAS_ONLY,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired_pool_state(missing, assessment),
         _current(PhysicalHeatMode.OFF, 2600),
     )
@@ -551,7 +591,7 @@ def test_missing_collector_blocks_spa_solar_activation() -> None:
         None,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired_spa_state(missing, assessment),
         _current(
             PhysicalHeatMode.OFF,
@@ -577,7 +617,7 @@ def test_spa_permission_veto_remains_blocked() -> None:
         permissions=HeatSourcePermissions(gas_allowed=False),
     )
     assessment = SpaThermalPolicyTracker().evaluate(observation)
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired_spa_state(observation, assessment),
         _current(
             PhysicalHeatMode.OFF,
@@ -592,7 +632,7 @@ def test_spa_permission_veto_remains_blocked() -> None:
 
 
 def test_native_heater_and_pump_expectations_prove_source_without_htmode() -> None:
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.GAS, 3000),
         _current(PhysicalHeatMode.OFF, 0, htmode="0"),
     )
@@ -608,7 +648,7 @@ def test_native_heater_and_pump_expectations_prove_source_without_htmode() -> No
 
 
 def test_stale_or_degraded_current_truth_cannot_create_plan() -> None:
-    source_stale = ThermalExecutionPlanBuilder().build(
+    source_stale = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.SOLAR, 2900),
         ThermalCurrentState(
             NOW,
@@ -618,7 +658,7 @@ def test_stale_or_degraded_current_truth_cannot_create_plan() -> None:
             source_evidence_usable=False,
         ),
     )
-    rpm_stale = ThermalExecutionPlanBuilder().build(
+    rpm_stale = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.SOLAR, 2900),
         ThermalCurrentState(
             NOW,
@@ -635,7 +675,7 @@ def test_stale_or_degraded_current_truth_cannot_create_plan() -> None:
 
 
 def test_plan_identity_and_order_are_deterministic() -> None:
-    builder = ThermalExecutionPlanBuilder()
+    builder = ThermalExecutionPlanBuilder(pump_equipment_id="p0102")
     desired = _desired(PhysicalHeatMode.SOLAR, 2900)
     current = _current(PhysicalHeatMode.OFF, 0)
 
@@ -662,7 +702,7 @@ def test_inactive_pool_cold_start_plans_body_prime_final_rpm_then_solar() -> Non
         body_active=False,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(desired, current)
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0101").build(desired, current)
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (
@@ -719,7 +759,7 @@ def test_inactive_hot_tub_gas_start_primes_once_at_3000() -> None:
         body_active=False,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(desired, current)
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0199").build(desired, current)
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (
@@ -740,6 +780,7 @@ def test_inactive_hot_tub_gas_start_primes_once_at_3000() -> None:
     }
 
     assert isinstance(prime, SetPumpSpeed)
+    assert prime.equipment_id == "p0199"
     assert prime.rpm == 3000
     assert (
         plan.step_specifications[1].metadata["minimum_verified_hold_seconds"]
@@ -764,7 +805,7 @@ def test_active_running_pool_does_not_reprime_for_solar_transition() -> None:
         body_active=True,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(desired, current)
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(desired, current)
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (SetPumpSpeed, SetHeatMode)
@@ -790,7 +831,7 @@ def test_active_body_with_stopped_pump_still_requires_cold_start_prime() -> None
         body_active=True,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(desired, current)
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(desired, current)
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (
@@ -830,7 +871,7 @@ def test_pool_temperature_probe_cold_start_primes_then_settles_to_probe_rpm() ->
         body_active=False,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(desired, current)
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0101").build(desired, current)
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (
@@ -841,10 +882,12 @@ def test_pool_temperature_probe_cold_start_primes_then_settles_to_probe_rpm() ->
     assert isinstance(plan.operations[0], SetBodyActive)
     assert plan.operations[0].active is True
     assert isinstance(plan.operations[1], SetPumpSpeed)
+    assert plan.operations[1].equipment_id == "p0101"
     assert plan.operations[1].rpm == 3000
     assert plan.step_specifications[1].metadata["priming_step"] == "true"
     assert plan.step_specifications[1].metadata["minimum_verified_hold_seconds"] == "60"
     assert isinstance(plan.operations[2], SetPumpSpeed)
+    assert plan.operations[2].equipment_id == "p0101"
     assert plan.operations[2].rpm == 1500
     assert plan.expected_final_state == {
         "pool.raw_heater_id": "00000",
@@ -873,11 +916,12 @@ def test_pool_temperature_probe_does_not_reprime_existing_circulation() -> None:
         body_active=True,
     )
 
-    plan = ThermalExecutionPlanBuilder().build(desired, current)
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0199").build(desired, current)
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (SetPumpSpeed,)
     assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].equipment_id == "p0199"
     assert plan.operations[0].rpm == 1500
     assert "cold_start_priming_required" not in plan.change_reasons
 
@@ -885,7 +929,7 @@ def test_pool_temperature_probe_does_not_reprime_existing_circulation() -> None:
 def test_off_source_residual_plan_keeps_rpm_before_source_after_priming() -> None:
     """A new epoch after priming remains a suffix of the cold-start plan."""
 
-    plan = ThermalExecutionPlanBuilder().build(
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         _desired(PhysicalHeatMode.SOLAR, 2900),
         ThermalCurrentState(
             observed_at=NOW,

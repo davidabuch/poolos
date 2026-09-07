@@ -60,7 +60,7 @@ _NATIVE_OBJECT_BY_CONCEPT = {
     "slide.active": "C0004",
     "waterfall.active": "FTR01",
     "freeze.active": "FRE01",
-    "pump_circuit.p0102.configured_speed_rpm": "p0102",
+    "pool.pump_circuit.configured_speed_rpm": "p0102",
     "pump.rpm": "PUMP01",
 }
 
@@ -207,7 +207,7 @@ def safe_observations(
         "slide.active": slide,
         "waterfall.active": waterfall,
         "freeze.active": freeze,
-        "pump_circuit.p0102.configured_speed_rpm": configured,
+        "pool.pump_circuit.configured_speed_rpm": configured,
         "pump.rpm": rpm,
     }
     return tuple(observation(key, value, at=at) for key, value in values.items())
@@ -222,6 +222,7 @@ def frame(
     authority: bool = True,
     transport: bool = True,
     external_preemption_reason: str | None = None,
+    pump_circuit_id: str | None = "p0102",
 ) -> GridOutageSafetyFrame:
     return GridOutageSafetyFrame(
         frame_identity=identity,
@@ -231,6 +232,7 @@ def frame(
         filtration=filtration(filtration_state, at=at),
         physical_authority_ready=authority,
         transport_ready=transport,
+        pool_pump_circuit_id=pump_circuit_id,
         external_preemption_reason=external_preemption_reason,
     )
 
@@ -413,6 +415,40 @@ def test_outage_pump_is_reduction_only_and_never_starts_circulation(
     if result.candidate is not None:
         assert result.candidate.kind is GridOutageReductionKind.POOL_PUMP_REDUCTION
         assert result.candidate.requested_value == 1500
+
+
+def test_outage_pump_candidate_binds_exact_current_recycled_pmpcirc() -> None:
+    observations = tuple(
+        observation(
+            item.observation_id,
+            item.value,
+            native_object_id=(
+                "p0199"
+                if item.observation_id
+                == "pool.pump_circuit.configured_speed_rpm"
+                else None
+            ),
+        )
+        for item in safe_observations(configured=2600, rpm=2600)
+    )
+
+    current = enabled_engine().evaluate(
+        frame(observations=observations, pump_circuit_id="p0199")
+    )
+    stale = enabled_engine().evaluate(
+        frame(observations=observations, pump_circuit_id="p0102")
+    )
+    unresolved = enabled_engine().evaluate(
+        frame(observations=observations, pump_circuit_id=None)
+    )
+
+    assert current.candidate is not None
+    assert current.candidate.target == "p0199"
+    assert current.candidate.expected_native_object_id == "p0199"
+    assert stale.candidate is None
+    assert stale.reason_code == "grid_outage_pool_pump_identity_stale"
+    assert unresolved.candidate is None
+    assert unresolved.reason_code == "grid_outage_pool_pump_circuit_unresolved"
 
 
 def test_debt_alone_does_not_require_circulation() -> None:

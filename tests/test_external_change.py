@@ -17,6 +17,7 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterReadAdapter,
     NativeIntelliCenterStatus,
     NativeIntelliCenterTransportSnapshot,
+    NativePumpState,
     NativeRawAttribute,
     NativeRawObject,
 )
@@ -154,6 +155,28 @@ def test_configured_pool_pump_speed_is_classified_as_canonical_external_change()
     assert batch.events[0].concept == concept
     assert batch.events[0].external_policy is ExternalChangePolicy.ACCEPT
     assert not batch.events[0].reconciliation_required
+
+
+def test_pool_pmpcirc_id_recycle_without_speed_change_is_not_external_drift() -> None:
+    monitor = ExternalNativeChangeMonitor(authority())
+    concept = POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+    process(monitor, NOW, {concept: (2600, "p0102")})
+
+    recycled = process(
+        monitor,
+        NOW + timedelta(seconds=1),
+        {concept: (2600, "p0101")},
+    )
+    changed = process(
+        monitor,
+        NOW + timedelta(seconds=2),
+        {concept: (2900, "p0101")},
+    )
+
+    assert recycled.events == ()
+    assert len(changed.events) == 1
+    assert changed.events[0].concept == concept
+    assert changed.events[0].native_object_id == "p0101"
 
 
 def test_outage_relevant_external_evidence_is_retained_boundedly() -> None:
@@ -448,6 +471,11 @@ def test_correlation_uses_raw_native_identity_from_canonical_provenance() -> Non
             observed_at=at,
             connected=True,
             temperature_unit="°F",
+            pumps=(
+                    NativePumpState(
+                        "PMP01", "Pool Pump", False, 0.0, None, None, 450, 3450
+                    ),
+            ),
             raw_inventory=(
                 NativeRawObject(
                     native_id="p0102",
@@ -456,7 +484,12 @@ def test_correlation_uses_raw_native_identity_from_canonical_provenance() -> Non
                     name="Pool",
                     parent_id="PMP01",
                     observed_at=at,
-                    attributes=(NativeRawAttribute("SPEED", str(rpm)),),
+                    attributes=(
+                        NativeRawAttribute("CIRCUIT", "C0006"),
+                        NativeRawAttribute("SELECT", "RPM"),
+                        NativeRawAttribute("PARENT", "PMP01"),
+                        NativeRawAttribute("SPEED", str(rpm)),
+                    ),
                 ),
             ),
         )

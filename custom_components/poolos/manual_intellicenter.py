@@ -39,6 +39,7 @@ from poolos.physical_command_authority import (
 )
 from poolos.intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    is_pmpcirc_native_id,
 )
 
 from pyintellicenter import (
@@ -743,55 +744,59 @@ class ManualIntelliCenterControl:
         pump_circuit_objnam: str,
     ) -> tuple[str, int, int]:
         """Validate PMPCIRC identity/mode and return parent identity/limits."""
+        matches: list[tuple[str, str, int, int]] = []
+        for candidate in self._model.get_by_type(PMPCIRC_TYPE):
+            candidate_id = str(candidate.objnam)
+            resolved = self._validated_pool_pump_circuit(candidate)
+            if resolved is not None:
+                parent_id, minimum, maximum = resolved
+                matches.append((candidate_id, parent_id, minimum, maximum))
+        if len(matches) != 1 or matches[0][0] != pump_circuit_objnam:
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} is not the unique live Pool PMPCIRC object"
+            )
+        _candidate_id, parent_id, minimum, maximum = matches[0]
+        return parent_id, minimum, maximum
 
-        item = self._model[pump_circuit_objnam]
+    def _validated_pool_pump_circuit(
+        self,
+        item: Any,
+    ) -> tuple[str, int, int] | None:
+        """Return parent and limits only for one valid Pool RPM assignment."""
 
         if item is None or str(item.objtype).upper() != str(PMPCIRC_TYPE).upper():
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} is not a live PMPCIRC object"
-            )
+            return None
+        if not is_pmpcirc_native_id(str(item.objnam)):
+            return None
 
         circuit_id = item[CIRCUIT_ATTR]
 
         if circuit_id is None or str(circuit_id) != _POOL_CIRCUIT_OBJNAM:
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} is not assigned to the Pool circuit"
-            )
+            return None
 
         mode = item[SELECT_ATTR]
 
         if mode is None or str(mode).upper() != _PUMP_RPM_MODE:
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} is not configured for RPM control"
-            )
+            return None
 
         parent_id = item[PARENT_ATTR]
 
         if parent_id is None or not str(parent_id).strip():
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} has no parent pump"
-            )
+            return None
 
         parent = self._model[str(parent_id)]
 
         if parent is None or str(parent.objtype).upper() != str(PUMP_TYPE).upper():
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} parent is not a live pump object"
-            )
+            return None
 
         minimum = self._coerce_positive_int(parent[MIN_ATTR])
         maximum = self._coerce_positive_int(parent[MAX_ATTR])
 
         if minimum is None or maximum is None:
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} parent pump native RPM limits "
-                "are unavailable"
-            )
+            return None
 
         if minimum > maximum:
-            raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} parent pump RPM limits are invalid"
-            )
+            return None
 
         return str(parent_id), minimum, maximum
 

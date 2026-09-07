@@ -203,7 +203,7 @@ def thermal_assessment(
     current_source: PhysicalHeatMode = PhysicalHeatMode.OFF,
     current_rpm: int = 2600,
 ) -> ThermalExecutionPlanAssessment:
-    return ThermalExecutionPlanBuilder().build(
+    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         ThermalDesiredState(
             evaluated_at=at,
             body=ThermalBody.POOL,

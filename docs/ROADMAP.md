@@ -1138,9 +1138,10 @@ Status: implemented, disabled, and awaiting controlled live commissioning.
   separate typed exception for ADR-102 thermal plans only;
 - defaults both the thermal kill switch and one-body commissioning scope to
   disabled;
-- permits only bounded target-body activation, `SetPumpSpeed` for `p0102` at
-  the selected 2900/3000 thermal or priming baseline, and `SetHeatMode` for the
-  commissioned Pool/Hot Tub source matrix;
+- permits only bounded target-body activation, `SetPumpSpeed` for the uniquely
+  resolved Pool `C0006` RPM assignment at the selected 2900/3000 thermal or
+  priming baseline, and `SetHeatMode` for the commissioned Pool/Hot Tub source
+  matrix;
 - re-authorizes each step from current evaluation, plan, transport, health,
   hydraulic, body-activity, and native-configuration evidence;
 - delivers one step, waits for authoritative native verification, and advances
@@ -1150,7 +1151,8 @@ Status: implemented, disabled, and awaiting controlled live commissioning.
   evidence without retry or restoration commands;
 - exposes an unregistered HA adapter over the existing manual IntelliCenter
   thermal methods while keeping core PoolOS Home Assistant-independent;
-- adds independent physical endpoint bounds for `p0102` thermal RPM commands;
+- adds independent physical endpoint bounds for the exact currently resolved
+  Pool PMPCIRC thermal RPM target;
   and
 - grants no authority to hydraulic routing, body deactivation, Spillway,
   filtration, temperature probing, grid-outage actions, or any other operation,

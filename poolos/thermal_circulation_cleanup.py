@@ -15,6 +15,7 @@ import json
 
 from .circulation_successor import CirculationSuccessorAssessment
 from .integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
+from .intellicenter_readonly import is_pmpcirc_native_id
 from .thermal_runtime_ownership import (
     ThermalResidualTerminationEntitlement,
     ThermalRuntimeConceptProvenance,
@@ -169,9 +170,9 @@ class ThermalCirculationCleanupCandidate:
                 raise ValueError("body cleanup candidate must be exact Pool Off")
         elif not (
             isinstance(self.operation, SetPumpSpeed)
-            and self.operation.equipment_id == "p0102"
+            and is_pmpcirc_native_id(self.operation.equipment_id)
         ):
-            raise ValueError("pump cleanup candidate must target p0102")
+            raise ValueError("pump cleanup candidate must target a resolved Pool PMPCIRC")
 
     @classmethod
     def from_arbitration(
@@ -180,6 +181,7 @@ class ThermalCirculationCleanupCandidate:
         provenance: ThermalCirculationCleanupProvenance,
         assessment: CirculationSuccessorAssessment,
         epoch_identity: str,
+        pump_circuit_id: str | None,
     ) -> ThermalCirculationCleanupCandidate | None:
         """Create only an operation justified by the canonical assessment."""
 
@@ -198,11 +200,11 @@ class ThermalCirculationCleanupCandidate:
             )
         elif assessment.pump_handoff_eligible:
             target = assessment.filtration_target_rpm
-            if target is None:
+            if target is None or pump_circuit_id is None:
                 return None
             action = ThermalCirculationCleanupAction.FILTRATION_PUMP_NORMALIZATION
             operation = SetPumpSpeed(
-                equipment_id="p0102",
+                equipment_id=pump_circuit_id,
                 rpm=target,
                 metadata={
                     "thermal_circulation_cleanup": True,

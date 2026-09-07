@@ -12,6 +12,8 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from poolos.intellicenter_readonly import resolve_pool_pump_circuit
+
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import PoolOSCoordinator
@@ -19,7 +21,6 @@ from .manual_intellicenter import ManualIntelliCenterCommandError
 
 
 _POOL_PMPCIRC_TYPE = "PMPCIRC"
-_POOL_CIRCUIT_OBJNAM = "C0006"
 _RPM_MODE = "RPM"
 _DEFAULT_MIN_RPM = 450
 _DEFAULT_MAX_RPM = 3450
@@ -37,22 +38,6 @@ def _raw_snapshot(coordinator: PoolOSCoordinator) -> Any:
         return None
 
     return transport.latest_snapshot
-
-
-def _raw_object(
-    coordinator: PoolOSCoordinator,
-    native_id: str,
-) -> Any:
-    snapshot = _raw_snapshot(coordinator)
-
-    if snapshot is None:
-        return None
-
-    for item in snapshot.raw_inventory:
-        if item.native_id == native_id:
-            return item
-
-    return None
 
 
 def _raw_attributes(item: Any) -> dict[str, Any]:
@@ -87,56 +72,26 @@ def _pool_pump_circuit(
     if snapshot is None:
         return None, {}
 
-    matches: list[tuple[Any, dict[str, Any]]] = []
-
-    for item in snapshot.raw_inventory:
-        if str(item.object_type).upper() != _POOL_PMPCIRC_TYPE:
-            continue
-
-        attributes = _raw_attributes(item)
-
-        if str(attributes.get("CIRCUIT") or "") != _POOL_CIRCUIT_OBJNAM:
-            continue
-
-        if str(attributes.get("SELECT") or "").upper() != _RPM_MODE:
-            continue
-
-        if not str(attributes.get("PARENT") or "").strip():
-            continue
-
-        matches.append((item, attributes))
-
-    if len(matches) != 1:
+    identity = resolve_pool_pump_circuit(snapshot)
+    if identity is None:
         return None, {}
-
-    return matches[0]
+    item = next(
+        candidate
+        for candidate in snapshot.raw_inventory
+        if candidate.object_type.upper() == _POOL_PMPCIRC_TYPE
+        and candidate.native_id == identity.native_id
+    )
+    return item, _raw_attributes(item)
 
 
 def _rpm_limits(
     coordinator: PoolOSCoordinator,
-    attributes: dict[str, Any],
 ) -> tuple[int, int]:
-    parent_id = attributes.get("PARENT")
-
-    if parent_id is None:
+    snapshot = _raw_snapshot(coordinator)
+    identity = None if snapshot is None else resolve_pool_pump_circuit(snapshot)
+    if identity is None:
         return _DEFAULT_MIN_RPM, _DEFAULT_MAX_RPM
-
-    parent = _raw_object(coordinator, str(parent_id))
-    parent_attributes = _raw_attributes(parent)
-
-    minimum = (
-        _positive_int(parent_attributes.get("MIN"))
-        or _DEFAULT_MIN_RPM
-    )
-    maximum = (
-        _positive_int(parent_attributes.get("MAX"))
-        or _DEFAULT_MAX_RPM
-    )
-
-    if minimum > maximum:
-        return _DEFAULT_MIN_RPM, _DEFAULT_MAX_RPM
-
-    return minimum, maximum
+    return identity.minimum_rpm, identity.maximum_rpm
 
 
 class PoolOSNativeIntelliCenterPoolRPM(
@@ -205,16 +160,14 @@ class PoolOSNativeIntelliCenterPoolRPM(
     def native_min_value(self) -> float:
         """Return parent pump minimum RPM when native evidence is available."""
 
-        _item, attributes = _pool_pump_circuit(self.coordinator)
-        minimum, _maximum = _rpm_limits(self.coordinator, attributes)
+        minimum, _maximum = _rpm_limits(self.coordinator)
         return float(minimum)
 
     @property
     def native_max_value(self) -> float:
         """Return parent pump maximum RPM when native evidence is available."""
 
-        _item, attributes = _pool_pump_circuit(self.coordinator)
-        _minimum, maximum = _rpm_limits(self.coordinator, attributes)
+        _minimum, maximum = _rpm_limits(self.coordinator)
         return float(maximum)
 
     async def async_set_native_value(self, value: float) -> None:
@@ -245,10 +198,7 @@ class PoolOSNativeIntelliCenterPoolRPM(
 
         manual = self._runtime.manual_intellicenter
         item, attributes = _pool_pump_circuit(self.coordinator)
-        minimum, maximum = _rpm_limits(
-            self.coordinator,
-            attributes,
-        )
+        minimum, maximum = _rpm_limits(self.coordinator)
 
         return {
             "pmpcirc_objnam": None if item is None else str(item.native_id),

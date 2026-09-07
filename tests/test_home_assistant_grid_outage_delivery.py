@@ -73,9 +73,9 @@ class FakeManual:
         (
             GridOutageReductionKind.POOL_PUMP_REDUCTION,
             "pump_circuit_speed",
-            "p0102",
+            "p0199",
             1500,
-            "pump_circuit.p0102.configured_speed_rpm",
+            "pool.pump_circuit.configured_speed_rpm",
             9,
         ),
     ),
