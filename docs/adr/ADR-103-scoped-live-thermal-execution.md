@@ -115,6 +115,16 @@ Slide authoritatively absent; core-object presence is not a completeness signal.
 Installed-and-Off is safe; installed but missing, stale, or unusable remains
 blocked; unknown inventory completeness cannot imply Off.
 
+Command-free candidate admission evaluates native body and shared-hydraulic
+evidence over a bounded 120-second currentness window. This is derived from the
+independent native transport's 90-second keepalive/read cadence plus one
+30-second coordinator reconciliation/scheduling interval; it is not permission
+to retain stale state indefinitely. Evidence older than that bound, missing,
+non-LIVE, low-confidence, unusable, contradictory, or active still blocks.
+Active ownership, probe acquisition continuity, and post-delivery verification
+retain their stricter 30-second freshness contract and require later
+authoritative epochs.
+
 `ThermalLiveExecutionEngine` converts the authorized thermal assessment into
 the existing immutable proposal/authorization/plan models and reuses the
 existing coordinator, per-step state machine, verification engine, receipts,
