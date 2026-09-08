@@ -733,6 +733,15 @@ SENSORS = (
         "mdi:filter-clock-outline",
     ),
     PoolOSControlCenterSensorDescription(
+        "automatic_filtration_execution",
+        "Automatic Filtration Execution",
+        lambda coordinator, runtime: runtime.filtration_automatic_runtime.diagnostics()[
+            "state"
+        ].upper(),
+        lambda coordinator, runtime: runtime.filtration_automatic_runtime.diagnostics(),
+        "mdi:pool-thermometer",
+    ),
+    PoolOSControlCenterSensorDescription(
         "thermal_execution_readiness",
         "Thermal Execution Readiness",
         lambda coordinator, runtime: (

@@ -245,12 +245,13 @@ class ThermalCirculationCleanupAttempt:
 
     candidate: ThermalCirculationCleanupCandidate
     correlation_id: str
+    receipt_id: str
     delivered_at: datetime
     deadline: datetime
 
     def __post_init__(self) -> None:
-        if not self.correlation_id.strip():
-            raise ValueError("cleanup correlation_id must not be empty")
+        if not self.correlation_id.strip() or not self.receipt_id.strip():
+            raise ValueError("cleanup correlation and receipt must not be empty")
         _require_aware(self.delivered_at, "cleanup delivery")
         _require_aware(self.deadline, "cleanup deadline")
         if self.deadline <= self.delivered_at:
