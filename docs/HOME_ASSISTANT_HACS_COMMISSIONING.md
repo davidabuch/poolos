@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.10.3
+poolos@git+https://github.com/davidabuch/poolos.git@v0.10.4
 ```
 
 This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
@@ -80,7 +80,7 @@ Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
 Milestone 11.3C uses integration version `0.8.0` and tag `v0.8.0`.
 Milestone 11.3D uses integration version `0.9.0` and tag `v0.9.0`.
 Milestone 11.4A advances the integration to `0.10.0`; after 11.4A is merged and green, create matching tag and release `v0.10.0` before any installation attempt.
-Patch release `0.10.3` packages the Pool-only commissioning milestone through PR #137, including dynamic Pool PMPCIRC discovery and exact-target propagation across planning, authority, delivery, probe, cleanup, grid-outage safety, and verification, while preserving the previously commissioned post-thermal circulation cleanup, Pool Solar temperature-probe execution, and default-off confirmed-grid-outage physical safety. The integration pins the core dependency to matching tag `v0.10.3` for HACS delivery.
+Patch release `0.10.4` advances Pool-only commissioning through PR #139 with a command-safe Pool Solar cold-start lifecycle. It separates pre-circulation Solar opportunity from native Solar configuration and actual IntelliCenter Solar engagement, preserves exact raw `HEATER=H0002` verification, adds bounded Solar-engagement observation and retry suppression, supports an explicit provenance-safe temperature-probe-to-thermal ownership handoff, and adds authoritative native inventory-completeness semantics for optional shared-hydraulic equipment. Existing dynamic Pool PMPCIRC discovery, filtration-aware cleanup, default-off execution gates, and confirmed-grid-outage physical safety remain preserved. The integration pins the core dependency to matching tag `v0.10.4` for HACS delivery.
 
 
 ## 11.4A high-fidelity observation boundary
