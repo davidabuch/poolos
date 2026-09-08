@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.10.6
+poolos@git+https://github.com/davidabuch/poolos.git@v0.10.7
 ```
 
 This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
@@ -80,7 +80,7 @@ Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
 Milestone 11.3C uses integration version `0.8.0` and tag `v0.8.0`.
 Milestone 11.3D uses integration version `0.9.0` and tag `v0.9.0`.
 Milestone 11.4A advances the integration to `0.10.0`; after 11.4A is merged and green, create matching tag and release `v0.10.0` before any installation attempt.
-Patch release `0.10.6` corrects the live v0.10.5 autonomous-filtration ownership-loss defect discovered during commissioning. Verified PoolOS-owned filtration now enters an explicit command-free suspended state when current authoritative evidence becomes temporarily unusable, retaining only the exact already-proven session provenance required for bounded cleanup. On authoritative recovery, the same verified lease may resume without state adoption or redundant commands, or perform provenance-bound Pool OFF cleanup when filtration is already satisfied. Genuine external takeover, Spa/shared-hydraulic conflicts, and dynamic PMPCIRC identity changes still invalidate ownership fail-closed. Restart continues to reconstruct no ownership. The integration pins the matching core dependency to tag `v0.10.6` for HACS delivery.
+Patch release `0.10.7` corrects the autonomous Pool thermal cold-start candidate-currentness defect discovered during live v0.10.6 commissioning. Valid authoritative shared-hydraulic observations can now remain eligible for candidate admission across the documented native IntelliCenter 90-second keepalive/read cadence plus the 30-second coordinator scheduling margin, while active ownership, probe continuity, and post-delivery verification retain the stricter 30-second currentness requirement. Missing, unusable, stale-beyond-bound, or conflicting Jets, Waterfall, Slide, Spa/body-topology, and external-takeover evidence continue to fail closed. No physical command authority, pump RPM envelope, Hot Tub authority, Grid Outage authority, filtration accounting semantics, or ownership semantics are expanded. The integration pins the matching core dependency to tag `v0.10.7` for HACS delivery.
 
 
 ## 11.4A high-fidelity observation boundary
