@@ -45,6 +45,7 @@ class FiltrationAutomaticDriverState(StrEnum):
     BLOCKED = "blocked"
     AWAITING_REOBSERVATION = "awaiting_reobservation"
     OWNED = "owned"
+    SUSPENDED = "suspended"
     HANDOFF_PENDING = "handoff_pending"
     FAILED = "failed"
     PREEMPTED = "preempted"
@@ -239,6 +240,7 @@ class FiltrationAutomaticExecutionDriver:
         lease = self.ownership.filtration_lease
         if (
             lease is not None
+            and frame.pool_pump_circuit_id is not None
             and frame.pool_pump_circuit_id != lease.pool_pump_circuit_id
         ):
             self.ownership.release_filtration(session_id=lease.session_id)
@@ -269,6 +271,53 @@ class FiltrationAutomaticExecutionDriver:
             )
         if self._requires_reenable:
             return self._blocked(frame, "automatic_filtration_reenable_required")
+        suspended = (
+            lease is not None
+            and lease.verified
+            and self.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
+        )
+        if suspended:
+            assert lease is not None
+            pool = _live_state(
+                {item.observation_id: item for item in frame.observations}.get(
+                    "pool.active"
+                ),
+                frame.observed_at,
+            )
+            if pool.usable and pool.value is False:
+                recovery = self._recover_suspended(frame, lease)
+                if recovery is not None:
+                    return recovery
+        blocker = self._safety_blocker(
+            frame,
+            allow_pool_off=(
+                suspended
+                or (
+                    self.attempt is not None
+                    and self.attempt.step is FiltrationExecutionStep.BODY_OFF
+                )
+            ),
+        )
+        if lease is not None and lease.verified and _transient_evidence_loss(blocker):
+            self.ownership.suspend_filtration(session_id=lease.session_id)
+            return self._publish(
+                FiltrationAutomaticDriverState.SUSPENDED,
+                at=frame.observed_at,
+                blocker=blocker,
+                frame=frame,
+                command=False,
+            )
+        if suspended:
+            assert lease is not None
+            if blocker is not None:
+                return self._fail(frame, blocker, preempted=True)
+            recovery = self._recover_suspended(frame, lease)
+            if recovery is not None:
+                return recovery
+            self.ownership.resume_filtration(
+                session_id=lease.session_id,
+                confirmed_at=frame.observed_at,
+            )
         if self.attempt is not None:
             return await self._verify_attempt(frame, delivery_factory)
         if lease is not None and frame.thermal_candidate_ready:
@@ -301,7 +350,6 @@ class FiltrationAutomaticExecutionDriver:
             return self._blocked(frame, "automatic_filtration_not_immediately_required")
         if frame.thermal_owned or self.ownership.owner is PoolCirculationOwner.THERMAL:
             return self._blocked(frame, "automatic_filtration_thermal_owner_active")
-        blocker = self._safety_blocker(frame)
         if blocker is not None:
             if lease is not None:
                 return self._fail(frame, blocker, preempted=True)
@@ -350,6 +398,84 @@ class FiltrationAutomaticExecutionDriver:
                 command=False,
             )
         return await self._deliver_pump(frame, delivery_factory)
+
+    def _recover_suspended(
+        self,
+        frame: FiltrationAutomaticExecutionFrame,
+        lease: FiltrationCirculationLease,
+    ) -> FiltrationAutomaticAssessment | None:
+        """Recover only from retained provenance and fresh authoritative truth."""
+
+        by_id = {item.observation_id: item for item in frame.observations}
+        pool = _live_state(by_id.get("pool.active"), frame.observed_at)
+        if pool.value is False:
+            if (
+                self.attempt is not None
+                and self.attempt.step is FiltrationExecutionStep.BODY_OFF
+                and not _later(pool.observed_at, self.attempt.delivered_at)
+            ):
+                return self._publish(
+                    FiltrationAutomaticDriverState.SUSPENDED,
+                    at=frame.observed_at,
+                    blocker="automatic_filtration_cleanup_verification_pending",
+                    frame=frame,
+                    command=False,
+                )
+            self.ownership.release_filtration(session_id=lease.session_id)
+            self.session_id = None
+            self.attempt = None
+            return self._publish(
+                (
+                    FiltrationAutomaticDriverState.DISABLED
+                    if not self.requested_enabled
+                    else FiltrationAutomaticDriverState.BLOCKED
+                ),
+                at=frame.observed_at,
+                blocker="automatic_filtration_pool_off_observed_after_suspension",
+                frame=frame,
+                command=False,
+            )
+        if pool.value is not True:
+            raise AssertionError("usable Pool activity must be an exact boolean")
+        pump_provenance = lease.pump_setpoint
+        configured = _live_state(
+            by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
+            frame.observed_at,
+        )
+        actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+        if (
+            pump_provenance is None
+            or type(pump_provenance.intended_value) is not int
+            or configured.value != pump_provenance.intended_value
+            or isinstance(actual.value, bool)
+            or not isinstance(actual.value, (int, float))
+            or abs(float(actual.value) - pump_provenance.intended_value)
+            > self.pump_rpm_tolerance
+        ):
+            return self._fail(
+                frame,
+                "automatic_filtration_owned_pump_state_conflict",
+                preempted=True,
+            )
+        if self.attempt is not None:
+            if self.attempt.step is not FiltrationExecutionStep.BODY_OFF:
+                return self._fail(
+                    frame,
+                    "automatic_filtration_suspended_attempt_invalid",
+                    preempted=True,
+                )
+            return self._publish(
+                FiltrationAutomaticDriverState.SUSPENDED,
+                at=frame.observed_at,
+                blocker=(
+                    "automatic_filtration_cleanup_verification_timed_out"
+                    if frame.observed_at >= self.attempt.deadline
+                    else "automatic_filtration_cleanup_verification_pending"
+                ),
+                frame=frame,
+                command=False,
+            )
+        return None
 
     async def _verify_attempt(
         self,
@@ -548,7 +674,9 @@ class FiltrationAutomaticExecutionDriver:
         )
         if not pool.usable or (pool.value is not False and pool.value is not True):
             return "automatic_filtration_pool_activity_unusable"
-        if not spa.usable or spa.value is not False:
+        if not spa.usable:
+            return "automatic_filtration_spa_activity_unusable"
+        if spa.value is not False:
             return "automatic_filtration_spa_topology_blocked"
         if (
             not pump.usable
@@ -793,6 +921,19 @@ def _live_state(observation: PoolObservation | None, at: datetime) -> _LiveState
 
 def _later(observed_at: datetime | None, delivered_at: datetime) -> bool:
     return observed_at is not None and observed_at > delivered_at
+
+
+def _transient_evidence_loss(blocker: str | None) -> bool:
+    if blocker is None:
+        return False
+    return blocker in {
+        "automatic_filtration_accounting_not_current",
+        "automatic_filtration_pool_activity_unusable",
+        "automatic_filtration_spa_activity_unusable",
+        "automatic_filtration_pump_observation_unusable",
+        "automatic_filtration_configured_speed_unusable",
+        "automatic_filtration_pool_pump_circuit_unresolved",
+    } or blocker.startswith("automatic_filtration_shared_hydraulic_unusable:")
 
 
 def _session_id(frame: FiltrationAutomaticExecutionFrame) -> str:
