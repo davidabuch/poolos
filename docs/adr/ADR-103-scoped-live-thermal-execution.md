@@ -84,10 +84,36 @@ start or restore an acquisition.
 Probe success publishes canonical trusted water evidence only. A fresh normal
 thermal evaluation independently selects Solar, Gas fallback, Off, or no eligible
 source under all normal gates. Probe authority cannot authorize the successor.
-When the existing typed ownership handoff cannot retain every owned concept
-compatibly, the established circulation-successor and cleanup lifecycle performs
-the safe relinquishment path; it never restores a remembered RPM or turns off a
-pre-existing body.
+For the exact same-mode Pool probe successor, an explicit typed handoff may retain
+only accepted Pool body-activation provenance. It discards the probe pump/source
+provenance before a newly authorized 2900-RPM Solar or 3000-RPM Gas operation and
+reacquires each concept only from a fresh accepted delivery. State equality never
+performs this handoff. Incompatible, stale, cross-body, or externally preempted
+successors use the established relinquishment/cleanup path; it never restores a
+remembered RPM or turns off a pre-existing body.
+
+Solar policy separately represents a favorable pre-circulation opportunity,
+native Solar configuration, actual IntelliCenter Solar engagement, and active
+Solar continuation. A Pool-inactive state does not by itself veto a favorable
+opportunity. Exact raw Pool `HEATER=H0002` verifies source configuration even when
+`solar.active` remains false; only IntelliCenter decides whether collectors
+actually engage. For PoolOS-started Solar circulation, a five-minute in-memory
+effectiveness window observes `solar.active`, with a 30-second continuous
+confirmation hold. Missing or unusable engagement evidence remains unknown before
+that absolute deadline and resets the continuous confirmation hold; it does not
+invalidate the already-verified H0002 configuration. Non-engagement is an
+operational disposition, not failed H0002 verification: the existing
+provenance-bound source-Off and filtration-aware cleanup lifecycle runs, and the
+unchanged opportunity is suppressed for 30 minutes. These constants are isolated
+policy defaults and add no retry loop, scheduler, persistence, or generic stop
+authority.
+
+Optional shared-hydraulic circuits are inventory states rather than mandatory
+installation assumptions. Only an immutable snapshot explicitly marked complete
+after successful native all-equipment discovery may prove Waterfall, Jets, or
+Slide authoritatively absent; core-object presence is not a completeness signal.
+Installed-and-Off is safe; installed but missing, stale, or unusable remains
+blocked; unknown inventory completeness cannot imply Off.
 
 `ThermalLiveExecutionEngine` converts the authorized thermal assessment into
 the existing immutable proposal/authorization/plan models and reuses the

@@ -48,6 +48,7 @@ class SolarEligibilityInput:
     water_temperature_f: float | None
     collector_temperature_f: float | None
     target_temperature_f: float | None
+    solar_configured: bool = False
 
     def __post_init__(self) -> None:
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
@@ -72,6 +73,10 @@ class SolarEligibilityAssessment:
     reason_code: str = ""
     differential_below_since: datetime | None = None
     target_satisfied_since: datetime | None = None
+    opportunity_warranted: bool = False
+    solar_engaged: bool = False
+    continuation_eligible: bool = False
+    solar_configured: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -82,6 +87,10 @@ class SolarEligibilityAssessment:
             "differential_below_since": _iso(self.differential_below_since),
             "target_satisfied_since": _iso(self.target_satisfied_since),
             "reason_code": self.reason_code,
+            "opportunity_warranted": self.opportunity_warranted,
+            "solar_engaged": self.solar_engaged,
+            "continuation_eligible": self.continuation_eligible,
+            "solar_configured": self.solar_configured,
             "rationale": list(self.rationale),
             "authority": "none",
             "command_delivery_enabled": False,
@@ -114,6 +123,8 @@ class SolarEligibilityTracker:
         differential: float | None,
         reason_code: str,
         rationale: str,
+        opportunity_warranted: bool = False,
+        continuation_eligible: bool = False,
     ) -> SolarEligibilityAssessment:
         return SolarEligibilityAssessment(
             evaluated_at=observation.evaluated_at,
@@ -124,6 +135,10 @@ class SolarEligibilityTracker:
             reason_code=reason_code,
             differential_below_since=self._differential_below_since,
             target_satisfied_since=self._target_satisfied_since,
+            opportunity_warranted=opportunity_warranted,
+            solar_engaged=observation.solar_active,
+            continuation_eligible=continuation_eligible,
+            solar_configured=observation.solar_configured,
         )
 
     def _block(
@@ -155,8 +170,6 @@ class SolarEligibilityTracker:
         if water is None or collector is None or target is None:
             return self._block(observation, differential=None, reason_code="required_temperature_unavailable", rationale="Required trusted solar temperature evidence is unavailable.")
         differential = collector - water
-        if not observation.pool_active:
-            return self._block(observation, differential=differential, reason_code="pool_circulation_inactive", rationale="Pool circulation is not active.")
         if observation.spa_active:
             return self._block(observation, differential=differential, reason_code="spa_priority", rationale="Active spa operation suppresses pool solar.")
 
@@ -169,7 +182,31 @@ class SolarEligibilityTracker:
                 return self._block(observation, differential=differential, reason_code="target_satisfied", rationale="Pool target is already satisfied.")
             if differential < self._policy.activation_differential_f:
                 return self._block(observation, differential=differential, reason_code="activation_differential_insufficient", rationale="Collector differential is below the activation threshold.")
-            return self._result(observation, disposition=SolarEligibilityDisposition.ELIGIBLE, differential=differential, reason_code="physically_eligible", rationale="Physical solar eligibility is satisfied immediately.")
+            return self._result(
+                observation,
+                disposition=SolarEligibilityDisposition.ELIGIBLE,
+                differential=differential,
+                reason_code=(
+                    "physically_eligible"
+                    if observation.pool_active
+                    else "pre_circulation_solar_opportunity"
+                ),
+                rationale=(
+                    "Physical solar eligibility is satisfied immediately."
+                    if observation.pool_active
+                    else "Collector and demand evidence warrant a pre-circulation Solar attempt."
+                ),
+                opportunity_warranted=True,
+                continuation_eligible=observation.pool_active,
+            )
+
+        if not observation.pool_active:
+            return self._block(
+                observation,
+                differential=differential,
+                reason_code="active_solar_pool_circulation_lost",
+                rationale="Active Solar cannot continue without proven Pool circulation.",
+            )
 
         if differential < self._policy.deactivation_differential_f:
             if self._differential_below_since is None:
@@ -186,7 +223,15 @@ class SolarEligibilityTracker:
             return self._block(observation, differential=differential, reason_code="differential_low_sustained", rationale="Collector differential stayed below threshold for the shutdown hold.")
         if self._target_satisfied_since is not None and observation.evaluated_at - self._target_satisfied_since >= self._policy.target_satisfaction_hold:
             return self._block(observation, differential=differential, reason_code="target_satisfied_sustained", rationale="Pool target stayed satisfied for the shutdown hold.")
-        return self._result(observation, disposition=SolarEligibilityDisposition.ELIGIBLE, differential=differential, reason_code="active_shutdown_debounce", rationale="Active solar remains eligible while shutdown conditions debounce.")
+        return self._result(
+            observation,
+            disposition=SolarEligibilityDisposition.ELIGIBLE,
+            differential=differential,
+            reason_code="active_shutdown_debounce",
+            rationale="Active solar remains eligible while shutdown conditions debounce.",
+            opportunity_warranted=True,
+            continuation_eligible=True,
+        )
 
 
 def _iso(value: datetime | None) -> str | None:

@@ -169,6 +169,16 @@ receipt. The separately scoped Pool probe delivery envelope grants no normal
 thermal, filtration, Hot Tub, or outage authority. Physical outage response
 remains separate work.
 
+One narrow successor handoff permits an owned Pool temperature-probe lifecycle
+to become a same-request-mode normal Pool thermal lifecycle. The handoff retains
+only accepted body-activation provenance and explicitly clears incompatible
+probe pump/source provenance. The successor's pump and heat-source concepts are
+unowned until their exact new operations receive accepted delivery receipts.
+The handoff requires current usable topology, the exact live predecessor lease
+and generation, a current authorized successor plan, the same Pool body, and
+typed probe-to-thermal purpose identities. It cannot adopt pre-existing state,
+cross bodies, or transfer ownership after external preemption.
+
 Orchestration evidence uses the same live verification boundary as thermal
 execution: source kind must be `LIVE`, confidence must be at least `0.5`, and
 quality must be `GOOD` or `DEGRADED`. Freshness remains concept-specific.

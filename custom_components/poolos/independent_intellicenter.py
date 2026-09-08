@@ -65,6 +65,7 @@ from poolos.intellicenter_readonly import (
     NativeCircuitState,
     NativeIntelliCenterReadError,
     NativeIntelliCenterTransportSnapshot,
+    NativeInventoryCompleteness,
     NativeIntelliChlorState,
     NativePumpState,
     NativeRawAttribute,
@@ -414,6 +415,7 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._last_error_code: str | None = None
         self._reconnect_count = 0
         self._discovery_generation = 0
+        self._inventory_completeness = NativeInventoryCompleteness.UNKNOWN
         self._running = False
         self._body_metadata_refresh_pending: set[str] = set()
         self._body_metadata_refresh_dirty: set[str] = set()
@@ -571,6 +573,11 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._last_native_update = observed_at
         self._last_error_code = None
         self._discovery_generation += 1
+        # ICModelController.start() has completed its initial all-equipment
+        # discovery before the handler invokes this successful lifecycle
+        # callback. Completeness is therefore explicit and generation-bound;
+        # connection state or object presence never establishes it.
+        self._inventory_completeness = NativeInventoryCompleteness.COMPLETE
         if reconnected:
             self._reconnect_count += 1
         self._latest_snapshot = self._copy_snapshot(
@@ -585,6 +592,7 @@ class IndependentIntelliCenterReadOnlyTransport:
     def _on_disconnected(self, exc: Exception | None) -> None:
         observed_at = datetime.now(UTC)
         self._last_error_code = None if exc is None else type(exc).__name__.upper()
+        self._inventory_completeness = NativeInventoryCompleteness.UNKNOWN
         self._latest_snapshot = self._copy_snapshot(
             observed_at=observed_at,
             connected=False,
@@ -827,6 +835,7 @@ class IndependentIntelliCenterReadOnlyTransport:
                 if bool(getattr(self._controller.system_info, "uses_metric", False))
                 else "°F"
             ),
+            inventory_completeness=self._inventory_completeness,
             bodies=tuple(
                 item
                 for obj in self._model.get_by_type(BODY_TYPE)

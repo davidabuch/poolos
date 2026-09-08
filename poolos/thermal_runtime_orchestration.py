@@ -26,6 +26,7 @@ from .observations import (
     PoolObservation,
 )
 from .thermal_live_execution import ThermalLiveExecutionContext
+from .thermal_execution_currentness import ThermalExecutionPurposeKind
 from .thermal_runtime_assessment import (
     ThermalBodyRuntimeAssessment,
     ThermalRuntimeAssessment,
@@ -35,6 +36,7 @@ from .thermal_runtime_ownership import (
     SharedHydraulicCircuitEvidence,
     ThermalRuntimeOwnershipDecision,
     ThermalRuntimeOwnershipEvidence,
+    ThermalRuntimeOwnershipLease,
     ThermalRuntimeOwnershipManager,
     ThermalRuntimeOwnershipStatus,
     shared_hydraulic_safety_class,
@@ -57,6 +59,7 @@ _ORCHESTRATION_OBSERVATION_IDS = frozenset(
         POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
+        "solar.active",
         *SHARED_HYDRAULIC_SAFETY_BY_CONCEPT,
     }
 )
@@ -397,14 +400,15 @@ class ThermalRuntimeOrchestrator:
                 retain_termination_entitlement=True,
             )
         body = thermal.pool if lease.body is ThermalBody.POOL else thermal.hot_tub
-        return self.ownership.evaluate(
-            build_thermal_runtime_ownership_evidence(
-                generated_at=generated_at,
-                observations=observations,
-                body=body,
-                external_changes=external_changes,
-            )
+        evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=generated_at,
+            observations=observations,
+            body=body,
+            external_changes=external_changes,
         )
+        if _probe_successor_handoff_pending(lease, body):
+            return self.ownership.evaluate_pending_successor(evidence)
+        return self.ownership.evaluate(evidence)
 
 
     def _lifecycle(
@@ -543,6 +547,27 @@ def build_thermal_runtime_ownership_evidence(
         external_changes=external_changes,
         shared_hydraulic_circuits=circuits,
         shared_hydraulic_inventory_complete=complete,
+    )
+
+
+def _probe_successor_handoff_pending(
+    lease: ThermalRuntimeOwnershipLease,
+    body: ThermalBodyRuntimeAssessment,
+) -> bool:
+    """Identify only a same-mode Pool probe-to-thermal successor boundary."""
+
+    predecessor = lease.originating_currentness
+    successor = getattr(body, "execution_currentness", None)
+    return bool(
+        predecessor is not None
+        and successor is not None
+        and predecessor.purpose.kind
+        is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+        and successor.purpose.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and lease.body is ThermalBody.POOL
+        and body.body is ThermalBody.POOL
+        and predecessor.purpose.requested_mode == successor.purpose.requested_mode
+        and body.actual_authorization.authorized
     )
 
 
