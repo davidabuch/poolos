@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from poolos.physical_command_authority import (
+    AutomaticFiltrationDispatchPurpose,
     AutomaticThermalDispatchContext,
     AutomaticThermalDispatchPurpose,
     ExpectedNativeConsequence,
@@ -74,6 +75,99 @@ def test_native_service_and_timeout_modes_remain_command_prohibitions(
     authority.resolve_maintenance(False)
     authority.set_controller_mode(mode)
     assert authority.assess(request()).reason is reason
+
+
+def test_automatic_filtration_authority_is_default_off_exact_and_epoch_bound() -> None:
+    authority = ready()
+    authority.begin_automatic_filtration_epoch("epoch-1")
+    context = authority.bind_automatic_filtration_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="filtration-session",
+        operation_identity="operation-1",
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=2600,
+        pump_circuit_id="p0102",
+    )
+    filtration = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        requested_value=2600,
+        automatic_filtration_context=context,
+    )
+    assert authority.assess(filtration).reason is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_GATE_DISABLED
+
+    authority.configure_automatic_filtration(enabled=True)
+    authority.begin_automatic_filtration_epoch("epoch-2")
+    context = authority.bind_automatic_filtration_dispatch(
+        epoch_identity="epoch-2",
+        session_identity="filtration-session",
+        operation_identity="operation-2",
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=2600,
+        pump_circuit_id="p0102",
+    )
+    filtration = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        requested_value=2600,
+        automatic_filtration_context=context,
+    )
+    assert authority.assess(filtration).allowed
+    wrong = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        requested_value=2900,
+        automatic_filtration_context=context,
+    )
+    assert authority.assess(wrong).reason is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_OPERATION_UNAUTHORIZED
+
+    authority.begin_automatic_filtration_epoch("epoch-3")
+    assert authority.assess(filtration).reason is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
+
+
+def test_disabled_filtration_gate_allows_only_bound_owned_body_cleanup() -> None:
+    authority = ready()
+    authority.begin_automatic_filtration_epoch("epoch-1")
+    with pytest.raises(
+        ValueError,
+        match="filtration cleanup requires exact body ownership provenance",
+    ):
+        authority.bind_automatic_filtration_dispatch(
+            epoch_identity="epoch-1",
+            session_identity="filtration-session",
+            operation_identity="unproven-body-off",
+            operation="body_active",
+            target="B1101",
+            requested_value=False,
+            pump_circuit_id="p0102",
+            cleanup=True,
+        )
+    context = authority.bind_automatic_filtration_dispatch(
+        epoch_identity="epoch-1",
+        session_identity="filtration-session",
+        operation_identity="body-off",
+        operation="body_active",
+        target="B1101",
+        requested_value=False,
+        pump_circuit_id="p0102",
+        cleanup=True,
+        ownership_lease_id="filtration-lease",
+        body_activation_receipt_id="body-activation-receipt",
+    )
+    assert context.purpose is AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP
+    cleanup = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1101",
+        source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        requested_value=False,
+        automatic_filtration_context=context,
+    )
+    assert authority.assess(cleanup).allowed
 
 
 def test_expectation_lifecycle_is_pre_dispatch_bounded_and_value_specific() -> None:

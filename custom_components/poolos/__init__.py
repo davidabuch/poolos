@@ -31,6 +31,9 @@ _enable_local_vendored_core()
 from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
 from .coordinator import PoolOSCoordinator  # noqa: E402
 from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
+from .filtration_automatic_runtime import (  # noqa: E402
+    PoolOSFiltrationAutomaticRuntime,
+)
 from .external_change_runtime import PoolOSExternalChangeRuntime  # noqa: E402
 from .grid_outage_runtime import PoolOSGridOutageSafetyRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
@@ -47,6 +50,9 @@ from poolos.pool_temperature_probe_execution import (  # noqa: E402
 from poolos.physical_command_authority import (  # noqa: E402
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
+)
+from poolos.pool_circulation_ownership import (  # noqa: E402
+    PoolCirculationOwnershipRegistry,
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import (  # noqa: E402
@@ -69,6 +75,7 @@ class PoolOSRuntimeData:
     thermal_runtime_orchestrator: ThermalRuntimeOrchestrator
     thermal_automatic_runtime: PoolOSThermalAutomaticRuntime
     grid_outage_safety_runtime: PoolOSGridOutageSafetyRuntime
+    filtration_automatic_runtime: PoolOSFiltrationAutomaticRuntime
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
@@ -114,11 +121,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_runtime=thermal_runtime,
     )
     thermal_runtime_orchestrator = ThermalRuntimeOrchestrator()
+    pool_circulation_ownership = PoolCirculationOwnershipRegistry()
     thermal_automatic_runtime = PoolOSThermalAutomaticRuntime(
         hass=hass,
         coordinator=coordinator,
         thermal_runtime=thermal_runtime,
         orchestrator=thermal_runtime_orchestrator,
+        authority=physical_command_authority,
+        manual=manual_intellicenter,
+        circulation_ownership=pool_circulation_ownership,
+    )
+    filtration_automatic_runtime = PoolOSFiltrationAutomaticRuntime(
+        hass=hass,
+        coordinator=coordinator,
+        filtration_runtime=filtration_runtime,
+        thermal_runtime=thermal_runtime,
+        ownership=pool_circulation_ownership,
         authority=physical_command_authority,
         manual=manual_intellicenter,
     )
@@ -173,6 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_runtime_orchestrator=thermal_runtime_orchestrator,
         thermal_automatic_runtime=thermal_automatic_runtime,
         grid_outage_safety_runtime=grid_outage_safety_runtime,
+        filtration_automatic_runtime=filtration_automatic_runtime,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
     coordinator.set_native_snapshot_observer(external_change_runtime.process)
@@ -197,6 +216,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             orchestration,
             external_change_runtime.latest_batch,
         )
+        filtration_automatic_runtime.observe(
+            snapshot,
+            orchestration,
+            external_changes=external_change_runtime.latest_batch,
+        )
         grid_outage_safety_runtime.observe(
             snapshot,
             orchestration,
@@ -216,6 +240,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             ),
         )
         thermal_automatic_runtime.orchestration_failed(snapshot, error)
+        filtration_automatic_runtime.orchestration_failed(snapshot, error)
         grid_outage_safety_runtime.orchestration_failed(snapshot, error)
 
     thermal_runtime.set_orchestration_failure_observer(
@@ -283,6 +308,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> b
     entry.runtime_data.thermal_runtime.set_orchestration_failure_observer(None)
     await entry.runtime_data.grid_outage_safety_runtime.async_unload()
     await entry.runtime_data.thermal_automatic_runtime.async_unload()
+    await entry.runtime_data.filtration_automatic_runtime.async_unload()
     entry.runtime_data.thermal_runtime_orchestrator.unload(
         unloaded_at=datetime.now(UTC)
     )

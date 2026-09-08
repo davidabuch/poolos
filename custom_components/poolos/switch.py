@@ -330,6 +330,42 @@ class PoolOSThermalAutomaticExecutionSwitch(SwitchEntity):
         }
 
 
+class PoolOSFiltrationAutomaticExecutionSwitch(SwitchEntity):
+    """Independent restart-reset gate for autonomous Pool filtration."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Automatic Filtration Execution"
+    _attr_icon = "mdi:pool"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_automatic_filtration_execution"
+
+    @property
+    def is_on(self) -> bool:
+        return self._runtime.filtration_automatic_runtime.enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.filtration_automatic_runtime.set_enabled(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.filtration_automatic_runtime.set_enabled(False)
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **self._runtime.filtration_automatic_runtime.diagnostics(),
+            "effective_state_resets_off_on_restart": True,
+            "cached_candidate_executes_on_enable": False,
+            "fresh_authoritative_epoch_required": True,
+            "filtration_accounting_remains_command_free": True,
+        }
+
+
 class PoolOSGridOutagePhysicalSafetySwitch(SwitchEntity):
     """Independent restart-reset gate for confirmed-outage reductions."""
 
@@ -702,6 +738,7 @@ async def async_setup_entry(
             ),
             PoolOSThermalLiveExecutionSwitch(entry),
             PoolOSThermalAutomaticExecutionSwitch(entry),
+            PoolOSFiltrationAutomaticExecutionSwitch(entry),
             PoolOSGridOutagePhysicalSafetySwitch(entry),
             PoolOSMaintenanceModeSwitch(entry),
         ]

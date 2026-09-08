@@ -29,6 +29,7 @@ from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
 
 from poolos.physical_command_authority import (
+    AutomaticFiltrationDispatchContext,
     AutomaticThermalDispatchContext,
     ExpectedNativeConsequence,
     GridOutageDispatchContext,
@@ -258,6 +259,7 @@ class ManualIntelliCenterControl:
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
+        automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Turn Pool/Spa body circulation on or off."""
@@ -274,6 +276,7 @@ class ManualIntelliCenterControl:
                 source=request_source,
                 requested_value=active,
                 automatic_thermal_context=automatic_thermal_context,
+                automatic_filtration_context=automatic_filtration_context,
                 grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(
@@ -571,6 +574,7 @@ class ManualIntelliCenterControl:
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
+        automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
     ) -> ManualCommandReceipt:
         """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
@@ -602,6 +606,7 @@ class ManualIntelliCenterControl:
                 source=request_source,
                 requested_value=target,
                 automatic_thermal_context=automatic_thermal_context,
+                automatic_filtration_context=automatic_filtration_context,
                 grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(

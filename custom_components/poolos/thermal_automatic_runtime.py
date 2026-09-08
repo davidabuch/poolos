@@ -19,6 +19,7 @@ from poolos.circulation_successor import FiltrationSuccessorEvidence
 from poolos.integration import SetBodyActive, SetPumpSpeed, ThermalBody
 from poolos.external_change import ExternalChangeBatch
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDeliveryFactory,
     ThermalAutomaticExecutionDriver,
@@ -184,6 +185,9 @@ class PoolOSThermalAutomaticRuntime:
     orchestrator: ThermalRuntimeOrchestrator
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
+    circulation_ownership: PoolCirculationOwnershipRegistry = field(
+        default_factory=PoolCirculationOwnershipRegistry
+    )
     driver: ThermalAutomaticExecutionDriver = field(init=False)
     _latest_frame: ThermalAutomaticExecutionFrame | None = field(
         default=None, init=False, repr=False
@@ -192,7 +196,10 @@ class PoolOSThermalAutomaticRuntime:
     _unloaded: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.driver = ThermalAutomaticExecutionDriver(self.orchestrator)
+        self.driver = ThermalAutomaticExecutionDriver(
+            self.orchestrator,
+            circulation_ownership=self.circulation_ownership,
+        )
         self._sync_authority_configuration()
 
     @property
@@ -266,6 +273,10 @@ class PoolOSThermalAutomaticRuntime:
         ):
             return
         self._latest_frame = frame
+        self.circulation_ownership.begin_epoch(frame.epoch_identity)
+        reserve = getattr(self.driver, "reserve_circulation_candidate", None)
+        if reserve is not None:
+            reserve(frame)
         self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled:
             self.driver.note_disabled_epoch(frame)

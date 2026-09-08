@@ -29,6 +29,7 @@ class PhysicalRequestSource(StrEnum):
     MANUAL = "manual"
     AUTONOMOUS = "autonomous"
     AUTOMATIC_THERMAL = "automatic_thermal"
+    AUTOMATIC_FILTRATION = "automatic_filtration"
     RECONCILIATION = "reconciliation"
     SAFETY_INTERLOCK = "safety_interlock"
     GRID_OUTAGE_SAFETY = "grid_outage_safety"
@@ -53,6 +54,13 @@ class PhysicalAuthorityReason(StrEnum):
     AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED = (
         "automatic_thermal_operation_unauthorized"
     )
+    AUTOMATIC_FILTRATION_GATE_DISABLED = "automatic_filtration_gate_disabled"
+    AUTOMATIC_FILTRATION_CONTEXT_MISSING = "automatic_filtration_context_missing"
+    AUTOMATIC_FILTRATION_CONTEXT_STALE = "automatic_filtration_context_stale"
+    AUTOMATIC_FILTRATION_OPERATION_UNAUTHORIZED = (
+        "automatic_filtration_operation_unauthorized"
+    )
+    AUTOMATIC_FILTRATION_DRIVER_UNLOADED = "automatic_filtration_driver_unloaded"
     GRID_OUTAGE_GATE_DISABLED = "grid_outage_gate_disabled"
     GRID_OUTAGE_CONTEXT_MISSING = "grid_outage_context_missing"
     GRID_OUTAGE_CONTEXT_STALE = "grid_outage_context_stale"
@@ -321,6 +329,86 @@ class AutomaticThermalDispatchContext:
             raise ValueError("normal or source termination context cannot carry cleanup authority")
 
 
+class AutomaticFiltrationDispatchPurpose(StrEnum):
+    """Exact Pool-only filtration operation class."""
+
+    NORMAL = "normal"
+    OWNED_BODY_CLEANUP = "owned_body_cleanup"
+
+
+@dataclass(frozen=True, slots=True)
+class AutomaticFiltrationDispatchContext:
+    """Immutable final-gateway binding for one filtration operation."""
+
+    generation: int
+    epoch_identity: str
+    session_identity: str
+    operation_identity: str
+    operation: str
+    target: str
+    requested_value: bool | int
+    pump_circuit_id: str
+    ownership_lease_id: str | None = None
+    body_activation_receipt_id: str | None = None
+    purpose: AutomaticFiltrationDispatchPurpose = (
+        AutomaticFiltrationDispatchPurpose.NORMAL
+    )
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("automatic filtration generation must be positive")
+        for name in (
+            "epoch_identity",
+            "session_identity",
+            "operation_identity",
+            "operation",
+            "target",
+            "pump_circuit_id",
+        ):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        if not is_pmpcirc_native_id(self.pump_circuit_id):
+            raise ValueError("automatic filtration requires a concrete Pool PMPCIRC")
+        object.__setattr__(
+            self,
+            "purpose",
+            AutomaticFiltrationDispatchPurpose(self.purpose),
+        )
+        if self.purpose is AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP:
+            if not (
+                self.ownership_lease_id
+                and self.ownership_lease_id.strip()
+                and self.body_activation_receipt_id
+                and self.body_activation_receipt_id.strip()
+            ):
+                raise ValueError(
+                    "filtration cleanup requires exact body ownership provenance"
+                )
+        elif (
+            self.ownership_lease_id is not None
+            or self.body_activation_receipt_id is not None
+        ):
+            raise ValueError("normal filtration context cannot carry cleanup provenance")
+        allowed = (
+            self.operation == "body_active"
+            and self.target == "B1101"
+            and type(self.requested_value) is bool
+            and (
+                self.requested_value is True
+                if self.purpose is AutomaticFiltrationDispatchPurpose.NORMAL
+                else self.requested_value is False
+            )
+        ) or (
+            self.purpose is AutomaticFiltrationDispatchPurpose.NORMAL
+            and self.operation == "pump_circuit_speed"
+            and self.target == self.pump_circuit_id
+            and type(self.requested_value) is int
+            and self.requested_value == _THERMAL_BASELINES.filtration_rpm
+        )
+        if not allowed:
+            raise ValueError("operation exceeds exact automatic filtration envelope")
+
+
 @dataclass(frozen=True, slots=True)
 class PhysicalCommandRequest:
     """Immutable identity of one proposed physical mutation."""
@@ -331,6 +419,7 @@ class PhysicalCommandRequest:
     requested_value: bool | int | float | str
     request_id: str = field(default_factory=lambda: str(uuid4()))
     automatic_thermal_context: AutomaticThermalDispatchContext | None = None
+    automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None
     grid_outage_context: GridOutageDispatchContext | None = None
 
     def __post_init__(self) -> None:
@@ -350,6 +439,18 @@ class PhysicalCommandRequest:
             and self.grid_outage_context is not None
         ):
             raise ValueError("grid outage context requires grid outage safety source")
+        if (
+            self.source is not PhysicalRequestSource.AUTOMATIC_FILTRATION
+            and self.automatic_filtration_context is not None
+        ):
+            raise ValueError(
+                "automatic filtration context requires automatic filtration source"
+            )
+        if (
+            self.source is PhysicalRequestSource.AUTOMATIC_FILTRATION
+            and self.automatic_thermal_context is not None
+        ):
+            raise ValueError("filtration requests cannot carry thermal context")
         if (
             self.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
             and self.automatic_thermal_context is not None
@@ -448,6 +549,17 @@ class PoolOSPhysicalCommandAuthority:
         default=None, init=False, repr=False
     )
     _automatic_thermal_probe_authority: AutomaticThermalProbeAuthority | None = field(
+        default=None, init=False, repr=False
+    )
+    _automatic_filtration_gate_enabled: bool = field(
+        default=False, init=False, repr=False
+    )
+    _automatic_filtration_loaded: bool = field(default=True, init=False, repr=False)
+    _automatic_filtration_generation: int = field(default=0, init=False, repr=False)
+    _automatic_filtration_epoch_identity: str | None = field(
+        default=None, init=False, repr=False
+    )
+    _automatic_filtration_context: AutomaticFiltrationDispatchContext | None = field(
         default=None, init=False, repr=False
     )
     _grid_outage_gate_enabled: bool = field(default=False, init=False, repr=False)
@@ -653,6 +765,70 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_thermal_loaded = False
         self._invalidate_automatic_thermal_context()
 
+    def configure_automatic_filtration(self, *, enabled: bool) -> None:
+        """Set the independent restart-reset filtration gate."""
+
+        if self._automatic_filtration_gate_enabled == bool(enabled):
+            return
+        self._automatic_filtration_gate_enabled = bool(enabled)
+        self._invalidate_automatic_filtration_context()
+
+    def begin_automatic_filtration_epoch(self, epoch_identity: str) -> None:
+        """Invalidate filtration commands bound to an older observation frame."""
+
+        if not epoch_identity.strip():
+            raise ValueError("automatic filtration epoch identity must not be empty")
+        if epoch_identity == self._automatic_filtration_epoch_identity:
+            return
+        self._automatic_filtration_generation += 1
+        self._automatic_filtration_epoch_identity = epoch_identity
+        self._automatic_filtration_context = None
+
+    def bind_automatic_filtration_dispatch(
+        self,
+        *,
+        epoch_identity: str,
+        session_identity: str,
+        operation_identity: str,
+        operation: str,
+        target: str,
+        requested_value: bool | int,
+        pump_circuit_id: str,
+        cleanup: bool = False,
+        ownership_lease_id: str | None = None,
+        body_activation_receipt_id: str | None = None,
+    ) -> AutomaticFiltrationDispatchContext:
+        """Bind exactly one current canonical filtration operation."""
+
+        if epoch_identity != self._automatic_filtration_epoch_identity:
+            raise ValueError("automatic filtration epoch is not current")
+        context = AutomaticFiltrationDispatchContext(
+            generation=self._automatic_filtration_generation,
+            epoch_identity=epoch_identity,
+            session_identity=session_identity,
+            operation_identity=operation_identity,
+            operation=operation,
+            target=target,
+            requested_value=requested_value,
+            pump_circuit_id=pump_circuit_id,
+            ownership_lease_id=ownership_lease_id,
+            body_activation_receipt_id=body_activation_receipt_id,
+            purpose=(
+                AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP
+                if cleanup
+                else AutomaticFiltrationDispatchPurpose.NORMAL
+            ),
+        )
+        self._automatic_filtration_context = context
+        return context
+
+    def unload_automatic_filtration_driver(self) -> None:
+        """Make late filtration work inert without issuing cleanup."""
+
+        self._automatic_filtration_loaded = False
+        self._automatic_filtration_gate_enabled = False
+        self._invalidate_automatic_filtration_context()
+
     def configure_grid_outage_safety(self, *, enabled: bool) -> None:
         """Set the independent default-off outage gate and invalidate old work."""
 
@@ -763,6 +939,16 @@ class PoolOSPhysicalCommandAuthority:
             if item.request.source is not PhysicalRequestSource.AUTOMATIC_THERMAL
         }
 
+    def _invalidate_automatic_filtration_context(self) -> None:
+        self._automatic_filtration_generation += 1
+        self._automatic_filtration_epoch_identity = None
+        self._automatic_filtration_context = None
+        self._expectations = {
+            key: item
+            for key, item in self._expectations.items()
+            if item.request.source is not PhysicalRequestSource.AUTOMATIC_FILTRATION
+        }
+
     def assess(self, request: PhysicalCommandRequest) -> PhysicalAuthorityDecision:
         """Answer whether this request may physically dispatch right now."""
 
@@ -772,6 +958,11 @@ class PoolOSPhysicalCommandAuthority:
             and request.source is PhysicalRequestSource.AUTOMATIC_THERMAL
         ):
             reason = self._automatic_thermal_reason(request)
+        elif (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source is PhysicalRequestSource.AUTOMATIC_FILTRATION
+        ):
+            reason = self._automatic_filtration_reason(request)
         elif (
             reason is PhysicalAuthorityReason.ALLOWED
             and request.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
@@ -860,6 +1051,30 @@ class PoolOSPhysicalCommandAuthority:
             and request.requested_value == expected.requested_value
         ):
             return PhysicalAuthorityReason.GRID_OUTAGE_OPERATION_UNAUTHORIZED
+        return PhysicalAuthorityReason.ALLOWED
+
+    def _automatic_filtration_reason(
+        self,
+        request: PhysicalCommandRequest,
+    ) -> PhysicalAuthorityReason:
+        if not self._automatic_filtration_loaded:
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_DRIVER_UNLOADED
+        context = request.automatic_filtration_context
+        if context is None:
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_MISSING
+        if context != self._automatic_filtration_context or (
+            context.generation != self._automatic_filtration_generation
+            or context.epoch_identity != self._automatic_filtration_epoch_identity
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
+        if (
+            not self._automatic_filtration_gate_enabled
+            and context.purpose
+            is not AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_GATE_DISABLED
+        if not _automatic_filtration_request_matches_context(request, context):
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_OPERATION_UNAUTHORIZED
         return PhysicalAuthorityReason.ALLOWED
 
     def require_allowed(self, request: PhysicalCommandRequest) -> None:
@@ -986,6 +1201,13 @@ class PoolOSPhysicalCommandAuthority:
                     if self._automatic_thermal_cleanup_authority is None
                     else self._automatic_thermal_cleanup_authority.candidate_identity
                 ),
+                "automatic_filtration_gate_enabled": (
+                    self._automatic_filtration_gate_enabled
+                ),
+                "automatic_filtration_loaded": self._automatic_filtration_loaded,
+                "automatic_filtration_generation": (
+                    self._automatic_filtration_generation
+                ),
                 "grid_outage_safety_gate_enabled": self._grid_outage_gate_enabled,
                 "grid_outage_safety_loaded": self._grid_outage_loaded,
                 "grid_outage_generation": self._grid_outage_generation,
@@ -1052,6 +1274,18 @@ def _automatic_thermal_request_matches_context(
     return False
 
 
+def _automatic_filtration_request_matches_context(
+    request: PhysicalCommandRequest,
+    context: AutomaticFiltrationDispatchContext,
+) -> bool:
+    return bool(
+        request.operation == context.operation
+        and request.target == context.target
+        and type(request.requested_value) is type(context.requested_value)
+        and request.requested_value == context.requested_value
+    )
+
+
 def _matches(expected: ExpectedNativeConsequence, value: Any) -> bool:
     if expected.numeric_tolerance:
         if isinstance(value, bool) or isinstance(expected.expected_value, bool):
@@ -1083,6 +1317,8 @@ def _require_aware(value: datetime) -> None:
 
 
 __all__ = [
+    "AutomaticFiltrationDispatchContext",
+    "AutomaticFiltrationDispatchPurpose",
     "AutomaticThermalCleanupAuthority",
     "AutomaticThermalProbeAuthority",
     "AutomaticThermalDispatchPurpose",

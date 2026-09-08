@@ -42,6 +42,10 @@ from .pool_temperature_probe_execution import (
     PoolTemperatureProbeExecutionEvidence,
     PoolTemperatureProbeExecutionPhase,
 )
+from .pool_circulation_ownership import (
+    FiltrationToThermalHandoff,
+    PoolCirculationOwnershipRegistry,
+)
 from .operating_baselines import PumpOperatingBaselines
 from .thermal_execution_currentness import ThermalExecutionPurposeKind
 from .thermal_live_execution import (
@@ -71,7 +75,9 @@ from .thermal_runtime_orchestration import (
 from .thermal_runtime_ownership import (
     SharedHydraulicSafetyClass,
     ThermalResidualTerminationEntitlement,
+    ThermalRuntimeConceptProvenance,
     ThermalRuntimeHandoffRequest,
+    ThermalRuntimeOwnedConcept,
     ThermalRuntimeOwnershipDisposition,
     ThermalRuntimeOwnershipStatus,
 )
@@ -260,6 +266,9 @@ class ThermalAutomaticExecutionDriver:
 
     orchestrator: ThermalRuntimeOrchestrator
     engine: ThermalLiveExecutionEngine = field(default_factory=ThermalLiveExecutionEngine)
+    circulation_ownership: PoolCirculationOwnershipRegistry = field(
+        default_factory=PoolCirculationOwnershipRegistry
+    )
     requested_enabled: bool = False
     assessment: ThermalAutomaticDriverAssessment | None = None
     active_session: ThermalLiveExecutionSession | None = None
@@ -300,6 +309,28 @@ class ThermalAutomaticExecutionDriver:
     _solar_nonengagement_cleanup_purpose_id: str | None = field(
         default=None, init=False, repr=False
     )
+    _filtration_handoff: FiltrationToThermalHandoff | None = field(
+        default=None, init=False, repr=False
+    )
+
+    def reserve_circulation_candidate(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> None:
+        """Synchronously reserve this epoch before another driver is scheduled."""
+
+        if (
+            self.requested_enabled
+            and frame.physical_authority_ready
+            and frame.live_policy.thermal_live_execution_enabled
+            and frame.orchestration.candidate_body is ThermalBody.POOL
+            and frame.orchestration.lifecycle
+            in {
+                ThermalOrchestrationLifecycle.CANDIDATE_READY,
+                ThermalOrchestrationLifecycle.OWNED,
+            }
+        ):
+            self.circulation_ownership.reserve_thermal(frame.epoch_identity)
 
     @property
     def last_epoch_identity(self) -> str | None:
@@ -643,16 +674,28 @@ class ThermalAutomaticExecutionDriver:
                         preflight=preflight,
                     )
                 if body.body_active is True:
-                    return self._blocked(
-                        frame,
-                        "automatic_thermal_preexisting_body_unowned",
-                        body=body,
-                        preflight=preflight,
+                    self._filtration_handoff = (
+                        self.circulation_ownership.begin_filtration_to_thermal(
+                            thermal_purpose_id=(
+                                body.execution_currentness.purpose.purpose_id
+                            ),
+                            established_at=frame.observed_at,
+                        )
                     )
+                    if self._filtration_handoff is None:
+                        return self._blocked(
+                            frame,
+                            "automatic_thermal_preexisting_body_unowned",
+                            body=body,
+                            preflight=preflight,
+                        )
                 if (
+                    self._filtration_handoff is None
+                    and (
                     not body.plan.operations
                     or not isinstance(body.plan.operations[0], SetBodyActive)
                     or body.plan.operations[0].active is not True
+                    )
                 ):
                     return self._blocked(
                         frame,
@@ -674,7 +717,24 @@ class ThermalAutomaticExecutionDriver:
                         policy=frame.live_policy,
                         evidence=safety,
                     )
+                    if self._filtration_handoff is not None:
+                        provenance = self._filtration_handoff.body_activation
+                        seeded = replace(
+                            self.active_session.ownership,
+                            body_activation_operation_id=provenance.operation_id,
+                            body_activation_receipt_id=provenance.receipt_id,
+                            body_activation_correlation_id=provenance.correlation_id,
+                        )
+                        self.active_session = replace(
+                            self.active_session,
+                            ownership=seeded,
+                        )
                 except ValueError as exc:
+                    if self._filtration_handoff is not None:
+                        self.circulation_ownership.cancel_filtration_to_thermal(
+                            token_id=self._filtration_handoff.token_id
+                        )
+                        self._filtration_handoff = None
                     return self._blocked(
                         frame,
                         f"automatic_thermal_session_begin_failed:{_bounded(str(exc))}",
@@ -728,6 +788,11 @@ class ThermalAutomaticExecutionDriver:
                 requested_mode=body.requested_mode.value,
             )
             if promotion_failure is not None:
+                if self._filtration_handoff is not None:
+                    self.circulation_ownership.invalidate_filtration_to_thermal(
+                        token_id=self._filtration_handoff.token_id,
+                    )
+                    self._filtration_handoff = None
                 self._retire_session(
                     at=frame.observed_at,
                     reason=promotion_failure,
@@ -742,6 +807,16 @@ class ThermalAutomaticExecutionDriver:
                     failure=promotion_failure,
                     command_delivery_performed=True,
                 )
+            lease = self.orchestrator.ownership.state.lease
+            if lease is not None:
+                if self._filtration_handoff is not None:
+                    self.circulation_ownership.complete_filtration_to_thermal(
+                        token_id=self._filtration_handoff.token_id,
+                        thermal_lease_id=lease.lease_id,
+                    )
+                    self._filtration_handoff = None
+                else:
+                    self.circulation_ownership.mark_thermal_owned(lease.lease_id)
         if self._retire_after_inflight or not self.requested_enabled or self._unloaded:
             self._retire_after_inflight = False
             self._retire_session(
@@ -1051,6 +1126,7 @@ class ThermalAutomaticExecutionDriver:
                 self.cleanup_attempt = None
                 if action is ThermalCirculationCleanupAction.BODY_DEACTIVATION:
                     self.cleanup_provenance = None
+                    self.circulation_ownership.release_thermal()
                     return self._publish(
                         state=ThermalAutomaticDriverState.CONVERGED,
                         evaluated_at=frame.observed_at,
@@ -1062,11 +1138,29 @@ class ThermalAutomaticExecutionDriver:
                         command_delivery_performed=False,
                         circulation_assessment=assessment,
                     )
-                self.cleanup_provenance = provenance.without_pump()
+                operation = attempt.candidate.operation
+                assert isinstance(operation, SetPumpSpeed)
+                if provenance.body_activation is not None:
+                    self.circulation_ownership.accept_thermal_to_filtration(
+                        session_id=f"thermal-successor:{provenance.provenance_id}",
+                        pool_pump_circuit_id=operation.equipment_id,
+                        accepted_at=frame.observed_at,
+                        body_activation=provenance.body_activation,
+                        pump_setpoint=ThermalRuntimeConceptProvenance(
+                            concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+                            operation_id=operation.operation_id,
+                            receipt_id=attempt.receipt_id,
+                            correlation_id=attempt.correlation_id,
+                            intended_value=operation.rpm,
+                        ),
+                    )
+                else:
+                    self.circulation_ownership.release_thermal()
+                self.cleanup_provenance = None
                 return self._publish(
-                    state=ThermalAutomaticDriverState.CLEANUP_WAITING,
+                    state=ThermalAutomaticDriverState.CONVERGED,
                     evaluated_at=frame.observed_at,
-                    blocker="thermal_cleanup_filtration_pump_normalization_verified",
+                    blocker="thermal_cleanup_filtration_handoff_verified",
                     frame=frame,
                     body=None,
                     preflight=None,
@@ -1077,6 +1171,9 @@ class ThermalAutomaticExecutionDriver:
             if verification.startswith("failed:"):
                 reason = verification.removeprefix("failed:")
                 self._clear_cleanup()
+                self.circulation_ownership.release_thermal(
+                    thermal_lease_id=provenance.lease_id,
+                )
                 return self._publish(
                     state=ThermalAutomaticDriverState.PREEMPTED,
                     evaluated_at=frame.observed_at,
@@ -1116,6 +1213,9 @@ class ThermalAutomaticExecutionDriver:
         if assessment.external_takeover or assessment.topology_conflict:
             reason = assessment.reason_code
             self._clear_cleanup()
+            self.circulation_ownership.release_thermal(
+                thermal_lease_id=provenance.lease_id,
+            )
             return self._publish(
                 state=ThermalAutomaticDriverState.PREEMPTED,
                 evaluated_at=frame.observed_at,
@@ -1251,6 +1351,7 @@ class ThermalAutomaticExecutionDriver:
         self.cleanup_attempt = ThermalCirculationCleanupAttempt(
             candidate=candidate,
             correlation_id=correlation_id,
+            receipt_id=receipt.command_id,
             delivered_at=frame.observed_at,
             deadline=frame.observed_at + frame.live_policy.verification_timeout,
         )
@@ -1492,6 +1593,7 @@ class ThermalAutomaticExecutionDriver:
         self._probe_acquisition = None
         self.solar_engagement_attempt = None
         self._solar_nonengagement_cleanup_purpose_id = None
+        self._cancel_filtration_handoff()
         self._retire_session(
             at=unloaded_at,
             reason="automatic_thermal_driver_unloaded",
@@ -1922,7 +2024,10 @@ class ThermalAutomaticExecutionDriver:
         self._probe_acquisition = None
         self.solar_engagement_attempt = None
         self._solar_nonengagement_cleanup_purpose_id = None
+        self._cancel_filtration_handoff()
         self._retire_session(at=frame.observed_at, reason=reason)
+        if state is ThermalAutomaticDriverState.PREEMPTED:
+            self.circulation_ownership.release_thermal()
         return self._publish(
             state=state,
             evaluated_at=frame.observed_at,
@@ -1933,6 +2038,15 @@ class ThermalAutomaticExecutionDriver:
             failure=reason if state is ThermalAutomaticDriverState.FAILED else None,
             command_delivery_performed=False,
         )
+
+    def _cancel_filtration_handoff(self) -> None:
+        handoff = self._filtration_handoff
+        if handoff is None:
+            return
+        self.circulation_ownership.cancel_filtration_to_thermal(
+            token_id=handoff.token_id,
+        )
+        self._filtration_handoff = None
 
     def _blocked(
         self,

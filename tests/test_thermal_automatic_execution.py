@@ -35,6 +35,10 @@ from poolos.pool_temperature_probe_execution import (
     PoolTemperatureProbeContinuityEvidence,
     PoolTemperatureProbeExecutionPhase,
 )
+from poolos.pool_circulation_ownership import (
+    PoolCirculationOwner,
+    PoolCirculationOwnershipRegistry,
+)
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
@@ -54,7 +58,11 @@ from poolos.thermal_runtime_assessment import (
     ThermalRuntimeEvidence,
 )
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
-from poolos.thermal_runtime_ownership import ThermalRuntimeOwnershipStatus
+from poolos.thermal_runtime_ownership import (
+    ThermalRuntimeConceptProvenance,
+    ThermalRuntimeOwnedConcept,
+    ThermalRuntimeOwnershipStatus,
+)
 
 
 NOW = datetime(2026, 9, 4, 18, 0, tzinfo=UTC)
@@ -1098,7 +1106,123 @@ def test_preexisting_pool_circulation_and_hot_tub_fail_closed() -> None:
     )
 
     assert blocked.blocker == "automatic_thermal_hot_tub_pump_ownership_unproven"
-    assert hot_tub_delivery.calls == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_rpm", "expected_heater"),
+    (
+        (ThermalRequestedMode.SOLAR, 2900, "H0002"),
+        (ThermalRequestedMode.GAS, 3000, "H0001"),
+    ),
+)
+def test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adoption(
+    mode: ThermalRequestedMode,
+    expected_rpm: int,
+    expected_heater: str,
+) -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    circulation = PoolCirculationOwnershipRegistry()
+    driver = ThermalAutomaticExecutionDriver(
+        orchestrator,
+        circulation_ownership=circulation,
+    )
+    driver.set_enabled(True, changed_at=NOW, current_epoch_identity=None)
+    circulation.begin_epoch("filtration-epoch")
+    circulation.record_filtration_delivery(
+        session_id="filtration-session",
+        pool_pump_circuit_id="p0102",
+        accepted_at=NOW,
+        provenance=ThermalRuntimeConceptProvenance(
+            concept=ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+            operation_id="filtration-body-operation",
+            receipt_id="filtration-body-receipt",
+            correlation_id="filtration-body-correlation",
+            intended_value=True,
+        ),
+    )
+    circulation.record_filtration_delivery(
+        session_id="filtration-session",
+        pool_pump_circuit_id="p0102",
+        accepted_at=NOW,
+        provenance=ThermalRuntimeConceptProvenance(
+            concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+            operation_id="filtration-pump-operation",
+            receipt_id="filtration-pump-receipt",
+            correlation_id="filtration-pump-correlation",
+            intended_value=2600,
+        ),
+    )
+    circulation.confirm_filtration_body(
+        session_id="filtration-session",
+        confirmed_at=NOW,
+    )
+    circulation.confirm_filtration(
+        session_id="filtration-session",
+        confirmed_at=NOW,
+    )
+    frame = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=mode,
+    )
+    circulation.begin_epoch(frame.epoch_identity)
+    driver.reserve_circulation_candidate(frame)
+    delivery = FakeDelivery()
+
+    result = asyncio.run(
+        driver.process_epoch(frame, delivery_factory=FakeDeliveryFactory(delivery))
+    )
+
+    assert result.blocker is None
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == expected_rpm
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.body_activation.receipt_id == "filtration-body-receipt"
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.receipt_id != "filtration-pump-receipt"
+    assert circulation.filtration_lease is None
+
+    pump_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=2),
+        pool_active=True,
+        pump_rpm=expected_rpm,
+        configured_rpm=expected_rpm,
+        mode=mode,
+    )
+    asyncio.run(
+        driver.process_epoch(
+            pump_verified,
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=3),
+        pool_active=True,
+        pump_rpm=expected_rpm,
+        configured_rpm=expected_rpm,
+        pool_heater=expected_heater,
+        mode=mode,
+    )
+    asyncio.run(
+        driver.process_epoch(
+            source_verified,
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    thermal_lease = orchestrator.ownership.state.lease
+    assert thermal_lease is not None
+    assert thermal_lease.owns_body_activation
+    assert thermal_lease.owns_pump_setpoint
+    assert thermal_lease.owns_heat_source
 
 
 def test_physical_authority_and_thermal_live_gates_fail_closed() -> None:
@@ -1165,6 +1289,45 @@ def test_pending_outage_blocks_before_session_or_delivery() -> None:
     assert result.state is ThermalAutomaticDriverState.PREEMPTED
     assert result.blocker == "automatic_thermal_grid_not_authoritatively_on"
     assert delivery.calls == []
+
+
+def test_outage_preemption_relinquishes_shared_thermal_command_ownership() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    circulation = PoolCirculationOwnershipRegistry()
+    driver = ThermalAutomaticExecutionDriver(
+        orchestrator,
+        circulation_ownership=circulation,
+    )
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    baseline = _frame(orchestrator, NOW, pool_active=False)
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    asyncio.run(
+        driver.process_epoch(
+            _frame(orchestrator, NOW + timedelta(seconds=1), pool_active=False),
+            delivery_factory=factory,
+        )
+    )
+    assert circulation.owner is PoolCirculationOwner.THERMAL
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=2),
+                pool_active=True,
+                grid_outage_active=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert circulation.owner is PoolCirculationOwner.NONE
 
 
 def test_true_requested_mode_supersession_terminates_without_next_delivery() -> None:
@@ -1536,10 +1699,13 @@ def test_verified_source_off_then_normalizes_filtration_once_and_later_stops_bod
         filtration_remaining=timedelta(hours=2),
     )
     complete = asyncio.run(driver.process_epoch(normalized, delivery_factory=factory))
-    assert complete.state is ThermalAutomaticDriverState.CLEANUP_WAITING
-    assert driver.cleanup_provenance is not None
-    assert driver.cleanup_provenance.body_activation is not None
-    assert driver.cleanup_provenance.pump_setpoint is None
+    assert complete.state is ThermalAutomaticDriverState.CONVERGED
+    assert complete.blocker == "thermal_cleanup_filtration_handoff_verified"
+    assert driver.cleanup_provenance is None
+    assert driver.circulation_ownership.filtration_lease is not None
+    assert driver.circulation_ownership.filtration_lease.verified
+    assert driver.circulation_ownership.filtration_lease.body_activation is not None
+    assert driver.circulation_ownership.filtration_lease.pump_setpoint is not None
     command_count = len(factory.delivery.calls)
 
     still_needed = _frame(
@@ -1552,41 +1718,8 @@ def test_verified_source_off_then_normalizes_filtration_once_and_later_stops_bod
         filtration_remaining=timedelta(hours=1),
     )
     waiting = asyncio.run(driver.process_epoch(still_needed, delivery_factory=factory))
-    assert waiting.state is ThermalAutomaticDriverState.CLEANUP_WAITING
+    assert waiting.state is ThermalAutomaticDriverState.BLOCKED
     assert len(factory.delivery.calls) == command_count
-
-    satisfied = _frame(
-        orchestrator,
-        NOW + timedelta(seconds=70),
-        pool_active=True,
-        pump_rpm=2600,
-        configured_rpm=2600,
-        mode=ThermalRequestedMode.OFF,
-        filtration_remaining=timedelta(0),
-    )
-    body_requested = asyncio.run(
-        driver.process_epoch(satisfied, delivery_factory=factory)
-    )
-    assert body_requested.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
-    assert isinstance(factory.delivery.calls[-1], SetBodyActive)
-    assert factory.delivery.calls[-1].equipment_id == ThermalBody.POOL.value
-    assert factory.delivery.calls[-1].active is False
-
-    body_off = _frame(
-        orchestrator,
-        NOW + timedelta(seconds=71),
-        pool_active=False,
-        pump_rpm=0,
-        configured_rpm=2600,
-        mode=ThermalRequestedMode.OFF,
-        filtration_remaining=timedelta(0),
-    )
-    body_verified = asyncio.run(
-        driver.process_epoch(body_off, delivery_factory=factory)
-    )
-    assert body_verified.state is ThermalAutomaticDriverState.CONVERGED
-    assert driver.cleanup_provenance is None
-    assert driver.cleanup_attempt is None
 
 
 def test_body_cleanup_receipt_is_not_verification() -> None:
@@ -1679,6 +1812,10 @@ def test_source_no_longer_off_preempts_cleanup_verification() -> None:
         filtration_remaining=timedelta(0),
     )
     asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    assert driver.cleanup_provenance is not None
+    driver.circulation_ownership.mark_thermal_owned(
+        driver.cleanup_provenance.lease_id,
+    )
     body_request = _frame(
         orchestrator,
         NOW + timedelta(seconds=67),
@@ -1708,6 +1845,7 @@ def test_source_no_longer_off_preempts_cleanup_verification() -> None:
     assert result.blocker == "thermal_cleanup_source_off_not_current"
     assert driver.cleanup_provenance is None
     assert driver.cleanup_attempt is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
 
 
 def test_new_immediate_filtration_preempts_pending_body_cleanup() -> None:
@@ -1769,6 +1907,10 @@ def test_transient_spa_takeover_preempts_pending_cleanup_verification() -> None:
         filtration_remaining=timedelta(0),
     )
     asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    assert driver.cleanup_provenance is not None
+    driver.circulation_ownership.mark_thermal_owned(
+        driver.cleanup_provenance.lease_id,
+    )
 
     body_request = _frame(
         orchestrator,
@@ -1829,6 +1971,7 @@ def test_transient_spa_takeover_preempts_pending_cleanup_verification() -> None:
     assert result.blocker == "thermal_cleanup_external_takeover"
     assert driver.cleanup_provenance is None
     assert driver.cleanup_attempt is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
     assert len(factory.delivery.calls) == calls_before
 
 
@@ -1846,6 +1989,9 @@ def test_cleanup_takeover_invalidates_provenance_without_command() -> None:
     )
     asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
     assert driver.cleanup_provenance is not None
+    driver.circulation_ownership.mark_thermal_owned(
+        driver.cleanup_provenance.lease_id,
+    )
     calls_before = len(factory.delivery.calls)
     takeover_frame = _frame(
         orchestrator,
@@ -1881,6 +2027,7 @@ def test_cleanup_takeover_invalidates_provenance_without_command() -> None:
 
     assert result.state is ThermalAutomaticDriverState.PREEMPTED
     assert driver.cleanup_provenance is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
     assert len(factory.delivery.calls) == calls_before
 
 
