@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.10.5
+poolos@git+https://github.com/davidabuch/poolos.git@v0.10.6
 ```
 
 This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
@@ -80,7 +80,7 @@ Milestone 11.3B uses integration version `0.7.0` and tag `v0.7.0`.
 Milestone 11.3C uses integration version `0.8.0` and tag `v0.8.0`.
 Milestone 11.3D uses integration version `0.9.0` and tag `v0.9.0`.
 Milestone 11.4A advances the integration to `0.10.0`; after 11.4A is merged and green, create matching tag and release `v0.10.0` before any installation attempt.
-Patch release `0.10.5` advances Pool-only daily autonomy through PR #141 with first-class autonomous filtration execution and explicit shared Pool-circulation ownership across filtration and thermal runtimes. It adds default-off autonomous filtration start at the canonical ordinary target, typed filtration-to-thermal and thermal-to-filtration handoffs, provenance-bound Pool shutdown after filtration satisfaction, deterministic single-owner arbitration, restart-safe ephemeral ownership, dynamic Pool PMPCIRC command targeting and verification, and preservation of external/manual circulation as unowned. Existing Pool Solar cold-start, exact raw HEATER verification, filtration accounting, Solar/Gas filtration credit, fail-closed currentness, and default-off Grid Outage Physical Safety remain preserved. The integration pins the core dependency to matching tag `v0.10.5` for HACS delivery.
+Patch release `0.10.6` corrects the live v0.10.5 autonomous-filtration ownership-loss defect discovered during commissioning. Verified PoolOS-owned filtration now enters an explicit command-free suspended state when current authoritative evidence becomes temporarily unusable, retaining only the exact already-proven session provenance required for bounded cleanup. On authoritative recovery, the same verified lease may resume without state adoption or redundant commands, or perform provenance-bound Pool OFF cleanup when filtration is already satisfied. Genuine external takeover, Spa/shared-hydraulic conflicts, and dynamic PMPCIRC identity changes still invalidate ownership fail-closed. Restart continues to reconstruct no ownership. The integration pins the matching core dependency to tag `v0.10.6` for HACS delivery.
 
 
 ## 11.4A high-fidelity observation boundary
