@@ -57,7 +57,10 @@ from poolos.thermal_runtime_assessment import (
     ThermalRuntimeEvaluator,
     ThermalRuntimeEvidence,
 )
-from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
+from poolos.thermal_runtime_orchestration import (
+    ThermalOrchestrationLifecycle,
+    ThermalRuntimeOrchestrator,
+)
 from poolos.thermal_runtime_ownership import (
     ThermalRuntimeConceptProvenance,
     ThermalRuntimeOwnedConcept,
@@ -173,10 +176,12 @@ def _frame(
     solar_observation_observed_at: datetime | None = None,
     omit_solar_observation: bool = False,
     solar_temperature: float = 110.0,
+    native_observation_at: datetime | None = None,
     body: ThermalBody = ThermalBody.POOL,
     filtration_remaining: timedelta | None = None,
     driver: ThermalAutomaticExecutionDriver | None = None,
 ) -> ThermalAutomaticExecutionFrame:
+    evidence_at = at if native_observation_at is None else native_observation_at
     values = _values(
         pool_active=pool_active,
         spa_active=body is ThermalBody.HOT_TUB,
@@ -197,7 +202,7 @@ def _frame(
                 solar_observation_observed_at
                 if concept == "solar.active"
                 and solar_observation_observed_at is not None
-                else at
+                else evidence_at
             ),
         )
         for concept, value in values.items()
@@ -230,7 +235,7 @@ def _frame(
         ThermalRuntimeEvidence(
             evaluated_at=at,
             native_values=values,
-            native_observed_at={concept: at for concept in values},
+            native_observed_at={concept: evidence_at for concept in values},
             pool_requested_mode=(
                 mode if body is ThermalBody.POOL else ThermalRequestedMode.OFF
             ),
@@ -427,6 +432,133 @@ def test_cold_start_delivers_at_most_one_command_per_authoritative_epoch() -> No
         "SetBodyActive",
         "SetPumpSpeed",
     ]
+
+
+def test_warmed_collector_exposes_command_free_probe_candidate_at_native_cadence() -> None:
+    """Model the v0.10.6 Pool-off commissioning sequence without delivery."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    evaluator = ThermalRuntimeEvaluator()
+    initial_at = NOW - timedelta(seconds=60)
+    initial = _frame(
+        orchestrator,
+        initial_at,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=1500,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=82.0,
+        evaluator=evaluator,
+    )
+    evaluated_at = NOW + timedelta(seconds=30, milliseconds=940)
+    warmed = _frame(
+        orchestrator,
+        evaluated_at,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=1500,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=97.0,
+        native_observation_at=NOW,
+        evaluator=evaluator,
+    )
+
+    assert initial.orchestration.candidate_body is None
+    assert warmed.thermal is not None
+    assert warmed.thermal.pool.plan.desired.reason_code == "pool_temperature_probe_required"
+    assert warmed.thermal.pool.plan.desired.required_pump_rpm == 1500
+    assert warmed.orchestration.lifecycle is ThermalOrchestrationLifecycle.CANDIDATE_READY
+    assert warmed.orchestration.candidate_body is ThermalBody.POOL
+    assert not warmed.orchestration.command_delivery_performed
+
+
+def test_native_cadence_probe_candidate_can_start_bounded_fake_cold_start() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline_at = NOW - timedelta(seconds=60)
+    baseline = _frame(
+        orchestrator,
+        baseline_at,
+        pool_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=82.0,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=baseline_at,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    evaluated_at = NOW + timedelta(seconds=30, milliseconds=940)
+    warmed = _frame(
+        orchestrator,
+        evaluated_at,
+        pool_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=97.0,
+        native_observation_at=NOW,
+        evaluator=evaluator,
+    )
+
+    result = asyncio.run(driver.process_epoch(warmed, delivery_factory=factory))
+
+    assert result.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert result.accepted_delivery_count == 1
+    assert result.command_delivery_performed
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetBodyActive)
+    assert delivery.calls[0].equipment_id == ThermalBody.POOL.value
+    assert delivery.calls[0].active is True
+
+
+@pytest.mark.parametrize(
+    "missing_concept",
+    ("jets.active", "waterfall.active", "slide.active"),
+)
+def test_incomplete_shared_hydraulic_inventory_never_reaches_delivery(
+    missing_concept: str,
+) -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        missing=(missing_concept,),
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    current = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        missing=(missing_concept,),
+    )
+
+    result = asyncio.run(driver.process_epoch(current, delivery_factory=factory))
+
+    assert result.state is ThermalAutomaticDriverState.BLOCKED
+    assert (
+        result.blocker
+        == "thermal_orchestration_shared_hydraulic_inventory_incomplete"
+    )
+    assert result.accepted_delivery_count == 0
+    assert not result.command_delivery_performed
+    assert delivery.calls == []
 
 
 def test_priming_hold_uses_later_epochs_and_never_chains_delivery() -> None:

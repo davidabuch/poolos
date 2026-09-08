@@ -237,6 +237,53 @@ def test_target_inactive_with_other_body_inactive_remains_cold_start_candidate()
     assert result.candidate_body is ThermalBody.POOL
 
 
+def test_live_native_cadence_does_not_expire_complete_off_hydraulic_inventory() -> None:
+    """Reproduce the v0.10.6 commissioning boundary at 30.94 seconds."""
+
+    evaluated_at = NOW + timedelta(seconds=30, milliseconds=940)
+    result = _refresh(
+        ThermalRuntimeOrchestrator(),
+        evaluated_at,
+        thermal=_thermal(evaluated_at),
+        observations=_observations(
+            NOW,
+            pool_active=False,
+            spa_active=False,
+            pump_rpm=0,
+            configured_rpm=1500,
+        ),
+    )
+
+    assert result.lifecycle is ThermalOrchestrationLifecycle.CANDIDATE_READY
+    assert result.candidate_body is ThermalBody.POOL
+    assert result.blocking_reason == "thermal_orchestration_candidate_ready_command_free"
+
+
+def test_candidate_freshness_boundary_is_bounded_and_inclusive() -> None:
+    at_boundary = NOW + timedelta(seconds=120)
+    just_stale = at_boundary + timedelta(microseconds=1)
+
+    accepted = _refresh(
+        ThermalRuntimeOrchestrator(),
+        at_boundary,
+        thermal=_thermal(at_boundary),
+        observations=_observations(NOW, pool_active=False, spa_active=False),
+    )
+    rejected = _refresh(
+        ThermalRuntimeOrchestrator(),
+        just_stale,
+        thermal=_thermal(just_stale),
+        observations=_observations(NOW, pool_active=False, spa_active=False),
+    )
+
+    assert accepted.lifecycle is ThermalOrchestrationLifecycle.CANDIDATE_READY
+    assert rejected.lifecycle is ThermalOrchestrationLifecycle.BLOCKED
+    assert (
+        rejected.blocking_reason
+        == "thermal_orchestration_shared_hydraulic_inventory_incomplete"
+    )
+
+
 def test_active_pool_light_is_not_a_shared_hydraulic_conflict() -> None:
     observations = (*_observations(NOW), _observation("pool_light.active", True, at=NOW))
 
@@ -464,6 +511,8 @@ def test_hot_tub_mode_change_uses_fresh_candidate_only(
         _observations(NOW, jets=True),
         _observations(NOW, slide=True),
         _observations(NOW, omit=frozenset({"waterfall.active"})),
+        _observations(NOW, omit=frozenset({"jets.active"})),
+        _observations(NOW, omit=frozenset({"slide.active"})),
     ],
 )
 def test_ambiguous_or_conflicting_hydraulics_fail_closed(
@@ -485,7 +534,7 @@ def test_stale_body_activity_fails_closed(concept: str) -> None:
         _observation(
             item.observation_id,
             item.value,
-            at=(NOW - timedelta(seconds=31) if item.observation_id == concept else NOW),
+            at=(NOW - timedelta(seconds=121) if item.observation_id == concept else NOW),
         )
         for item in _observations(NOW)
     )
@@ -494,6 +543,31 @@ def test_stale_body_activity_fails_closed(concept: str) -> None:
 
     assert result.lifecycle is ThermalOrchestrationLifecycle.BLOCKED
     assert result.candidate_id is None
+
+
+@pytest.mark.parametrize("concept", ["waterfall.active", "jets.active", "slide.active"])
+def test_unusable_shared_hydraulic_evidence_fails_closed(concept: str) -> None:
+    observations = tuple(
+        _observation(
+            item.observation_id,
+            item.value,
+            at=NOW,
+            quality=(
+                ObservationQuality.SUSPECT
+                if item.observation_id == concept
+                else ObservationQuality.GOOD
+            ),
+        )
+        for item in _observations(NOW)
+    )
+
+    result = _refresh(ThermalRuntimeOrchestrator(), NOW, observations=observations)
+
+    assert result.lifecycle is ThermalOrchestrationLifecycle.BLOCKED
+    assert (
+        result.blocking_reason
+        == "thermal_orchestration_shared_hydraulic_inventory_incomplete"
+    )
 
 
 @pytest.mark.parametrize("concept", ["pool.active", "spa.active"])

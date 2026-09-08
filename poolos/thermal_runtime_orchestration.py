@@ -44,6 +44,19 @@ from .thermal_runtime_ownership import (
 from .pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
 from .operating_baselines import PumpOperatingBaselines
 
+# The independent native transport performs bounded keepalive reads every 90
+# seconds and the HA coordinator provides a 30-second reconciliation backstop.
+# Candidate admission therefore permits one complete source cadence plus one
+# scheduling interval.  Active ownership, probe continuity, and post-delivery
+# verification deliberately retain the stricter 30-second contract below.
+_NATIVE_CANDIDATE_SOURCE_CADENCE = timedelta(seconds=90)
+_NATIVE_CANDIDATE_SCHEDULING_MARGIN = timedelta(seconds=30)
+_NATIVE_CANDIDATE_FRESHNESS = FreshnessPolicy(
+    max_age=(
+        _NATIVE_CANDIDATE_SOURCE_CADENCE
+        + _NATIVE_CANDIDATE_SCHEDULING_MARGIN
+    )
+)
 _LIVE_FRESHNESS = FreshnessPolicy(max_age=timedelta(seconds=30))
 _LIVE_MINIMUM_CONFIDENCE = 0.5
 _LIVE_ACCEPTED_QUALITIES = frozenset(
@@ -466,6 +479,7 @@ class ThermalRuntimeOrchestrator:
         hydraulic_reason = _shared_hydraulic_blocker(
             observations,
             evaluated_at=thermal.generated_at,
+            freshness_policy=_NATIVE_CANDIDATE_FRESHNESS,
         )
         if hydraulic_reason is not None:
             return ThermalOrchestrationLifecycle.BLOCKED, hydraulic_reason, None
@@ -485,6 +499,7 @@ class ThermalRuntimeOrchestrator:
             observations,
             evaluated_at=thermal.generated_at,
             target=candidates[0],
+            freshness_policy=_NATIVE_CANDIDATE_FRESHNESS,
         )
         if topology_reason is not None:
             return ThermalOrchestrationLifecycle.BLOCKED, topology_reason, None
@@ -582,12 +597,14 @@ class _ObservationState:
 def _observation_state(
     observation: PoolObservation | None,
     evaluated_at: datetime,
+    *,
+    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
 ) -> _ObservationState:
     if observation is None:
         return _ObservationState(None, False, False, None)
     freshness = observation.freshness(
         clock=FixedClock(evaluated_at),
-        policy=_LIVE_FRESHNESS,
+        policy=freshness_policy,
     )
     return _ObservationState(
         observation.value,
@@ -603,13 +620,19 @@ def _observation_state(
 def _shared_hydraulic_evidence(
     observations: dict[str, PoolObservation],
     evaluated_at: datetime,
+    *,
+    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
 ) -> tuple[tuple[SharedHydraulicCircuitEvidence, ...], bool]:
     evidence: list[SharedHydraulicCircuitEvidence] = []
     complete = True
     for concept in SHARED_HYDRAULIC_SAFETY_BY_CONCEPT:
         if concept == "pool_light.active":
             continue
-        state = _observation_state(observations.get(concept), evaluated_at)
+        state = _observation_state(
+            observations.get(concept),
+            evaluated_at,
+            freshness_policy=freshness_policy,
+        )
         active = _boolean(state.value)
         if active is None or not state.usable:
             complete = False
@@ -630,8 +653,13 @@ def _shared_hydraulic_blocker(
     observations: dict[str, PoolObservation],
     *,
     evaluated_at: datetime,
+    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
 ) -> str | None:
-    circuits, complete = _shared_hydraulic_evidence(observations, evaluated_at)
+    circuits, complete = _shared_hydraulic_evidence(
+        observations,
+        evaluated_at,
+        freshness_policy=freshness_policy,
+    )
     if not complete:
         return "thermal_orchestration_shared_hydraulic_inventory_incomplete"
     for item in circuits:
@@ -645,9 +673,18 @@ def _body_topology_blocker(
     *,
     evaluated_at: datetime,
     target: ThermalBody,
+    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
 ) -> str | None:
-    pool = _observation_state(observations.get("pool.active"), evaluated_at)
-    spa = _observation_state(observations.get("spa.active"), evaluated_at)
+    pool = _observation_state(
+        observations.get("pool.active"),
+        evaluated_at,
+        freshness_policy=freshness_policy,
+    )
+    spa = _observation_state(
+        observations.get("spa.active"),
+        evaluated_at,
+        freshness_policy=freshness_policy,
+    )
     pool_active = _boolean(pool.value)
     spa_active = _boolean(spa.value)
     if not pool.usable or pool_active is None:
