@@ -24,6 +24,7 @@ class PoolCirculationOwner(StrEnum):
     NONE = "none"
     FILTRATION_ACQUIRING = "filtration_acquiring"
     FILTRATION = "filtration"
+    FILTRATION_SUSPENDED = "filtration_suspended"
     THERMAL = "thermal"
     FILTRATION_TO_THERMAL = "filtration_to_thermal"
 
@@ -237,6 +238,42 @@ class PoolCirculationOwnershipRegistry:
         self.filtration_lease = replace(
             lease,
             verified=True,
+            last_confirmed_at=confirmed_at,
+        )
+        self.owner = PoolCirculationOwner.FILTRATION
+
+    def suspend_filtration(self, *, session_id: str) -> None:
+        """Retain verified provenance while current evidence is unusable."""
+
+        lease = self.filtration_lease
+        if lease is None or lease.session_id != session_id or not lease.verified:
+            raise ValueError("filtration suspension requires the verified lease")
+        if self.owner not in {
+            PoolCirculationOwner.FILTRATION,
+            PoolCirculationOwner.FILTRATION_SUSPENDED,
+        }:
+            raise ValueError("only the current filtration owner may be suspended")
+        self.owner = PoolCirculationOwner.FILTRATION_SUSPENDED
+
+    def resume_filtration(
+        self,
+        *,
+        session_id: str,
+        confirmed_at: datetime,
+    ) -> None:
+        """Resume retained provenance after current hardware is reverified."""
+
+        _require_aware(confirmed_at)
+        lease = self.filtration_lease
+        if (
+            self.owner is not PoolCirculationOwner.FILTRATION_SUSPENDED
+            or lease is None
+            or lease.session_id != session_id
+            or not lease.verified
+        ):
+            raise ValueError("filtration resumption requires the suspended lease")
+        self.filtration_lease = replace(
+            lease,
             last_confirmed_at=confirmed_at,
         )
         self.owner = PoolCirculationOwner.FILTRATION

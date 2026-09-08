@@ -37,8 +37,19 @@ Accepted delivery records bounded in-memory provenance, but full filtration
 ownership is established only after a later authoritative observation verifies
 both Pool body activation and the exact configured plus tolerant actual pump
 state. Hardware equality alone never creates provenance. Ownership is not
-persisted and is cleared on unload, restart, external takeover, topology loss,
-verification failure, or dynamic `PMPCIRC` identity change.
+persisted and is cleared on unload, restart, positive external takeover,
+incompatible topology, verification failure, or dynamic `PMPCIRC` identity
+change.
+
+A verified filtration lease is suspended, rather than discarded, when current
+required observations are temporarily unusable. Suspension permits no new
+delivery or thermal handoff. It retains only the exact in-memory session,
+generation, body receipt, and pump receipt needed to resume after current state
+is reverified or to perform the already-authorized Pool body cleanup. There is
+no evidence-loss timer: repeated unusable epochs remain command-free and expose
+operator-review diagnostics. A usable Pool-Off observation releases the lease
+without a redundant command. Positive external takeover, conflicting topology,
+or a changed dynamic `PMPCIRC` identity still invalidates the lease immediately.
 
 One shared Pool circulation registry arbitrates the filtration and thermal
 drivers. Thermal reserves an actionable Pool candidate synchronously before
@@ -63,9 +74,10 @@ circulation.
   Pool-routed RPM continues to determine filtration credit.
 - `DEFERRED_TOU` and `DEFERRED_OPTIMIZATION` do not create execution work;
   `RUN_NOW` and already-valid `CREDITING` are immediate dispositions.
-- Spa activity, conflicting or unavailable shared-hydraulic evidence, unresolved
-  dynamic pump identity, non-current accounting, physical-authority denial,
-  non-confirmed on-grid state, or relevant external change blocks or preempts.
+- Spa activity or other positive topology conflict, changed dynamic pump
+  identity, physical-authority denial, non-confirmed on-grid state, or relevant
+  external change preempts. Temporarily unavailable required evidence suspends
+  an already-verified lease but cannot create one.
 - Delivery is event-driven by authoritative observation epochs. No polling,
   sleeps, retry timers, ownership persistence, or alternate transport exists.
 - Filtration and thermal cannot independently command Pool circulation in the

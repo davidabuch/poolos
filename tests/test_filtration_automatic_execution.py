@@ -183,6 +183,434 @@ def _enabled_driver() -> tuple[FiltrationAutomaticExecutionDriver, _Delivery, _F
     return driver, delivery, _Factory(delivery)
 
 
+def _verified_filtration_driver(
+    *,
+    at: datetime = NOW,
+) -> tuple[FiltrationAutomaticExecutionDriver, _Delivery, _Factory]:
+    driver, delivery, factory = _enabled_driver()
+    asyncio.run(
+        driver.process_epoch(
+            _frame(at, pool=False, rpm=0, configured=2600),
+            delivery_factory=factory,
+        )
+    )
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                at + timedelta(seconds=1),
+                pool=True,
+                rpm=3000,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                at + timedelta(seconds=2),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.verified
+    return driver, delivery, factory
+
+
+def test_verified_filtration_transient_pool_evidence_loss_retains_cleanup_provenance() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    commands_before = len(delivery.operations)
+
+    suspended = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                missing=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert suspended.state is FiltrationAutomaticDriverState.SUSPENDED
+    assert suspended.blocker == "automatic_filtration_pool_activity_unusable"
+    assert not suspended.command_delivery_performed
+    assert len(delivery.operations) == commands_before
+    assert driver.ownership.filtration_lease == lease
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
+
+
+def test_live_incident_suspends_until_satisfied_then_completes_owned_shutdown() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    commands_before = len(delivery.operations)
+
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                missing=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    still_suspended = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+                stale=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert still_suspended.state is FiltrationAutomaticDriverState.SUSPENDED
+    assert driver.ownership.filtration_lease == lease
+    assert len(delivery.operations) == commands_before
+
+    cleanup = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=5),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert cleanup.command_delivery_performed
+    assert len(delivery.operations) == commands_before + 1
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is False
+
+    stopped = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=6),
+                pool=False,
+                rpm=0,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert stopped.blocker == "automatic_filtration_pool_off_verified"
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert driver.ownership.filtration_lease is None
+    assert len(delivery.operations) == commands_before + 1
+
+
+def test_suspended_filtration_recovers_running_without_redundant_commands() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    commands_before = len(delivery.operations)
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                degraded=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    recovered = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert recovered.state is FiltrationAutomaticDriverState.OWNED
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
+    assert len(delivery.operations) == commands_before
+
+
+def test_suspended_filtration_observes_pool_already_off_without_redundant_cleanup() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    commands_before = len(delivery.operations)
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                low_confidence=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    recovered_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=False,
+                rpm=0,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert (
+        recovered_off.blocker
+        == "automatic_filtration_pool_off_observed_after_suspension"
+    )
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert driver.ownership.filtration_lease is None
+    assert len(delivery.operations) == commands_before
+
+
+def test_suspended_filtration_external_takeover_invalidates_cleanup_entitlement() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                non_live=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    commands_before = len(delivery.operations)
+    takeover = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="PMP01",
+        previous_value=2600,
+        new_value=2400,
+        observed_at=NOW + timedelta(seconds=4),
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    preempted = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=True,
+                rpm=2400,
+                configured=2600,
+                changes=ExternalChangeBatch((takeover,)),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert preempted.state is FiltrationAutomaticDriverState.PREEMPTED
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert driver.ownership.filtration_lease is None
+    assert len(delivery.operations) == commands_before
+    blocked = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=5),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert blocked.blocker == "automatic_filtration_reenable_required"
+
+
+def test_suspended_filtration_identity_or_topology_conflict_remains_preemptive() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                missing=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    commands_before = len(delivery.operations)
+    changed = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                pump_circuit_id="p0103",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert changed.blocker == "automatic_filtration_pump_circuit_identity_changed"
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert len(delivery.operations) == commands_before
+
+    other, other_delivery, other_factory = _verified_filtration_driver(
+        at=NOW + timedelta(minutes=1)
+    )
+    asyncio.run(
+        other.process_epoch(
+            _frame(
+                NOW + timedelta(minutes=1, seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                stale=("pool.active",),
+            ),
+            delivery_factory=other_factory,
+        )
+    )
+    topology = asyncio.run(
+        other.process_epoch(
+            _frame(
+                NOW + timedelta(minutes=1, seconds=4),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                spa=True,
+            ),
+            delivery_factory=other_factory,
+        )
+    )
+    assert topology.blocker == "automatic_filtration_spa_topology_blocked"
+    assert other.ownership.owner is PoolCirculationOwner.NONE
+    assert len(other_delivery.operations) == commands_before
+
+    shared, shared_delivery, shared_factory = _verified_filtration_driver(
+        at=NOW + timedelta(minutes=2)
+    )
+    asyncio.run(
+        shared.process_epoch(
+            _frame(
+                NOW + timedelta(minutes=2, seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                missing=("pool.active",),
+            ),
+            delivery_factory=shared_factory,
+        )
+    )
+    shared_frame = _frame(
+        NOW + timedelta(minutes=2, seconds=4),
+        pool=True,
+        rpm=2600,
+        configured=2600,
+    )
+    shared_conflict = asyncio.run(
+        shared.process_epoch(
+            replace(
+                shared_frame,
+                observations=tuple(
+                    replace(item, value=True)
+                    if item.observation_id == "waterfall.active"
+                    else item
+                    for item in shared_frame.observations
+                ),
+            ),
+            delivery_factory=shared_factory,
+        )
+    )
+    assert (
+        shared_conflict.blocker
+        == "automatic_filtration_shared_hydraulic_conflict:waterfall.active"
+    )
+    assert shared.ownership.owner is PoolCirculationOwner.NONE
+    assert len(shared_delivery.operations) == commands_before
+
+
+def test_operator_disable_and_repeated_unusable_epochs_retain_one_bounded_lease() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    commands_before = len(delivery.operations)
+    for offset in (3, 60, 3600):
+        suspended = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    NOW + timedelta(seconds=offset),
+                    pool=True,
+                    rpm=2600,
+                    configured=2600,
+                    missing=("pool.active",),
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert suspended.state is FiltrationAutomaticDriverState.SUSPENDED
+        assert driver.ownership.filtration_lease == lease
+        assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
+    driver.set_enabled(
+        False,
+        changed_at=NOW + timedelta(seconds=3601),
+        current_epoch_identity="old",
+    )
+    still_suspended = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3602),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                missing=("pool.active",),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert still_suspended.state is FiltrationAutomaticDriverState.SUSPENDED
+    assert driver.ownership.filtration_lease == lease
+    assert len(delivery.operations) == commands_before
+
+    cleanup = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3603),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert cleanup.command_delivery_performed
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is False
+
+
 def test_off_to_filtration_owned_to_off_is_closed_loop_and_provenance_based() -> None:
     driver, delivery, factory = _enabled_driver()
 
@@ -404,13 +832,13 @@ def test_non_immediate_spa_shared_hydraulic_and_missing_evidence_all_block() -> 
         (_frame(NOW, pool=False, rpm=0, configured=2600, missing=("jets.active",)), "automatic_filtration_shared_hydraulic_unusable:jets.active"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, stale=("slide.active",)), "automatic_filtration_shared_hydraulic_unusable:slide.active"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, missing=("pool.active",)), "automatic_filtration_pool_activity_unusable"),
-        (_frame(NOW, pool=False, rpm=0, configured=2600, stale=("spa.active",)), "automatic_filtration_spa_topology_blocked"),
+        (_frame(NOW, pool=False, rpm=0, configured=2600, stale=("spa.active",)), "automatic_filtration_spa_activity_unusable"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, degraded=("pool.active",)), "automatic_filtration_pool_activity_unusable"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, degraded=("jets.active",)), "automatic_filtration_shared_hydraulic_unusable:jets.active"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, missing=("pump.rpm",)), "automatic_filtration_pump_observation_unusable"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, missing=(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,)), "automatic_filtration_configured_speed_unusable"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, low_confidence=("pool.active",)), "automatic_filtration_pool_activity_unusable"),
-        (_frame(NOW, pool=False, rpm=0, configured=2600, non_live=("spa.active",)), "automatic_filtration_spa_topology_blocked"),
+        (_frame(NOW, pool=False, rpm=0, configured=2600, non_live=("spa.active",)), "automatic_filtration_spa_activity_unusable"),
         (_frame(NOW, pool=False, rpm=1200, configured=2600), "automatic_filtration_preexisting_pump_unowned"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, suspect=("waterfall.active",)), "automatic_filtration_shared_hydraulic_unusable:waterfall.active"),
         (_frame(NOW, pool=False, rpm=0, configured=2600, pump_circuit_id=None), "automatic_filtration_pool_pump_circuit_unresolved"),

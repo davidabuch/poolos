@@ -105,6 +105,31 @@ def test_accepted_operations_remain_acquiring_until_body_and_pump_are_verified()
     assert registry.owner is PoolCirculationOwner.FILTRATION
 
 
+def test_verified_filtration_suspension_retains_one_lease_but_cannot_handoff() -> None:
+    registry = _filtration_owner()
+    lease = registry.filtration_lease
+    assert lease is not None
+
+    registry.suspend_filtration(session_id=lease.session_id)
+
+    assert registry.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
+    assert registry.filtration_lease == lease
+    registry.begin_epoch("epoch-2")
+    assert not registry.reserve_thermal("epoch-2")
+    assert not registry.filtration_may_deliver(
+        epoch_identity="epoch-2",
+        session_id=lease.session_id,
+    )
+
+    registry.resume_filtration(
+        session_id=lease.session_id,
+        confirmed_at=NOW + timedelta(seconds=4),
+    )
+    assert registry.owner is PoolCirculationOwner.FILTRATION
+    assert registry.filtration_lease is not None
+    assert registry.filtration_lease.last_confirmed_at == NOW + timedelta(seconds=4)
+
+
 def test_handoff_cancel_restores_filtration_but_post_delivery_invalidation_owns_nothing() -> None:
     cancelled = _filtration_owner()
     cancelled.begin_epoch("epoch-2")
