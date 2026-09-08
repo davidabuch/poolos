@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -793,6 +794,136 @@ def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     assert successor.generation == predecessor.generation + 1
     assert successor.lease_id != predecessor.lease_id
     assert successor.predecessor_lease_id == predecessor.lease_id
+
+
+def test_probe_successor_handoff_retains_body_and_replaces_pump_provenance() -> None:
+    builder = ThermalExecutionPlanBuilder(pump_equipment_id="p0102")
+    probe_plan = builder.build(
+        ThermalDesiredState(
+            evaluated_at=NOW,
+            body=ThermalBody.POOL,
+            requested_mode="solar",
+            selected_source=PhysicalHeatMode.SOLAR,
+            required_pump_rpm=1500,
+            reason_code="pool_temperature_probe_required",
+            rpm_reason_code="baseline:temperature_probe",
+            rationale=("Acquire trusted Pool water temperature.",),
+            criteria=("canonical_probe",),
+            evidence={"pool_target_f": 90.0},
+        ),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+    probe_currentness = ThermalExecutionCurrentness.from_assessment(
+        probe_plan,
+        evaluation_id="probe-evaluation",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    established = manager.establish(
+        execution_ownership(
+            activation=True,
+            pump_rpm=1500,
+            source=PhysicalHeatMode.OFF,
+            evaluation_id=probe_currentness.evaluation_id,
+            plan_id=probe_currentness.plan_id,
+            execution_plan_id="probe-execution",
+        ),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            probe_currentness.evaluation_id,
+            probe_currentness.plan_id,
+            probe_currentness,
+        ),
+        execution_progress=ThermalExecutionProgress(
+            verified_prefix=tuple(
+                operation_signature(operation, specification.metadata)
+                for operation, specification in zip(
+                    probe_plan.operations,
+                    probe_plan.step_specifications,
+                    strict=True,
+                )
+            )
+        ),
+    )
+    predecessor = manager.state.lease
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    assert predecessor is not None
+    successor_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=1),
+        current_rpm=1500,
+    )
+    successor_currentness = ThermalExecutionCurrentness.from_assessment(
+        successor_plan,
+        evaluation_id="successor-evaluation",
+    )
+    request = ThermalRuntimeHandoffRequest(
+        explicit=True,
+        predecessor_lease_id=predecessor.lease_id,
+        predecessor_generation=predecessor.generation,
+        successor_context=ThermalLiveExecutionContext(
+            successor_currentness.evaluation_id,
+            successor_currentness.plan_id,
+            successor_currentness,
+        ),
+        successor_execution_plan_id="successor-execution",
+        successor_body=ThermalBody.POOL,
+        successor_requested_mode="Solar",
+        successor_requires_body_active=True,
+        successor_required_pump_rpm=2900,
+        successor_heat_source=PhysicalHeatMode.SOLAR,
+        successor_progress=ThermalExecutionProgress(),
+        replace_pump_setpoint=True,
+        replace_heat_source=True,
+    )
+
+    decision = manager.handoff(
+        request,
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id=successor_currentness.evaluation_id,
+            plan_id=successor_currentness.plan_id,
+            requested_mode="Solar",
+            pump_rpm=1500,
+            configured_pump_rpm=1500,
+            heat_source=PhysicalHeatMode.OFF,
+            execution_currentness=successor_currentness,
+        ),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.HANDED_OFF
+    successor = manager.state.lease
+    assert successor is not None
+    assert successor.generation == predecessor.generation + 1
+    assert successor.body_activation == predecessor.body_activation
+    assert successor.pump_setpoint is None
+    assert successor.heat_source is None
+
+
+def test_probe_replacement_handoff_rejects_stale_generation() -> None:
+    manager = full_manager()
+    request = replace(
+        handoff_request(manager, pump_rpm=3000),
+        predecessor_generation=999,
+        replace_pump_setpoint=True,
+    )
+
+    decision = manager.handoff(
+        request,
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+        ),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert decision.reason_code.endswith("predecessor_provenance_mismatch")
 
 
 @pytest.mark.parametrize(

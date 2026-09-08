@@ -19,6 +19,7 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterReadError,
     NativeIntelliCenterStatus,
     NativeIntelliCenterTransportSnapshot,
+    NativeInventoryCompleteness,
     NativeIntelliChlorState,
     NativePumpState,
     NativeRawAttribute,
@@ -137,6 +138,98 @@ def test_native_models_are_immutable_and_adapter_surface_is_read_only() -> None:
     snapshot = transport()
     with pytest.raises(FrozenInstanceError):
         snapshot.connected = False  # type: ignore[misc]
+
+
+def test_explicitly_complete_inventory_marks_uninstalled_shared_hydraulics_absent() -> None:
+    base = transport()
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        inventory_completeness=NativeInventoryCompleteness.COMPLETE,
+        bodies=base.bodies,
+        pumps=base.pumps,
+        circuits=tuple(
+            item
+            for item in base.circuits
+            if item.name not in {"Waterfall", "Jets", "Slide"}
+        ),
+        raw_inventory=base.raw_inventory,
+    )
+
+    mapped = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+    by_id = {item.observation_id: item for item in mapped.observations}
+
+    for concept in ("waterfall.active", "jets.active", "slide.active"):
+        assert by_id[concept].value is False
+        assert by_id[concept].source_id.endswith(
+            f"authoritatively-absent:{concept}"
+        )
+
+
+def test_installed_shared_hydraulic_with_unknown_status_is_not_assumed_off() -> None:
+    base = transport()
+    unknown_waterfall = NativeRawObject(
+        native_id="FTR01",
+        object_type="FEATR",
+        subtype=None,
+        name="Waterfall",
+        parent_id=None,
+        observed_at=NOW,
+        attributes=(NativeRawAttribute("SNAME", "Waterfall"),),
+    )
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        inventory_completeness=NativeInventoryCompleteness.COMPLETE,
+        bodies=base.bodies,
+        pumps=base.pumps,
+        circuits=tuple(
+            item
+            for item in base.circuits
+            if item.name not in {"Waterfall", "Jets", "Slide"}
+        ),
+        raw_inventory=(*base.raw_inventory, unknown_waterfall),
+    )
+
+    mapped = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+    by_id = {item.observation_id: item for item in mapped.observations}
+
+    assert "waterfall.active" not in by_id
+    assert "waterfall.active" in mapped.missing_concepts
+    assert by_id["jets.active"].value is False
+    assert by_id["slide.active"].value is False
+
+
+def test_core_object_presence_cannot_prove_optional_inventory_complete() -> None:
+    base = transport()
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=base.connected,
+        temperature_unit=base.temperature_unit,
+        bodies=base.bodies,
+        pumps=base.pumps,
+        temperatures=base.temperatures,
+        circuits=tuple(
+            item
+            for item in base.circuits
+            if item.name not in {"Waterfall", "Jets", "Slide"}
+        ),
+        intellichlors=base.intellichlors,
+        systems=base.systems,
+        raw_inventory=base.raw_inventory,
+    )
+
+    mapped = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+
+    assert snapshot.inventory_completeness is NativeInventoryCompleteness.UNKNOWN
+    assert "waterfall.active" in mapped.missing_concepts
+    assert "jets.active" in mapped.missing_concepts
+    assert "slide.active" in mapped.missing_concepts
 
 
 

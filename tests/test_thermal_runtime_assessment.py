@@ -286,6 +286,7 @@ def test_requested_planned_and_effective_states_remain_distinct() -> None:
     assert diagnostics["effective_native_heater_id"] == "H0002"
     assert diagnostics["planned_rpm"] == 3000
     assert diagnostics["actual_pump_rpm"] == 2900
+    assert result.pool.plan.desired.evidence["solar_configured"] is True
 
 
 def test_new_diagnostic_payloads_are_bounded_below_eight_kibibytes() -> None:

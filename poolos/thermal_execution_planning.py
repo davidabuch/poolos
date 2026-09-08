@@ -226,6 +226,14 @@ def desired_pool_state(
         "collector_temperature_f": observation.collector_temperature_f,
         "collector_differential_f": assessment.solar_assessment.differential_f,
         "solar_eligible": assessment.solar_assessment.eligible,
+        "solar_opportunity_warranted": (
+            assessment.solar_assessment.opportunity_warranted
+        ),
+        "solar_engaged": assessment.solar_assessment.solar_engaged,
+        "solar_configured": assessment.solar_assessment.solar_configured,
+        "solar_continuation_eligible": (
+            assessment.solar_assessment.continuation_eligible
+        ),
         "solar_active": observation.solar_active,
         "pool_active": observation.pool_active,
         "spa_active": observation.spa_active,

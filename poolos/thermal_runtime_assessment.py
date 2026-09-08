@@ -997,6 +997,9 @@ class ThermalRuntimeEvaluator:
                         WaterTemperatureDisposition.PROBING,
                     }
                 ),
+                solar_configured=(
+                    _string_or_none(values.get("pool.raw_heater_id")) == "H0002"
+                ),
             )
             return desired_pool_state(
                 source_input,

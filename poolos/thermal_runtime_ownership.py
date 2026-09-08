@@ -20,6 +20,7 @@ from .integration import PhysicalHeatMode, ThermalBody
 from .thermal_execution_currentness import (
     ThermalExecutionCompatibilityDisposition,
     ThermalExecutionCurrentness,
+    ThermalExecutionPurposeKind,
     ThermalExecutionProgress,
     assess_execution_compatibility,
 )
@@ -375,6 +376,8 @@ class ThermalRuntimeHandoffRequest:
     successor_required_pump_rpm: int | None
     successor_heat_source: PhysicalHeatMode | None
     successor_progress: ThermalExecutionProgress | None = None
+    replace_pump_setpoint: bool = False
+    replace_heat_source: bool = False
 
     def __post_init__(self) -> None:
         if not self.predecessor_lease_id.strip():
@@ -722,6 +725,12 @@ class ThermalRuntimeOwnershipManager:
             ended_at=None,
             originating_currentness=request.successor_context.execution_currentness,
             execution_progress=request.successor_progress,
+            pump_setpoint=(
+                None if request.replace_pump_setpoint else lease.pump_setpoint
+            ),
+            heat_source=(
+                None if request.replace_heat_source else lease.heat_source
+            ),
         )
         self._state = ThermalRuntimeOwnershipState(
             status=successor.status,
@@ -732,6 +741,51 @@ class ThermalRuntimeOwnershipManager:
         return self._decision(
             ThermalRuntimeOwnershipDisposition.HANDED_OFF,
             successor.reason_code,
+            previous,
+            evidence.evaluated_at,
+        )
+
+    def evaluate_pending_successor(
+        self,
+        evidence: ThermalRuntimeOwnershipEvidence,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Retain a predecessor only while an explicit successor may be handed off.
+
+        This does not transfer ownership or adopt successor state.  It applies
+        the normal hydraulic/external checks while deliberately deferring only
+        immutable plan identity to the driver's explicit typed handoff.
+        """
+
+        previous = self._state.status
+        lease = self._state.lease
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.NO_OWNERSHIP,
+                "runtime_ownership_successor_pending:no_current_owner",
+                previous,
+                evidence.evaluated_at,
+            )
+        failure = self._continuation_failure_reason(
+            lease,
+            evidence,
+            check_identity=False,
+            check_requested_mode=True,
+        )
+        if failure is not None:
+            return self._terminate(lease, reason=failure, at=evidence.evaluated_at)
+        retained = replace(
+            lease,
+            last_confirmed_at=evidence.evaluated_at,
+            reason_code="runtime_ownership_retained:explicit_successor_pending",
+        )
+        self._state = ThermalRuntimeOwnershipState(
+            status=retained.status,
+            lease=retained,
+            reason_code=retained.reason_code,
+        )
+        return self._decision(
+            ThermalRuntimeOwnershipDisposition.RETAINED,
+            retained.reason_code,
             previous,
             evidence.evaluated_at,
         )
@@ -929,11 +983,35 @@ class ThermalRuntimeOwnershipManager:
         if lease.body_activation is not None and not request.successor_requires_body_active:
             return prefix + "body_activation_incompatible"
         if lease.pump_setpoint is not None:
-            if request.successor_required_pump_rpm != lease.pump_setpoint.intended_value:
+            if (
+                request.successor_required_pump_rpm
+                != lease.pump_setpoint.intended_value
+                and not request.replace_pump_setpoint
+            ):
                 return prefix + "pump_incompatible"
         if lease.heat_source is not None:
-            if request.successor_heat_source is not lease.heat_source.intended_value:
+            if (
+                request.successor_heat_source is not lease.heat_source.intended_value
+                and not request.replace_heat_source
+            ):
                 return prefix + "source_incompatible"
+        if request.replace_pump_setpoint or request.replace_heat_source:
+            predecessor = lease.originating_currentness
+            successor = request.successor_context.execution_currentness
+            if (
+                predecessor is None
+                or successor is None
+                or predecessor.purpose.kind
+                is not ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+                or successor.purpose.kind
+                is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+                or lease.body is not ThermalBody.POOL
+                or request.successor_body is not ThermalBody.POOL
+                or predecessor.purpose.requested_mode
+                != successor.purpose.requested_mode
+                or not request.successor_requires_body_active
+            ):
+                return prefix + "replacement_not_probe_successor"
         return None
 
     def _terminate(

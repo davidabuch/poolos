@@ -107,6 +107,7 @@ class ThermalSourceInput:
     solar_override: bool = False
     forecast: ForecastGateEvidence = ForecastGateEvidence()
     temperature_probe_required: bool = False
+    solar_configured: bool = False
 
     def __post_init__(self) -> None:
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
@@ -176,6 +177,7 @@ class ThermalSourceSelector:
             water_temperature_f=observation.trusted_pool_temperature_f,
             collector_temperature_f=observation.collector_temperature_f,
             target_temperature_f=observation.pool_target_f,
+            solar_configured=observation.solar_configured,
         ))
         gate_applied, gate_passed = self._forecast_gate(observation)
         needs_heat = observation.trusted_pool_temperature_f is not None and observation.pool_target_f is not None and observation.trusted_pool_temperature_f < observation.pool_target_f

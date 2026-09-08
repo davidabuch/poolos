@@ -45,6 +45,13 @@ class NativeIntelliCenterStatus(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
+class NativeInventoryCompleteness(str, Enum):
+    """Whether one immutable frame follows completed native discovery."""
+
+    UNKNOWN = "UNKNOWN"
+    COMPLETE = "COMPLETE"
+
+
 class NativeBodyKind(str, Enum):
     POOL = "pool"
     SPA = "spa"
@@ -196,6 +203,9 @@ class NativeIntelliCenterTransportSnapshot:
     observed_at: datetime
     connected: bool
     temperature_unit: str
+    inventory_completeness: NativeInventoryCompleteness = (
+        NativeInventoryCompleteness.UNKNOWN
+    )
     bodies: tuple[NativeBodyState, ...] = ()
     pumps: tuple[NativePumpState, ...] = ()
     temperatures: tuple[NativeTemperatureState, ...] = ()
@@ -236,6 +246,7 @@ class NativeIntelliCenterTransportSnapshot:
         return MappingProxyType(
             {
                 "snapshot_observed_at": self.observed_at.isoformat(),
+                "inventory_completeness": self.inventory_completeness.value,
                 "total_native_object_count": len(self.raw_inventory),
                 "count_by_native_object_type": dict(sorted(counts.items())),
                 "displayed_native_object_count": len(displayed),
@@ -584,6 +595,28 @@ class NativeIntelliCenterReadAdapter:
             if circuit is not None:
                 _put(values, concept, circuit.active, None, circuit.native_id)
 
+        # Successful native initialization/reconnection explicitly proves that
+        # pyintellicenter completed its all-equipment discovery for this frame.
+        # Object presence alone never proves completeness. Installed features
+        # with unavailable STATUS remain missing because they are present in
+        # raw inventory and therefore cannot be synthesized as absent.
+        if (
+            transport.inventory_completeness
+            is NativeInventoryCompleteness.COMPLETE
+        ):
+            for concept in _OPTIONAL_SHARED_HYDRAULIC_CONCEPTS:
+                if concept in values:
+                    continue
+                aliases = _CIRCUIT_ALIASES[concept]
+                if not _raw_inventory_has_alias(transport.raw_inventory, aliases):
+                    _put(
+                        values,
+                        concept,
+                        False,
+                        None,
+                        f"authoritatively-absent:{concept}",
+                    )
+
         freeze = _freeze_circuit(circuits)
         if freeze is not None:
             _put(
@@ -776,6 +809,33 @@ _CIRCUIT_ALIASES: Mapping[str, frozenset[str]] = MappingProxyType(
     }
 )
 
+_OPTIONAL_SHARED_HYDRAULIC_CONCEPTS = (
+    "waterfall.active",
+    "jets.active",
+    "slide.active",
+)
+
+
+def _raw_inventory_has_alias(
+    inventory: tuple[NativeRawObject, ...],
+    aliases: frozenset[str],
+) -> bool:
+    """Return whether complete raw inventory contains a matching feature."""
+
+    for item in inventory:
+        if item.object_type.upper() not in {"CIRCUIT", "FEATR"}:
+            continue
+        candidates: list[object] = [item.name, item.subtype]
+        candidates.extend(attribute.value for attribute in item.attributes)
+        normalized = {
+            token
+            for value in candidates
+            if (token := _normalized_token(None if value is None else str(value)))
+        }
+        if normalized.intersection(aliases):
+            return True
+    return False
+
 
 def _circuit(
     circuits: tuple[NativeCircuitState, ...], aliases: frozenset[str]
@@ -961,6 +1021,7 @@ __all__ = [
     "NativeIntelliCenterReadSource",
     "NativeIntelliCenterStatus",
     "NativeIntelliCenterTransportSnapshot",
+    "NativeInventoryCompleteness",
     "NativeIntelliChlorState",
     "NativePumpState",
     "PoolPumpCircuitIdentity",

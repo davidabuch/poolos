@@ -378,6 +378,7 @@ def test_independent_construction_discovery_and_unknown_retention(
     object_types = {item.object_type for item in snapshot.raw_inventory}
 
     assert transport.connected is True
+    assert snapshot.inventory_completeness.value == "COMPLETE"
     assert len(snapshot.raw_inventory) == 12
     assert {
         "BODY",
@@ -394,6 +395,10 @@ def test_independent_construction_discovery_and_unknown_retention(
         "FUTURE_TYPE",
     } == object_types
     assert "runtime_data" not in MODULE_PATH.read_text(encoding="utf-8")
+
+    transport._on_disconnected(ConnectionError("test disconnect"))
+    assert transport.latest_snapshot is not None
+    assert transport.latest_snapshot.inventory_completeness.value == "UNKNOWN"
 
 
 def test_body_monitoring_matches_working_narrow_subscription(

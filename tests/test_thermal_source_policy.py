@@ -147,7 +147,7 @@ def test_tou_and_gpm_are_not_thermal_control_inputs() -> None:
     assert "tou_tier" not in fields
 
 
-def test_inactive_body_configuration_does_not_bypass_physical_execution_gate() -> None:
+def test_inactive_pool_can_expose_pre_circulation_solar_opportunity() -> None:
     configured_solar = ThermalSourceInput(
         NOW,
         False,
@@ -157,13 +157,56 @@ def test_inactive_body_configuration_does_not_bypass_physical_execution_gate() -
         90,
         100,
         PoolHeatingMode.SOLAR_ONLY,
+        solar_configured=True,
     )
 
     result = ThermalSourceSelector().evaluate(configured_solar)
 
     assert configured_solar.heating_mode is PoolHeatingMode.SOLAR_ONLY
+    assert result.heat_source is ThermalHeatSource.SOLAR
+    assert result.recommended_pump_rpm == 2900
+    assert result.intent is not None
+    assert result.solar_assessment.reason_code == "pre_circulation_solar_opportunity"
+    assert result.solar_assessment.opportunity_warranted
+    assert not result.solar_assessment.solar_engaged
+    assert result.solar_assessment.solar_configured
+    assert not result.solar_assessment.continuation_eligible
+    assert "htmode" not in ThermalSourceInput.__dataclass_fields__
+
+
+def test_inactive_pool_with_insufficient_collector_evidence_stays_off() -> None:
+    result = ThermalSourceSelector().evaluate(
+        ThermalSourceInput(
+            NOW,
+            False,
+            False,
+            False,
+            86,
+            90,
+            90,
+            PoolHeatingMode.SOLAR_ONLY,
+        )
+    )
+
     assert result.heat_source is ThermalHeatSource.NONE
     assert result.recommended_pump_rpm is None
-    assert result.intent is None
-    assert result.solar_assessment.reason_code == "pool_circulation_inactive"
-    assert "htmode" not in ThermalSourceInput.__dataclass_fields__
+    assert result.solar_assessment.reason_code == "activation_differential_insufficient"
+
+
+def test_active_solar_requires_continuous_pool_circulation() -> None:
+    result = ThermalSourceSelector().evaluate(
+        ThermalSourceInput(
+            NOW,
+            False,
+            False,
+            True,
+            86,
+            90,
+            100,
+            PoolHeatingMode.SOLAR_ONLY,
+        )
+    )
+
+    assert result.heat_source is ThermalHeatSource.NONE
+    assert result.solar_assessment.reason_code == "active_solar_pool_circulation_lost"
+    assert result.solar_assessment.solar_engaged
