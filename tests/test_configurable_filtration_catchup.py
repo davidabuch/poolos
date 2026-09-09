@@ -88,6 +88,8 @@ def test_home_assistant_exposes_persistent_preferred_catchup_option() -> None:
 
     assert "CONF_PREFERRED_FILTRATION_CATCHUP_START" in flow_source
     assert "DEFAULT_PREFERRED_FILTRATION_CATCHUP_START" in flow_source
+    assert "selector.TimeSelector()" in flow_source
+    assert 'vol.Match(r"(?:[01]\\d|2[0-3]):[0-5]\\d")' not in flow_source
 
     assert "preferred_catchup_start" in runtime_source
     assert "preferred_catchup_start=" in runtime_source
