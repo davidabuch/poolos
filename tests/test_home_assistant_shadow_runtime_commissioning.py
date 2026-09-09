@@ -23,9 +23,9 @@ def test_component_modules_parse() -> None:
 
 def test_manifest_advances_shadow_runtime_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.11.4"
+    assert manifest["version"] == "0.11.5"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.4",
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.5",
         "pyintellicenter==0.1.20",
     ]
 
