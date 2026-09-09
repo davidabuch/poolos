@@ -108,6 +108,7 @@ class ThermalSourceInput:
     forecast: ForecastGateEvidence = ForecastGateEvidence()
     temperature_probe_required: bool = False
     solar_configured: bool = False
+    retained_water_reference: bool = False
 
     def __post_init__(self) -> None:
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
@@ -178,12 +179,12 @@ class ThermalSourceSelector:
             collector_temperature_f=observation.collector_temperature_f,
             target_temperature_f=observation.pool_target_f,
             solar_configured=observation.solar_configured,
+            retained_water_reference=observation.retained_water_reference,
         ))
         gate_applied, gate_passed = self._forecast_gate(observation)
         needs_heat = observation.trusted_pool_temperature_f is not None and observation.pool_target_f is not None and observation.trusted_pool_temperature_f < observation.pool_target_f
 
         if observation.temperature_probe_required:
-            rpm = self._policy.baselines.temperature_probe_rpm
             intent = OperationalIntent(
                 intent_type=OperationalIntentType.MAINTAIN_CIRCULATION,
                 source=OperationalIntentSource.EQUIPMENT,
@@ -191,9 +192,29 @@ class ThermalSourceSelector:
                 description="Acquire trusted pool-water temperature",
                 requested_at=observation.evaluated_at,
                 source_reference="trusted-water-temperature-probe",
-                constraints=(pump_baseline_criterion(rpm=rpm, operating_mode="temperature_probe"), command_disabled_criterion()),
+                constraints=(
+                    IntentCriterion(
+                        "temperature_acquisition",
+                        "Use the commissioned Pool bulk-water acquisition baseline",
+                        {
+                            "minimum_duration_seconds": 120,
+                            "rpm": self._policy.baselines.temperature_probe_rpm,
+                        },
+                    ),
+                    command_disabled_criterion(),
+                ),
             )
-            return ThermalOperatingAssessment(observation.evaluated_at, ThermalOperatingMode.POOL_TEMPERATURE_PROBE, ThermalHeatSource.NONE, rpm, solar, gate_applied, gate_passed, intent, "pool_temperature_probe_required")
+            return ThermalOperatingAssessment(
+                observation.evaluated_at,
+                ThermalOperatingMode.POOL_TEMPERATURE_PROBE,
+                ThermalHeatSource.NONE,
+                self._policy.baselines.temperature_probe_rpm,
+                solar,
+                gate_applied,
+                gate_passed,
+                intent,
+                "pool_temperature_probe_required",
+            )
 
         if observation.heating_mode is PoolHeatingMode.GAS_ONLY:
             if not needs_heat:

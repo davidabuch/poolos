@@ -73,6 +73,7 @@ class ManualIntelliCenterThermalLiveDelivery:
             raise ValueError("correlation_id must not be empty")
         issued_at = datetime.now(timezone.utc)
         try:
+            self._validate_probe_operation(operation)
             if isinstance(operation, SetBodyActive):
                 body_id = self._validate_body_activation(operation)
                 manual_receipt = await self.manual.async_set_body_active(
@@ -138,6 +139,31 @@ class ManualIntelliCenterThermalLiveDelivery:
             },
         )
 
+    def _validate_probe_operation(self, operation: PoolOperation) -> None:
+        context = self.automatic_thermal_context
+        if (
+            context is None
+            or context.purpose
+            is not AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+        ):
+            return
+        authority = context.probe_authority
+        if authority is None or operation.operation_id != authority.operation_id:
+            raise ValueError("probe operation does not match bound authority")
+        if isinstance(operation, SetBodyActive):
+            actual = ("body_active", _BODY_ID[ThermalBody(operation.equipment_id)], operation.active)
+        elif isinstance(operation, SetHeatMode):
+            body_id, heater_id = self._validate_heat_mode(operation)
+            actual = ("body_heat_source", body_id, heater_id)
+        else:
+            raise ValueError("probe operation type does not match bound authority")
+        if actual != (
+            authority.operation,
+            authority.target,
+            authority.requested_value,
+        ):
+            raise ValueError("probe operation does not match bound authority")
+
     def _validate_body_activation(self, operation: SetBodyActive) -> str:
         try:
             body = ThermalBody(operation.equipment_id)
@@ -192,11 +218,36 @@ class ManualIntelliCenterThermalLiveDelivery:
             if authority is None or operation.rpm != authority.requested_value:
                 raise ValueError("pump cleanup RPM does not match bound authority")
             return
-        if operation.rpm not in {
+        allowed = {
             self.baselines.solar_heating_rpm,
             self.baselines.gas_heating_rpm,
             self.baselines.priming_rpm,
-        }:
+        }
+        if cleanup is not None and cleanup.body == ThermalBody.HOT_TUB.value:
+            expected = {
+                "temperature_acquisition": self.baselines.temperature_probe_rpm,
+                "ordinary_circulation": self.baselines.filtration_rpm,
+                "solar_heating": self.baselines.solar_heating_rpm,
+                "gas_heating": self.baselines.gas_heating_rpm,
+            }.get(
+                cleanup.operating_purpose
+                if cleanup.operating_purpose is not None
+                else ""
+            )
+            if operation.rpm != expected:
+                raise ValueError("Hot Tub RPM does not match bound operating purpose")
+            return
+        if (
+            cleanup is not None
+            and cleanup.body == ThermalBody.POOL.value
+            and cleanup.operating_purpose == "ordinary_circulation"
+        ):
+            if operation.rpm != self.baselines.filtration_rpm:
+                raise ValueError(
+                    "Pool RPM does not match bound ordinary-circulation purpose"
+                )
+            return
+        if operation.rpm not in allowed:
             raise ValueError("unsupported thermal pump RPM baseline")
 
     @staticmethod

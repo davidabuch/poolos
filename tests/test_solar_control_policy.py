@@ -8,8 +8,17 @@ from poolos.solar_control_policy import SolarEligibilityDisposition, SolarEligib
 NOW = datetime(2026, 8, 26, 15, 0, tzinfo=timezone.utc)
 
 
-def observation(*, at: datetime = NOW, pool_active: bool = True, spa_active: bool = False, solar_active: bool = False, water: float | None = 86, collector: float | None = 93, target: float | None = 90) -> SolarEligibilityInput:
-    return SolarEligibilityInput(at, pool_active, spa_active, solar_active, water, collector, target)
+def observation(*, at: datetime = NOW, pool_active: bool = True, spa_active: bool = False, solar_active: bool = False, water: float | None = 86, collector: float | None = 93, target: float | None = 90, retained: bool = False) -> SolarEligibilityInput:
+    return SolarEligibilityInput(
+        at,
+        pool_active,
+        spa_active,
+        solar_active,
+        water,
+        collector,
+        target,
+        retained_water_reference=retained,
+    )
 
 
 def test_default_policy_uses_seven_degree_start_three_degree_stop_and_five_minute_hold() -> None:
@@ -91,6 +100,54 @@ def test_activation_boundary_remains_inclusive_at_seven() -> None:
     assert not below.eligible
     assert below.reason_code == "activation_differential_insufficient"
     assert at_threshold.eligible
+
+
+def test_retained_reference_trial_requires_exact_ninety_and_seven_boundaries() -> None:
+    below_collector = SolarEligibilityTracker().evaluate(
+        observation(pool_active=False, water=83.0, collector=89.999, retained=True)
+    )
+    below_differential = SolarEligibilityTracker().evaluate(
+        observation(pool_active=False, water=83.001, collector=90.0, retained=True)
+    )
+    exact = SolarEligibilityTracker().evaluate(
+        observation(pool_active=False, water=83.0, collector=90.0, retained=True)
+    )
+
+    assert not below_collector.eligible
+    assert not below_differential.eligible
+    assert exact.eligible
+    assert exact.reason_code == "pre_circulation_solar_opportunity"
+
+
+@pytest.mark.parametrize(
+    ("fresh_differential", "eligible", "reason"),
+    (
+        (6.0, True, "solar_trial_continuation"),
+        (5.5, True, "solar_trial_continuation"),
+        (5.0, False, "solar_trial_differential_abort"),
+    ),
+)
+def test_retained_reference_trial_uses_six_continue_five_abort_hysteresis(
+    fresh_differential: float,
+    eligible: bool,
+    reason: str,
+) -> None:
+    tracker = SolarEligibilityTracker()
+    started = tracker.evaluate(
+        observation(pool_active=False, water=83.0, collector=90.0, retained=True)
+    )
+    current = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(seconds=1),
+            pool_active=True,
+            water=84.0,
+            collector=84.0 + fresh_differential,
+        )
+    )
+
+    assert started.eligible
+    assert current.eligible is eligible
+    assert current.reason_code == reason
 
 
 def test_active_solar_is_not_forced_off_by_activation_only_ninety_degree_floor() -> None:

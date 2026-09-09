@@ -13,7 +13,16 @@ from poolos.circulation_successor import (
 )
 from poolos.hal import CommandReceipt, CommandStatus
 from poolos.external_change import ExternalChangeBatch, ExternalChangeEvent
-from poolos.filtration_policy import FiltrationDisposition
+from poolos.filtration_automatic_execution import (
+    FiltrationAutomaticDriverState,
+    FiltrationAutomaticExecutionDriver,
+    FiltrationAutomaticExecutionFrame,
+)
+from poolos.filtration_policy import (
+    FiltrationAccountingTracker,
+    FiltrationDisposition,
+    FiltrationObservation,
+)
 from poolos.integration import (
     PhysicalHeatMode,
     PoolOperation,
@@ -66,6 +75,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnedConcept,
     ThermalRuntimeOwnershipStatus,
 )
+from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
 
 NOW = datetime(2026, 9, 4, 18, 0, tzinfo=UTC)
@@ -114,6 +124,10 @@ class FakeDeliveryFactory:
         self.bindings.append((f"cleanup:{candidate.candidate_id}", epoch_identity))
         return self.delivery
 
+    def for_operation(self, **kwargs: object) -> FakeDelivery:
+        del kwargs
+        return self.delivery
+
 
 def _observation(concept: str, value: object, at: datetime) -> PoolObservation:
     return PoolObservation(
@@ -133,24 +147,33 @@ def _values(
     spa_active: bool = False,
     pump_rpm: int = 0,
     pool_heater: str = "00000",
+    spa_heater: str = "00000",
     configured_rpm: int = 2600,
     grid_outage_active: bool = False,
     solar_active: bool = False,
     solar_temperature: float = 110.0,
+    pool_temperature: float = 80.0,
+    spa_temperature: float = 98.0,
+    spa_target: float = 101.0,
+    heater_active: bool = False,
+    spa_heating_demand_active: bool = False,
 ) -> dict[str, object]:
     return {
         "pool.active": pool_active,
-        "pool.temperature": 80.0,
+        "pool.temperature": pool_temperature,
         "pool.target_temperature": 90.0,
         "pool.raw_heater_id": pool_heater,
         "pool.raw_htmode": "0",
         "spa.active": spa_active,
-        "spa.temperature": 98.0,
-        "spa.target_temperature": 101.0,
-        "spa.raw_heater_id": "00000",
+        "spa.temperature": spa_temperature,
+        "spa.target_temperature": spa_target,
+        "spa.raw_heater_id": spa_heater,
         "spa.raw_htmode": "0",
+        "heater.active": heater_active,
+        "spa.heating_demand_active": spa_heating_demand_active,
         "pump.rpm": pump_rpm,
         "pool.pump_circuit.configured_speed_rpm": configured_rpm,
+        "spa.pump_circuit.configured_speed_rpm": configured_rpm,
         "solar.temperature": solar_temperature,
         "solar.active": solar_active,
         "grid.outage_active": grid_outage_active,
@@ -176,6 +199,13 @@ def _frame(
     solar_observation_observed_at: datetime | None = None,
     omit_solar_observation: bool = False,
     solar_temperature: float = 110.0,
+    pool_temperature: float = 80.0,
+    spa_active: bool | None = None,
+    spa_heater: str = "00000",
+    spa_temperature: float = 98.0,
+    spa_target: float = 101.0,
+    heater_active: bool = False,
+    spa_heating_demand_active: bool = False,
     native_observation_at: datetime | None = None,
     body: ThermalBody = ThermalBody.POOL,
     filtration_remaining: timedelta | None = None,
@@ -184,13 +214,19 @@ def _frame(
     evidence_at = at if native_observation_at is None else native_observation_at
     values = _values(
         pool_active=pool_active,
-        spa_active=body is ThermalBody.HOT_TUB,
+        spa_active=(body is ThermalBody.HOT_TUB if spa_active is None else spa_active),
         pump_rpm=pump_rpm,
         pool_heater=pool_heater,
         configured_rpm=configured_rpm,
         grid_outage_active=grid_outage_active,
         solar_active=solar_active,
         solar_temperature=solar_temperature,
+        pool_temperature=pool_temperature,
+        spa_heater=spa_heater,
+        spa_temperature=spa_temperature,
+        spa_target=spa_target,
+        heater_active=heater_active,
+        spa_heating_demand_active=spa_heating_demand_active,
     )
     for concept in missing:
         values.pop(concept, None)
@@ -212,8 +248,11 @@ def _frame(
             "spa.active",
             "pump.rpm",
             "pool.pump_circuit.configured_speed_rpm",
+            "spa.pump_circuit.configured_speed_rpm",
             "pool.raw_heater_id",
             "spa.raw_heater_id",
+            "heater.active",
+            "spa.heating_demand_active",
             "solar.active",
             "grid.outage_active",
             "waterfall.active",
@@ -251,6 +290,8 @@ def _frame(
                 NativeConfigurationInput()
             ),
             pool_pump_circuit_id="p0102",
+            spa_pump_circuit_id="p0198",
+            spa_session_kind=(None if driver is None else driver.spa_session_kind()),
             pool_temperature_probe_execution=probe_execution,
             pool_temperature_probe_continuity=(
                 PoolTemperatureProbeContinuityEvidence(evaluated_at=at, valid=True)
@@ -298,6 +339,64 @@ def _frame(
                 ),
             )
         ),
+    )
+
+
+def _filtration_frame(
+    at: datetime,
+    *,
+    pool_active: bool,
+    pump_rpm: int,
+    configured_rpm: int,
+    satisfied: bool,
+    spa_active: bool = False,
+) -> FiltrationAutomaticExecutionFrame:
+    tracker = FiltrationAccountingTracker(tou_profile=LADWP_INITIAL_PROFILE)
+    accounting = tracker.observe(
+        FiltrationObservation(
+            observed_at=at,
+            pool_active=pool_active,
+            spa_active=spa_active,
+            pump_rpm=pump_rpm,
+            water_temperature_f=90.0,
+            circulation_evidence_usable=True,
+            temperature_evidence_usable=True,
+        ),
+        safely_deferrable=False,
+    )
+    if satisfied:
+        accounting = replace(
+            accounting,
+            required_runtime=accounting.credited_runtime,
+            remaining_runtime=timedelta(0),
+            total_remaining_runtime=timedelta(0),
+            disposition=FiltrationDisposition.SATISFIED,
+            currently_earning_credit=False,
+            reason_code="filtration_obligation_satisfied",
+        )
+    observations = tuple(
+        _observation(concept, value, at)
+        for concept, value in (
+            ("pool.active", pool_active),
+            ("spa.active", spa_active),
+            ("pump.rpm", pump_rpm),
+            ("pool.pump_circuit.configured_speed_rpm", configured_rpm),
+            ("waterfall.active", False),
+            ("jets.active", False),
+            ("slide.active", False),
+        )
+    )
+    return FiltrationAutomaticExecutionFrame(
+        epoch_identity=f"filtration:{at.isoformat()}",
+        observed_at=at,
+        observations=observations,
+        filtration=accounting,
+        pool_pump_circuit_id="p0102",
+        physical_authority_ready=True,
+        physical_authority_blocker=None,
+        grid_on=True,
+        thermal_candidate_ready=False,
+        thermal_owned=False,
     )
 
 
@@ -433,6 +532,83 @@ def test_cold_start_delivers_at_most_one_command_per_authoritative_epoch() -> No
         "SetPumpSpeed",
     ]
 
+
+def test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    baseline = _frame(orchestrator, NOW, pool_active=False)
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    first = _frame(orchestrator, NOW + timedelta(seconds=1), pool_active=False)
+    asyncio.run(driver.process_epoch(first, delivery_factory=factory))
+    commands_before = len(delivery.calls)
+    suppressed = replace(
+        _frame(orchestrator, NOW + timedelta(seconds=2), pool_active=False),
+        pool_automatic_control_suppressed=True,
+    )
+
+    result = asyncio.run(driver.process_epoch(suppressed, delivery_factory=factory))
+
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert result.blocker == "automatic_thermal_manual_pool_off_preempted"
+    assert len(delivery.calls) == commands_before
+    assert driver.active_session is None
+
+
+@pytest.mark.parametrize(
+    ("body", "pool_suppressed", "spa_suppressed", "forbidden_blocker"),
+    (
+        (
+            ThermalBody.HOT_TUB,
+            True,
+            False,
+            "automatic_thermal_manual_pool_off_preempted",
+        ),
+        (
+            ThermalBody.POOL,
+            False,
+            True,
+            "automatic_thermal_manual_spa_off_preempted",
+        ),
+    ),
+)
+def test_manual_off_suppression_is_scoped_to_its_body(
+    body: ThermalBody,
+    pool_suppressed: bool,
+    spa_suppressed: bool,
+    forbidden_blocker: str,
+) -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    baseline = _frame(orchestrator, NOW, pool_active=False, body=body)
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    frame = replace(
+        _frame(
+            orchestrator,
+            NOW + timedelta(seconds=1),
+            pool_active=False,
+            body=body,
+        ),
+        pool_automatic_control_suppressed=pool_suppressed,
+        spa_automatic_control_suppressed=spa_suppressed,
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(frame, delivery_factory=FakeDeliveryFactory(FakeDelivery()))
+    )
+
+    assert result.blocker != forbidden_blocker
 
 def test_warmed_collector_exposes_command_free_probe_candidate_at_native_cadence() -> None:
     """Model the v0.10.6 Pool-off commissioning sequence without delivery."""
@@ -1089,10 +1265,8 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
 
     sequence = (
         (1, False, 0, 2600),
-        (2, True, 0, 2600),
-        (3, True, 3000, 3000),
-        (63, True, 3000, 3000),
-        (64, True, 1500, 1500),
+        (2, True, 2600, 2600),
+        (3, True, 1500, 1500),
     )
     for seconds, active, rpm, configured in sequence:
         frame = _frame(
@@ -1113,18 +1287,16 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
     probe = driver.probe_execution_evidence()
     assert probe is not None
     assert probe.phase.value == "acquiring"
-    assert probe.acquisition_started_at == NOW + timedelta(seconds=64)
+    assert probe.acquisition_started_at == NOW + timedelta(seconds=3)
     assert [type(operation).__name__ for operation in delivery.calls] == [
         "SetBodyActive",
         "SetPumpSpeed",
-        "SetPumpSpeed",
     ]
-    assert [
-        operation.rpm for operation in delivery.calls if isinstance(operation, SetPumpSpeed)
-    ] == [3000, 1500]
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 1500
 
     final = None
-    for seconds in (94, 124, 184):
+    for seconds in (33, 63, 123):
         frame = _frame(
             orchestrator,
             NOW + timedelta(seconds=seconds),
@@ -1138,12 +1310,12 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
         )
         final = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
 
-    assert evaluator.pool_temperature_probe.started_at == NOW + timedelta(seconds=64)
+    assert evaluator.pool_temperature_probe.started_at == NOW + timedelta(seconds=3)
     assert evaluator.pool_temperature_probe.last_assessment is not None
     assert evaluator.pool_temperature_probe.last_assessment.reason_code == "probe_settled"
     assert final is not None
     assert driver.probe_execution_evidence() is None
-    assert len(delivery.calls) == 4
+    assert len(delivery.calls) == 3
     assert isinstance(delivery.calls[-1], SetPumpSpeed)
     assert delivery.calls[-1].rpm == successor_rpm
 
@@ -1151,7 +1323,7 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=185),
+                NOW + timedelta(seconds=124),
                 pool_active=True,
                 pump_rpm=successor_rpm,
                 configured_rpm=successor_rpm,
@@ -1170,7 +1342,7 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=186),
+                NOW + timedelta(seconds=125),
                 pool_active=True,
                 pump_rpm=successor_rpm,
                 configured_rpm=successor_rpm,
@@ -1201,23 +1373,662 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
     assert lease.owns_heat_source is True
 
 
-def test_preexisting_pool_circulation_and_hot_tub_fail_closed() -> None:
+def test_normal_day_pool_and_spa_complete_lifecycle() -> None:
+    """Exercise Pool acquisition/Solar/filtration and external Spa Gas."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    filtration_driver = FiltrationAutomaticExecutionDriver(
+        driver.circulation_ownership
+    )
+    filtration_driver.set_enabled(
+        True,
+        changed_at=NOW - timedelta(seconds=1),
+        current_epoch_identity=None,
+    )
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=1500,
+        pool_heater="H0002",
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=89.0,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    assert baseline.orchestration.candidate_body is None
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    probe_epochs = (
+        (1, False, 0, 1500, "H0002"),
+        (2, False, 0, 1500, "00000"),
+        (3, True, 2600, 2600, "00000"),
+        (4, True, 1500, 1500, "00000"),
+    )
+    result = None
+    for seconds, active, rpm, configured, heater in probe_epochs:
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=active,
+                    pump_rpm=rpm,
+                    configured_rpm=configured,
+                    pool_heater=heater,
+                    mode=ThermalRequestedMode.SOLAR,
+                    missing=("pool.temperature",),
+                    solar_temperature=90.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+    assert result is not None
+    assert driver.probe_execution_evidence() is not None
+    assert [type(operation).__name__ for operation in delivery.calls] == [
+        "SetHeatMode",
+        "SetBodyActive",
+        "SetPumpSpeed",
+    ]
+    assert isinstance(delivery.calls[0], SetHeatMode)
+    assert delivery.calls[0].mode is PhysicalHeatMode.OFF
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 1500
+
+    for seconds in (34, 64, 124):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=1500,
+                    configured_rpm=1500,
+                    pool_heater="00000",
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=91.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+    assert result is not None
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2900
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=125),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert delivery.calls[-1].mode is PhysicalHeatMode.SOLAR
+
+    for seconds in (126, 127, 157):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    solar_active=seconds >= 127,
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=91.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    assert result is not None
+    assert result.state is ThermalAutomaticDriverState.CONVERGED
+    assert result.blocker == "automatic_thermal_solar_engaged"
+    assert [type(operation).__name__ for operation in delivery.calls] == [
+        "SetHeatMode",
+        "SetBodyActive",
+        "SetPumpSpeed",
+        "SetPumpSpeed",
+        "SetHeatMode",
+    ]
+    assert [
+        operation.rpm
+        for operation in delivery.calls
+        if isinstance(operation, SetPumpSpeed)
+    ] == [1500, 2900]
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.owns_body_activation
+    assert lease.owns_pump_setpoint
+    assert lease.owns_heat_source
+
+    calls_before_termination = len(delivery.calls)
+    holding_target = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=219),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                pool_temperature=90.0,
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert holding_target.blocker == "automatic_thermal_owned_successor_requires_explicit_handoff"
+    assert len(delivery.calls) == calls_before_termination
+
+    terminating = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=819),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                pool_temperature=90.0,
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert terminating.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
+
+    awaiting_native_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=820),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                pool_temperature=90.0,
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert awaiting_native_off.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION
+    assert len(delivery.calls) == calls_before_termination + 1
+
+    source_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=821),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert source_off.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is not None
+
+    cleanup = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=822),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert cleanup.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+
+    handoff_complete = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=823),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert handoff_complete.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.FILTRATION
+
+    owned_filtration = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=824),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                satisfied=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert owned_filtration.state is FiltrationAutomaticDriverState.OWNED
+
+    yielded = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=900),
+                pool_active=False,
+                spa_active=True,
+                pump_rpm=2500,
+                configured_rpm=2600,
+                satisfied=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert yielded.blocker == "automatic_filtration_yielded_to_spa"
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
+
+    _assert_external_hot_tub_gas_lifecycle(
+        orchestrator=orchestrator,
+        driver=driver,
+        evaluator=evaluator,
+        start_at=NOW + timedelta(seconds=900),
+    )
+
+    pool_restart = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=911),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                satisfied=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert pool_restart.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is True
+
+    pump_restart = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=912),
+                pool_active=True,
+                pump_rpm=3000,
+                configured_rpm=2600,
+                satisfied=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert pump_restart.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+
+    resumed = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=913),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                satisfied=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert resumed.state is FiltrationAutomaticDriverState.OWNED
+
+    filtration_complete = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=914),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert filtration_complete.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is False
+
+    complete = asyncio.run(
+        filtration_driver.process_epoch(
+            _filtration_frame(
+                NOW + timedelta(seconds=915),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert complete.state is FiltrationAutomaticDriverState.BLOCKED
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
+    assert orchestrator.ownership.residual_termination is None
+    assert [
+        item.rpm for item in delivery.calls if isinstance(item, SetPumpSpeed)
+    ] == [1500, 2900, 2600, 2600]
+
+
+@pytest.mark.parametrize(
+    ("pool_temperature", "post_probe_collector"),
+    (
+        (86.0, 92.0),
+        (84.0, 87.0),
+        (90.0, 110.0),
+    ),
+)
+def test_negative_probe_outcomes_handoff_to_safe_filtration_without_solar(
+    pool_temperature: float,
+    post_probe_collector: float,
+) -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=1500,
+        pool_heater="H0002",
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=89.0,
+        filtration_remaining=timedelta(hours=2),
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    for seconds, active, rpm, configured, heater in (
+        (1, False, 0, 1500, "H0002"),
+        (2, False, 0, 1500, "00000"),
+        (3, True, 2600, 2600, "00000"),
+        (4, True, 1500, 1500, "00000"),
+    ):
+        asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=active,
+                    pump_rpm=rpm,
+                    configured_rpm=configured,
+                    pool_heater=heater,
+                    mode=ThermalRequestedMode.SOLAR,
+                    missing=("pool.temperature",),
+                    solar_temperature=92.0,
+                    filtration_remaining=timedelta(hours=2),
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    for seconds in (34, 64, 124):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=1500,
+                    configured_rpm=1500,
+                    pool_heater="00000",
+                    pool_temperature=pool_temperature,
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=post_probe_collector,
+                    filtration_remaining=timedelta(hours=2),
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+    assert result.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.probe_execution_evidence() is None
+    assert driver.cleanup_provenance is not None
+
+    handoff = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=125),
+                pool_active=True,
+                pump_rpm=1500,
+                configured_rpm=1500,
+                pool_heater="00000",
+                pool_temperature=pool_temperature,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=post_probe_collector,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert handoff.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+    assert not any(
+        isinstance(item, SetHeatMode) and item.mode is PhysicalHeatMode.SOLAR
+        for item in delivery.calls
+    )
+
+    verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=126),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="00000",
+                pool_temperature=pool_temperature,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=post_probe_collector,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert verified.blocker == "thermal_cleanup_filtration_handoff_verified"
+    assert driver.cleanup_provenance is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.FILTRATION
+    calls_after_handoff = len(delivery.calls)
+
+    no_repeat = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=127),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="00000",
+                pool_temperature=pool_temperature,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=post_probe_collector,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert not no_repeat.command_delivery_performed
+    assert driver.probe_execution_evidence() is None
+    assert len(delivery.calls) == calls_after_handoff
+    assert [
+        item.rpm for item in delivery.calls if isinstance(item, SetPumpSpeed)
+    ][-1] == 2600
+
+
+def test_external_pool_no_heat_normalizes_pump_without_body_ownership() -> None:
     pool_orchestrator = ThermalRuntimeOrchestrator()
     pool_driver = ThermalAutomaticExecutionDriver(pool_orchestrator)
-    pool_driver.set_enabled(True, changed_at=NOW, current_epoch_identity=None)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        pool_orchestrator,
+        NOW,
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.SOLAR,
+        solar_temperature=80.0,
+        evaluator=evaluator,
+        driver=pool_driver,
+    )
+    pool_driver.note_disabled_epoch(baseline)
+    pool_driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
     pool = _frame(
         pool_orchestrator,
         NOW + timedelta(seconds=1),
         pool_active=True,
-        pump_rpm=2600,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.SOLAR,
+        solar_temperature=80.0,
+        evaluator=evaluator,
+        driver=pool_driver,
     )
     delivery = FakeDelivery()
     result = asyncio.run(
         pool_driver.process_epoch(pool, delivery_factory=FakeDeliveryFactory(delivery))
     )
 
-    assert result.blocker == "automatic_thermal_preexisting_body_unowned"
-    assert delivery.calls == []
+    assert result.command_delivery_performed
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetPumpSpeed)
+    assert delivery.calls[0].rpm == 2600
+    assert pool_driver.active_session is not None
+    assert pool_driver.active_session.ownership.body_activation_operation_id is None
+
+    verified = asyncio.run(
+        pool_driver.process_epoch(
+            _frame(
+                pool_orchestrator,
+                NOW + timedelta(seconds=2),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="00000",
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=80.0,
+                evaluator=evaluator,
+                driver=pool_driver,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert verified.state is ThermalAutomaticDriverState.CONVERGED
+    lease = pool_orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.pump_setpoint is not None
+
+
+def test_external_hot_tub_without_proven_circulation_fails_closed() -> None:
 
     hot_tub_orchestrator = ThermalRuntimeOrchestrator()
     hot_tub_driver = ThermalAutomaticExecutionDriver(hot_tub_orchestrator)
@@ -1237,7 +2048,317 @@ def test_preexisting_pool_circulation_and_hot_tub_fail_closed() -> None:
         )
     )
 
-    assert blocked.blocker == "automatic_thermal_hot_tub_pump_ownership_unproven"
+    assert (
+        blocked.blocker
+        == "automatic_thermal_external_hot_tub_circulation_not_established"
+    )
+    assert hot_tub_delivery.calls == []
+
+
+def _assert_external_hot_tub_gas_lifecycle(
+    *,
+    orchestrator: ThermalRuntimeOrchestrator | None = None,
+    driver: ThermalAutomaticExecutionDriver | None = None,
+    evaluator: ThermalRuntimeEvaluator | None = None,
+    start_at: datetime = NOW,
+) -> None:
+    standalone = orchestrator is None
+    orchestrator = orchestrator or ThermalRuntimeOrchestrator()
+    driver = driver or ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = evaluator or ThermalRuntimeEvaluator()
+    if standalone:
+        baseline = _frame(
+            orchestrator,
+            start_at,
+            pool_active=False,
+            body=ThermalBody.HOT_TUB,
+            spa_active=False,
+            pump_rpm=0,
+            configured_rpm=2900,
+            driver=driver,
+            evaluator=evaluator,
+        )
+        driver.note_disabled_epoch(baseline)
+        driver.set_enabled(
+            True,
+            changed_at=start_at,
+            current_epoch_identity=baseline.epoch_identity,
+        )
+    frame = _frame(
+        orchestrator,
+        start_at + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        pump_rpm=2500,
+        configured_rpm=2500,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    delivery = FakeDelivery()
+
+    result = asyncio.run(
+        driver.process_epoch(frame, delivery_factory=FakeDeliveryFactory(delivery))
+    )
+
+    assert result.command_delivery_performed
+    assert len(delivery.calls) == 1
+    operation = delivery.calls[0]
+    assert isinstance(operation, SetPumpSpeed)
+    assert operation.equipment_id == "p0198"
+    assert operation.rpm == 2600
+    assert driver.active_session is not None, (
+        result,
+        orchestrator.ownership.state,
+        orchestrator.ownership.residual_termination,
+    )
+    assert driver.active_session.ownership.body_activation_operation_id is None
+
+    normalized = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=2),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert normalized.state is ThermalAutomaticDriverState.TERMINATING
+
+    relinquished = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=3),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert relinquished.state is ThermalAutomaticDriverState.CONVERGED
+
+    preparing = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=4),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert preparing.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 3000
+    assert driver.active_session is not None
+    assert driver.active_session.ownership.body_activation_operation_id is None
+
+    gas_selected = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=5),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert gas_selected.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert delivery.calls[-1].mode is PhysicalHeatMode.GAS
+
+    gas_active = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=6),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_heater="H0001",
+                heater_active=True,
+                spa_heating_demand_active=True,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert gas_active.state is ThermalAutomaticDriverState.CONVERGED
+
+    target_transition = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=7),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_heater="H0001",
+                spa_temperature=97.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert not target_transition.command_delivery_performed
+
+    downshift = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=8),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_heater="H0001",
+                spa_temperature=97.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert downshift.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+
+    settled = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=9),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                spa_heater="H0001",
+                spa_temperature=97.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert settled.state is ThermalAutomaticDriverState.CONVERGED
+    assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
+
+    calls_before_user_off = len(delivery.calls)
+    user_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                start_at + timedelta(seconds=10),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                spa_heater="H0001",
+                spa_temperature=97.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert not user_off.command_delivery_performed
+    assert len(delivery.calls) == calls_before_user_off
+    assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
+
+
+def test_external_hot_tub_session_governs_dynamic_spa_pump_without_body_ownership() -> None:
+    _assert_external_hot_tub_gas_lifecycle()
+
+
+def test_external_hot_tub_already_gas_active_reconciles_directly_to_3000() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2900,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    delivery = FakeDelivery()
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                spa_heater="H0001",
+                heater_active=True,
+                spa_heating_demand_active=True,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+
+    assert result.command_delivery_performed
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetPumpSpeed)
+    assert delivery.calls[0].rpm == 3000
+    assert driver.active_session is not None
+    assert driver.active_session.ownership.body_activation_operation_id is None
 
 
 @pytest.mark.parametrize(

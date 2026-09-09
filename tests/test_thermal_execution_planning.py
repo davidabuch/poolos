@@ -17,6 +17,7 @@ from poolos.spa_thermal_policy import (
     SpaPolicyInput,
     SpaThermalPolicyTracker,
     SpaUserSource,
+    ThermalHeatSource,
 )
 from poolos.thermal_execution_planning import (
     ThermalCurrentState,
@@ -181,6 +182,7 @@ def test_spa_user_session_preserves_solar_qualification_and_gas_fallback() -> No
         90.0,
         100.0,
         130.0,
+        active_heat_source=ThermalHeatSource.GAS,
     )
     qualified_input = SpaPolicyInput(
         NOW + timedelta(minutes=2),
@@ -189,6 +191,7 @@ def test_spa_user_session_preserves_solar_qualification_and_gas_fallback() -> No
         90.0,
         100.0,
         130.0,
+        active_heat_source=ThermalHeatSource.SOLAR,
     )
     gas = desired_spa_state(first_input, tracker.evaluate(first_input))
     solar = desired_spa_state(qualified_input, tracker.evaluate(qualified_input))
@@ -431,6 +434,38 @@ def test_off_does_not_require_pump_rpm_and_only_deselects_heat_source() -> None:
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (SetHeatMode,)
     assert not any(isinstance(item, SetPumpSpeed) for item in plan.operations)
+
+
+def test_morning_acquisition_preconditions_source_then_activates_and_sets_1500() -> None:
+    """The bounded fallback requests 1500 immediately after Pool activation."""
+
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
+        _desired(
+            PhysicalHeatMode.OFF,
+            1500,
+            reason="pool_temperature_probe_required",
+        ),
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.SOLAR,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (SetHeatMode, SetBodyActive, SetPumpSpeed)
+    assert plan.step_specifications[0].expected_observations == {
+        "pool.raw_heater_id": "00000"
+    }
+    assert plan.step_specifications[1].expected_observations == {
+        "pool.active": True
+    }
+    assert plan.step_specifications[2].expected_observations == {
+        "pump.rpm": 1500,
+        "pool.pump_circuit.configured_speed_rpm": 1500,
+    }
 
 
 def test_pool_safe_off_is_not_blocked_by_irrelevant_missing_collector() -> None:
@@ -850,7 +885,7 @@ def test_active_body_with_stopped_pump_still_requires_cold_start_prime() -> None
     assert "cold_start_priming_required" in plan.change_reasons
 
 
-def test_pool_temperature_probe_cold_start_primes_then_settles_to_probe_rpm() -> None:
+def test_pool_temperature_probe_cold_start_uses_bounded_1500_fallback() -> None:
     desired = ThermalDesiredState(
         evaluated_at=NOW,
         body=ThermalBody.POOL,
@@ -877,18 +912,13 @@ def test_pool_temperature_probe_cold_start_primes_then_settles_to_probe_rpm() ->
     assert _operation_kinds(plan) == (
         SetBodyActive,
         SetPumpSpeed,
-        SetPumpSpeed,
     )
     assert isinstance(plan.operations[0], SetBodyActive)
     assert plan.operations[0].active is True
     assert isinstance(plan.operations[1], SetPumpSpeed)
     assert plan.operations[1].equipment_id == "p0101"
-    assert plan.operations[1].rpm == 3000
-    assert plan.step_specifications[1].metadata["priming_step"] == "true"
-    assert plan.step_specifications[1].metadata["minimum_verified_hold_seconds"] == "60"
-    assert isinstance(plan.operations[2], SetPumpSpeed)
-    assert plan.operations[2].equipment_id == "p0101"
-    assert plan.operations[2].rpm == 1500
+    assert plan.operations[1].rpm == 1500
+    assert plan.step_specifications[1].metadata["pool_temperature_probe_step"] == "true"
     assert plan.expected_final_state == {
         "pool.raw_heater_id": "00000",
         "pump.rpm": 1500,
@@ -948,7 +978,7 @@ def test_off_source_residual_plan_keeps_rpm_before_source_after_priming() -> Non
 def test_off_source_pump_rpm_is_rejected_outside_temperature_probe() -> None:
     with pytest.raises(
         ValueError,
-        match="off heat source may require pump RPM only for pool temperature probe",
+        match="off heat source RPM requires an explicit acquisition or hold purpose",
     ):
         ThermalDesiredState(
             evaluated_at=NOW,
@@ -962,3 +992,81 @@ def test_off_source_pump_rpm_is_rejected_outside_temperature_probe() -> None:
             criteria=("test",),
             evidence={},
         )
+
+
+def test_opportunistic_spa_preconditions_solar_before_body_activation() -> None:
+    desired_state = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.SOLAR,
+        required_pump_rpm=2600,
+        reason_code="opportunistic_started_or_resumed",
+        rpm_reason_code="operating_baseline:2600_rpm",
+        rationale=("Use Solar without permitting opportunistic Gas.",),
+        criteria=("gas_fallback_forbidden",),
+        evidence={
+            "session_kind": "poolos_opportunistic",
+            "active_operating_purpose": "ordinary_circulation",
+        },
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0198",
+        configured_speed_concept="spa.pump_circuit.configured_speed_rpm",
+    ).build(
+        desired_state,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.GAS,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    assert isinstance(plan.operations[0], SetHeatMode)
+    assert plan.operations[0].mode is PhysicalHeatMode.SOLAR
+    assert plan.step_specifications[0].metadata[
+        "spa_opportunistic_source_precondition"
+    ] == "true"
+    assert isinstance(plan.operations[1], SetBodyActive)
+    assert all(
+        not isinstance(operation, SetHeatMode)
+        or operation.mode is not PhysicalHeatMode.GAS
+        for operation in plan.operations
+    )
+
+
+def test_opportunistic_spa_reasserts_safe_source_for_positive_provenance() -> None:
+    desired_state = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.SOLAR,
+        required_pump_rpm=2600,
+        reason_code="opportunistic_started_or_resumed",
+        rpm_reason_code="operating_baseline:2600_rpm",
+        rationale=("Establish exact source provenance before activation.",),
+        criteria=("gas_fallback_forbidden",),
+        evidence={
+            "session_kind": "poolos_opportunistic",
+            "active_operating_purpose": "ordinary_circulation",
+        },
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0198",
+        configured_speed_concept="spa.pump_circuit.configured_speed_rpm",
+    ).build(
+        desired_state,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.SOLAR,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+
+    assert isinstance(plan.operations[0], SetHeatMode)
+    assert plan.operations[0].mode is PhysicalHeatMode.SOLAR
+    assert isinstance(plan.operations[1], SetBodyActive)

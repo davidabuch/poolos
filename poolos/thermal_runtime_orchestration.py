@@ -17,7 +17,10 @@ from .grid_outage_confirmation import (
     GridOutageDisposition,
 )
 from .integration import PhysicalHeatMode, ThermalBody
-from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -62,6 +65,8 @@ _LIVE_MINIMUM_CONFIDENCE = 0.5
 _LIVE_ACCEPTED_QUALITIES = frozenset(
     {ObservationQuality.GOOD, ObservationQuality.DEGRADED}
 )
+_PUMP_BASELINES = PumpOperatingBaselines()
+_ACTUAL_PUMP_RPM_TOLERANCE = 25
 _EMPTY_EXTERNAL_CHANGES = ExternalChangeBatch(())
 _ORCHESTRATION_OBSERVATION_IDS = frozenset(
     {
@@ -70,6 +75,7 @@ _ORCHESTRATION_OBSERVATION_IDS = frozenset(
         "spa.active",
         "pump.rpm",
         POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         "solar.active",
@@ -520,9 +526,13 @@ def build_thermal_runtime_ownership_evidence(
     pool = _observation_state(observations.get("pool.active"), generated_at)
     spa = _observation_state(observations.get("spa.active"), generated_at)
     pump = _observation_state(observations.get("pump.rpm"), generated_at)
+    configured_concept = (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        if body.body is ThermalBody.POOL
+        else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+    )
     configured = _observation_state(
-        observations.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
-        generated_at,
+        observations.get(configured_concept), generated_at
     )
     source_concept = (
         "pool.raw_heater_id"
@@ -707,7 +717,6 @@ def assess_pool_temperature_probe_continuity(
     prior_grid_disposition: GridOutageDisposition | None,
     lifecycle_blocker: str | None = None,
     external_preemption_reason: str | None = None,
-    pump_rpm_tolerance: int = 25,
 ) -> PoolTemperatureProbeContinuityEvidence:
     """Prove current Pool probe hydraulics before accepting a sample."""
 
@@ -731,23 +740,23 @@ def assess_pool_temperature_probe_continuity(
             blocker = "temperature_probe_pool_inactive"
     if blocker is None:
         blocker = _shared_hydraulic_blocker(by_id, evaluated_at=generated_at)
-    baseline = PumpOperatingBaselines().temperature_probe_rpm
-    if blocker is None:
-        configured = _observation_state(
-            by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT), generated_at
-        )
-        configured_rpm = _integer(configured.value)
-        if not configured.usable or configured_rpm != baseline:
-            blocker = "temperature_probe_configured_speed_not_verified"
     if blocker is None:
         pump = _observation_state(by_id.get("pump.rpm"), generated_at)
         pump_rpm = _integer(pump.value)
+        configured = _observation_state(
+            by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
+            generated_at,
+        )
+        configured_rpm = _integer(configured.value)
         if (
             not pump.usable
             or pump_rpm is None
-            or abs(pump_rpm - baseline) > pump_rpm_tolerance
+            or abs(pump_rpm - _PUMP_BASELINES.temperature_probe_rpm)
+            > _ACTUAL_PUMP_RPM_TOLERANCE
+            or not configured.usable
+            or configured_rpm != _PUMP_BASELINES.temperature_probe_rpm
         ):
-            blocker = "temperature_probe_actual_rpm_not_verified"
+            blocker = "temperature_probe_pool_circulation_not_proven"
     temperature = _observation_state(by_id.get("pool.temperature"), generated_at)
     return PoolTemperatureProbeContinuityEvidence(
         evaluated_at=generated_at,

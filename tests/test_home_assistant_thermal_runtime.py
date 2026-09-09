@@ -81,8 +81,10 @@ def _native_values() -> dict[str, object]:
         "spa.raw_htmode": "0",
         "pump.rpm": 2900,
         "pool.pump_circuit.configured_speed_rpm": 2900,
+        "spa.pump_circuit.configured_speed_rpm": 2600,
         "solar.temperature": 110.0,
         "solar.active": False,
+        "heater.active": False,
     }
 
 
@@ -103,6 +105,7 @@ def runtime_fixture(
     pool_pmpcirc = SimpleNamespace(
         object_type="PMPCIRC",
         native_id=pool_pmpcirc_id,
+        observed_at=NOW,
         name="Pool",
         subtype=None,
         attributes=(
@@ -110,6 +113,19 @@ def runtime_fixture(
             SimpleNamespace(name="SELECT", value="RPM"),
             SimpleNamespace(name="PARENT", value="PMP01"),
             SimpleNamespace(name="SPEED", value="2900"),
+        ),
+    )
+    spa_pmpcirc = SimpleNamespace(
+        object_type="PMPCIRC",
+        native_id="p0198",
+        observed_at=NOW,
+        name="Spa",
+        subtype=None,
+        attributes=(
+            SimpleNamespace(name="CIRCUIT", value="C0001"),
+            SimpleNamespace(name="SELECT", value="RPM"),
+            SimpleNamespace(name="PARENT", value="PMP01"),
+            SimpleNamespace(name="SPEED", value="2600"),
         ),
     )
     transport_snapshot = SimpleNamespace(
@@ -122,7 +138,8 @@ def runtime_fixture(
                 maximum_rpm=3450.0,
             ),
         ),
-        raw_inventory=(*raw_inventory, pool_pmpcirc),
+        observed_at=NOW,
+        raw_inventory=(*raw_inventory, pool_pmpcirc, spa_pmpcirc),
     )
     coordinator = FakeCoordinator(
         data=SimpleNamespace(generated_at=NOW, healthy=True, stale_entities=()),
@@ -142,10 +159,15 @@ def test_runtime_binds_current_recycled_pool_pmpcirc_into_assessment() -> None:
 
     assert runtime.assessment is not None
     assert runtime.assessment.pool_pump_circuit_id == "p0101"
+    assert runtime.assessment.spa_pump_circuit_id == "p0198"
     assert all(
         operation.equipment_id == "p0101"
-        for body in (runtime.assessment.pool, runtime.assessment.hot_tub)
-        for operation in body.plan.operations
+        for operation in runtime.assessment.pool.plan.operations
+        if isinstance(operation, SetPumpSpeed)
+    )
+    assert all(
+        operation.equipment_id == "p0198"
+        for operation in runtime.assessment.hot_tub.plan.operations
         if isinstance(operation, SetPumpSpeed)
     )
 
@@ -326,8 +348,8 @@ def test_ha_entities_expose_exact_safe_configuration_contracts() -> None:
     select = (ROOT / "custom_components" / "poolos" / "select.py").read_text()
 
     assert "PoolOSThermalLiveExecutionSwitch" in switch
-    assert "effective_state_resets_off_on_restart" in switch
-    assert "RestoreEntity" not in switch.split(
+    assert "commissioned_desired_state_persists_across_restart" in switch
+    assert "RestoreEntity" in switch.split(
         "class PoolOSThermalLiveExecutionSwitch", 1
     )[1].split("class ", 1)[0]
     assert '"Disabled": ThermalLiveCommissioningScope.DISABLED' in select
@@ -337,8 +359,9 @@ def test_ha_entities_expose_exact_safe_configuration_contracts() -> None:
     automatic = switch.split(
         "class PoolOSThermalAutomaticExecutionSwitch", 1
     )[1].split("class ", 1)[0]
-    assert "RestoreEntity" not in automatic
+    assert "RestoreEntity" in automatic
     assert "fresh_authoritative_epoch_required" in automatic
+    assert "physical_session_ownership_restored" in automatic
 
 
 def test_configuration_refresh_never_regresses_stateful_policy_timestamp() -> None:

@@ -18,7 +18,19 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.observations import ObservationQuality, PoolObservation
-from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+from poolos.physical_command_authority import (
+    AutomaticThermalDispatchPurpose,
+    ExpectedNativeConsequence,
+    PhysicalCommandRequest,
+    PhysicalRequestSource,
+    PoolOSPhysicalCommandAuthority,
+)
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppression,
+    PoolAutomaticControlSuppressionSource,
+    SpaAutomaticControlSuppression,
+    SpaAutomaticControlSuppressionSource,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +65,31 @@ def _load_module() -> ModuleType:
     return module
 
 
-def _native(at: datetime, *, pool_active: bool) -> NativeIntelliCenterObservationSnapshot:
+def _native(
+    at: datetime,
+    *,
+    pool_active: bool,
+    spa_active: bool | None = None,
+) -> NativeIntelliCenterObservationSnapshot:
+    body_observations = [
+        PoolObservation(
+            "pool.active",
+            pool_active,
+            observed_at=at,
+            source_id="B1101",
+            quality=ObservationQuality.GOOD,
+        )
+    ]
+    if spa_active is not None:
+        body_observations.append(
+            PoolObservation(
+                "spa.active",
+                spa_active,
+                observed_at=at,
+                source_id="B1202",
+                quality=ObservationQuality.GOOD,
+            )
+        )
     return NativeIntelliCenterObservationSnapshot(
         generated_at=at,
         status=NativeIntelliCenterStatus.AVAILABLE,
@@ -66,13 +102,7 @@ def _native(at: datetime, *, pool_active: bool) -> NativeIntelliCenterObservatio
                 source_id="SYS01",
                 quality=ObservationQuality.GOOD,
             ),
-            PoolObservation(
-                "pool.active",
-                pool_active,
-                observed_at=at,
-                source_id="B1101",
-                quality=ObservationQuality.GOOD,
-            ),
+            *body_observations,
         ),
         missing_concepts=(),
     )
@@ -123,7 +153,6 @@ def test_runtime_publishes_one_stable_bounded_ha_event_after_baseline() -> None:
     assert data["notification_recommended"] is True
     assert data["reconciliation_required"] is False
     assert "history" not in data
-    assert runtime.latest_batch.events[0].concept == "pool.active"
 
     runtime.process(
         _native(now + timedelta(seconds=2), pool_active=True), transport, 1
@@ -136,6 +165,188 @@ def test_runtime_publishes_one_stable_bounded_ha_event_after_baseline() -> None:
     )
     assert runtime.latest_batch.events == ()
     assert len(calls) == 1
+
+
+def test_baseline_off_does_not_suppress_but_external_on_to_off_does() -> None:
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    restraint = PoolAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        pool_automatic_control=restraint,
+    )
+    now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(_native(now, pool_active=False), transport, 1)
+    assert not restraint.state.suppressed
+    runtime.process(_native(now + timedelta(seconds=1), pool_active=True), transport, 1)
+    assert not restraint.state.suppressed
+    runtime.process(_native(now + timedelta(seconds=2), pool_active=False), transport, 1)
+
+    assert restraint.state.suppressed
+    assert restraint.state.source is (
+        PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
+    )
+    assert restraint.state.suppressed_at == now + timedelta(seconds=2)
+    assert runtime.latest_batch.events[0].concept == "pool.active"
+
+
+def test_spa_on_to_off_suppression_is_independent_from_pool() -> None:
+    module = _load_module()
+    pool = PoolAutomaticControlSuppression()
+    spa = SpaAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=PoolOSPhysicalCommandAuthority(),
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        pool_automatic_control=pool,
+        spa_automatic_control=spa,
+    )
+    now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(
+        _native(now, pool_active=False, spa_active=False), transport, 1
+    )
+    runtime.process(
+        _native(
+            now + timedelta(seconds=1),
+            pool_active=False,
+            spa_active=True,
+        ),
+        transport,
+        1,
+    )
+    runtime.process(
+        _native(
+            now + timedelta(seconds=2),
+            pool_active=False,
+            spa_active=False,
+        ),
+        transport,
+        1,
+    )
+
+    assert spa.state.suppressed
+    assert spa.state.source is SpaAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
+    assert not pool.state.suppressed
+
+
+def test_spa_takeover_does_not_misclassify_routed_pool_off_as_manual_off() -> None:
+    module = _load_module()
+    pool = PoolAutomaticControlSuppression()
+    spa = SpaAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=PoolOSPhysicalCommandAuthority(),
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        pool_automatic_control=pool,
+        spa_automatic_control=spa,
+    )
+    now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(
+        _native(now, pool_active=True, spa_active=False), transport, 1
+    )
+    runtime.process(
+        _native(
+            now + timedelta(seconds=1),
+            pool_active=False,
+            spa_active=True,
+        ),
+        transport,
+        1,
+    )
+
+    assert not pool.state.suppressed
+    assert not spa.state.suppressed
+    assert {event.concept for event in runtime.latest_batch.events} >= {
+        "pool.active",
+        "spa.active",
+    }
+
+
+def test_correlated_poolos_owned_cleanup_off_does_not_false_latch() -> None:
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("cleanup-epoch")
+    authority.register_automatic_thermal_cleanup(
+        epoch_identity="cleanup-epoch",
+        candidate_identity="cleanup-candidate",
+        body="pool",
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        operation="body_active",
+        target="B1101",
+        requested_value=False,
+    )
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="cleanup-epoch",
+        session_identity="cleanup-session",
+        body="pool",
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        cleanup_candidate_identity="cleanup-candidate",
+    )
+    restraint = PoolAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        pool_automatic_control=restraint,
+    )
+    now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
+    transport = _transport(now)
+    runtime.process(_native(now, pool_active=True), transport, 1)
+    expectation = authority.reserve(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1101",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=False,
+            automatic_thermal_context=context,
+        ),
+        ExpectedNativeConsequence("pool.active", "B1101", False),
+        now=now + timedelta(milliseconds=500),
+    )
+    assert expectation is not None
+    authority.mark_dispatch_started(expectation)
+
+    runtime.process(_native(now + timedelta(seconds=1), pool_active=False), transport, 1)
+
+    assert not restraint.state.suppressed
+    assert runtime.latest_batch.events == ()
+    assert len(runtime.latest_batch.correlated_consequences) == 1
 
 
 def _body_assessment(

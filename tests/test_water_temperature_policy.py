@@ -17,7 +17,7 @@ def test_idle_pipe_temperature_is_not_bulk_water_and_probe_is_demand_driven() ->
     assert idle.disposition is WaterTemperatureDisposition.NOT_REQUIRED
     assert idle.trusted_temperature_f is None
     assert actionable.disposition is WaterTemperatureDisposition.PROBE_REQUIRED
-    assert actionable.recommended_pump_rpm == 1500
+    assert actionable.recommended_pump_rpm is None
 
 
 def test_existing_circulation_bypasses_probe_and_trusts_temperature() -> None:
@@ -51,13 +51,34 @@ def test_probe_fails_closed_at_five_minutes() -> None:
     assert result.recommended_pump_rpm is None
 
 
-def test_trusted_temperature_reused_for_thirty_minutes_then_stales() -> None:
+def test_trusted_temperature_reused_then_retained_for_operational_day() -> None:
     tracker = WaterTemperatureTracker()
     evaluate(tracker, circulating=True)
     within = evaluate(tracker, at=NOW + timedelta(minutes=30), circulating=False)
-    stale = evaluate(tracker, at=NOW + timedelta(minutes=31), circulating=False)
+    retained = evaluate(tracker, at=NOW + timedelta(minutes=31), circulating=False)
     assert within.disposition is WaterTemperatureDisposition.REUSED
-    assert stale.disposition is WaterTemperatureDisposition.PROBE_REQUIRED
+    assert retained.disposition is WaterTemperatureDisposition.RETAINED
+    assert retained.trusted_temperature_f == 86
+
+
+def test_retained_temperature_expires_at_next_operational_day_boundary() -> None:
+    tracker = WaterTemperatureTracker()
+    evaluate(tracker, circulating=True)
+
+    before_boundary = evaluate(
+        tracker,
+        at=datetime(2026, 8, 27, 14, 59, 59, tzinfo=timezone.utc),
+        circulating=False,
+    )
+    next_day = evaluate(
+        tracker,
+        at=datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc),
+        circulating=False,
+    )
+
+    assert before_boundary.disposition is WaterTemperatureDisposition.RETAINED
+    assert next_day.disposition is WaterTemperatureDisposition.PROBE_REQUIRED
+    assert tracker.retained_temperature_f is None
 
 
 def test_successful_probe_result_is_reused_without_reprobing() -> None:

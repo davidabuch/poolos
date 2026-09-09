@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 import asyncio
 import sys
@@ -13,6 +14,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppression,
+    PoolAutomaticControlSuppressionSource,
+    SpaAutomaticControlSuppression,
+    SpaAutomaticControlSuppressionSource,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,6 +129,211 @@ def test_first_install_or_restored_off_resolves_without_replaying_commands(
         assert not entity.is_on
         assert authority.maintenance_mode is False
         assert external_calls == []
+
+    asyncio.run(run())
+
+
+def test_pool_autonomous_control_restores_off_without_command_or_ownership() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+            ),
+        )
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                state="off",
+                attributes={
+                    "pool_manual_off_suppression_source": "operator_restraint",
+                    "pool_manual_off_suppression_at": "2026-09-08T16:00:00+00:00",
+                    "pool_manual_off_suppression_reason": "operator_disabled",
+                },
+            )
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.async_on_remove = lambda _remove: None
+
+        await entity.async_added_to_hass()
+
+        assert restraint.state.suppressed
+        assert not entity.is_on
+        assert authority.pool_automatic_control_suppressed
+        assert entity.extra_state_attributes["command_delivery_performed"] is False
+        assert entity.extra_state_attributes["resume_creates_ownership"] is False
+
+    asyncio.run(run())
+
+
+def test_spa_autonomous_control_restores_off_without_affecting_pool() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        spa = SpaAutomaticControlSuppression()
+        pool = PoolAutomaticControlSuppression()
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                spa_automatic_control=spa,
+                pool_automatic_control=pool,
+            ),
+        )
+        entity = module.PoolOSSpaAutonomousControlSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                state="off",
+                attributes={
+                    "spa_manual_off_suppression_source": "operator_restraint",
+                    "spa_manual_off_suppression_at": "2026-09-08T16:00:00+00:00",
+                    "spa_manual_off_suppression_reason": "operator_disabled",
+                },
+            )
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.async_on_remove = lambda _remove: None
+
+        await entity.async_added_to_hass()
+
+        assert spa.state.suppressed
+        assert spa.state.source is SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT
+        assert authority.spa_automatic_control_suppressed
+        assert not pool.state.suppressed
+        assert authority.pool_automatic_control_suppressed is False
+
+    asyncio.run(run())
+
+
+def test_commissioned_execution_switches_restore_desired_on_without_ownership() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+
+        class ThermalRuntime:
+            effective_live_enabled = False
+
+            def set_effective_live_enabled(self, enabled: bool) -> None:
+                self.effective_live_enabled = enabled
+
+        class AutomaticRuntime:
+            enabled = False
+            authority_refreshes = 0
+
+            def set_enabled(self, enabled: bool) -> None:
+                self.enabled = enabled
+
+            def authority_configuration_changed(self) -> None:
+                self.authority_refreshes += 1
+
+            def diagnostics(self) -> dict[str, object]:
+                return {}
+
+        thermal = ThermalRuntime()
+        automatic = AutomaticRuntime()
+        filtration = AutomaticRuntime()
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                thermal_runtime=thermal,
+                thermal_automatic_runtime=automatic,
+                filtration_automatic_runtime=filtration,
+            ),
+        )
+        entities = (
+            module.PoolOSThermalLiveExecutionSwitch(entry),
+            module.PoolOSThermalAutomaticExecutionSwitch(entry),
+            module.PoolOSFiltrationAutomaticExecutionSwitch(entry),
+        )
+        for entity in entities:
+            entity.async_get_last_state = AsyncMock(
+                return_value=SimpleNamespace(state="on")
+            )
+            await entity.async_added_to_hass()
+
+        assert thermal.effective_live_enabled
+        assert automatic.enabled
+        assert filtration.enabled
+        assert automatic.authority_refreshes == 1
+        assert all(
+            entity.extra_state_attributes["physical_session_ownership_restored"]
+            is False
+            for entity in entities
+        )
+
+    asyncio.run(run())
+
+
+def test_pool_autonomous_control_setup_preserves_preexisting_runtime_restraint() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+        restraint.suppress(
+            source=PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
+            suppressed_at=datetime(2026, 9, 8, 16, 0, tzinfo=UTC),
+            reason="external_native_pool_off",
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+            ),
+        )
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                state="off",
+                attributes={
+                    "pool_manual_off_suppression_source": "operator_restraint",
+                    "pool_manual_off_suppression_at": "2026-09-08T15:00:00+00:00",
+                    "pool_manual_off_suppression_reason": "older_restored_restraint",
+                },
+            )
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.async_on_remove = lambda _remove: None
+
+        await entity.async_added_to_hass()
+
+        assert restraint.state.suppressed
+        assert restraint.state.source is PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
+        assert not entity.is_on
+        assert authority.pool_automatic_control_suppressed
+
+    asyncio.run(run())
+
+
+def test_pool_autonomous_control_resume_only_clears_restraint() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+        restraint.suppress(
+            source=PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+            suppressed_at=datetime(2026, 9, 8, 16, 0, tzinfo=UTC),
+            reason="operator_disabled",
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+            ),
+        )
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_write_ha_state = lambda: None
+
+        await entity.async_turn_on()
+
+        assert not restraint.state.suppressed
+        assert entity.is_on
+        assert restraint.diagnostics()["authority"] == "none"
+        assert restraint.diagnostics()["command_delivery_performed"] is False
 
     asyncio.run(run())
 

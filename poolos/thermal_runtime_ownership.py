@@ -620,6 +620,21 @@ class ThermalRuntimeOwnershipManager:
                 current_context=originating_context,
                 execution_progress=execution_progress,
             )
+        if (
+            lease.status is ThermalRuntimeOwnershipStatus.SUPERSEDED
+            and self._residual_termination is None
+        ):
+            # The terminal lease is historical after its exact residual token
+            # has been explicitly consumed. A fresh accepted operation may
+            # establish a new generation, but no prior concept provenance is
+            # copied into it.
+            return self.establish(
+                ownership,
+                established_at=promoted_at,
+                requested_mode=requested_mode,
+                current_context=originating_context,
+                execution_progress=execution_progress,
+            )
         previous = self._state.status
         if lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
             return self._decision(

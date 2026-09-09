@@ -54,6 +54,11 @@ class PhysicalAuthorityReason(StrEnum):
     AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED = (
         "automatic_thermal_operation_unauthorized"
     )
+    POOL_AUTOMATIC_CONTROL_SUPPRESSED = "pool_automatic_control_suppressed"
+    SPA_AUTOMATIC_CONTROL_SUPPRESSED = "spa_automatic_control_suppressed"
+    AUTOMATIC_RESTRAINT_RESTORATION_PENDING = (
+        "automatic_restraint_restoration_pending"
+    )
     AUTOMATIC_FILTRATION_GATE_DISABLED = "automatic_filtration_gate_disabled"
     AUTOMATIC_FILTRATION_CONTEXT_MISSING = "automatic_filtration_context_missing"
     AUTOMATIC_FILTRATION_CONTEXT_STALE = "automatic_filtration_context_stale"
@@ -211,7 +216,7 @@ class AutomaticThermalCleanupAuthority:
     purpose: AutomaticThermalDispatchPurpose
     operation: str
     target: str
-    requested_value: bool | int
+    requested_value: bool | int | str
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -220,18 +225,19 @@ class AutomaticThermalCleanupAuthority:
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         object.__setattr__(self, "purpose", AutomaticThermalDispatchPurpose(self.purpose))
-        if self.body != "pool":
-            raise ValueError("automatic circulation cleanup is Pool-only")
         if self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP:
+            expected_target = "B1101" if self.body == "pool" else "B1202"
             if not (
                 self.operation == "body_active"
-                and self.target == "B1101"
+                and self.body in {"pool", "hot_tub"}
+                and self.target == expected_target
                 and self.requested_value is False
             ):
-                raise ValueError("body cleanup authority must be exact Pool Off")
+                raise ValueError("body cleanup authority must be exact owned-body Off")
         elif self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION:
             if not (
-                self.operation == "pump_circuit_speed"
+                self.body == "pool"
+                and self.operation == "pump_circuit_speed"
                 and is_pmpcirc_native_id(self.target)
                 and isinstance(self.requested_value, int)
                 and not isinstance(self.requested_value, bool)
@@ -251,7 +257,7 @@ class AutomaticThermalProbeAuthority:
     operation_id: str
     operation: str
     target: str
-    requested_value: bool | int
+    requested_value: bool | int | str
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -260,11 +266,13 @@ class AutomaticThermalProbeAuthority:
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         allowed = (
-            self.operation == "pump_circuit_speed"
-            and is_pmpcirc_native_id(self.target)
-            and isinstance(self.requested_value, int)
-            and not isinstance(self.requested_value, bool)
-            and self.requested_value == _THERMAL_BASELINES.temperature_probe_rpm
+            self.operation == "body_active"
+            and self.target == "B1101"
+            and self.requested_value is True
+        ) or (
+            self.operation == "body_heat_source"
+            and self.target == "B1101"
+            and self.requested_value == "00000"
         )
         if not allowed:
             raise ValueError("unsupported Pool temperature-probe operation")
@@ -279,6 +287,7 @@ class AutomaticThermalDispatchContext:
     session_identity: str
     body: str
     pump_circuit_id: str | None = None
+    operating_purpose: str | None = None
     purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL
     cleanup_authority: AutomaticThermalCleanupAuthority | None = None
     probe_authority: AutomaticThermalProbeAuthority | None = None
@@ -302,6 +311,13 @@ class AutomaticThermalDispatchContext:
             raise ValueError(
                 "automatic thermal pump circuit must be a concrete p01xx identity"
             )
+        if self.operating_purpose is not None and self.operating_purpose not in {
+            "temperature_acquisition",
+            "ordinary_circulation",
+            "solar_heating",
+            "gas_heating",
+        }:
+            raise ValueError("unsupported thermal operating purpose")
         cleanup_purposes = {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
@@ -522,6 +538,21 @@ class PoolOSPhysicalCommandAuthority:
     expectation_limit: int = 64
     _maintenance_mode: bool | None = field(default=None, init=False, repr=False)
     _controller_mode: str | None = field(default=None, init=False, repr=False)
+    _pool_automatic_control_suppressed: bool = field(
+        default=False, init=False, repr=False
+    )
+    _spa_automatic_control_suppressed: bool = field(
+        default=False, init=False, repr=False
+    )
+    _automatic_restoration_barrier_required: bool = field(
+        default=False, init=False, repr=False
+    )
+    _pool_automatic_restraint_restored: bool = field(
+        default=True, init=False, repr=False
+    )
+    _spa_automatic_restraint_restored: bool = field(
+        default=True, init=False, repr=False
+    )
     _expectations: dict[str, _PendingExpectation] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -589,6 +620,66 @@ class PoolOSPhysicalCommandAuthority:
     def controller_mode(self) -> str | None:
         return self._controller_mode
 
+    @property
+    def pool_automatic_control_suppressed(self) -> bool:
+        """Return the persistent operator restraint applied to automatic Pool work."""
+
+        return self._pool_automatic_control_suppressed
+
+    def set_pool_automatic_control_suppressed(self, suppressed: bool) -> None:
+        """Invalidate queued automatic Pool work whenever the restraint changes."""
+
+        suppressed = bool(suppressed)
+        if suppressed == self._pool_automatic_control_suppressed:
+            return
+        self._pool_automatic_control_suppressed = suppressed
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+        self._invalidate_grid_outage_context()
+
+    @property
+    def spa_automatic_control_suppressed(self) -> bool:
+        """Return the operator restraint applied only to automatic Spa work."""
+
+        return self._spa_automatic_control_suppressed
+
+    def set_spa_automatic_control_suppressed(self, suppressed: bool) -> None:
+        """Invalidate queued automatic Spa work whenever its restraint changes."""
+
+        suppressed = bool(suppressed)
+        if suppressed == self._spa_automatic_control_suppressed:
+            return
+        self._spa_automatic_control_suppressed = suppressed
+        self._invalidate_automatic_thermal_context()
+
+    def require_automatic_restraint_restoration(self) -> None:
+        """Deny automatic dispatch until both persisted body restraints restore."""
+
+        self._automatic_restoration_barrier_required = True
+        self._pool_automatic_restraint_restored = False
+        self._spa_automatic_restraint_restored = False
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+        self._invalidate_grid_outage_context()
+
+    def resolve_pool_automatic_control_suppressed(self, suppressed: bool) -> None:
+        """Apply restored Pool restraint truth and mark its startup gate complete."""
+
+        self.set_pool_automatic_control_suppressed(suppressed)
+        self._pool_automatic_restraint_restored = True
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+        self._invalidate_grid_outage_context()
+
+    def resolve_spa_automatic_control_suppressed(self, suppressed: bool) -> None:
+        """Apply restored Spa restraint truth and mark its startup gate complete."""
+
+        self.set_spa_automatic_control_suppressed(suppressed)
+        self._spa_automatic_restraint_restored = True
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+        self._invalidate_grid_outage_context()
+
     def resolve_maintenance(self, enabled: bool) -> None:
         """Resolve persisted state or change the global physical kill switch."""
 
@@ -652,7 +743,7 @@ class PoolOSPhysicalCommandAuthority:
         operation_id: str,
         operation: str,
         target: str,
-        requested_value: bool | int,
+        requested_value: bool | int | str,
     ) -> AutomaticThermalProbeAuthority:
         """Register exactly one current Pool probe operation."""
 
@@ -706,6 +797,7 @@ class PoolOSPhysicalCommandAuthority:
         session_identity: str,
         body: str,
         pump_circuit_id: str | None = None,
+        operating_purpose: str | None = None,
         purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL,
         cleanup_candidate_identity: str | None = None,
         probe_operation_id: str | None = None,
@@ -754,6 +846,7 @@ class PoolOSPhysicalCommandAuthority:
             session_identity=session_identity,
             body=body,
             pump_circuit_id=pump_circuit_id,
+            operating_purpose=operating_purpose,
             purpose=purpose,
             cleanup_authority=cleanup,
             probe_authority=probe,
@@ -953,6 +1046,33 @@ class PoolOSPhysicalCommandAuthority:
         """Answer whether this request may physically dispatch right now."""
 
         reason = self.base_authority_reason
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source
+            in {
+                PhysicalRequestSource.AUTOMATIC_THERMAL,
+                PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+            }
+            and self._automatic_restoration_barrier_required
+            and not (
+                self._pool_automatic_restraint_restored
+                and self._spa_automatic_restraint_restored
+            )
+        ):
+            reason = PhysicalAuthorityReason.AUTOMATIC_RESTRAINT_RESTORATION_PENDING
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and self._pool_automatic_control_suppressed
+            and _is_automatic_pool_request(request)
+        ):
+            reason = PhysicalAuthorityReason.POOL_AUTOMATIC_CONTROL_SUPPRESSED
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and self._spa_automatic_control_suppressed
+            and _is_automatic_spa_request(request)
+        ):
+            reason = PhysicalAuthorityReason.SPA_AUTOMATIC_CONTROL_SUPPRESSED
         if (
             reason is PhysicalAuthorityReason.ALLOWED
             and request.source is PhysicalRequestSource.AUTOMATIC_THERMAL
@@ -1186,6 +1306,28 @@ class PoolOSPhysicalCommandAuthority:
                 "physical_commands_allowed": (
                     self._maintenance_mode is False and self._controller_mode == "auto"
                 ),
+                "pool_automatic_control_suppressed": (
+                    self._pool_automatic_control_suppressed
+                ),
+                "spa_automatic_control_suppressed": (
+                    self._spa_automatic_control_suppressed
+                ),
+                "automatic_restoration_barrier_required": (
+                    self._automatic_restoration_barrier_required
+                ),
+                "pool_automatic_restraint_restored": (
+                    self._pool_automatic_restraint_restored
+                ),
+                "spa_automatic_restraint_restored": (
+                    self._spa_automatic_restraint_restored
+                ),
+                "automatic_restoration_complete": (
+                    not self._automatic_restoration_barrier_required
+                    or (
+                        self._pool_automatic_restraint_restored
+                        and self._spa_automatic_restraint_restored
+                    )
+                ),
                 "pending_expectation_count": len(self._expectations),
                 "pending_expectation_limit": self.expectation_limit,
                 "expectation_ttl_seconds": self.expectation_ttl.total_seconds(),
@@ -1236,9 +1378,8 @@ def _automatic_thermal_request_matches_context(
         )
     if context.purpose is AutomaticThermalDispatchPurpose.TERMINATION:
         return (
-            context.body == "pool"
-            and request.operation == "body_heat_source"
-            and request.target == "B1101"
+            request.operation == "body_heat_source"
+            and request.target == body_target
             and request.requested_value == "00000"
         )
     if context.purpose in {
@@ -1260,18 +1401,70 @@ def _automatic_thermal_request_matches_context(
             and request.requested_value in {"00000", "H0001", "H0002"}
         )
     if request.operation == "pump_circuit_speed":
+        allowed_rpms = {
+            _THERMAL_BASELINES.solar_heating_rpm,
+            _THERMAL_BASELINES.gas_heating_rpm,
+            _THERMAL_BASELINES.priming_rpm,
+        }
+        if context.body == "hot_tub":
+            expected_hot_tub_rpm = {
+                "temperature_acquisition": _THERMAL_BASELINES.temperature_probe_rpm,
+                "ordinary_circulation": _THERMAL_BASELINES.filtration_rpm,
+                "solar_heating": _THERMAL_BASELINES.solar_heating_rpm,
+                "gas_heating": _THERMAL_BASELINES.gas_heating_rpm,
+            }.get(
+                context.operating_purpose
+                if context.operating_purpose is not None
+                else ""
+            )
+            return bool(
+                context.pump_circuit_id is not None
+                and request.target == context.pump_circuit_id
+                and not isinstance(request.requested_value, bool)
+                and request.requested_value == expected_hot_tub_rpm
+            )
+        if context.operating_purpose == "ordinary_circulation":
+            return bool(
+                context.pump_circuit_id is not None
+                and request.target == context.pump_circuit_id
+                and not isinstance(request.requested_value, bool)
+                and request.requested_value == _THERMAL_BASELINES.filtration_rpm
+            )
         return (
             context.pump_circuit_id is not None
             and request.target == context.pump_circuit_id
             and not isinstance(request.requested_value, bool)
-            and request.requested_value
-            in {
-                _THERMAL_BASELINES.solar_heating_rpm,
-                _THERMAL_BASELINES.gas_heating_rpm,
-                _THERMAL_BASELINES.priming_rpm,
-            }
+            and request.requested_value in allowed_rpms
         )
     return False
+
+
+def _is_automatic_pool_request(request: PhysicalCommandRequest) -> bool:
+    """Identify Pool-scoped automatic work without affecting manual control."""
+
+    if request.source is PhysicalRequestSource.AUTOMATIC_FILTRATION:
+        return True
+    if request.source is PhysicalRequestSource.AUTOMATIC_THERMAL:
+        thermal_context = request.automatic_thermal_context
+        return thermal_context is not None and thermal_context.body == "pool"
+    if request.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY:
+        outage_context = request.grid_outage_context
+        if outage_context is None:
+            return request.target == "B1101"
+        return outage_context.authority.purpose in {
+            GridOutageDispatchPurpose.POOL_SOURCE_OFF,
+            GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+        }
+    return False
+
+
+def _is_automatic_spa_request(request: PhysicalCommandRequest) -> bool:
+    """Identify Spa-scoped automatic work without affecting Pool automation."""
+
+    if request.source is not PhysicalRequestSource.AUTOMATIC_THERMAL:
+        return False
+    thermal_context = request.automatic_thermal_context
+    return thermal_context is not None and thermal_context.body == "hot_tub"
 
 
 def _automatic_filtration_request_matches_context(

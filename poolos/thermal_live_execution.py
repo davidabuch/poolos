@@ -227,6 +227,10 @@ class ThermalLiveSafetyEvidence:
     hydraulic: ThermalHydraulicSafetyEvidence
     native_configuration: NativeConfigurationAssessment
     pool_pump_circuit_id: str | None = None
+    target_pump_circuit_id: str | None = None
+    configured_pump_speed_concept: str = (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+    )
     contradictory_evidence: tuple[str, ...] = ()
     interrupted_execution_present: bool = False
     metadata: Mapping[str, str] = field(default_factory=dict)
@@ -249,6 +253,8 @@ class ThermalLiveSafetyEvidence:
             )
         object.__setattr__(self, "contradictory_evidence", contradictions)
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        if not self.configured_pump_speed_concept.strip():
+            raise ValueError("configured pump speed concept must not be empty")
 
     @property
     def current_context(self) -> ThermalLiveExecutionContext:
@@ -780,9 +786,14 @@ class ThermalLiveAuthorizationEngine:
         )
         if operation is not None:
             if isinstance(operation, SetPumpSpeed):
-                if evidence.pool_pump_circuit_id is None:
-                    reasons.append("pool_pump_circuit_unresolved")
-                elif operation.equipment_id != evidence.pool_pump_circuit_id:
+                target_pump = (
+                    evidence.target_pump_circuit_id
+                    if evidence.target_pump_circuit_id is not None
+                    else evidence.pool_pump_circuit_id
+                )
+                if target_pump is None:
+                    reasons.append("body_pump_circuit_unresolved")
+                elif operation.equipment_id != target_pump:
                     reasons.append("thermal_pump_identity_stale")
             reasons.extend(
                 self._operation_reasons(
@@ -837,10 +848,38 @@ class ThermalLiveAuthorizationEngine:
             and operation.active is True
             and operation.equipment_id == target.value
         )
+        opportunistic_spa_source_precondition = (
+            isinstance(operation, SetHeatMode)
+            and target is ThermalBody.HOT_TUB
+            and assessment.desired.evidence.get("session_kind")
+            == "poolos_opportunistic"
+            and operation.mode in {PhysicalHeatMode.OFF, PhysicalHeatMode.SOLAR}
+            and any(
+                item.operation_id == operation.operation_id
+                and item.metadata.get("spa_opportunistic_source_precondition")
+                == "true"
+                for item in assessment.step_specifications
+            )
+        )
+        pool_probe_source_precondition = (
+            isinstance(operation, SetHeatMode)
+            and target is ThermalBody.POOL
+            and assessment.desired.reason_code == "pool_temperature_probe_required"
+            and operation.mode is PhysicalHeatMode.OFF
+            and any(
+                item.operation_id == operation.operation_id
+                and item.metadata.get("pool_temperature_probe_source_precondition")
+                == "true"
+                for item in assessment.step_specifications
+            )
+        )
         if activation_step:
             if target_active is True:
                 reasons.append("target_body_already_active_requires_reevaluation")
-        elif target_active is False:
+        elif target_active is False and not (
+            opportunistic_spa_source_precondition
+            or pool_probe_source_precondition
+        ):
             reasons.append("target_body_inactive")
 
         if other_active is True:
@@ -921,23 +960,44 @@ class ThermalLiveAuthorizationEngine:
                 assert specification is not None
                 if assessment.desired.body is not ThermalBody.POOL:
                     return ("temperature_probe_requires_pool_body",)
-                if assessment.desired.selected_source is not PhysicalHeatMode.OFF:
-                    return ("temperature_probe_requires_heat_source_off",)
-                if (
-                    assessment.desired.reason_code != "pool_temperature_probe_required"
-                    or operation.metadata.get("reason_code")
-                    != "pool_temperature_probe_required"
-                ):
-                    return ("temperature_probe_reason_mismatch",)
                 if operation.rpm != policy.baselines.temperature_probe_rpm:
-                    return ("uncommissioned_temperature_probe_pump_rpm",)
+                    return ("temperature_probe_rpm_mismatch",)
                 if assessment.desired.required_pump_rpm != operation.rpm:
                     return ("pump_rpm_does_not_match_thermal_plan",)
-                if dict(specification.expected_observations) != {
-                    "pump.rpm": operation.rpm,
-                    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT: operation.rpm,
-                }:
-                    return ("temperature_probe_verification_contract_mismatch",)
+                if operation.metadata.get("reason_code") != (
+                    "pool_temperature_probe_required"
+                ):
+                    return ("temperature_probe_reason_mismatch",)
+                if operation.metadata.get("operating_purpose") != (
+                    "temperature_acquisition"
+                ):
+                    return ("temperature_probe_operating_purpose_mismatch",)
+                return ()
+
+            if assessment.desired.body is ThermalBody.HOT_TUB:
+                purpose_value = operation.metadata.get("operating_purpose")
+                purpose = purpose_value if isinstance(purpose_value, str) else ""
+                expected_rpm = {
+                    "temperature_acquisition": policy.baselines.temperature_probe_rpm,
+                    "ordinary_circulation": policy.baselines.filtration_rpm,
+                    "solar_heating": policy.baselines.solar_heating_rpm,
+                    "gas_heating": policy.baselines.gas_heating_rpm,
+                }.get(purpose)
+                if expected_rpm is None or operation.rpm != expected_rpm:
+                    return ("hot_tub_operating_purpose_rpm_mismatch",)
+                if assessment.desired.required_pump_rpm != operation.rpm:
+                    return ("pump_rpm_does_not_match_thermal_plan",)
+                return ()
+
+            if (
+                assessment.desired.body is ThermalBody.POOL
+                and operation.metadata.get("operating_purpose")
+                == "ordinary_circulation"
+            ):
+                if operation.rpm != policy.baselines.filtration_rpm:
+                    return ("pool_ordinary_circulation_rpm_mismatch",)
+                if assessment.desired.required_pump_rpm != operation.rpm:
+                    return ("pump_rpm_does_not_match_thermal_plan",)
                 return ()
 
             expected_rpm = {
@@ -951,7 +1011,30 @@ class ThermalLiveAuthorizationEngine:
             return ()
         if isinstance(operation, SetHeatMode):
             if assessment.desired.reason_code == "pool_temperature_probe_required":
-                return ("temperature_probe_heat_source_mutation_not_authorized",)
+                specification = (
+                    assessment.step_specifications[step_index]
+                    if 0 <= step_index < len(assessment.step_specifications)
+                    else None
+                )
+                if assessment.desired.body is not ThermalBody.POOL:
+                    return ("temperature_probe_requires_pool_body",)
+                if operation.equipment_id != ThermalBody.POOL.value:
+                    return ("temperature_probe_source_body_mismatch",)
+                if operation.mode is not PhysicalHeatMode.OFF:
+                    return ("temperature_probe_requires_heat_source_off",)
+                if (
+                    specification is None
+                    or specification.metadata.get(
+                        "pool_temperature_probe_source_precondition"
+                    )
+                    != "true"
+                ):
+                    return ("temperature_probe_source_precondition_missing",)
+                if dict(specification.expected_observations) != {
+                    "pool.raw_heater_id": "00000"
+                }:
+                    return ("temperature_probe_source_verification_contract_mismatch",)
+                return ()
             if operation.equipment_id != assessment.desired.body.value:
                 return ("heat_mode_body_mismatch",)
             if operation.mode is not assessment.desired.selected_source:
@@ -1360,6 +1443,12 @@ class ThermalLiveExecutionEngine:
             hydraulic_failure = _hydraulic_continuity_failure_reason(
                 observations,
                 target=hydraulic_target,
+                required_target_active=(
+                    attempt.step.metadata.get(
+                        "pool_temperature_probe_source_precondition"
+                    )
+                    != "true"
+                ),
                 evaluated_at=evaluated_at,
                 freshness_policy=FreshnessPolicy(
                     max_age=policy.observation_freshness
@@ -1868,6 +1957,7 @@ def _hydraulic_continuity_failure_reason(
     observations: ObservationStore,
     *,
     target: ThermalBody,
+    required_target_active: bool = True,
     evaluated_at: datetime,
     freshness_policy: FreshnessPolicy,
     source_id: str | None,
@@ -1914,7 +2004,9 @@ def _hydraulic_continuity_failure_reason(
     )
     if active[other]:
         return f"other_body_active:{other.value}"
-    if not active[target]:
+    if active[target] is not required_target_active:
+        if not required_target_active:
+            return f"target_body_unexpectedly_active:{target.value}"
         return f"target_body_inactive:{target.value}"
     return None
 

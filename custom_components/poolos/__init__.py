@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 import sys
@@ -54,6 +54,12 @@ from poolos.physical_command_authority import (  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
     PoolCirculationOwnershipRegistry,
 )
+from poolos.pool_automatic_control_suppression import (  # noqa: E402
+    PoolAutomaticControlSuppression,
+    PoolAutomaticControlSuppressionSource,
+    SpaAutomaticControlSuppression,
+    SpaAutomaticControlSuppressionSource,
+)
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import (  # noqa: E402
     ThermalRuntimeAssessment,
@@ -76,6 +82,10 @@ class PoolOSRuntimeData:
     thermal_automatic_runtime: PoolOSThermalAutomaticRuntime
     grid_outage_safety_runtime: PoolOSGridOutageSafetyRuntime
     filtration_automatic_runtime: PoolOSFiltrationAutomaticRuntime
+    pool_automatic_control: PoolAutomaticControlSuppression
+    spa_automatic_control: SpaAutomaticControlSuppression = field(
+        default_factory=SpaAutomaticControlSuppression
+    )
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
@@ -100,6 +110,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     configured = {**dict(entry.data), **dict(entry.options)}
     manual_host = str(configured.get("intellicenter_host", "")).strip()
     physical_command_authority = PoolOSPhysicalCommandAuthority()
+    physical_command_authority.require_automatic_restraint_restoration()
+    pool_automatic_control = PoolAutomaticControlSuppression()
+    spa_automatic_control = SpaAutomaticControlSuppression()
+
+    def arm_manual_pool_off(suppressed_at: datetime) -> None:
+        pool_automatic_control.suppress(
+            source=(
+                PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST
+            ),
+            suppressed_at=suppressed_at,
+            reason="manual_pool_off_requested_before_delivery",
+        )
+
+    def arm_manual_spa_off(suppressed_at: datetime) -> None:
+        spa_automatic_control.suppress(
+            source=SpaAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+            suppressed_at=suppressed_at,
+            reason="manual_spa_off_requested_before_delivery",
+        )
+
     manual_intellicenter = (
         None
         if not manual_host
@@ -107,6 +137,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             host=manual_host,
             command_authority=physical_command_authority,
             transport=str(configured.get("intellicenter_transport", "tcp")),
+            pool_manual_off_requested=arm_manual_pool_off,
+            spa_manual_off_requested=arm_manual_spa_off,
         )
     )
 
@@ -119,6 +151,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         hass=hass,
         authority=physical_command_authority,
         thermal_runtime=thermal_runtime,
+        pool_automatic_control=pool_automatic_control,
+        spa_automatic_control=spa_automatic_control,
     )
     thermal_runtime_orchestrator = ThermalRuntimeOrchestrator()
     pool_circulation_ownership = PoolCirculationOwnershipRegistry()
@@ -130,6 +164,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
         circulation_ownership=pool_circulation_ownership,
+        pool_automatic_control=pool_automatic_control,
+        spa_automatic_control=spa_automatic_control,
     )
     filtration_automatic_runtime = PoolOSFiltrationAutomaticRuntime(
         hass=hass,
@@ -139,6 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         ownership=pool_circulation_ownership,
         authority=physical_command_authority,
         manual=manual_intellicenter,
+        pool_automatic_control=pool_automatic_control,
     )
     grid_outage_safety_runtime = PoolOSGridOutageSafetyRuntime(
         hass=hass,
@@ -147,8 +184,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
     )
+
+    def synchronize_pool_automatic_restraint(_state: object) -> None:
+        physical_command_authority.set_pool_automatic_control_suppressed(
+            pool_automatic_control.state.suppressed
+        )
+        thermal_automatic_runtime.driver.restrictive_authority_changed(
+            changed_at=datetime.now(UTC)
+        )
+
+    def synchronize_spa_automatic_restraint(_state: object) -> None:
+        physical_command_authority.set_spa_automatic_control_suppressed(
+            spa_automatic_control.state.suppressed
+        )
+        thermal_automatic_runtime.driver.restrictive_authority_changed(
+            changed_at=datetime.now(UTC)
+        )
+
+    entry.async_on_unload(
+        pool_automatic_control.add_listener(synchronize_pool_automatic_restraint)
+    )
+    entry.async_on_unload(
+        spa_automatic_control.add_listener(synchronize_spa_automatic_restraint)
+    )
     thermal_runtime.set_probe_execution_provider(
         thermal_automatic_runtime.driver.probe_execution_evidence
+    )
+    thermal_runtime.set_spa_session_kind_provider(
+        thermal_automatic_runtime.driver.spa_session_kind
     )
     def probe_continuity(
         snapshot: ObservationSnapshot,
@@ -192,6 +255,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_automatic_runtime=thermal_automatic_runtime,
         grid_outage_safety_runtime=grid_outage_safety_runtime,
         filtration_automatic_runtime=filtration_automatic_runtime,
+        pool_automatic_control=pool_automatic_control,
+        spa_automatic_control=spa_automatic_control,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
     coordinator.set_native_snapshot_observer(external_change_runtime.process)

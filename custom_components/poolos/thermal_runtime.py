@@ -13,7 +13,11 @@ from poolos.native_configuration_policy import (
     NativeConfigurationInput,
     NativeRpmAssignment,
 )
-from poolos.intellicenter_readonly import resolve_pool_pump_circuit
+from poolos.intellicenter_readonly import (
+    NativeBodyKind,
+    resolve_body_pump_circuit,
+    resolve_pool_pump_circuit,
+)
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionEvidence
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
 from poolos.thermal_live_execution import (
@@ -26,6 +30,7 @@ from poolos.thermal_runtime_assessment import (
     ThermalRuntimeEvaluator,
     ThermalRuntimeEvidence,
 )
+from poolos.spa_thermal_policy import SpaSessionKind
 
 from .observation import ObservationSnapshot
 
@@ -77,6 +82,11 @@ class PoolOSThermalRuntime:
         [ObservationSnapshot, Exception],
         None,
     ] | None = field(default=None, init=False, repr=False)
+    _spa_session_kind_provider: Callable[[], SpaSessionKind | None] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     _probe_execution_provider: Callable[
         [], PoolTemperatureProbeExecutionEvidence | None
     ] | None = field(default=None, init=False, repr=False)
@@ -141,6 +151,14 @@ class PoolOSThermalRuntime:
 
         self.commissioning_scope = ThermalLiveCommissioningScope(scope)
         self.refresh(publish=True)
+
+    def set_spa_session_kind_provider(
+        self,
+        provider: Callable[[], SpaSessionKind | None] | None,
+    ) -> None:
+        """Attach in-memory autonomous Spa provenance without persisting it."""
+
+        self._spa_session_kind_provider = provider
 
     def set_requested_mode(
         self,
@@ -233,6 +251,14 @@ class PoolOSThermalRuntime:
                 if transport_snapshot is None
                 else resolve_pool_pump_circuit(transport_snapshot)
             )
+            spa_pump_circuit = (
+                None
+                if transport_snapshot is None
+                else resolve_body_pump_circuit(
+                    transport_snapshot,
+                    body=NativeBodyKind.SPA,
+                )
+            )
             self.assessment = self.evaluator.evaluate(
                 ThermalRuntimeEvidence(
                     evaluated_at=authoritative.generated_at,
@@ -258,6 +284,11 @@ class PoolOSThermalRuntime:
                         if pool_pump_circuit is None
                         else pool_pump_circuit.native_id
                     ),
+                    spa_pump_circuit_id=(
+                        None
+                        if spa_pump_circuit is None
+                        else spa_pump_circuit.native_id
+                    ),
                     filtration_debt=(
                         None
                         if filtration is None
@@ -278,6 +309,11 @@ class PoolOSThermalRuntime:
                         None
                         if self._probe_continuity_provider is None
                         else self._probe_continuity_provider(authoritative)
+                    ),
+                    spa_session_kind=(
+                        None
+                        if self._spa_session_kind_provider is None
+                        else self._spa_session_kind_provider()
                     ),
                 ),
                 live_policy=policy,

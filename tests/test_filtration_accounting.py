@@ -102,6 +102,19 @@ def test_spa_only_operation_earns_no_pool_filtration_credit() -> None:
     assert result.total_remaining_runtime == timedelta(hours=15, minutes=57)
 
 
+def test_gpm_is_not_filtration_evidence_and_zero_rpm_earns_no_credit() -> None:
+    assert "pump_gpm" not in FiltrationObservation.__dataclass_fields__
+    tracker = accounting()
+    start = datetime(2026, 8, 28, 8, 0, tzinfo=LOCAL)
+    tracker.observe(observation(start, pool_active=True, rpm=0))
+    result = tracker.observe(
+        observation(start + timedelta(hours=1), pool_active=True, rpm=0)
+    )
+
+    assert result is not None
+    assert result.credited_runtime == timedelta(0)
+
+
 def test_unusable_evidence_breaks_credit_continuity_fail_closed() -> None:
     tracker = accounting()
     start = datetime(2026, 8, 28, 8, 0, tzinfo=LOCAL)

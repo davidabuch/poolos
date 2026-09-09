@@ -11,8 +11,26 @@ LOCAL = ZoneInfo("America/Los_Angeles")
 NOW = datetime(2026, 8, 26, 14, 0, tzinfo=LOCAL)
 
 
-def observation(*, at: datetime = NOW, active: bool = False, source: SpaUserSource | None = None, spa: float = 90, target: float = 100, roof: float = 125, mode: SpaHeatingMode = SpaHeatingMode.SOLAR_PREFERRED, allowed: bool = True, pool_satisfied: bool = True, debt: timedelta = timedelta(0), conflict: bool = False, permissions: HeatSourcePermissions = HeatSourcePermissions()) -> SpaPolicyInput:
-    return SpaPolicyInput(at, active, source, spa, target, roof, mode, permissions, allowed, pool_satisfied, debt, conflict)
+def observation(*, at: datetime = NOW, active: bool = False, source: SpaUserSource | None = None, spa: float = 90, target: float = 100, roof: float = 125, mode: SpaHeatingMode = SpaHeatingMode.SOLAR_PREFERRED, allowed: bool = True, pool_satisfied: bool = True, debt: timedelta = timedelta(0), conflict: bool = False, permissions: HeatSourcePermissions = HeatSourcePermissions(), active_heat_source: ThermalHeatSource | None = None) -> SpaPolicyInput:
+    return SpaPolicyInput(
+        at,
+        active,
+        source,
+        spa,
+        target,
+        roof,
+        mode,
+        permissions,
+        allowed,
+        pool_satisfied,
+        debt,
+        conflict,
+        active_heat_source=(
+            ThermalHeatSource.GAS
+            if active and active_heat_source is None
+            else active_heat_source or ThermalHeatSource.NONE
+        ),
+    )
 
 
 @pytest.mark.parametrize("source", (SpaUserSource.HOME_ASSISTANT, SpaUserSource.ICP, SpaUserSource.OCP))
@@ -35,7 +53,14 @@ def test_user_spa_uses_gas_immediately_without_pool_probe() -> None:
 def test_heat_up_switches_gas_to_solar_after_130_for_two_minutes() -> None:
     tracker = SpaThermalPolicyTracker()
     first = tracker.evaluate(observation(active=True, source=SpaUserSource.HOME_ASSISTANT, roof=130))
-    solar = tracker.evaluate(observation(at=NOW + timedelta(minutes=2), active=True, roof=130))
+    solar = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=2),
+            active=True,
+            roof=130,
+            active_heat_source=ThermalHeatSource.SOLAR,
+        )
+    )
     assert first.heat_source is ThermalHeatSource.GAS
     assert solar.heat_source is ThermalHeatSource.SOLAR
     assert solar.recommended_pump_rpm == 2900
@@ -111,7 +136,7 @@ def test_opportunistic_continues_to_120_then_enters_isolated_hold() -> None:
     assert useful.heat_source is ThermalHeatSource.SOLAR
     assert hold.state is SpaPolicyState.OPPORTUNISTIC_HOLD
     assert hold.preserve_spa_mode
-    assert hold.recommended_pump_rpm is None
+    assert hold.recommended_pump_rpm == 2600
     assert not hold.pool_reprobe_allowed
 
 

@@ -697,19 +697,25 @@ def test_source_off_is_required_but_does_not_create_body_origin() -> None:
     assert not no_body.body_deactivation_eligible
 
 
-def test_pump_handoff_requires_current_owned_pump_provenance() -> None:
+def test_pump_handoff_accepts_owned_body_acquisition_but_requires_current_evidence() -> None:
     filtration = _filtration(
         FiltrationDisposition.RUN_NOW,
         debt=timedelta(hours=1),
         target=2600,
     )
     no_pump = _evaluate(entitlement=_entitlement(pump_owned=False), filtration=filtration)
+    no_circulation_provenance = _evaluate(
+        entitlement=_entitlement(body_owned=False, pump_owned=False),
+        filtration=filtration,
+    )
     stale_pump = _evaluate(
         evidence=replace(_evidence(), pump_observation_fresh=False),
         filtration=filtration,
     )
 
-    assert not no_pump.pump_handoff_eligible
+    assert no_pump.pump_handoff_eligible
+    assert no_pump.physical_handoff_ready
+    assert not no_circulation_provenance.pump_handoff_eligible
     assert not stale_pump.pump_handoff_eligible
 
 

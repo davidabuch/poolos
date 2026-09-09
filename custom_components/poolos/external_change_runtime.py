@@ -18,6 +18,12 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppression,
+    PoolAutomaticControlSuppressionSource,
+    SpaAutomaticControlSuppression,
+    SpaAutomaticControlSuppressionSource,
+)
 from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
@@ -34,6 +40,8 @@ class PoolOSExternalChangeRuntime:
     hass: HomeAssistant
     authority: PoolOSPhysicalCommandAuthority
     thermal_runtime: PoolOSThermalRuntime
+    pool_automatic_control: PoolAutomaticControlSuppression | None = None
+    spa_automatic_control: SpaAutomaticControlSuppression | None = None
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
@@ -79,6 +87,39 @@ class PoolOSExternalChangeRuntime:
         # cannot erase an earlier lease-relevant takeover. Consumers still apply
         # their own lease-epoch chronology checks.
         self.latest_batch = self._thermal_external_evidence.update(batch)
+        if self.pool_automatic_control is not None:
+            spa_takeover = any(
+                event.concept == "spa.active"
+                and event.previous_value is False
+                and event.new_value is True
+                for event in batch.events
+            )
+            for event in batch.events:
+                if (
+                    event.concept == "pool.active"
+                    and event.previous_value is True
+                    and event.new_value is False
+                    and not spa_takeover
+                ):
+                    self.pool_automatic_control.suppress(
+                        source=(
+                            PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
+                        ),
+                        suppressed_at=event.observed_at,
+                        reason="external_authoritative_pool_on_to_off",
+                    )
+        if self.spa_automatic_control is not None:
+            for event in batch.events:
+                if (
+                    event.concept == "spa.active"
+                    and event.previous_value is True
+                    and event.new_value is False
+                ):
+                    self.spa_automatic_control.suppress(
+                        source=SpaAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
+                        suppressed_at=event.observed_at,
+                        reason="external_authoritative_spa_on_to_off",
+                    )
         refreshed_ownership = self._ownership()
         if refreshed_ownership.intended_values != ownership.intended_values:
             self.monitor.recompute_current_ownership(refreshed_ownership)
