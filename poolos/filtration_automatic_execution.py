@@ -16,7 +16,7 @@ from typing import Mapping, Protocol
 
 from .clock import FixedClock
 from .external_change import ExternalChangeBatch, POOL_CIRCULATION_TAKEOVER_CONCEPTS
-from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
+from .filtration_policy import FiltrationAccountingSnapshot
 from .hal import CommandReceipt
 from .integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
 from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, is_pmpcirc_native_id
@@ -348,8 +348,7 @@ class FiltrationAutomaticExecutionDriver:
             )
         immediate = bool(
             frame.filtration
-            and frame.filtration.disposition
-            in {FiltrationDisposition.RUN_NOW, FiltrationDisposition.CREDITING}
+            and frame.filtration.immediate_circulation_required is True
         )
         if not self.requested_enabled and lease is None:
             return self._publish(

@@ -294,6 +294,11 @@ class PoolOSThermalRuntime:
                         if filtration is None
                         else filtration.total_remaining_runtime
                     ),
+                    filtration_immediate_circulation_required=(
+                        None
+                        if filtration is None
+                        else filtration.immediate_circulation_required
+                    ),
                     pending_durable_incident_confirmation=bool(
                         health.get("pending_confirmation", False)
                     ),

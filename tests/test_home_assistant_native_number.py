@@ -70,7 +70,9 @@ def test_manual_gateway_validates_pmpcirc_identity_mode_and_parent() -> None:
         encoding="utf-8"
     )
 
-    assert "_POOL_CIRCUIT_OBJNAM" in source
+    assert "POOL_CIRCUIT_NATIVE_ID" in source
+    assert "SPA_CIRCUIT_NATIVE_ID" in source
+    assert "_validated_body_pump_circuit" in source
     assert "PMPCIRC_TYPE" in source
     assert "CIRCUIT_ATTR" in source
     assert "SELECT_ATTR" in source

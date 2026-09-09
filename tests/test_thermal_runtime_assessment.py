@@ -73,6 +73,7 @@ def evidence(
     missing: tuple[str, ...] = (),
     configuration: NativeConfigurationInput = NativeConfigurationInput(),
     filtration_debt: timedelta | None = None,
+    filtration_immediate_circulation_required: bool | None = None,
     pending: bool = False,
     confirmed: bool = False,
     observed_at: dict[str, datetime] | None = None,
@@ -95,6 +96,9 @@ def evidence(
         pool_pump_circuit_id="p0102",
         spa_pump_circuit_id="p0198",
         filtration_debt=filtration_debt,
+        filtration_immediate_circulation_required=(
+            filtration_immediate_circulation_required
+        ),
         pending_durable_incident_confirmation=pending,
         durable_incident_confirmed=confirmed,
         pool_temperature_probe_execution=probe_execution,
@@ -401,6 +405,7 @@ def test_live_cold_roof_active_filtration_rpm_requests_source_off_only() -> None
                 pump_rpm=2600,
             ),
             pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=True,
         ),
         live_policy=disabled_policy(),
     )
@@ -463,6 +468,7 @@ def test_live_already_off_preserves_nonthermal_rpm_without_operations() -> None:
                 pump_rpm=2600,
             ),
             pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=True,
         ),
         live_policy=disabled_policy(),
     ).pool.plan
@@ -473,7 +479,7 @@ def test_live_already_off_preserves_nonthermal_rpm_without_operations() -> None:
     assert result.current.pump_rpm == 2600
 
 
-def test_live_external_pool_with_stale_solar_speed_normalizes_to_ordinary_rpm() -> None:
+def test_urgent_filtration_normalizes_live_pool_with_stale_solar_speed() -> None:
     result = ThermalRuntimeEvaluator().evaluate(
         evidence(
             native_values=live_values(
@@ -482,6 +488,7 @@ def test_live_external_pool_with_stale_solar_speed_normalizes_to_ordinary_rpm() 
                 pump_rpm=2900,
             ),
             pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=True,
         ),
         live_policy=disabled_policy(),
     ).pool.plan
@@ -496,6 +503,32 @@ def test_live_external_pool_with_stale_solar_speed_normalizes_to_ordinary_rpm() 
     assert result.operations[0].metadata["operating_purpose"] == (
         "ordinary_circulation"
     )
+
+
+def test_deferrable_filtration_debt_does_not_become_desired_pool_successor() -> None:
+    """Current ordinary circulation is not proof that filtration is due now."""
+
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=True,
+                pool_heater="00000",
+                pump_rpm=2900,
+            ),
+            pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_debt=timedelta(hours=5),
+            filtration_immediate_circulation_required=False,
+        ),
+        live_policy=disabled_policy(),
+    ).pool.plan
+
+    assert result.desired.selected_source is PhysicalHeatMode.OFF
+    assert result.desired.required_pump_rpm is None
+    assert result.desired.evidence["current_operating_purpose"] == (
+        "ordinary_circulation"
+    )
+    assert result.desired.evidence["active_operating_purpose"] is None
+    assert result.operations == ()
 
 
 def test_live_hot_tub_gas_behavior_remains_unchanged() -> None:
@@ -520,7 +553,148 @@ def test_live_hot_tub_gas_behavior_remains_unchanged() -> None:
     assert result.operations == ()
 
 
-def test_spa_gas_preparation_is_flow_first_and_target_returns_to_2600() -> None:
+@pytest.mark.parametrize(
+    ("spa_heater", "solar_active", "heater_active", "expected_rpm"),
+    (
+        ("H0001", False, True, 3000),
+        ("H0002", True, False, 2900),
+        ("H0001", False, False, 2600),
+        ("H0002", False, False, 2600),
+    ),
+)
+def test_external_hot_tub_rpm_tracks_actual_heat_delivery(
+    spa_heater: str,
+    solar_active: bool,
+    heater_active: bool,
+    expected_rpm: int,
+) -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    native = live_values(
+        pool_active=False,
+        pool_heater="00000",
+        pump_rpm=2816,
+        spa_active=True,
+        spa_heater=spa_heater,
+        heater_active=heater_active,
+        spa_heating_demand_active=heater_active,
+        solar_temperature=140.0,
+    )
+    native["solar.active"] = solar_active
+    native["spa.temperature"] = 80.0
+    native["spa.target_temperature"] = 97.0
+    mode = (
+        ThermalRequestedMode.SOLAR_PREFERRED
+        if spa_heater == "H0002"
+        else ThermalRequestedMode.GAS
+    )
+    if spa_heater == "H0002" and not solar_active:
+        evaluator.evaluate(
+            evidence(
+                native_values=native,
+                spa_mode=mode,
+            ),
+            live_policy=disabled_policy(),
+        )
+
+    plan = evaluator.evaluate(
+        evidence(
+            at=(
+                NOW + timedelta(minutes=2)
+                if spa_heater == "H0002" and not solar_active
+                else NOW
+            ),
+            native_values=native,
+            spa_mode=mode,
+        ),
+        live_policy=disabled_policy(),
+    ).hot_tub.plan
+
+    assert plan.desired.required_pump_rpm == expected_rpm
+    assert plan.desired.evidence["active_operating_purpose"] == {
+        3000: "gas_heating",
+        2900: "solar_heating",
+        2600: "ordinary_circulation",
+    }[expected_rpm]
+
+
+def test_external_hot_tub_actual_source_transitions_drive_rpm_contract() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+
+    def required_rpm(
+        offset: int,
+        *,
+        spa_heater: str,
+        heater_active: bool,
+        solar_active: bool,
+        mode: ThermalRequestedMode,
+    ) -> int | None:
+        native = live_values(
+            pool_active=False,
+            pool_heater="00000",
+            pump_rpm=2600,
+            spa_active=True,
+            spa_heater=spa_heater,
+            heater_active=heater_active,
+            spa_heating_demand_active=heater_active,
+            solar_temperature=140.0,
+        )
+        native["solar.active"] = solar_active
+        native["spa.temperature"] = 80.0
+        native["spa.target_temperature"] = 97.0
+        return evaluator.evaluate(
+            evidence(
+                at=NOW + timedelta(seconds=offset),
+                native_values=native,
+                spa_mode=mode,
+            ),
+            live_policy=disabled_policy(),
+        ).hot_tub.plan.desired.required_pump_rpm
+
+    assert required_rpm(
+        0,
+        spa_heater="H0001",
+        heater_active=True,
+        solar_active=False,
+        mode=ThermalRequestedMode.GAS,
+    ) == 3000
+    assert required_rpm(
+        1,
+        spa_heater="H0001",
+        heater_active=False,
+        solar_active=False,
+        mode=ThermalRequestedMode.GAS,
+    ) == 2600
+    assert required_rpm(
+        2,
+        spa_heater="H0001",
+        heater_active=True,
+        solar_active=False,
+        mode=ThermalRequestedMode.GAS,
+    ) == 3000
+    required_rpm(
+        3,
+        spa_heater="H0002",
+        heater_active=False,
+        solar_active=False,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+    )
+    assert required_rpm(
+        123,
+        spa_heater="H0002",
+        heater_active=False,
+        solar_active=False,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+    ) == 2600
+    assert required_rpm(
+        124,
+        spa_heater="H0002",
+        heater_active=False,
+        solar_active=True,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+    ) == 2900
+
+
+def test_external_spa_gas_preparation_establishes_flow_before_source() -> None:
     preparing_values = live_values(
         pool_active=False,
         pool_heater="00000",
@@ -560,6 +734,43 @@ def test_spa_gas_preparation_is_flow_first_and_target_returns_to_2600() -> None:
     assert len(at_target.operations) == 1
     assert isinstance(at_target.operations[0], SetPumpSpeed)
     assert at_target.operations[0].rpm == 2600
+
+
+def test_external_spa_solar_preparation_establishes_flow_before_source() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    preparing_values = live_values(
+        pool_active=False,
+        pool_heater="00000",
+        pump_rpm=2600,
+        spa_active=True,
+        spa_heater="00000",
+        solar_temperature=140.0,
+    )
+    preparing_values["spa.temperature"] = 80.0
+    preparing_values["spa.target_temperature"] = 97.0
+    evaluator.evaluate(
+        evidence(
+            native_values=preparing_values,
+            spa_mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    plan = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2),
+            native_values=preparing_values,
+            spa_mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        ),
+        live_policy=disabled_policy(),
+    ).hot_tub.plan
+
+    assert plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert plan.desired.required_pump_rpm == 2900
+    assert [type(operation) for operation in plan.operations] == [
+        SetPumpSpeed,
+        SetHeatMode,
+    ]
 
 
 def test_stateful_evaluator_rejects_timestamp_regression_with_exact_reason() -> None:
