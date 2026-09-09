@@ -273,6 +273,11 @@ class AutomaticThermalProbeAuthority:
             self.operation == "body_heat_source"
             and self.target == "B1101"
             and self.requested_value == "00000"
+        ) or (
+            self.operation == "pump_circuit_speed"
+            and is_pmpcirc_native_id(self.target)
+            and type(self.requested_value) is int
+            and self.requested_value == _THERMAL_BASELINES.temperature_probe_rpm
         )
         if not allowed:
             raise ValueError("unsupported Pool temperature-probe operation")
