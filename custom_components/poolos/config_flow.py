@@ -12,34 +12,26 @@ import voluptuous as vol
 from .const import (
     ALL_ENTITY_OPTIONS,
     CONF_AIR_TEMPERATURE_ENTITY,
+    CONFIG_ENTRY_MINOR_VERSION,
+    CONFIG_ENTRY_VERSION,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_PREFERRED_FILTRATION_CATCHUP_START,
-    CONF_FIRMWARE_VERSION_ENTITY,
-    CONF_FREEZE_ACTIVE_ENTITY,
     CONF_HEATER_ACTIVE_ENTITY,
-    CONF_INTELLICHLOR_POOL_OUTPUT_ENTITY,
-    CONF_INTELLICHLOR_SALT_ENTITY,
-    CONF_INTELLICHLOR_SPA_OUTPUT_ENTITY,
     CONF_INTELLICENTER_HOST,
     CONF_INTELLICENTER_TRANSPORT,
     CONF_GRID_STATUS_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
     CONF_POOL_LIGHT_ENTITY,
-    CONF_POOL_MAXIMUM_TEMPERATURE_ENTITY,
     CONF_POOL_THERMOSTAT_ENTITY,
     CONF_PUMP_GPM_ENTITY,
     CONF_PUMP_POWER_ENTITY,
-    CONF_PUMP_MAXIMUM_RPM_ENTITY,
-    CONF_PUMP_MINIMUM_RPM_ENTITY,
     CONF_PUMP_RPM_ENTITY,
     CONF_SLIDE_ACTIVE_ENTITY,
     CONF_SOLAR_ACTIVE_ENTITY,
     CONF_SOLAR_TEMPERATURE_ENTITY,
     CONF_SPA_COMMAND_ENTITY,
-    CONF_SPA_MAXIMUM_TEMPERATURE_ENTITY,
     CONF_SPA_THERMOSTAT_ENTITY,
-    CONF_SYSTEM_MODE_ENTITY,
     CONF_WATERFALL_ACTIVE_ENTITY,
     CONF_WATER_TEMPERATURE_ENTITY,
     DEFAULT_DIAGNOSTICS_ENABLED,
@@ -55,8 +47,8 @@ from .const import (
 class PoolOSConfigFlow(ConfigFlow, domain=DOMAIN):
     """Create the single PoolOS commissioning entry."""
 
-    VERSION = 2
-    MINOR_VERSION = 0
+    VERSION = CONFIG_ENTRY_VERSION
+    MINOR_VERSION = CONFIG_ENTRY_MINOR_VERSION
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -108,7 +100,7 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
 
     # C5.9: IntelliCenter-owned controller observations come directly from
     # PoolOS native transport. Grid remains mandatory external HA truth.
-    # Legacy Pentair mappings remain optional for parity commissioning.
+    # Remaining legacy Pentair mappings are optional parity inputs.
     required = {
         CONF_GRID_STATUS_ENTITY: ["binary_sensor"],
     }
@@ -129,16 +121,6 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         CONF_JETS_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_SLIDE_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_POOL_LIGHT_ENTITY: ["light"],
-        CONF_INTELLICHLOR_SALT_ENTITY: ["sensor"],
-        CONF_INTELLICHLOR_POOL_OUTPUT_ENTITY: ["number", "sensor"],
-        CONF_INTELLICHLOR_SPA_OUTPUT_ENTITY: ["number", "sensor"],
-        CONF_FREEZE_ACTIVE_ENTITY: ["binary_sensor"],
-        CONF_FIRMWARE_VERSION_ENTITY: ["sensor"],
-        CONF_SYSTEM_MODE_ENTITY: ["sensor"],
-        CONF_POOL_MAXIMUM_TEMPERATURE_ENTITY: ["number", "sensor"],
-        CONF_SPA_MAXIMUM_TEMPERATURE_ENTITY: ["number", "sensor"],
-        CONF_PUMP_MINIMUM_RPM_ENTITY: ["sensor"],
-        CONF_PUMP_MAXIMUM_RPM_ENTITY: ["sensor"],
     }
 
     fields: dict[vol.Marker, object] = {}

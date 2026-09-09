@@ -40,7 +40,8 @@ def test_solar_learning_inputs_are_available_as_optional_mappings() -> None:
     config_data = translation["config"]["step"]["user"]["data"]
     assert "solar_temperature_entity" in config_data
     assert "air_temperature_entity" in config_data
-    assert 'VERSION = 2' in flow
+    assert "CONFIG_ENTRY_VERSION = 2" in const
+    assert "VERSION = CONFIG_ENTRY_VERSION" in flow
     assert 'vol.Required(\n            CONF_DIAGNOSTICS_ENABLED,' in flow
 
 

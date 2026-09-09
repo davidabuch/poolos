@@ -34,6 +34,7 @@ from .const import (  # noqa: E402
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     PLATFORMS,
 )
+from .config_entry_migration import migrate_config_entry  # noqa: E402
 from .coordinator import PoolOSCoordinator  # noqa: E402
 from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
 from .filtration_automatic_runtime import (  # noqa: E402
@@ -94,6 +95,15 @@ class PoolOSRuntimeData:
 
 
 type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]
+
+
+async def async_migrate_entry(
+    hass: HomeAssistant,
+    entry: PoolOSConfigEntry,
+) -> bool:
+    """Remove retired legacy IntelliCenter HA shadow mappings."""
+
+    return migrate_config_entry(hass, entry)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:

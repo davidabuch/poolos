@@ -23,6 +23,7 @@ def test_required_integration_files_exist() -> None:
         "button.py",
         "climate.py",
             "config_flow.py",
+            "config_entry_migration.py",
             "configured_thermal.py",
             "const.py",
         "coordinator.py",
