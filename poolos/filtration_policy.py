@@ -658,13 +658,18 @@ class FiltrationAccountingTracker:
         tou_profile: TimeOfUseProfile,
         target_policy: TemperatureFiltrationPolicy = TemperatureFiltrationPolicy(),
         baselines: PumpOperatingBaselines = PumpOperatingBaselines(),
+        preferred_catchup_start: time = time(hour=20),
         operational_day_policy: FiltrationOperationalDayPolicy = (
             FiltrationOperationalDayPolicy()
         ),
     ) -> None:
         self._target_policy = target_policy
         self._tou_profile = tou_profile
-        self._policy = FiltrationPolicy(tou_profile, baselines=baselines)
+        self._policy = FiltrationPolicy(
+            tou_profile,
+            baselines=baselines,
+            preferred_catchup_start=preferred_catchup_start,
+        )
         self._baselines = baselines
         self._operational_day_policy = operational_day_policy
         self._timezone = ZoneInfo(tou_profile.timezone_name)

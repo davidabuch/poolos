@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from pathlib import Path
 import sys
 
@@ -28,7 +28,12 @@ def _enable_local_vendored_core() -> None:
 
 _enable_local_vendored_core()
 
-from .const import DEFAULT_OPERATING_MODE, PLATFORMS  # noqa: E402
+from .const import (  # noqa: E402
+    CONF_PREFERRED_FILTRATION_CATCHUP_START,
+    DEFAULT_OPERATING_MODE,
+    DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+    PLATFORMS,
+)
 from .coordinator import PoolOSCoordinator  # noqa: E402
 from .filtration_runtime import PoolOSFiltrationRuntime  # noqa: E402
 from .filtration_automatic_runtime import (  # noqa: E402
@@ -96,7 +101,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
 
     coordinator = PoolOSCoordinator(hass, entry)
     await coordinator.async_initialize_persistence()
-    filtration_runtime = PoolOSFiltrationRuntime(coordinator=coordinator)
+
+    configured = {**dict(entry.data), **dict(entry.options)}
+    preferred_catchup_text = str(
+        configured.get(
+            CONF_PREFERRED_FILTRATION_CATCHUP_START,
+            DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+        )
+    ).strip()
+
+    try:
+        preferred_catchup_start = time.fromisoformat(preferred_catchup_text)
+    except ValueError:
+        preferred_catchup_start = time.fromisoformat(
+            DEFAULT_PREFERRED_FILTRATION_CATCHUP_START
+        )
+
+    filtration_runtime = PoolOSFiltrationRuntime(
+        coordinator=coordinator,
+        preferred_catchup_start=preferred_catchup_start,
+    )
     await filtration_runtime.async_restore(restored_at=datetime.now(UTC))
     coordinator.set_filtration_runtime_refresh(filtration_runtime.refresh)
     await coordinator.async_config_entry_first_refresh()
@@ -107,7 +131,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             coordinator.async_handle_homeassistant_stop,
         )
     )
-    configured = {**dict(entry.data), **dict(entry.options)}
     manual_host = str(configured.get("intellicenter_host", "")).strip()
     physical_command_authority = PoolOSPhysicalCommandAuthority()
     physical_command_authority.require_automatic_restraint_restoration()

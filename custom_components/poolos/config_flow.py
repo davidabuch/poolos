@@ -13,6 +13,7 @@ from .const import (
     ALL_ENTITY_OPTIONS,
     CONF_AIR_TEMPERATURE_ENTITY,
     CONF_DIAGNOSTICS_ENABLED,
+    CONF_PREFERRED_FILTRATION_CATCHUP_START,
     CONF_FIRMWARE_VERSION_ENTITY,
     CONF_FREEZE_ACTIVE_ENTITY,
     CONF_HEATER_ACTIVE_ENTITY,
@@ -42,6 +43,7 @@ from .const import (
     CONF_WATERFALL_ACTIVE_ENTITY,
     CONF_WATER_TEMPERATURE_ENTITY,
     DEFAULT_DIAGNOSTICS_ENABLED,
+    DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     DEFAULT_INTELLICENTER_TRANSPORT,
     DEFAULT_OPERATING_MODE,
     DOMAIN,
@@ -150,6 +152,16 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
             default=current.get(CONF_DIAGNOSTICS_ENABLED, DEFAULT_DIAGNOSTICS_ENABLED),
         )
     ] = bool
+
+    fields[
+        vol.Required(
+            CONF_PREFERRED_FILTRATION_CATCHUP_START,
+            default=current.get(
+                CONF_PREFERRED_FILTRATION_CATCHUP_START,
+                DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+            ),
+        )
+    ] = vol.Match(r"(?:[01]\d|2[0-3]):[0-5]\d")
     fields[
         vol.Optional(
             CONF_INTELLICENTER_HOST,
