@@ -58,7 +58,7 @@ For deterministic installation, `manifest.json` pins the core package to the sam
 release tag using a Home Assistant-supported Git requirement:
 
 ```text
-poolos@git+https://github.com/davidabuch/poolos.git@v0.10.7
+poolos@git+https://github.com/davidabuch/poolos.git@v0.11.0
 ```
 
 This means the Git tag matching the manifest version must exist before that integration version can be installed in Home Assistant.
