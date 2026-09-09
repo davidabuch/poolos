@@ -161,7 +161,7 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
                 DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
             ),
         )
-    ] = vol.Match(r"(?:[01]\d|2[0-3]):[0-5]\d")
+    ] = selector.TimeSelector()
     fields[
         vol.Optional(
             CONF_INTELLICENTER_HOST,
