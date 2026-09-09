@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Mapping
 
@@ -27,13 +27,16 @@ class PoolOSFiltrationRuntime:
     """Own one derived ledger replayed from authoritative observation history."""
 
     coordinator: PoolOSCoordinator
-    tracker: FiltrationAccountingTracker = field(
-        default_factory=lambda: FiltrationAccountingTracker(
-            tou_profile=LADWP_INITIAL_PROFILE
-        )
-    )
+    preferred_catchup_start: time = time(hour=20)
+    tracker: FiltrationAccountingTracker = field(init=False)
     assessment: FiltrationAccountingSnapshot | None = None
     restore_error: str | None = None
+
+    def __post_init__(self) -> None:
+        self.tracker = FiltrationAccountingTracker(
+            tou_profile=LADWP_INITIAL_PROFILE,
+            preferred_catchup_start=self.preferred_catchup_start,
+        )
 
     async def async_restore(self, *, restored_at: datetime) -> None:
         """Replay the two-day ledger plus one chronology seed off the event loop."""
