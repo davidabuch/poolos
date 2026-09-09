@@ -36,8 +36,15 @@ class PoolTemperatureProbeExecutionEvidence:
         phase = PoolTemperatureProbeExecutionPhase(self.phase)
         object.__setattr__(self, "phase", phase)
         if phase is PoolTemperatureProbeExecutionPhase.ACQUIRING:
-            if self.acquisition_started_at is None or not self.pump_setpoint_owned:
-                raise ValueError("active acquisition requires start time and pump provenance")
+            if (
+                self.acquisition_started_at is None
+                or not self.body_activation_owned
+                or not self.pump_setpoint_owned
+            ):
+                raise ValueError(
+                    "active acquisition requires start time, Pool body provenance, "
+                    "and acquisition pump provenance"
+                )
         elif self.acquisition_started_at is not None:
             raise ValueError("preparing probe cannot have an acquisition start")
         if self.acquisition_started_at is not None and (

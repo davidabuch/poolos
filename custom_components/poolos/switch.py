@@ -28,6 +28,10 @@ from poolos.physical_command_authority import (
     PhysicalCommandRequest,
     PhysicalRequestSource,
 )
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppressionSource,
+    SpaAutomaticControlSuppressionSource,
+)
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
 
@@ -247,8 +251,8 @@ class PoolOSNativeIntelliCenterSolarSwitch(
         }
 
 
-class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
-    """Effective restart-reset Phase 3 readiness switch; never executes."""
+class PoolOSThermalLiveExecutionSwitch(RestoreEntity, SwitchEntity):
+    """Persist commissioned desired readiness; never restore a live session."""
 
     _attr_has_entity_name = True
     _attr_name = "Thermal Live Execution"
@@ -261,6 +265,13 @@ class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
     @property
     def is_on(self) -> bool:
         return self._runtime.thermal_runtime.effective_live_enabled
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if previous is not None and previous.state == "on":
+            self._runtime.thermal_runtime.set_effective_live_enabled(True)
+            self._runtime.thermal_automatic_runtime.authority_configuration_changed()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
@@ -279,7 +290,8 @@ class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "effective_state_resets_off_on_restart": True,
+            "commissioned_desired_state_persists_across_restart": True,
+            "physical_session_ownership_restored": False,
             "configuration_only": True,
             "automatic_execution_driver_enabled": bool(
                 getattr(
@@ -294,8 +306,8 @@ class PoolOSThermalLiveExecutionSwitch(SwitchEntity):
         }
 
 
-class PoolOSThermalAutomaticExecutionSwitch(SwitchEntity):
-    """Dedicated restart-reset gate for event-driven thermal automation."""
+class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
+    """Persist desired automation while runtime ownership always starts empty."""
 
     _attr_has_entity_name = True
     _attr_name = "Automatic Thermal Execution"
@@ -308,6 +320,12 @@ class PoolOSThermalAutomaticExecutionSwitch(SwitchEntity):
     @property
     def is_on(self) -> bool:
         return self._runtime.thermal_automatic_runtime.enabled
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if previous is not None and previous.state == "on":
+            self._runtime.thermal_automatic_runtime.set_enabled(True)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
@@ -323,15 +341,16 @@ class PoolOSThermalAutomaticExecutionSwitch(SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             **self._runtime.thermal_automatic_runtime.diagnostics(),
-            "effective_state_resets_off_on_restart": True,
+            "commissioned_desired_state_persists_across_restart": True,
+            "physical_session_ownership_restored": False,
             "thermal_live_gate_is_independent": True,
             "cached_candidate_executes_on_enable": False,
             "fresh_authoritative_epoch_required": True,
         }
 
 
-class PoolOSFiltrationAutomaticExecutionSwitch(SwitchEntity):
-    """Independent restart-reset gate for autonomous Pool filtration."""
+class PoolOSFiltrationAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
+    """Persist desired filtration automation without restoring ownership."""
 
     _attr_has_entity_name = True
     _attr_name = "Automatic Filtration Execution"
@@ -344,6 +363,12 @@ class PoolOSFiltrationAutomaticExecutionSwitch(SwitchEntity):
     @property
     def is_on(self) -> bool:
         return self._runtime.filtration_automatic_runtime.enabled
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if previous is not None and previous.state == "on":
+            self._runtime.filtration_automatic_runtime.set_enabled(True)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
@@ -359,7 +384,8 @@ class PoolOSFiltrationAutomaticExecutionSwitch(SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             **self._runtime.filtration_automatic_runtime.diagnostics(),
-            "effective_state_resets_off_on_restart": True,
+            "commissioned_desired_state_persists_across_restart": True,
+            "physical_session_ownership_restored": False,
             "cached_candidate_executes_on_enable": False,
             "fresh_authoritative_epoch_required": True,
             "filtration_accounting_remains_command_free": True,
@@ -462,6 +488,176 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
             "parity_continues": True,
             "commands_replayed_on_exit": False,
             "physical_state_restored_on_exit": False,
+        }
+
+
+class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
+    """Persistent human-Off restraint; changing it never commands equipment."""
+
+    _attr_name = "PoolOS Autonomous Pool Control"
+    _attr_icon = "mdi:hand-back-right-off"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_autonomous_pool_control"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore only the restraint, never execution or equipment ownership."""
+
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if (
+            previous is not None
+            and previous.state == "off"
+            and not self._runtime.pool_automatic_control.state.suppressed
+        ):
+            source_value = previous.attributes.get(
+                "pool_manual_off_suppression_source"
+            )
+            try:
+                source = PoolAutomaticControlSuppressionSource(str(source_value))
+            except ValueError:
+                source = PoolAutomaticControlSuppressionSource.RESTORED
+            at_value = previous.attributes.get("pool_manual_off_suppression_at")
+            try:
+                suppressed_at = datetime.fromisoformat(str(at_value))
+                if suppressed_at.tzinfo is None:
+                    raise ValueError
+            except (TypeError, ValueError):
+                suppressed_at = datetime.now(UTC)
+            reason = str(
+                previous.attributes.get("pool_manual_off_suppression_reason")
+                or "restored_manual_pool_off_suppression"
+            )
+            self._runtime.pool_automatic_control.suppress(
+                source=source,
+                suppressed_at=suppressed_at,
+                reason=reason,
+            )
+        self._runtime.physical_command_authority.resolve_pool_automatic_control_suppressed(
+            self._runtime.pool_automatic_control.state.suppressed
+        )
+        self.async_on_remove(
+            self._runtime.pool_automatic_control.add_listener(
+                lambda _state: self.async_write_ha_state()
+            )
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """On means autonomous Pool control is eligible for fresh evaluation."""
+
+        return not self._runtime.pool_automatic_control.state.suppressed
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Explicitly resume future automation without issuing a command."""
+
+        del kwargs
+        self._runtime.pool_automatic_control.resume(resumed_at=datetime.now(UTC))
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Proactively restrain future automatic Pool mutations."""
+
+        del kwargs
+        self._runtime.pool_automatic_control.suppress(
+            source=PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+            suppressed_at=datetime.now(UTC),
+            reason="operator_disabled_autonomous_pool_control",
+        )
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **dict(self._runtime.pool_automatic_control.diagnostics()),
+            "resume_issues_equipment_command": False,
+            "resume_creates_ownership": False,
+            "manual_controls_remain_available": True,
+            "baseline_off_creates_suppression": False,
+            "suppression_persists_across_restart": True,
+            "offline_operator_off_detection_possible": False,
+        }
+
+
+class PoolOSSpaAutonomousControlSwitch(RestoreEntity, SwitchEntity):
+    """Persistent human-Off restraint scoped only to automatic Spa work."""
+
+    _attr_name = "PoolOS Autonomous Hot Tub Control"
+    _attr_icon = "mdi:hot-tub"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_autonomous_hot_tub_control"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if (
+            previous is not None
+            and previous.state == "off"
+            and not self._runtime.spa_automatic_control.state.suppressed
+        ):
+            source_value = previous.attributes.get(
+                "spa_manual_off_suppression_source"
+            )
+            try:
+                source = SpaAutomaticControlSuppressionSource(str(source_value))
+            except ValueError:
+                source = SpaAutomaticControlSuppressionSource.RESTORED
+            at_value = previous.attributes.get("spa_manual_off_suppression_at")
+            try:
+                suppressed_at = datetime.fromisoformat(str(at_value))
+                if suppressed_at.tzinfo is None:
+                    raise ValueError
+            except (TypeError, ValueError):
+                suppressed_at = datetime.now(UTC)
+            reason = str(
+                previous.attributes.get("spa_manual_off_suppression_reason")
+                or "restored_manual_spa_off_suppression"
+            )
+            self._runtime.spa_automatic_control.suppress(
+                source=source,
+                suppressed_at=suppressed_at,
+                reason=reason,
+            )
+        self._runtime.physical_command_authority.resolve_spa_automatic_control_suppressed(
+            self._runtime.spa_automatic_control.state.suppressed
+        )
+        self.async_on_remove(
+            self._runtime.spa_automatic_control.add_listener(
+                lambda _state: self.async_write_ha_state()
+            )
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return not self._runtime.spa_automatic_control.state.suppressed
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.spa_automatic_control.resume(resumed_at=datetime.now(UTC))
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.spa_automatic_control.suppress(
+            source=SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+            suppressed_at=datetime.now(UTC),
+            reason="operator_disabled_autonomous_spa_control",
+        )
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **dict(self._runtime.spa_automatic_control.diagnostics()),
+            "resume_issues_equipment_command": False,
+            "resume_creates_ownership": False,
+            "manual_controls_remain_available": True,
+            "baseline_off_creates_suppression": False,
+            "suppression_persists_across_restart": True,
+            "offline_operator_off_detection_possible": False,
         }
 
 
@@ -741,5 +937,7 @@ async def async_setup_entry(
             PoolOSFiltrationAutomaticExecutionSwitch(entry),
             PoolOSGridOutagePhysicalSafetySwitch(entry),
             PoolOSMaintenanceModeSwitch(entry),
+            PoolOSPoolAutonomousControlSwitch(entry),
+            PoolOSSpaAutonomousControlSwitch(entry),
         ]
     )

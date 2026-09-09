@@ -20,6 +20,10 @@ from poolos.thermal_termination import (
     ThermalTerminationPumpAction,
     ThermalTerminationSourceAction,
 )
+from poolos.thermal_circulation_cleanup import (
+    ThermalCirculationCleanupCandidate,
+    ThermalCirculationCleanupProvenance,
+)
 
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
@@ -227,13 +231,47 @@ def test_external_pump_takeover_invalidates_source_cleanup_too() -> None:
     assert result.operation is None
 
 
-def test_hot_tub_residual_does_not_expand_automatic_authority() -> None:
+def test_hot_tub_residual_allows_only_exact_owned_source_off() -> None:
     result = ThermalTerminationPolicy().evaluate(
         _entitlement(body=ThermalBody.HOT_TUB),
         _evidence(pool_active=False, spa_active=True),
         desired_source=PhysicalHeatMode.OFF,
     )
 
-    assert result.disposition is ThermalTerminationDisposition.BLOCKED
-    assert result.reason_code == "thermal_termination_hot_tub_not_commissioned"
-    assert result.operation is None
+    assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
+    assert result.operation is not None
+    assert result.operation.equipment_id == ThermalBody.HOT_TUB.value
+    assert result.operation.mode is PhysicalHeatMode.OFF
+
+
+def test_hot_tub_body_release_candidate_requires_accepted_activation_provenance() -> None:
+    entitled = _entitlement(body=ThermalBody.HOT_TUB)
+    provenance = ThermalCirculationCleanupProvenance.from_residual(
+        entitled,
+        established_at=NOW,
+    )
+    assert provenance is not None
+
+    candidate = ThermalCirculationCleanupCandidate.for_owned_hot_tub_release(
+        provenance=provenance,
+        epoch_identity="epoch:spa-release",
+        evaluated_at=NOW,
+    )
+
+    assert candidate is not None
+    assert candidate.operation.equipment_id == ThermalBody.HOT_TUB.value
+    assert candidate.operation.active is False
+
+    unowned = ThermalCirculationCleanupProvenance.from_residual(
+        _entitlement(body=ThermalBody.HOT_TUB, body_owned=False),
+        established_at=NOW,
+    )
+    assert unowned is not None
+    assert (
+        ThermalCirculationCleanupCandidate.for_owned_hot_tub_release(
+            provenance=unowned,
+            epoch_identity="epoch:unowned-spa",
+            evaluated_at=NOW,
+        )
+        is None
+    )

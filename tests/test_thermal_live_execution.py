@@ -22,6 +22,10 @@ from poolos.integration import (
     StopPump,
     ThermalBody,
 )
+from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
 from poolos.native_configuration_policy import (
     NativeConfigurationGuard,
     NativeConfigurationInput,
@@ -60,6 +64,7 @@ from poolos.thermal_live_execution import (
 
 NOW = datetime(2026, 8, 27, 18, 0, tzinfo=timezone.utc)
 TEST_POOL_PUMP_ID = "p0102"
+TEST_SPA_PUMP_ID = "p0198"
 
 
 def desired(
@@ -78,7 +83,19 @@ def desired(
         rpm_reason_code=None if rpm is None else f"baseline:{rpm}",
         rationale=("Thermal policy selected the commissioned physical state.",),
         criteria=("fresh_authoritative_native_evidence",),
-        evidence={"temperature_f": 86.0, "target_f": 90.0},
+        evidence={
+            "temperature_f": 86.0,
+            "target_f": 90.0,
+            "active_operating_purpose": (
+                "solar_heating"
+                if source is PhysicalHeatMode.SOLAR
+                else (
+                    "gas_heating"
+                    if source is PhysicalHeatMode.GAS
+                    else "ordinary_circulation"
+                )
+            ),
+        },
     )
 
 
@@ -90,7 +107,16 @@ def thermal_plan(
     *,
     body: ThermalBody = ThermalBody.POOL,
 ) -> ThermalExecutionPlanAssessment:
-    return ThermalExecutionPlanBuilder(pump_equipment_id=TEST_POOL_PUMP_ID).build(
+    pump_id = TEST_POOL_PUMP_ID if body is ThermalBody.POOL else TEST_SPA_PUMP_ID
+    configured_concept = (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        if body is ThermalBody.POOL
+        else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+    )
+    return ThermalExecutionPlanBuilder(
+        pump_equipment_id=pump_id,
+        configured_speed_concept=configured_concept,
+    ).build(
         desired(desired_source, desired_rpm, body=body),
         ThermalCurrentState(
             observed_at=NOW,
@@ -163,6 +189,16 @@ def evidence(
         hydraulic=hydraulic,
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
         pool_pump_circuit_id=TEST_POOL_PUMP_ID,
+        target_pump_circuit_id=(
+            TEST_SPA_PUMP_ID
+            if plan.desired.body is ThermalBody.HOT_TUB
+            else None
+        ),
+        configured_pump_speed_concept=(
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            if plan.desired.body is ThermalBody.POOL
+            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        ),
         contradictory_evidence=contradictions,
         interrupted_execution_present=interrupted,
         execution_currentness=execution_currentness,
@@ -242,6 +278,7 @@ def hydraulic_store(
         "pool.active": pool_active,
         "spa.active": spa_active,
         "pump.rpm": pump_rpm,
+        SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT: pump_rpm,
     }
     for observation_id, value in values.items():
         if value is None:
@@ -296,7 +333,18 @@ def priming_plan(
         if body is ThermalBody.POOL
         else PhysicalHeatMode.GAS
     )
-    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
+    return ThermalExecutionPlanBuilder(
+        pump_equipment_id=(
+            TEST_POOL_PUMP_ID
+            if body is ThermalBody.POOL
+            else TEST_SPA_PUMP_ID
+        ),
+        configured_speed_concept=(
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            if body is ThermalBody.POOL
+            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        ),
+    ).build(
         desired(
             source,
             2900 if body is ThermalBody.POOL else 3000,
@@ -1619,7 +1667,7 @@ def test_nonpriming_verified_step_still_advances_immediately() -> None:
     assert session.status is ThermalLiveExecutionStatus.COMPLETED
 
 
-def test_exact_pool_temperature_probe_rpm_has_narrow_live_authority() -> None:
+def test_pool_temperature_acquisition_authorizes_only_exact_probe_rpm() -> None:
     probe_desired = ThermalDesiredState(
         evaluated_at=NOW,
         body=ThermalBody.POOL,
@@ -1649,7 +1697,14 @@ def test_exact_pool_temperature_probe_rpm_has_narrow_live_authority() -> None:
     result = authorize(plan)
 
     assert result.authorized is True
-    assert result.blocking_reasons == ()
+
+    wrong = replace(
+        plan,
+        operations=(replace(plan.operations[0], rpm=1501),),
+    )
+    rejected = authorize(wrong)
+    assert rejected.authorized is False
+    assert "temperature_probe_rpm_mismatch" in rejected.blocking_reasons
 
 
 def _probe_plan_for_authority() -> ThermalExecutionPlanAssessment:
@@ -1726,16 +1781,20 @@ def test_probe_authority_requires_probe_and_general_native_pump_ownership() -> N
     )
 
 
-def test_probe_authority_rejects_heat_source_mutation_and_hot_tub() -> None:
-    desired = _probe_plan_for_authority().desired
+def test_probe_authority_allows_exact_pool_source_off_preconditioning_only() -> None:
+    desired = replace(
+        _probe_plan_for_authority().desired,
+        required_pump_rpm=None,
+        rpm_reason_code=None,
+    )
     source_mutation = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
         desired,
         ThermalCurrentState(
             observed_at=NOW,
             body=ThermalBody.POOL,
             selected_source=PhysicalHeatMode.SOLAR,
-            pump_rpm=3000,
-            body_active=True,
+            pump_rpm=0,
+            body_active=False,
         ),
     )
     hot_tub = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
@@ -1743,19 +1802,17 @@ def test_probe_authority_rejects_heat_source_mutation_and_hot_tub() -> None:
         ThermalCurrentState(
             observed_at=NOW,
             body=ThermalBody.HOT_TUB,
-            selected_source=PhysicalHeatMode.OFF,
-            pump_rpm=3000,
-            body_active=True,
+            selected_source=PhysicalHeatMode.SOLAR,
+            pump_rpm=0,
+            body_active=False,
         ),
     )
 
     source_result = authorize(source_mutation)
     hot_tub_result = authorize(hot_tub)
 
-    assert not source_result.authorized
-    assert "temperature_probe_heat_source_mutation_not_authorized" in (
-        source_result.blocking_reasons
-    )
+    assert source_result.authorized
+    assert source_result.blocking_reasons == ()
     assert not hot_tub_result.authorized
     assert "temperature_probe_requires_pool_body" in hot_tub_result.blocking_reasons
 
@@ -1763,7 +1820,7 @@ def test_probe_authority_rejects_heat_source_mutation_and_hot_tub() -> None:
 def test_unrelated_off_source_1500_rpm_is_rejected_by_canonical_model() -> None:
     with pytest.raises(
         ValueError,
-        match="off heat source may require pump RPM only for pool temperature probe",
+        match="off heat source RPM requires an explicit acquisition or hold purpose",
     ):
         replace(
             _probe_plan_for_authority().desired,
@@ -1771,12 +1828,132 @@ def test_unrelated_off_source_1500_rpm_is_rejected_by_canonical_model() -> None:
         )
 
 
-def _probe_verification_store(at: datetime) -> ObservationStore:
-    observations = hydraulic_store(at=at, pump_rpm=1500)
+def test_hot_tub_1500_requires_exact_temperature_acquisition_provenance() -> None:
+    acquisition = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="spa_temperature_acquisition_required",
+        rpm_reason_code="spa_temperature_acquisition_required",
+        rationale=("Acquire Spa bulk-water temperature.",),
+        criteria=("commissioned_spa_temperature_acquisition",),
+        evidence={"active_operating_purpose": "temperature_acquisition"},
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_SPA_PUMP_ID,
+        configured_speed_concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        acquisition,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2600,
+            body_active=True,
+        ),
+    )
+
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 1500
+    assert plan.operations[0].metadata["operating_purpose"] == "temperature_acquisition"
+    assert authorize(
+        plan,
+        live_policy=policy(ThermalLiveCommissioningScope.HOT_TUB),
+        live_evidence=evidence(plan),
+    ).authorized
+
+
+def test_opportunistic_spa_source_preconditioning_is_exact_and_precedes_activation() -> None:
+    desired_state = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.SOLAR,
+        required_pump_rpm=2600,
+        reason_code="opportunistic_started_or_resumed",
+        rpm_reason_code="operating_baseline:2600_rpm",
+        rationale=("Precondition Solar before autonomous Spa activation.",),
+        criteria=("gas_fallback_forbidden",),
+        evidence={
+            "session_kind": "poolos_opportunistic",
+            "active_operating_purpose": "ordinary_circulation",
+        },
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_SPA_PUMP_ID,
+        configured_speed_concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        desired_state,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.GAS,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+    safety = evidence(plan, body_active=False)
+
+    result = authorize(
+        plan,
+        step_index=0,
+        live_policy=policy(ThermalLiveCommissioningScope.HOT_TUB),
+        live_evidence=safety,
+    )
+
+    assert result.authorized
+    assert isinstance(plan.operations[0], SetHeatMode)
+    assert plan.operations[0].mode is PhysicalHeatMode.SOLAR
+    assert isinstance(plan.operations[1], SetBodyActive)
+
+
+def test_external_pool_ordinary_circulation_authorizes_only_exact_2600_target() -> None:
+    desired_state = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.POOL,
+        requested_mode="Solar",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=2600,
+        reason_code="active_pool_session_operating_purpose",
+        rpm_reason_code="operating_purpose:ordinary_circulation:2600_rpm",
+        rationale=("Preserve external body ownership while governing RPM.",),
+        criteria=("external_pool_session",),
+        evidence={"active_operating_purpose": "ordinary_circulation"},
+    )
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id=TEST_POOL_PUMP_ID).build(
+        desired_state,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2900,
+            body_active=True,
+        ),
+    )
+
+    assert len(plan.operations) == 1
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 2600
+    assert authorize(
+        plan,
+        live_policy=policy(ThermalLiveCommissioningScope.POOL),
+        live_evidence=evidence(plan),
+    ).authorized
+
+
+def _probe_source_verification_store(at: datetime) -> ObservationStore:
+    observations = hydraulic_store(
+        at=at,
+        pool_active=False,
+        spa_active=False,
+        pump_rpm=0,
+    )
     observations.put(
         PoolObservation(
-            observation_id="pool.pump_circuit.configured_speed_rpm",
-            value=1500,
+            observation_id="pool.raw_heater_id",
+            value="00000",
             observed_at=at,
             source_kind=ObservationSourceKind.LIVE,
             source_id="native-intellicenter",
@@ -1787,8 +1964,18 @@ def _probe_verification_store(at: datetime) -> ObservationStore:
     return observations
 
 
-def test_probe_verification_requires_configured_and_actual_later_evidence() -> None:
-    plan = _probe_plan_for_authority()
+def test_probe_source_off_verification_requires_later_native_evidence() -> None:
+    desired = _probe_plan_for_authority().desired
+    plan = ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
+        desired,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.SOLAR,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
     engine = ThermalLiveExecutionEngine()
     session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
     session = asyncio.run(
@@ -1802,7 +1989,7 @@ def test_probe_verification_requires_configured_and_actual_later_evidence() -> N
 
     same_epoch = engine.verify_current_step(
         session,
-        _probe_verification_store(NOW),
+        _probe_source_verification_store(NOW),
         current_context=session.originating_context,
         policy=policy(),
         evaluated_at=NOW,
@@ -1824,14 +2011,14 @@ def test_probe_verification_requires_configured_and_actual_later_evidence() -> N
     later = NOW + timedelta(seconds=1)
     verified = engine.verify_current_step(
         fresh_session,
-        _probe_verification_store(later),
+        _probe_source_verification_store(later),
         current_context=fresh_session.originating_context,
         policy=policy(),
         evaluated_at=later,
         source_id="native-intellicenter",
     )
 
-    assert verified.status is ThermalLiveExecutionStatus.COMPLETED
+    assert verified.status is ThermalLiveExecutionStatus.READY
 
 
 def test_inactive_body_may_authorize_only_its_activation_step() -> None:

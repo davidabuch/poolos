@@ -153,9 +153,9 @@ def probe_context(*, operation_id: str = "probe-step") -> AutomaticThermalDispat
         generation=1,
         epoch_identity="probe-epoch",
         operation_id=operation_id,
-        operation="pump_circuit_speed",
-        target="p0102",
-        requested_value=1500,
+        operation="body_heat_source",
+        target="B1101",
+        requested_value="00000",
     )
     return AutomaticThermalDispatchContext(
         generation=1,
@@ -235,6 +235,40 @@ def test_automatic_adapter_binds_exact_context_to_manual_gateway() -> None:
     ]
 
 
+def test_automatic_adapter_admits_exact_pool_ordinary_circulation_purpose() -> None:
+    manual = FakeManualControl()
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="ordinary-epoch",
+        session_identity="ordinary-session",
+        body="pool",
+        pump_circuit_id="p0199",
+        operating_purpose="ordinary_circulation",
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    accepted = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0199", rpm=2600),
+            correlation_id="ordinary-pool",
+        )
+    )
+    rejected = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0199", rpm=2900),
+            correlation_id="wrong-purpose",
+        )
+    )
+
+    assert accepted.status is CommandStatus.ACKNOWLEDGED
+    assert rejected.status is CommandStatus.REJECTED
+    assert manual.calls == [("pump", "p0199", 2600)]
+
+
 @pytest.mark.parametrize(
     ("source", "context"),
     (
@@ -294,7 +328,7 @@ def test_adapter_rejects_nonthermal_or_uncommissioned_operations_before_manual_c
     }
 
 
-def test_adapter_admits_only_exact_bound_probe_rpm_operation() -> None:
+def test_adapter_admits_only_exact_bound_probe_source_off_operation() -> None:
     manual = FakeManualControl()
     delivery = ManualIntelliCenterThermalLiveDelivery(
         manual=manual,
@@ -304,20 +338,20 @@ def test_adapter_admits_only_exact_bound_probe_rpm_operation() -> None:
 
     accepted = asyncio.run(
         delivery.deliver(
-            SetPumpSpeed(
+            SetHeatMode(
                 operation_id="probe-step",
-                equipment_id="p0102",
-                rpm=1500,
+                equipment_id=ThermalBody.POOL,
+                mode=PhysicalHeatMode.OFF,
             ),
             correlation_id="probe",
         )
     )
     wrong_operation = asyncio.run(
         delivery.deliver(
-            SetPumpSpeed(
+            SetHeatMode(
                 operation_id="other-step",
-                equipment_id="p0102",
-                rpm=1500,
+                equipment_id=ThermalBody.POOL,
+                mode=PhysicalHeatMode.OFF,
             ),
             correlation_id="wrong-probe",
         )
@@ -325,7 +359,7 @@ def test_adapter_admits_only_exact_bound_probe_rpm_operation() -> None:
 
     assert accepted.status is CommandStatus.ACKNOWLEDGED
     assert wrong_operation.status is CommandStatus.REJECTED
-    assert manual.calls == [("pump", "p0102", 1500)]
+    assert manual.calls == [("heater", "B1101", "00000")]
 
 
 @pytest.mark.parametrize(

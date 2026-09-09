@@ -16,10 +16,19 @@ from poolos.physical_command_authority import (
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.circulation_successor import FiltrationSuccessorEvidence
-from poolos.integration import SetBodyActive, SetPumpSpeed, ThermalBody
+from poolos.integration import (
+    PhysicalHeatMode,
+    SetBodyActive,
+    SetHeatMode,
+    SetPumpSpeed,
+    ThermalBody,
+)
 from poolos.external_change import ExternalChangeBatch
-from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppression,
+    SpaAutomaticControlSuppression,
+)
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDeliveryFactory,
     ThermalAutomaticExecutionDriver,
@@ -71,6 +80,16 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         if len(pump_targets) > 1:
             raise ValueError("thermal plan contains conflicting pump identities")
         pump_circuit_id = next(iter(pump_targets), None)
+        operating_purpose = None
+        current_sequence = session.coordination.current_step_sequence
+        if current_sequence is not None:
+            current_operation = session.execution_plan.steps[
+                current_sequence - 1
+            ].operation
+            if isinstance(current_operation, SetPumpSpeed):
+                purpose_value = current_operation.metadata.get("operating_purpose")
+                if isinstance(purpose_value, str) and purpose_value:
+                    operating_purpose = purpose_value
         currentness = session.originating_currentness
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
             sequence = session.coordination.current_step_sequence
@@ -78,24 +97,36 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 raise ValueError("probe session has no current operation")
             step = session.execution_plan.steps[sequence - 1]
             operation = step.operation
-            if (
-                isinstance(operation, SetPumpSpeed)
-                and operation.rpm == PumpOperatingBaselines().temperature_probe_rpm
-            ):
-                purpose = AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
-                self.authority.register_automatic_thermal_probe(
-                    epoch_identity=epoch_identity,
-                    operation_id=operation.operation_id,
-                    operation="pump_circuit_speed",
-                    target=operation.equipment_id,
-                    requested_value=operation.rpm,
-                )
-                probe_operation_id = operation.operation_id
+            purpose = AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+            if isinstance(operation, SetBodyActive):
+                operation_name = "body_active"
+                requested_value: bool | int | str = operation.active
+            elif isinstance(operation, SetPumpSpeed):
+                operation_name = "pump_circuit_speed"
+                requested_value = operation.rpm
+            elif isinstance(operation, SetHeatMode):
+                operation_name = "body_heat_source"
+                requested_value = {
+                    PhysicalHeatMode.OFF: "00000",
+                    PhysicalHeatMode.GAS: "H0001",
+                    PhysicalHeatMode.SOLAR: "H0002",
+                }[operation.mode]
+            else:
+                raise ValueError("unsupported Pool temperature-probe operation")
+            self.authority.register_automatic_thermal_probe(
+                epoch_identity=epoch_identity,
+                operation_id=operation.operation_id,
+                operation=operation_name,
+                target=operation.equipment_id,
+                requested_value=requested_value,
+            )
+            probe_operation_id = operation.operation_id
         context = self.authority.bind_automatic_thermal_dispatch(
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
             body=session.assessment.desired.body.value,
             pump_circuit_id=pump_circuit_id,
+            operating_purpose=operating_purpose,
             purpose=purpose,
             probe_operation_id=probe_operation_id,
         )
@@ -135,11 +166,13 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         """Bind exactly one canonical cleanup candidate to this authority epoch."""
 
         operation = candidate.operation
+        cleanup_body = ThermalBody.POOL
         if candidate.action is ThermalCirculationCleanupAction.BODY_DEACTIVATION:
             assert isinstance(operation, SetBodyActive)
             purpose = AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
             physical_operation = "body_active"
-            target = "B1101"
+            cleanup_body = ThermalBody(operation.equipment_id)
+            target = "B1101" if cleanup_body is ThermalBody.POOL else "B1202"
             value: bool | int = operation.active
         else:
             assert isinstance(operation, SetPumpSpeed)
@@ -150,7 +183,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         self.authority.register_automatic_thermal_cleanup(
             epoch_identity=epoch_identity,
             candidate_identity=candidate.candidate_id,
-            body=ThermalBody.POOL.value,
+            body=cleanup_body.value,
             purpose=purpose,
             operation=physical_operation,
             target=target,
@@ -159,7 +192,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         context = self.authority.bind_automatic_thermal_dispatch(
             epoch_identity=epoch_identity,
             session_identity=f"cleanup:{candidate.provenance_id}",
-            body=ThermalBody.POOL.value,
+            body=cleanup_body.value,
             pump_circuit_id=(
                 operation.equipment_id
                 if isinstance(operation, SetPumpSpeed)
@@ -185,6 +218,12 @@ class PoolOSThermalAutomaticRuntime:
     orchestrator: ThermalRuntimeOrchestrator
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
+    pool_automatic_control: PoolAutomaticControlSuppression = field(
+        default_factory=PoolAutomaticControlSuppression
+    )
+    spa_automatic_control: SpaAutomaticControlSuppression = field(
+        default_factory=SpaAutomaticControlSuppression
+    )
     circulation_ownership: PoolCirculationOwnershipRegistry = field(
         default_factory=PoolCirculationOwnershipRegistry
     )
@@ -266,6 +305,12 @@ class PoolOSThermalAutomaticRuntime:
                 )
             ),
             external_changes=external_changes,
+            pool_automatic_control_suppressed=(
+                self.pool_automatic_control.state.suppressed
+            ),
+            spa_automatic_control_suppressed=(
+                self.spa_automatic_control.state.suppressed
+            ),
         )
         if (
             self._latest_frame is not None
@@ -320,7 +365,11 @@ class PoolOSThermalAutomaticRuntime:
         self._task = None
 
     def diagnostics(self) -> dict[str, object]:
-        return dict(self.driver.diagnostics())
+        return {
+            **dict(self.driver.diagnostics()),
+            **dict(self.pool_automatic_control.diagnostics()),
+            **dict(self.spa_automatic_control.diagnostics()),
+        }
 
     def _sync_authority_configuration(self) -> None:
         scope = self.thermal_runtime.commissioning_scope

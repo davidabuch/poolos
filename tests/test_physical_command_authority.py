@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -809,6 +810,206 @@ def test_automatic_thermal_final_gateway_allows_only_commissioned_envelope(
     ).allowed
 
 
+def test_manual_pool_off_suppression_blocks_automatic_pool_but_not_manual() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("epoch-suppressed")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="epoch-suppressed",
+        session_identity="session-suppressed",
+        body="pool",
+        pump_circuit_id="p0199",
+    )
+    automatic = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0199",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2900,
+        automatic_thermal_context=context,
+    )
+    manual = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1101",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=True,
+    )
+
+    authority.set_pool_automatic_control_suppressed(True)
+
+    assert authority.assess(automatic).reason is (
+        PhysicalAuthorityReason.POOL_AUTOMATIC_CONTROL_SUPPRESSED
+    )
+    assert authority.assess(manual).allowed
+
+    authority.set_pool_automatic_control_suppressed(False)
+    assert authority.assess(automatic).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+
+def test_manual_pool_off_suppression_is_a_final_pool_only_automatic_gate() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("thermal-epoch")
+    thermal = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="thermal-epoch",
+        session_identity="thermal-session",
+        body="pool",
+        pump_circuit_id="p0199",
+    )
+    authority.configure_automatic_filtration(enabled=True)
+    authority.begin_automatic_filtration_epoch("filtration-epoch")
+    filtration = authority.bind_automatic_filtration_dispatch(
+        epoch_identity="filtration-epoch",
+        session_identity="filtration-session",
+        operation_identity="filtration-operation",
+        operation="pump_circuit_speed",
+        target="p0199",
+        requested_value=2600,
+        pump_circuit_id="p0199",
+    )
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-frame",
+    )
+    outage_authority = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-frame",
+        candidate_id="outage-pump",
+        purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+        operation="pump_circuit_speed",
+        target="p0199",
+        requested_value=1500,
+    )
+    outage = authority.bind_grid_outage_dispatch(outage_authority)
+    authority.set_pool_automatic_control_suppressed(True)
+
+    requests = (
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1101",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=True,
+            automatic_thermal_context=thermal,
+        ),
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0199",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=2900,
+            automatic_thermal_context=thermal,
+        ),
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1101",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value="H0002",
+            automatic_thermal_context=thermal,
+        ),
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0199",
+            source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+            requested_value=2600,
+            automatic_filtration_context=filtration,
+        ),
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0199",
+            source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+            requested_value=1500,
+            grid_outage_context=outage,
+        ),
+    )
+
+    assert all(
+        authority.assess(item).reason
+        is PhysicalAuthorityReason.POOL_AUTOMATIC_CONTROL_SUPPRESSED
+        for item in requests
+    )
+
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("hot-tub-epoch")
+    hot_tub = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="hot-tub-epoch",
+        session_identity="hot-tub-session",
+        body="hot_tub",
+        pump_circuit_id="p0188",
+    )
+    hot_tub_request = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1202",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value="00000",
+        automatic_thermal_context=hot_tub,
+    )
+
+    assert authority.assess(hot_tub_request).allowed
+
+
+def test_manual_spa_off_suppression_is_a_final_spa_only_automatic_gate() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("spa-epoch")
+    spa_context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="spa-epoch",
+        session_identity="spa-session",
+        body="hot_tub",
+        pump_circuit_id="p0188",
+    )
+    spa_request = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0188",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2600,
+        automatic_thermal_context=spa_context,
+    )
+    authority.set_spa_automatic_control_suppressed(True)
+
+    assert authority.assess(spa_request).reason is (
+        PhysicalAuthorityReason.SPA_AUTOMATIC_CONTROL_SUPPRESSED
+    )
+
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("pool-after-spa-off")
+    pool_context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="pool-after-spa-off",
+        session_identity="pool-session",
+        body="pool",
+        pump_circuit_id="p0199",
+    )
+    pool_request = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0199",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2900,
+        automatic_thermal_context=pool_context,
+    )
+
+    assert authority.assess(pool_request).allowed
+
+
 def test_automatic_thermal_authority_binds_exact_recycled_pool_pmpcirc() -> None:
     authority = ready()
     authority.configure_automatic_thermal(
@@ -851,6 +1052,158 @@ def test_automatic_thermal_authority_binds_exact_recycled_pool_pmpcirc() -> None
             body="pool",
             pump_circuit_id="other-pump",
         )
+
+
+def test_pool_ordinary_circulation_authority_is_exact_purpose_and_target_bound() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("pool-ordinary-epoch")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="pool-ordinary-epoch",
+        session_identity="pool-ordinary-session",
+        body="pool",
+        pump_circuit_id="p0199",
+        operating_purpose="ordinary_circulation",
+    )
+
+    def decision(target: str, rpm: int):
+        return authority.assess(
+            PhysicalCommandRequest(
+                operation="pump_circuit_speed",
+                target=target,
+                source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+                requested_value=rpm,
+                automatic_thermal_context=context,
+            )
+        )
+
+    assert decision("p0199", 2600).allowed
+    assert not decision("p0198", 2600).allowed
+    assert not decision("p0199", 1500).allowed
+    assert not decision("p0199", 2900).allowed
+    assert not decision("p0199", 3000).allowed
+
+
+def test_startup_restraint_barrier_requires_both_restores_and_a_fresh_epoch() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.require_automatic_restraint_restoration()
+
+    def bound_request(epoch: str) -> PhysicalCommandRequest:
+        authority.begin_automatic_thermal_epoch(epoch)
+        context = authority.bind_automatic_thermal_dispatch(
+            epoch_identity=epoch,
+            session_identity=f"session:{epoch}",
+            body="pool",
+            pump_circuit_id="p0199",
+            operating_purpose="ordinary_circulation",
+        )
+        return PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0199",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=2600,
+            automatic_thermal_context=context,
+        )
+
+    before_restore = bound_request("before-restore")
+    assert authority.assess(before_restore).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_RESTRAINT_RESTORATION_PENDING
+    )
+
+    authority.resolve_pool_automatic_control_suppressed(False)
+    pool_only = bound_request("pool-restored")
+    assert authority.assess(pool_only).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_RESTRAINT_RESTORATION_PENDING
+    )
+
+    authority.resolve_spa_automatic_control_suppressed(False)
+    assert authority.assess(pool_only).reason is (
+        PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+    fresh = bound_request("post-restore-fresh")
+    assert authority.assess(fresh).allowed
+
+
+@pytest.mark.parametrize(
+    ("rpm", "purpose"),
+    (
+        (1500, "temperature_acquisition"),
+        (2600, "ordinary_circulation"),
+        (2900, "solar_heating"),
+        (3000, "gas_heating"),
+    ),
+)
+def test_hot_tub_automatic_authority_is_dynamic_default_off_and_purpose_bounded(
+    rpm: int,
+    purpose: str,
+) -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("hot-tub-epoch")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="hot-tub-epoch",
+        session_identity="hot-tub-session",
+        body="hot_tub",
+        pump_circuit_id="p0198",
+        operating_purpose=purpose,
+    )
+
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0198",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=rpm,
+            automatic_thermal_context=context,
+        )
+    ).allowed
+    for target, value in (("p0102", rpm), ("p0198", 2816)):
+        assert not authority.assess(
+            PhysicalCommandRequest(
+                operation="pump_circuit_speed",
+                target=target,
+                source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+                requested_value=value,
+                automatic_thermal_context=context,
+            )
+        ).allowed
+
+
+def test_hot_tub_normal_authority_is_disabled_without_exact_commissioning_scope() -> None:
+    authority = ready()
+    authority.begin_automatic_thermal_epoch("hot-tub-disabled")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="hot-tub-disabled",
+        session_identity="hot-tub-session",
+        body="hot_tub",
+        pump_circuit_id="p0198",
+        operating_purpose="ordinary_circulation",
+    )
+
+    decision = authority.assess(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            requested_value=True,
+            automatic_thermal_context=context,
+        )
+    )
+
+    assert not decision.allowed
 
 
 @pytest.mark.parametrize(
@@ -898,6 +1251,76 @@ def test_termination_context_is_final_gateway_bounded_to_pool_source_off(
     assert decision.allowed is allowed
 
 
+def test_hot_tub_termination_context_allows_only_exact_source_off() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("hot-tub-termination")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="hot-tub-termination",
+        session_identity="termination:spa-entitlement",
+        body="hot_tub",
+        purpose=AutomaticThermalDispatchPurpose.TERMINATION,
+    )
+
+    def allowed(operation: str, target: str, value: object) -> bool:
+        return authority.assess(
+            PhysicalCommandRequest(
+                operation=operation,
+                target=target,
+                source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+                requested_value=value,
+                automatic_thermal_context=context,
+            )
+        ).allowed
+
+    assert allowed("body_heat_source", "B1202", "00000")
+    assert not allowed("body_heat_source", "B1202", "H0001")
+    assert not allowed("body_active", "B1202", False)
+    assert not allowed("body_heat_source", "B1101", "00000")
+
+
+def test_hot_tub_cleanup_authority_requires_exact_registered_owned_body_off() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("spa-cleanup")
+    authority.register_automatic_thermal_cleanup(
+        epoch_identity="spa-cleanup",
+        candidate_identity="spa-owned-release",
+        body="hot_tub",
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        operation="body_active",
+        target="B1202",
+        requested_value=False,
+    )
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="spa-cleanup",
+        session_identity="cleanup:spa-provenance",
+        body="hot_tub",
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        cleanup_candidate_identity="spa-owned-release",
+    )
+
+    exact = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1202",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=False,
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(exact).allowed
+    assert not authority.assess(
+        replace(exact, target="B1101")
+    ).allowed
+
+
 def _cleanup_context(
     authority: PoolOSPhysicalCommandAuthority,
     *,
@@ -934,9 +1357,9 @@ def _cleanup_context(
 def _probe_context(
     authority: PoolOSPhysicalCommandAuthority,
     *,
-    operation: str = "pump_circuit_speed",
-    target: str = "p0102",
-    value: bool | int = 1500,
+    operation: str = "body_active",
+    target: str = "B1101",
+    value: bool | int | str = True,
 ) -> AutomaticThermalDispatchContext:
     authority.configure_automatic_thermal(
         driver_enabled=True,
@@ -965,10 +1388,10 @@ def test_probe_authority_allows_only_exact_pool_probe_operation() -> None:
     context = _probe_context(authority)
 
     exact = PhysicalCommandRequest(
-        operation="pump_circuit_speed",
-        target="p0102",
+        operation="body_active",
+        target="B1101",
         source=PhysicalRequestSource.AUTOMATIC_THERMAL,
-        requested_value=1500,
+        requested_value=True,
         automatic_thermal_context=context,
     )
     assert authority.assess(exact).allowed
@@ -978,7 +1401,7 @@ def test_probe_authority_allows_only_exact_pool_probe_operation() -> None:
         ("pump_circuit_speed", "p0102", 3000),
         ("pump_circuit_speed", "p9999", 1500),
         ("pump_circuit_speed", "p0102", True),
-        ("body_active", "B1101", True),
+        ("body_active", "B1101", False),
         ("body_heat_source", "B1101", "00000"),
         ("body_active", "B1202", True),
     ):
@@ -994,33 +1417,66 @@ def test_probe_authority_allows_only_exact_pool_probe_operation() -> None:
         )
 
 
-def test_probe_authority_binds_recycled_target_without_retargeting() -> None:
+@pytest.mark.parametrize(
+    ("operation", "target", "value"),
+    (
+        ("body_active", "B1101", True),
+        ("body_heat_source", "B1101", "00000"),
+    ),
+)
+def test_probe_authority_binds_every_exact_canonical_probe_step(
+    operation: str,
+    target: str,
+    value: bool | int | str,
+) -> None:
     authority = ready()
-    context = _probe_context(authority, target="p0199")
+    context = _probe_context(
+        authority,
+        operation=operation,
+        target=target,
+        value=value,
+    )
+    exact = PhysicalCommandRequest(
+        operation=operation,
+        target=target,
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=value,
+        automatic_thermal_context=context,
+    )
 
-    def request_for(target: str) -> PhysicalCommandRequest:
-        return PhysicalCommandRequest(
-            operation="pump_circuit_speed",
-            target=target,
-            source=PhysicalRequestSource.AUTOMATIC_THERMAL,
-            requested_value=1500,
-            automatic_thermal_context=context,
-        )
-
-    assert authority.assess(request_for("p0199")).allowed
-    assert authority.assess(request_for("p0102")).reason is (
+    assert authority.assess(exact).allowed
+    assert authority.assess(replace(exact, target="B1202")).reason is (
         PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
     )
+
+
+def test_probe_authority_rejects_any_pump_registration() -> None:
+    authority = ready()
+
+    with pytest.raises(ValueError, match="unsupported Pool temperature-probe operation"):
+        _probe_context(
+            authority,
+            operation="pump_circuit_speed",
+            target="p0102",
+            value=1500,
+        )
+
+
+def test_probe_authority_rejects_retargeted_body_operation() -> None:
+    authority = ready()
+
+    with pytest.raises(ValueError, match="unsupported Pool temperature-probe operation"):
+        _probe_context(authority, target="B1202")
 
 
 def test_probe_authority_is_invalidated_by_new_epoch() -> None:
     authority = ready()
     context = _probe_context(authority)
     request = PhysicalCommandRequest(
-        operation="pump_circuit_speed",
-        target="p0102",
+        operation="body_active",
+        target="B1101",
         source=PhysicalRequestSource.AUTOMATIC_THERMAL,
-        requested_value=1500,
+        requested_value=True,
         automatic_thermal_context=context,
     )
 
@@ -1033,18 +1489,18 @@ def test_probe_authority_is_invalidated_by_new_candidate_in_same_epoch() -> None
     authority = ready()
     context = _probe_context(authority)
     request = PhysicalCommandRequest(
-        operation="pump_circuit_speed",
-        target="p0102",
+        operation="body_active",
+        target="B1101",
         source=PhysicalRequestSource.AUTOMATIC_THERMAL,
-        requested_value=1500,
+        requested_value=True,
         automatic_thermal_context=context,
     )
     authority.register_automatic_thermal_probe(
         epoch_identity="probe-epoch",
         operation_id="new-probe-operation",
-        operation="pump_circuit_speed",
-        target="p0102",
-        requested_value=1500,
+        operation="body_heat_source",
+        target="B1101",
+        requested_value="00000",
     )
 
     assert authority.assess(request).reason is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
@@ -1141,12 +1597,6 @@ def test_cleanup_authority_binds_recycled_target_without_retargeting() -> None:
 @pytest.mark.parametrize(
     ("purpose", "operation", "target", "value"),
     (
-        (
-            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
-            "body_active",
-            "B1202",
-            False,
-        ),
         (
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             "body_active",

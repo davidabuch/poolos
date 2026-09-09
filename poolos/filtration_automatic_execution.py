@@ -71,6 +71,7 @@ class FiltrationAutomaticExecutionFrame:
     thermal_candidate_ready: bool
     thermal_owned: bool
     external_changes: ExternalChangeBatch = ExternalChangeBatch(())
+    pool_automatic_control_suppressed: bool = False
 
     def __post_init__(self) -> None:
         if not self.epoch_identity.strip():
@@ -238,6 +239,8 @@ class FiltrationAutomaticExecutionDriver:
         self._last_epoch = frame.epoch_identity
         self._last_at = frame.observed_at
         lease = self.ownership.filtration_lease
+        if frame.pool_automatic_control_suppressed:
+            return self._apply_manual_off_suppression(frame, lease)
         if (
             lease is not None
             and frame.pool_pump_circuit_id is not None
@@ -254,6 +257,21 @@ class FiltrationAutomaticExecutionDriver:
                 frame=frame,
                 command=False,
                 failure="automatic_filtration_pump_circuit_identity_changed",
+            )
+        if lease is not None and lease.verified and self._clean_spa_takeover(frame):
+            # A clean native Pool -> Spa topology transition is an intentional
+            # shared-hydraulic yield, not an ownership claim over Spa and not a
+            # reason to require operator re-enable.  Discard all Pool command
+            # provenance; a later Pool need must start from fresh evidence.
+            self.ownership.release_filtration(session_id=lease.session_id)
+            self.session_id = None
+            self.attempt = None
+            return self._publish(
+                FiltrationAutomaticDriverState.BLOCKED,
+                at=frame.observed_at,
+                blocker="automatic_filtration_yielded_to_spa",
+                frame=frame,
+                command=False,
             )
         if self._externally_preempted(frame, lease):
             if lease is not None:
@@ -398,6 +416,54 @@ class FiltrationAutomaticExecutionDriver:
                 command=False,
             )
         return await self._deliver_pump(frame, delivery_factory)
+
+    def _apply_manual_off_suppression(
+        self,
+        frame: FiltrationAutomaticExecutionFrame,
+        lease: FiltrationCirculationLease | None,
+    ) -> FiltrationAutomaticAssessment:
+        """Retain only proven cleanup provenance while human Off wins."""
+
+        if lease is None or not lease.verified:
+            if lease is not None:
+                self.ownership.release_filtration(session_id=lease.session_id)
+            self.session_id = None
+            self.attempt = None
+            return self._publish(
+                FiltrationAutomaticDriverState.BLOCKED,
+                at=frame.observed_at,
+                blocker="automatic_filtration_manual_pool_off_suppressed",
+                frame=frame,
+                command=False,
+            )
+        pool = _live_state(
+            {item.observation_id: item for item in frame.observations}.get(
+                "pool.active"
+            ),
+            frame.observed_at,
+        )
+        if pool.usable and pool.value is False:
+            self.ownership.release_filtration(session_id=lease.session_id)
+            self.session_id = None
+            self.attempt = None
+            return self._publish(
+                FiltrationAutomaticDriverState.BLOCKED,
+                at=frame.observed_at,
+                blocker="automatic_filtration_manual_pool_off_observed",
+                frame=frame,
+                command=False,
+            )
+        self.ownership.suspend_filtration(session_id=lease.session_id)
+        # Any old in-flight automatic request is no longer eligible to advance.
+        # Exact accepted provenance remains only as a non-actuating cleanup fact.
+        self.attempt = None
+        return self._publish(
+            FiltrationAutomaticDriverState.SUSPENDED,
+            at=frame.observed_at,
+            blocker="automatic_filtration_manual_pool_off_suppressed",
+            frame=frame,
+            command=False,
+        )
 
     def _recover_suspended(
         self,
@@ -740,6 +806,17 @@ class FiltrationAutomaticExecutionDriver:
                     continue
             return True
         return False
+
+    def _clean_spa_takeover(self, frame: FiltrationAutomaticExecutionFrame) -> bool:
+        by_id = {item.observation_id: item for item in frame.observations}
+        pool = _live_state(by_id.get("pool.active"), frame.observed_at)
+        spa = _live_state(by_id.get("spa.active"), frame.observed_at)
+        return (
+            pool.usable
+            and pool.value is False
+            and spa.usable
+            and spa.value is True
+        )
 
     def _fail(
         self,

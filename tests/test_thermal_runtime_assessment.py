@@ -28,6 +28,10 @@ from poolos.thermal_runtime_assessment import (
     ThermalRuntimeEvidence,
     ThermalTechnicalPreflight,
 )
+from poolos.spa_temperature_policy import (
+    SpaTemperatureDisposition,
+    SpaTemperatureEvidence,
+)
 
 
 NOW = datetime(2026, 8, 27, 20, 0, tzinfo=UTC)
@@ -47,8 +51,12 @@ def values(*, pool_active: bool = True, spa_active: bool = False) -> dict[str, o
         "spa.raw_htmode": "0",
         "pump.rpm": 2900,
         "pool.pump_circuit.configured_speed_rpm": 2900,
+        "spa.pump_circuit.configured_speed_rpm": 2600,
         "solar.temperature": 110.0,
         "solar.active": False,
+        "heater.active": False,
+        "pool.heating_demand_active": False,
+        "spa.heating_demand_active": False,
     }
 
 
@@ -70,6 +78,7 @@ def evidence(
     observed_at: dict[str, datetime] | None = None,
     probe_execution: PoolTemperatureProbeExecutionEvidence | None = None,
     probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None,
+    trusted_spa: bool = True,
 ) -> ThermalRuntimeEvidence:
     return ThermalRuntimeEvidence(
         evaluated_at=at,
@@ -84,6 +93,7 @@ def evidence(
         missing_native_concepts=missing,
         native_configuration=NativeConfigurationGuard().evaluate(configuration),
         pool_pump_circuit_id="p0102",
+        spa_pump_circuit_id="p0198",
         filtration_debt=filtration_debt,
         pending_durable_incident_confirmation=pending,
         durable_incident_confirmed=confirmed,
@@ -101,6 +111,21 @@ def evidence(
                 is PoolTemperatureProbeExecutionPhase.ACQUIRING
                 else None
             )
+        ),
+        spa_temperature_evidence=(
+            SpaTemperatureEvidence(
+                evaluated_at=at,
+                disposition=SpaTemperatureDisposition.TRUSTED,
+                trusted_temperature_f=float(
+                    (values() if native_values is None else native_values)[
+                        "spa.temperature"
+                    ]
+                ),
+                trusted_at=at,
+                acquisition_generation=1,
+            )
+            if trusted_spa
+            else None
         ),
     )
 
@@ -324,6 +349,8 @@ def live_values(
     solar_active: bool = False,
     spa_active: bool = False,
     spa_heater: str = "H0001",
+    heater_active: bool = False,
+    spa_heating_demand_active: bool = False,
 ) -> dict[str, object]:
     return {
         "pool.active": pool_active,
@@ -338,8 +365,12 @@ def live_values(
         "spa.raw_htmode": "0",
         "pump.rpm": pump_rpm,
         "pool.pump_circuit.configured_speed_rpm": pump_rpm,
+        "spa.pump_circuit.configured_speed_rpm": pump_rpm,
         "solar.temperature": solar_temperature,
         "solar.active": solar_active,
+        "heater.active": heater_active,
+        "pool.heating_demand_active": False,
+        "spa.heating_demand_active": spa_heating_demand_active,
     }
 
 
@@ -376,7 +407,7 @@ def test_live_cold_roof_active_filtration_rpm_requests_source_off_only() -> None
     plan = result.pool.plan
 
     assert plan.desired.selected_source is PhysicalHeatMode.OFF
-    assert plan.desired.required_pump_rpm is None
+    assert plan.desired.required_pump_rpm == 2600
     assert len(plan.operations) == 1
     assert isinstance(plan.operations[0], SetHeatMode)
     assert plan.operations[0].mode is PhysicalHeatMode.OFF
@@ -437,13 +468,75 @@ def test_live_already_off_preserves_nonthermal_rpm_without_operations() -> None:
     ).pool.plan
 
     assert result.desired.selected_source is PhysicalHeatMode.OFF
-    assert result.desired.required_pump_rpm is None
+    assert result.desired.required_pump_rpm == 2600
     assert result.operations == ()
     assert result.current.pump_rpm == 2600
 
 
+def test_live_external_pool_with_stale_solar_speed_normalizes_to_ordinary_rpm() -> None:
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=True,
+                pool_heater="00000",
+                pump_rpm=2900,
+            ),
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    ).pool.plan
+
+    assert result.desired.reason_code == "active_pool_session_operating_purpose"
+    assert result.desired.evidence["active_operating_purpose"] == (
+        "ordinary_circulation"
+    )
+    assert len(result.operations) == 1
+    assert isinstance(result.operations[0], SetPumpSpeed)
+    assert result.operations[0].rpm == 2600
+    assert result.operations[0].metadata["operating_purpose"] == (
+        "ordinary_circulation"
+    )
+
+
 def test_live_hot_tub_gas_behavior_remains_unchanged() -> None:
     result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=live_values(
+                pool_active=False,
+                pool_heater="00000",
+                pump_rpm=3000,
+                spa_active=True,
+                spa_heater="H0001",
+                heater_active=True,
+                spa_heating_demand_active=True,
+            ),
+            spa_mode=ThermalRequestedMode.GAS,
+        ),
+        live_policy=disabled_policy(),
+    ).hot_tub.plan
+
+    assert result.desired.selected_source is PhysicalHeatMode.GAS
+    assert result.desired.required_pump_rpm == 3000
+    assert result.operations == ()
+
+
+def test_spa_gas_preparation_is_flow_first_and_target_returns_to_2600() -> None:
+    preparing_values = live_values(
+        pool_active=False,
+        pool_heater="00000",
+        pump_rpm=2600,
+        spa_active=True,
+        spa_heater="00000",
+    )
+    preparing_values["spa.temperature"] = 80.0
+    preparing = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=preparing_values,
+            spa_mode=ThermalRequestedMode.GAS,
+        ),
+        live_policy=disabled_policy(),
+    ).hot_tub.plan
+    at_target = ThermalRuntimeEvaluator().evaluate(
         evidence(
             native_values=live_values(
                 pool_active=False,
@@ -457,9 +550,16 @@ def test_live_hot_tub_gas_behavior_remains_unchanged() -> None:
         live_policy=disabled_policy(),
     ).hot_tub.plan
 
-    assert result.desired.selected_source is PhysicalHeatMode.GAS
-    assert result.desired.required_pump_rpm == 3000
-    assert result.operations == ()
+    assert preparing.desired.required_pump_rpm == 3000
+    assert [type(operation) for operation in preparing.operations] == [
+        SetPumpSpeed,
+        SetHeatMode,
+    ]
+    assert at_target.desired.selected_source is PhysicalHeatMode.GAS
+    assert at_target.desired.required_pump_rpm == 2600
+    assert len(at_target.operations) == 1
+    assert isinstance(at_target.operations[0], SetPumpSpeed)
+    assert at_target.operations[0].rpm == 2600
 
 
 def test_stateful_evaluator_rejects_timestamp_regression_with_exact_reason() -> None:
@@ -543,9 +643,11 @@ def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> Non
     # Pool is authoritative active and Hot Tub is inactive.
     assert result.hot_tub.technical_preflight.ready is False
     assert "other_body_active" in result.hot_tub.technical_preflight.blocking_reasons
-    assert isinstance(result.hot_tub.plan.operations[0], SetBodyActive)
-    assert result.hot_tub.plan.operations[0].equipment_id == ThermalBody.HOT_TUB.value
-    assert result.hot_tub.plan.operations[0].active is True
+    assert isinstance(result.hot_tub.plan.operations[0], SetHeatMode)
+    assert result.hot_tub.plan.operations[0].mode is PhysicalHeatMode.SOLAR
+    assert isinstance(result.hot_tub.plan.operations[1], SetBodyActive)
+    assert result.hot_tub.plan.operations[1].equipment_id == ThermalBody.HOT_TUB.value
+    assert result.hot_tub.plan.operations[1].active is True
 
     # Operator/live authority remains independently gated.
     assert result.hot_tub.actual_authorization.authorized is False
@@ -581,10 +683,9 @@ def test_idle_solar_pool_requests_temperature_probe_before_source_selection() ->
     assert [type(operation) for operation in plan.operations] == [
         SetBodyActive,
         SetPumpSpeed,
-        SetPumpSpeed,
     ]
-    assert plan.operations[1].rpm == 3000
-    assert plan.operations[2].rpm == 1500
+    assert isinstance(plan.operations[-1], SetPumpSpeed)
+    assert plan.operations[-1].rpm == 1500
     assert "required_pool_thermal_evidence_unavailable" not in (
         plan.blocking_reasons
     )
@@ -650,7 +751,7 @@ def test_recent_circulating_temperature_is_reused_without_reprobe() -> None:
     assert result.pool.plan.desired.evidence["pool_temperature_f"] == 84.0
 
 
-def test_reused_pool_temperature_expires_and_idle_pipe_value_is_not_trusted() -> None:
+def test_successful_pool_temperature_is_retained_for_current_operational_day() -> None:
     evaluator = ThermalRuntimeEvaluator()
 
     circulating = values(pool_active=True)
@@ -683,9 +784,10 @@ def test_reused_pool_temperature_expires_and_idle_pipe_value_is_not_trusted() ->
         live_policy=disabled_policy(),
     )
 
-    assert result.pool.plan.desired.reason_code == "pool_temperature_probe_required"
-    assert result.pool.plan.desired.evidence["pool_temperature_f"] is None
-    assert result.pool.plan.desired.required_pump_rpm == 1500
+    assert result.pool.water_temperature is not None
+    assert result.pool.water_temperature.disposition.value == "retained"
+    assert result.pool.plan.desired.evidence["pool_temperature_f"] == 84.0
+    assert result.pool.plan.desired.required_pump_rpm == 2900
 
 
 def _probe_values(
@@ -694,11 +796,12 @@ def _probe_values(
     rpm: int,
     temperature: float = 98.0,
     spa_active: bool = False,
+    configured_rpm: int = 1500,
 ) -> dict[str, object]:
     native = values(pool_active=active, spa_active=spa_active)
     native["pool.raw_heater_id"] = "00000"
     native["pump.rpm"] = rpm
-    native["pool.pump_circuit.configured_speed_rpm"] = rpm
+    native["pool.pump_circuit.configured_speed_rpm"] = configured_rpm
     native["pool.temperature"] = temperature
     native["pool.target_temperature"] = 90.0
     native["solar.temperature"] = 110.0
@@ -720,7 +823,7 @@ def _evaluate_probe(
     probe = evaluator.pool_temperature_probe
     execution = None
     if probe.execution_purpose_id is not None and active and not spa_active and rpm > 0:
-        acquiring = rpm == 1500
+        acquiring = True
         started_at = (
             probe.started_at
             if probe.started_at is not None
@@ -740,7 +843,7 @@ def _evaluate_probe(
             ownership_lease_id=f"test-probe-lease-{generation}",
             ownership_generation=generation,
             body_activation_owned=True,
-            pump_setpoint_owned=acquiring,
+            pump_setpoint_owned=True,
             acquisition_started_at=started_at,
         )
     return evaluator.evaluate(
@@ -800,11 +903,37 @@ def test_probe_requirement_creates_explicit_runtime_ownership() -> None:
     assert evaluator.pool_temperature_probe.started_at is None
 
 
+def test_positive_gpm_with_zero_actual_rpm_cannot_start_probe_acquisition() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    _evaluate_probe(evaluator, at=NOW, active=False, rpm=0)
+    started = NOW + timedelta(seconds=30)
+    native = _probe_values(active=True, rpm=0)
+    native["pump.gpm"] = 55
+    native["pump.power"] = 0
+
+    evaluator.evaluate(
+        evidence(
+            at=started,
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            observed_at={"pool.temperature": started},
+            probe_execution=_active_probe_execution(evaluator, started),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert evaluator.pool_temperature_probe.phase is (
+        PoolTemperatureProbePhase.PROBE_REQUIRED
+    )
+    assert evaluator.pool_temperature_probe.started_at is None
+    assert evaluator.pool_temperature_probe.samples == ()
+
+
 @pytest.mark.parametrize(
     ("first_rpm", "expected_phase"),
     (
         (1500, PoolTemperatureProbePhase.PROBING),
-        (3000, PoolTemperatureProbePhase.PROBE_REQUIRED),
+        (1525, PoolTemperatureProbePhase.PROBING),
     ),
 )
 def test_probe_owned_circulation_cannot_immediately_trust_pipe_temperature(
@@ -851,7 +980,7 @@ def test_probe_remains_probing_before_two_minutes_and_bounds_samples() -> None:
         evaluator,
         at=NOW + timedelta(seconds=30),
         active=True,
-        rpm=3000,
+        rpm=1500,
         temperature=98.0,
     )
 
@@ -1354,7 +1483,7 @@ def test_probe_succeeds_only_after_minimum_duration_and_stable_window() -> None:
         evaluator,
         at=NOW + timedelta(seconds=30),
         active=True,
-        rpm=3000,
+        rpm=1500,
         temperature=98.0,
     )
     _evaluate_probe(
@@ -1364,7 +1493,7 @@ def test_probe_succeeds_only_after_minimum_duration_and_stable_window() -> None:
         rpm=1500,
         temperature=87.0,
     )
-    _evaluate_probe(
+    result = _evaluate_probe(
         evaluator,
         at=NOW + timedelta(seconds=150),
         active=True,
@@ -1372,20 +1501,12 @@ def test_probe_succeeds_only_after_minimum_duration_and_stable_window() -> None:
         temperature=86.5,
     )
 
-    result = _evaluate_probe(
-        evaluator,
-        at=NOW + timedelta(seconds=210),
-        active=True,
-        rpm=1500,
-        temperature=86.0,
-    )
-
     probe = evaluator.pool_temperature_probe
     assert probe.phase is PoolTemperatureProbePhase.TRUSTED
     assert probe.last_assessment is not None
     assert probe.last_assessment.reason_code == "probe_settled"
-    assert probe.last_assessment.trusted_temperature_f == 86.0
-    assert result.pool.plan.desired.evidence["pool_temperature_f"] == 86.0
+    assert probe.last_assessment.trusted_temperature_f == 86.5
+    assert result.pool.plan.desired.evidence["pool_temperature_f"] == 86.5
 
 
 def test_probe_transients_never_become_trusted_and_fail_closed_at_five_minutes() -> None:
@@ -1396,15 +1517,15 @@ def test_probe_transients_never_become_trusted_and_fail_closed_at_five_minutes()
         evaluator,
         at=started,
         active=True,
-        rpm=3000,
+        rpm=1500,
         temperature=98.0,
     )
-    acquisition_started = started + timedelta(seconds=60)
+    acquisition_started = started
     for elapsed_seconds, temperature in (
-        (0, 94.0),
-        (60, 88.0),
-        (120, 93.0),
-        (240, 86.0),
+        (30, 94.0),
+        (90, 88.0),
+        (150, 93.0),
+        (270, 86.0),
     ):
         result = _evaluate_probe(
             evaluator,
@@ -1576,9 +1697,9 @@ def test_matching_probe_rpm_without_execution_provenance_is_ordinary_trust() -> 
 
 @pytest.mark.parametrize(
     ("actual_rpm", "configured_rpm"),
-    ((1526, 1500), (1500, 1499)),
+    ((1526, 1500), (1500, 1499), (3000, 2600)),
 )
-def test_probe_rpm_or_configured_speed_break_discards_acquisition_epoch(
+def test_probe_acquisition_rejects_wrong_actual_or_configured_rpm(
     actual_rpm: int,
     configured_rpm: int,
 ) -> None:
@@ -1593,8 +1714,12 @@ def test_probe_rpm_or_configured_speed_break_discards_acquisition_epoch(
         rpm=1500,
         temperature=89.0,
     )
-    native = _probe_values(active=True, rpm=actual_rpm, temperature=89.0)
-    native["pool.pump_circuit.configured_speed_rpm"] = configured_rpm
+    native = _probe_values(
+        active=True,
+        rpm=actual_rpm,
+        configured_rpm=configured_rpm,
+        temperature=89.0,
+    )
 
     evaluator.evaluate(
         evidence(
@@ -1607,7 +1732,10 @@ def test_probe_rpm_or_configured_speed_break_discards_acquisition_epoch(
         live_policy=disabled_policy(),
     )
 
-    assert evaluator.pool_temperature_probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
+    assert (
+        evaluator.pool_temperature_probe.phase
+        is PoolTemperatureProbePhase.PROBE_REQUIRED
+    )
     assert evaluator.pool_temperature_probe.started_at is None
     assert evaluator.pool_temperature_probe.samples == ()
 

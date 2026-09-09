@@ -1,7 +1,7 @@
 """Command-free, ownership-scoped thermal termination decisions.
 
 Termination is deliberately smaller than normal thermal execution.  It may
-only de-select a still-attributable Pool heat source.  Pump and body effects
+        only de-select a still-attributable body heat source.  Pump and body effects
 are relinquished without writes because PoolOS has no authoritative successor
 execution owner capable of proving that circulation may stop or which RPM it
 should assume.
@@ -81,10 +81,10 @@ class ThermalTerminationAssessment:
         if self.operation is not None:
             if (
                 self.operation.mode is not PhysicalHeatMode.OFF
-                or self.body is not ThermalBody.POOL
-                or self.operation.equipment_id != ThermalBody.POOL.value
+                or self.body not in {ThermalBody.POOL, ThermalBody.HOT_TUB}
+                or self.operation.equipment_id != self.body.value
             ):
-                raise ValueError("termination operation must be Pool heat source Off")
+                raise ValueError("termination operation must be exact body heat source Off")
             if not self.monotonic:
                 raise ValueError("termination operation must be monotonic")
         if self.physical_action_required != (self.operation is not None):
@@ -221,14 +221,8 @@ class ThermalTerminationPolicy:
                 "thermal_termination_current_policy_still_requires_heat_source",
                 **common,
             )
-        if entitlement.body is not ThermalBody.POOL:
-            return _assessment(
-                ThermalTerminationDisposition.BLOCKED,
-                "thermal_termination_hot_tub_not_commissioned",
-                **common,
-            )
         operation = SetHeatMode(
-            equipment_id=ThermalBody.POOL.value,
+            equipment_id=entitlement.body.value,
             mode=PhysicalHeatMode.OFF,
             metadata={
                 "thermal_termination": True,

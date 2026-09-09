@@ -24,6 +24,14 @@ class SpaHeatingMode(str, Enum):
     GAS_ONLY = "gas_only"
 
 
+class SpaSessionKind(str, Enum):
+    """Semantic Spa intent, deliberately distinct from body activity."""
+
+    INACTIVE = "inactive"
+    EXTERNAL_USER = "external_user"
+    POOLOS_OPPORTUNISTIC = "poolos_opportunistic"
+
+
 class SpaPolicyState(str, Enum):
     IDLE = "idle"
     SPA_IN_USE_HEAT_UP = "spa_in_use_heat_up"
@@ -62,6 +70,10 @@ class SpaPolicyInput:
     pool_demand_satisfied: bool = False
     filtration_debt: timedelta | None = timedelta(0)
     higher_priority_conflict: bool = False
+    session_kind: SpaSessionKind | None = None
+    spa_temperature_trusted: bool = True
+    active_heat_source: ThermalHeatSource = ThermalHeatSource.NONE
+    active_heat_source_usable: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +87,7 @@ class SpaPolicyAssessment:
     pool_reprobe_allowed: bool
     intent: OperationalIntent | None
     reason_code: str
+    session_kind: SpaSessionKind = SpaSessionKind.INACTIVE
     authority: str = "none"
     command_delivery_enabled: bool = False
 
@@ -117,6 +130,10 @@ class SpaThermalPolicyTracker:
         self._last_evaluated_at = observation.evaluated_at
 
         if observation.spa_active:
+            session_kind = observation.session_kind or SpaSessionKind.EXTERNAL_USER
+            if session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC:
+                self._spa_in_use = False
+                return self._evaluate_opportunistic(observation)
             if not self._spa_in_use:
                 self._maintenance_latched = False
                 self._above_130_since = None
@@ -134,7 +151,12 @@ class SpaThermalPolicyTracker:
         return self._evaluate_opportunistic(observation)
 
     def _evaluate_user_session(self, observation: SpaPolicyInput) -> SpaPolicyAssessment:
-        target_reached = observation.spa_temperature_f is not None and observation.spa_target_f is not None and observation.spa_temperature_f >= observation.spa_target_f
+        target_reached = (
+            observation.spa_temperature_trusted
+            and observation.spa_temperature_f is not None
+            and observation.spa_target_f is not None
+            and observation.spa_temperature_f >= observation.spa_target_f
+        )
         if target_reached:
             self._maintenance_latched = True
         self._state = SpaPolicyState.SPA_IN_USE_MAINTENANCE if self._maintenance_latched else SpaPolicyState.SPA_IN_USE_HEAT_UP
@@ -198,7 +220,7 @@ class SpaThermalPolicyTracker:
                     observation,
                     self._state,
                     ThermalHeatSource.NONE,
-                    None,
+                    self._policy.baselines.filtration_rpm,
                     "opportunistic_target_cap_reached",
                     preserve=True,
                 )
@@ -209,7 +231,14 @@ class SpaThermalPolicyTracker:
                 self._below_120_since = None
             if self._below_120_since is not None and observation.evaluated_at - self._below_120_since >= self._policy.qualification_hold:
                 self._state = SpaPolicyState.OPPORTUNISTIC_HOLD
-                return self._result(observation, self._state, ThermalHeatSource.NONE, None, "opportunistic_roof_low_hold", preserve=True)
+                return self._result(
+                    observation,
+                    self._state,
+                    ThermalHeatSource.NONE,
+                    self._policy.baselines.filtration_rpm,
+                    "opportunistic_roof_low_hold",
+                    preserve=True,
+                )
             return self._solar(observation, "opportunistic_active", opportunistic=True)
 
         if roof is not None and roof >= self._policy.heat_up_solar_roof_f:
@@ -228,12 +257,25 @@ class SpaThermalPolicyTracker:
     def _solar(self, observation: SpaPolicyInput, reason: str, *, opportunistic: bool = False) -> SpaPolicyAssessment:
         self._last_source = ThermalHeatSource.SOLAR
         state = SpaPolicyState.OPPORTUNISTIC_ACTIVE if opportunistic else self._state
-        return self._result(observation, state, ThermalHeatSource.SOLAR, self._policy.baselines.solar_heating_rpm, reason, preserve=opportunistic)
+        return self._result(
+            observation,
+            state,
+            ThermalHeatSource.SOLAR,
+            self._operating_rpm(observation, allow_start=opportunistic),
+            reason,
+            preserve=opportunistic,
+        )
 
     def _gas_or_none(self, observation: SpaPolicyInput, reason: str) -> SpaPolicyAssessment:
         if observation.permissions.gas_allowed:
             self._last_source = ThermalHeatSource.GAS
-            return self._result(observation, self._state, ThermalHeatSource.GAS, self._policy.baselines.gas_heating_rpm, reason)
+            return self._result(
+                observation,
+                self._state,
+                ThermalHeatSource.GAS,
+                self._operating_rpm(observation),
+                reason,
+            )
         self._last_source = ThermalHeatSource.NONE
         return self._result(observation, self._state, ThermalHeatSource.NONE, None, "gas_permission_veto")
 
@@ -253,4 +295,48 @@ class SpaThermalPolicyTracker:
                     IntentCriterion("gas_fallback_forbidden", "Opportunistic spa never uses gas", {"forbidden": not self._spa_in_use}),
                 ),
             )
-        return SpaPolicyAssessment(observation.evaluated_at, state, source, rpm, self._spa_in_use, preserve, False, intent, reason)
+        session_kind = (
+            SpaSessionKind.EXTERNAL_USER
+            if self._spa_in_use
+            else (
+                SpaSessionKind.POOLOS_OPPORTUNISTIC
+                if state
+                in {
+                    SpaPolicyState.OPPORTUNISTIC_ACTIVE,
+                    SpaPolicyState.OPPORTUNISTIC_HOLD,
+                    SpaPolicyState.PRESERVE_UNTIL_10PM,
+                    SpaPolicyState.RELEASE_TO_POOL,
+                }
+                else SpaSessionKind.INACTIVE
+            )
+        )
+        return SpaPolicyAssessment(
+            observation.evaluated_at,
+            state,
+            source,
+            rpm,
+            self._spa_in_use,
+            preserve,
+            False,
+            intent,
+            reason,
+            session_kind,
+        )
+
+    def _operating_rpm(
+        self,
+        observation: SpaPolicyInput,
+        *,
+        allow_start: bool = False,
+    ) -> int | None:
+        """Follow active energy delivery, not selected source configuration."""
+
+        if not observation.spa_active:
+            return self._policy.baselines.filtration_rpm if allow_start else None
+        if not observation.active_heat_source_usable:
+            return None
+        if observation.active_heat_source is ThermalHeatSource.SOLAR:
+            return self._policy.baselines.solar_heating_rpm
+        if observation.active_heat_source is ThermalHeatSource.GAS:
+            return self._policy.baselines.gas_heating_rpm
+        return self._policy.baselines.filtration_rpm

@@ -177,6 +177,8 @@ class ManualIntelliCenterControl:
         transport: str = "tcp",
         keepalive_interval: float = 90.0,
         reconnect_delay: int = 30,
+        pool_manual_off_requested: Callable[[datetime], None] | None = None,
+        spa_manual_off_requested: Callable[[datetime], None] | None = None,
     ) -> None:
         normalized_host = host.strip()
         if not normalized_host:
@@ -190,6 +192,8 @@ class ManualIntelliCenterControl:
 
         self._host = normalized_host
         self._command_authority = command_authority
+        self._pool_manual_off_requested = pool_manual_off_requested
+        self._spa_manual_off_requested = spa_manual_off_requested
         self._transport_name = transport
         self._model = PoolModel()
         self._controller = ICModelController(
@@ -269,6 +273,25 @@ class ManualIntelliCenterControl:
             raise ValueError("body active state must be boolean")
 
         prefix = "pool" if body_objnam == "B1101" else "spa"
+        pool_off_requested = getattr(self, "_pool_manual_off_requested", None)
+        spa_off_requested = getattr(self, "_spa_manual_off_requested", None)
+        if (
+            body_objnam == "B1101"
+            and active is False
+            and request_source is PhysicalRequestSource.MANUAL
+            and pool_off_requested is not None
+        ):
+            # Arm the operator restraint synchronously before the first await or
+            # physical delivery attempt. A failed manual Off remains a safety
+            # intent and must not silently re-enable automatic Pool work.
+            pool_off_requested(datetime.now(UTC))
+        if (
+            body_objnam == "B1202"
+            and active is False
+            and request_source is PhysicalRequestSource.MANUAL
+            and spa_off_requested is not None
+        ):
+            spa_off_requested(datetime.now(UTC))
         await self._async_deliver(
             request=PhysicalCommandRequest(
                 operation="body_active",

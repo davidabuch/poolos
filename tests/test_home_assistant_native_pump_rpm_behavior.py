@@ -196,6 +196,44 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def test_manual_pool_off_arms_suppression_before_physical_delivery() -> None:
+    gateway, recorder = _gateway([])
+    armed_at: list[datetime] = []
+    gateway._pool_manual_off_requested = armed_at.append
+
+    _run(gateway.async_set_body_active("B1101", False))
+
+    assert len(armed_at) == 1
+    assert recorder.calls == [("B1101", {"STATUS": "OFF"})]
+
+
+def test_failed_manual_pool_off_retains_pre_delivery_suppression_intent() -> None:
+    gateway, recorder = _gateway([])
+    armed_at: list[datetime] = []
+    gateway._pool_manual_off_requested = armed_at.append
+    gateway._command_authority.resolve_maintenance(True)
+
+    with pytest.raises(ManualIntelliCenterCommandError, match="maintenance_mode"):
+        _run(gateway.async_set_body_active("B1101", False))
+
+    assert len(armed_at) == 1
+    assert recorder.calls == []
+
+
+def test_manual_spa_off_arms_only_spa_suppression_before_delivery() -> None:
+    gateway, recorder = _gateway([])
+    pool_armed: list[datetime] = []
+    spa_armed: list[datetime] = []
+    gateway._pool_manual_off_requested = pool_armed.append
+    gateway._spa_manual_off_requested = spa_armed.append
+
+    _run(gateway.async_set_body_active("B1202", False))
+
+    assert spa_armed
+    assert pool_armed == []
+    assert recorder.calls == [("B1202", {"STATUS": "OFF"})]
+
+
 def test_pmpcirc_must_be_assigned_to_pool_circuit(
     pump_object_factory,
     pump_circuit_object_factory,
@@ -817,7 +855,7 @@ def test_queued_pool_cleanup_loses_stale_epoch_authority_inside_command_lock(
     asyncio.run(scenario())
 
 
-def test_queued_probe_rpm_loses_stale_epoch_authority_inside_command_lock(
+def test_queued_probe_source_off_loses_stale_epoch_authority_inside_command_lock(
     pump_object_factory,
     pump_circuit_object_factory,
 ) -> None:
@@ -835,9 +873,9 @@ def test_queued_probe_rpm_loses_stale_epoch_authority_inside_command_lock(
         authority.register_automatic_thermal_probe(
             epoch_identity="probe-epoch",
             operation_id="probe-operation",
-            operation="pump_circuit_speed",
-            target="p0102",
-            requested_value=1500,
+            operation="body_heat_source",
+            target="B1101",
+            requested_value="00000",
         )
         context = authority.bind_automatic_thermal_dispatch(
             epoch_identity="probe-epoch",
@@ -848,9 +886,9 @@ def test_queued_probe_rpm_loses_stale_epoch_authority_inside_command_lock(
         )
         await gateway._command_lock.acquire()
         task = asyncio.create_task(
-            gateway.async_set_pump_circuit_speed(
-                "p0102",
-                1500,
+            gateway.async_set_body_heat_source(
+                "B1101",
+                "00000",
                 request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
                 automatic_thermal_context=context,
             )

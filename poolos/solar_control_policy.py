@@ -18,6 +18,8 @@ class SolarEligibilityPolicy:
     """Initial physical thresholds; values remain configurable policy."""
 
     activation_differential_f: float = 7.0
+    trial_continuation_differential_f: float = 6.0
+    trial_abort_differential_f: float = 5.0
     deactivation_differential_f: float = 3.0
     minimum_collector_temperature_f: float = 90.0
     deactivation_hold: timedelta = timedelta(minutes=5)
@@ -26,6 +28,8 @@ class SolarEligibilityPolicy:
     def __post_init__(self) -> None:
         for name in (
             "activation_differential_f",
+            "trial_continuation_differential_f",
+            "trial_abort_differential_f",
             "deactivation_differential_f",
             "minimum_collector_temperature_f",
         ):
@@ -49,6 +53,7 @@ class SolarEligibilityInput:
     collector_temperature_f: float | None
     target_temperature_f: float | None
     solar_configured: bool = False
+    retained_water_reference: bool = False
 
     def __post_init__(self) -> None:
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
@@ -104,6 +109,7 @@ class SolarEligibilityTracker:
         self._policy = policy
         self._differential_below_since: datetime | None = None
         self._target_satisfied_since: datetime | None = None
+        self._retained_reference_trial_active = False
         self._last_evaluated_at: datetime | None = None
 
     @property
@@ -113,6 +119,7 @@ class SolarEligibilityTracker:
     def reset(self) -> None:
         self._differential_below_since = None
         self._target_satisfied_since = None
+        self._retained_reference_trial_active = False
         self._last_evaluated_at = None
 
     def _result(
@@ -148,9 +155,12 @@ class SolarEligibilityTracker:
         differential: float | None,
         reason_code: str,
         rationale: str,
+        preserve_trial: bool = False,
     ) -> SolarEligibilityAssessment:
         self._differential_below_since = None
         self._target_satisfied_since = None
+        if not preserve_trial:
+            self._retained_reference_trial_active = False
         return self._result(
             observation,
             disposition=SolarEligibilityDisposition.BLOCKED,
@@ -176,12 +186,35 @@ class SolarEligibilityTracker:
         if not observation.solar_active:
             self._differential_below_since = None
             self._target_satisfied_since = None
-            if collector < self._policy.minimum_collector_temperature_f:
-                return self._block(observation, differential=differential, reason_code="collector_below_minimum", rationale="Collector temperature is below the configured minimum.")
             if water >= target:
                 return self._block(observation, differential=differential, reason_code="target_satisfied", rationale="Pool target is already satisfied.")
+            if observation.pool_active and self._retained_reference_trial_active:
+                if differential <= self._policy.trial_abort_differential_f:
+                    return self._block(
+                        observation,
+                        differential=differential,
+                        reason_code="solar_trial_differential_abort",
+                        rationale="Fresh circulating differential reached the trial abort boundary.",
+                    )
+                return self._result(
+                    observation,
+                    disposition=SolarEligibilityDisposition.ELIGIBLE,
+                    differential=differential,
+                    reason_code="solar_trial_continuation",
+                    rationale=(
+                        "Fresh circulating evidence remains above the trial abort boundary."
+                        if differential < self._policy.trial_continuation_differential_f
+                        else "Fresh circulating differential satisfies the Solar trial continuation boundary."
+                    ),
+                    opportunity_warranted=True,
+                    continuation_eligible=True,
+                )
+            if collector < self._policy.minimum_collector_temperature_f:
+                return self._block(observation, differential=differential, reason_code="collector_below_minimum", rationale="Collector temperature is below the configured minimum.")
             if differential < self._policy.activation_differential_f:
                 return self._block(observation, differential=differential, reason_code="activation_differential_insufficient", rationale="Collector differential is below the activation threshold.")
+            if not observation.pool_active and observation.retained_water_reference:
+                self._retained_reference_trial_active = True
             return self._result(
                 observation,
                 disposition=SolarEligibilityDisposition.ELIGIBLE,
@@ -207,6 +240,8 @@ class SolarEligibilityTracker:
                 reason_code="active_solar_pool_circulation_lost",
                 rationale="Active Solar cannot continue without proven Pool circulation.",
             )
+
+        self._retained_reference_trial_active = False
 
         if differential < self._policy.deactivation_differential_f:
             if self._differential_below_since is None:

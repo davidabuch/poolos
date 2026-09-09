@@ -12,6 +12,7 @@ import pytest
 from poolos.intellicenter_readonly import (
     NATIVE_TARGET_CONCEPTS,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     NativeBodyKind,
     NativeBodyState,
     NativeCircuitState,
@@ -28,6 +29,7 @@ from poolos.intellicenter_readonly import (
     NativeTemperatureState,
     NativeSystemState,
     resolve_pool_pump_circuit,
+    resolve_body_pump_circuit,
 )
 from poolos.observations import ObservationQuality
 from poolos.observation_parity import ObservationParityEngine
@@ -130,7 +132,39 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
                     NativeRawAttribute("SPEED", "2200"),
                 ),
             ),
+            NativeRawObject(
+                native_id="p0198",
+                object_type="PMPCIRC",
+                subtype=None,
+                name="Spa",
+                parent_id="PMP01",
+                observed_at=NOW,
+                attributes=(
+                    NativeRawAttribute("CIRCUIT", "C0001"),
+                    NativeRawAttribute("SELECT", "RPM"),
+                    NativeRawAttribute("PARENT", "PMP01"),
+                    NativeRawAttribute("SPEED", "2816"),
+                ),
+            ),
         ),
+    )
+
+
+def test_body_specific_pmpcirc_identity_and_configured_speed_are_distinct() -> None:
+    snapshot = transport()
+    pool = resolve_pool_pump_circuit(snapshot)
+    spa = resolve_body_pump_circuit(snapshot, body=NativeBodyKind.SPA)
+
+    assert pool is not None and pool.native_id == "p0102"
+    assert spa is not None and spa.native_id == "p0198"
+    assert pool.native_id != spa.native_id
+
+    mapped = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+    by_id = {item.observation_id: item for item in mapped.observations}
+    assert by_id[POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT].value == 2200.0
+    assert by_id[SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT].value == 2816.0
+    assert by_id[SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT].source_id.endswith(
+        ":p0198"
     )
 
 

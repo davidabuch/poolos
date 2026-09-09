@@ -16,7 +16,10 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Mapping
 
 from .integration import PhysicalHeatMode, ThermalBody
-from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
 from .native_configuration_policy import NativeConfigurationAssessment
 from .operating_baselines import PumpOperatingBaselines
 from .pool_temperature_probe_execution import (
@@ -27,8 +30,18 @@ from .pool_temperature_probe_execution import (
 from .spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
+    SpaSessionKind,
     SpaThermalPolicyTracker,
     SpaUserSource,
+)
+from .spa_temperature_policy import (
+    SpaTemperatureDisposition,
+    SpaTemperatureEvidence,
+    current_spa_temperature_evidence,
+)
+from .thermal_operating_purpose import (
+    ThermalOperatingPurposeEvidence,
+    assess_thermal_operating_purpose,
 )
 from .thermal_execution_planning import (
     ThermalCurrentState,
@@ -51,6 +64,7 @@ from .thermal_live_execution import (
 from .thermal_source_policy import (
     HeatSourcePermissions,
     PoolHeatingMode,
+    ThermalHeatSource,
     ThermalSourceInput,
     ThermalSourceSelector,
 )
@@ -60,6 +74,9 @@ from .water_temperature_policy import (
     WaterTemperatureDisposition,
     WaterTemperatureTracker,
 )
+
+_PUMP_BASELINES = PumpOperatingBaselines()
+_ACTUAL_PUMP_RPM_TOLERANCE = 25
 
 
 class ThermalRequestedMode(StrEnum):
@@ -218,7 +235,10 @@ class PoolTemperatureProbeRuntimeState:
                     if started_at is None
                     else (started_at + maximum_duration).isoformat()
                 ),
-                "probe_rpm_target": PumpOperatingBaselines().temperature_probe_rpm,
+                "probe_rpm_target": _PUMP_BASELINES.temperature_probe_rpm,
+                "probe_rpm_requirement": (
+                    "authoritative_configured_and_actual_pool_acquisition_rpm"
+                ),
                 "probe_sample_count": len(self.samples),
                 "probe_oldest_sample_at": (
                     None if oldest is None else oldest.observed_at.isoformat()
@@ -321,12 +341,15 @@ class ThermalRuntimeEvidence:
     missing_native_concepts: tuple[str, ...]
     native_configuration: NativeConfigurationAssessment
     pool_pump_circuit_id: str | None = None
+    spa_pump_circuit_id: str | None = None
     native_observed_at: Mapping[str, datetime] = field(default_factory=dict)
     filtration_debt: timedelta | None = None
     pending_durable_incident_confirmation: bool = False
     durable_incident_confirmed: bool = False
     pool_temperature_probe_execution: PoolTemperatureProbeExecutionEvidence | None = None
     pool_temperature_probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None
+    spa_temperature_evidence: SpaTemperatureEvidence | None = None
+    spa_session_kind: SpaSessionKind | None = None
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at)
@@ -370,8 +393,11 @@ class ThermalBodyRuntimeAssessment:
     effective_heater_id: str | None
     actual_pump_rpm: int | None
     evidence_blockers: tuple[str, ...]
+    pump_circuit_id: str | None = None
+    configured_pump_speed_concept: str | None = None
     live_safety_evidence: ThermalLiveSafetyEvidence | None = None
     water_temperature: WaterTemperatureAssessment | None = None
+    spa_temperature: SpaTemperatureEvidence | None = None
     pool_temperature_probe_diagnostics: Mapping[str, object] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -424,6 +450,8 @@ class ThermalBodyRuntimeAssessment:
                 "body_active": self.body_active,
                 "effective_native_heater_id": self.effective_heater_id,
                 "actual_pump_rpm": self.actual_pump_rpm,
+                "pump_circuit_id": self.pump_circuit_id,
+                "configured_pump_speed_concept": self.configured_pump_speed_concept,
                 "actual_authorized": self.actual_authorization.authorized,
                 "actual_blockers": list(
                     self.actual_authorization.blocking_reasons[:blocker_limit]
@@ -443,6 +471,16 @@ class ThermalBodyRuntimeAssessment:
                     None
                     if self.water_temperature is None or self.water_temperature.trusted_at is None
                     else self.water_temperature.trusted_at.isoformat()
+                ),
+                "spa_temperature_disposition": (
+                    None
+                    if self.spa_temperature is None
+                    else self.spa_temperature.disposition.value
+                ),
+                "trusted_spa_temperature_f": (
+                    None
+                    if self.spa_temperature is None
+                    else self.spa_temperature.trusted_temperature_f
                 ),
                 "authority": "none",
                 "automatic_execution_driver_enabled": False,
@@ -467,6 +505,7 @@ class ThermalRuntimeAssessment:
     durable_incident_confirmed: bool
     native_conflict_codes: tuple[str, ...]
     pool_pump_circuit_id: str | None = None
+    spa_pump_circuit_id: str | None = None
 
     def global_diagnostics(self) -> Mapping[str, Any]:
         blockers = tuple(
@@ -503,6 +542,7 @@ class ThermalRuntimeAssessment:
                 "current_blockers": list(blockers[:20]),
                 "native_conflict_codes": list(self.native_conflict_codes[:20]),
                 "pool_pump_circuit_id": self.pool_pump_circuit_id,
+                "spa_pump_circuit_id": self.spa_pump_circuit_id,
                 "authority": "none",
                 "automatic_execution_driver_enabled": False,
                 "command_delivery_performed": False,
@@ -527,6 +567,11 @@ class ThermalRuntimeEvaluator:
         default_factory=ThermalLiveAuthorizationEngine
     )
     _last_pool_temperature_evaluated_at: datetime | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _spa_circulation_started_at: datetime | None = field(
         default=None,
         init=False,
         repr=False,
@@ -576,6 +621,7 @@ class ThermalRuntimeEvaluator:
                 item.code for item in evidence.native_configuration.conflicts
             ),
             pool_pump_circuit_id=evidence.pool_pump_circuit_id,
+            spa_pump_circuit_id=evidence.spa_pump_circuit_id,
         )
 
     def _evaluate_body(
@@ -593,6 +639,16 @@ class ThermalRuntimeEvaluator:
         heater_id = _string_or_none(values.get(f"{prefix}.raw_heater_id"))
         pump_rpm = _int_or_none(values.get("pump.rpm"))
         current_source = _physical_source(heater_id)
+        pump_circuit_id = (
+            evidence.pool_pump_circuit_id
+            if body is ThermalBody.POOL
+            else evidence.spa_pump_circuit_id
+        )
+        configured_speed_concept = (
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            if body is ThermalBody.POOL
+            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        )
         relevant = {
             f"{prefix}.active",
             f"{prefix}.temperature",
@@ -602,10 +658,18 @@ class ThermalRuntimeEvaluator:
             "solar.temperature",
             "solar.active",
         }
+        if body is ThermalBody.HOT_TUB:
+            relevant.update(
+                {
+                    "heater.active",
+                    "spa.heating_demand_active",
+                }
+            )
         missing = tuple(sorted(relevant & set(evidence.missing_native_concepts)))
         stale = tuple(sorted(relevant & set(evidence.stale_native_concepts)))
 
         water_temperature: WaterTemperatureAssessment | None = None
+        spa_temperature: SpaTemperatureEvidence | None = None
         if (
             body is ThermalBody.POOL
             and requested_mode
@@ -632,10 +696,13 @@ class ThermalRuntimeEvaluator:
                 and "solar.temperature" not in stale
             )
             spa_active = _bool_or_none(values.get("spa.active"))
+            if spa_active is True or (active is True and spa_active is True):
+                self.water_temperature_tracker.invalidate_retained_reference()
             probe_hydraulic_concepts = {
                 "pool.active",
                 "spa.active",
                 "pump.rpm",
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
             }
             execution_claim = evidence.pool_temperature_probe_execution
             execution = execution_claim
@@ -660,13 +727,6 @@ class ThermalRuntimeEvaluator:
                     pool_temperature_usable
                     and continuity.temperature_sample_usable
                 )
-            if (
-                execution is not None
-                and execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
-            ):
-                probe_hydraulic_concepts.add(
-                    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
-                )
             probe_hydraulic_evidence_usable = not (
                 probe_hydraulic_concepts
                 & (
@@ -674,34 +734,30 @@ class ThermalRuntimeEvaluator:
                     | set(evidence.stale_native_concepts)
                 )
             )
-            pool_circulating = (
+            ordinary_pool_circulating = (
                 probe_hydraulic_evidence_usable
                 and active is True
                 and spa_active is False
                 and pump_rpm is not None
                 and pump_rpm > 0
             )
-            if (
-                pool_circulating
-                and execution is not None
-                and execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
-            ):
-                probe_rpm = PumpOperatingBaselines().temperature_probe_rpm
-                configured_probe_rpm = _int_or_none(
+            probe_circulating = (
+                ordinary_pool_circulating
+                and pump_rpm is not None
+                and abs(pump_rpm - _PUMP_BASELINES.temperature_probe_rpm)
+                <= _ACTUAL_PUMP_RPM_TOLERANCE
+                and _int_or_none(
                     values.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT)
                 )
-                pool_circulating = bool(
-                    configured_probe_rpm == probe_rpm
-                    and pump_rpm is not None
-                    and abs(pump_rpm - probe_rpm) <= self.planner.pump_rpm_tolerance
-                )
+                == _PUMP_BASELINES.temperature_probe_rpm
+            )
             self.pool_temperature_probe.synchronize_execution(
                 execution,
                 at=evidence.evaluated_at,
             )
             self.pool_temperature_probe.invalidate_if_probing(
                 evidence.evaluated_at,
-                pool_circulating=pool_circulating,
+                pool_circulating=probe_circulating,
             )
             sample: TemperatureSample | None = None
             observed_temperature = (
@@ -711,7 +767,7 @@ class ThermalRuntimeEvaluator:
             )
             if (
                 self.pool_temperature_probe.tracker_probe_active
-                and pool_circulating
+                and probe_circulating
                 and observed_temperature is not None
             ):
                 sample_observed_at = evidence.native_observed_at.get(
@@ -730,7 +786,11 @@ class ThermalRuntimeEvaluator:
                 water_temperature = self.water_temperature_tracker.evaluate(
                     evaluated_at=evidence.evaluated_at,
                     observed_temperature_f=observed_temperature,
-                    pool_circulating=pool_circulating,
+                    pool_circulating=(
+                        probe_circulating
+                        if self.pool_temperature_probe.tracker_probe_active
+                        else ordinary_pool_circulating
+                    ),
                     probe_active=(
                         self.pool_temperature_probe.tracker_probe_active
                     ),
@@ -772,6 +832,46 @@ class ThermalRuntimeEvaluator:
                     item for item in stale if item != "pool.temperature"
                 )
 
+        if body is ThermalBody.HOT_TUB:
+            supplied_spa_temperature = evidence.spa_temperature_evidence
+            spa_temperature_observed_at = evidence.native_observed_at.get(
+                "spa.temperature"
+            )
+            spa_circulation_proven = (
+                active is True
+                and _bool_or_none(values.get("pool.active")) is False
+                and pump_rpm is not None
+                and pump_rpm > 0
+            )
+            if not spa_circulation_proven:
+                self._spa_circulation_started_at = None
+            elif self._spa_circulation_started_at is None:
+                self._spa_circulation_started_at = evidence.evaluated_at
+            spa_temperature = (
+                supplied_spa_temperature
+                if supplied_spa_temperature is not None
+                and supplied_spa_temperature.evaluated_at == evidence.evaluated_at
+                else current_spa_temperature_evidence(
+                    evaluated_at=evidence.evaluated_at,
+                    spa_active=active,
+                    pool_active=_bool_or_none(values.get("pool.active")),
+                    pump_rpm=pump_rpm,
+                    observed_temperature_f=_number(values.get("spa.temperature")),
+                    temperature_observed_at=spa_temperature_observed_at,
+                    observation_usable=(
+                        not bool(
+                            {"pool.active", "spa.active", "spa.temperature", "pump.rpm"}
+                            & (set(missing) | set(stale))
+                        )
+                        and _number(values.get("spa.temperature")) is not None
+                        and self._spa_circulation_started_at is not None
+                        and spa_temperature_observed_at is not None
+                        and spa_temperature_observed_at
+                        > self._spa_circulation_started_at
+                    ),
+                )
+            )
+
         blockers = tuple(
             (
                 *(f"missing_native:{item}" for item in missing),
@@ -786,25 +886,26 @@ class ThermalRuntimeEvaluator:
             evidence_usable=not blockers,
             blockers=blockers,
             water_temperature=water_temperature,
+            spa_temperature=spa_temperature,
         )
         if desired.required_pump_rpm is not None:
             if (
-                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                configured_speed_concept
                 in evidence.missing_native_concepts
-                or values.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT) is None
+                or values.get(configured_speed_concept) is None
             ):
                 blockers = tuple(
                     dict.fromkeys(
-                        (*blockers, f"missing_native:{POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT}")
+                        (*blockers, f"missing_native:{configured_speed_concept}")
                     )
                 )
             if (
-                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                configured_speed_concept
                 in evidence.stale_native_concepts
             ):
                 blockers = tuple(
                     dict.fromkeys(
-                        (*blockers, f"stale_native:{POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT}")
+                        (*blockers, f"stale_native:{configured_speed_concept}")
                     )
                 )
         current = ThermalCurrentState(
@@ -820,7 +921,8 @@ class ThermalRuntimeEvaluator:
         )
         planner = replace(
             self.planner,
-            pump_equipment_id=evidence.pool_pump_circuit_id,
+            pump_equipment_id=pump_circuit_id,
+            configured_speed_concept=configured_speed_concept,
         )
         plan = planner.build(desired, current)
         execution_currentness = ThermalExecutionCurrentness.from_assessment(
@@ -881,6 +983,8 @@ class ThermalRuntimeEvaluator:
             ),
             native_configuration=evidence.native_configuration,
             pool_pump_circuit_id=evidence.pool_pump_circuit_id,
+            target_pump_circuit_id=pump_circuit_id,
+            configured_pump_speed_concept=configured_speed_concept,
             contradictory_evidence=(
                 ("pool_and_hot_tub_active",)
                 if values.get("pool.active") is True
@@ -921,8 +1025,11 @@ class ThermalRuntimeEvaluator:
             effective_heater_id=heater_id,
             actual_pump_rpm=pump_rpm,
             evidence_blockers=blockers,
+            pump_circuit_id=pump_circuit_id,
+            configured_pump_speed_concept=configured_speed_concept,
             live_safety_evidence=safety,
             water_temperature=water_temperature,
+            spa_temperature=spa_temperature,
             pool_temperature_probe_diagnostics=(
                 self.pool_temperature_probe.diagnostics(
                     evaluated_at=evidence.evaluated_at,
@@ -944,6 +1051,7 @@ class ThermalRuntimeEvaluator:
         evidence_usable: bool,
         blockers: tuple[str, ...],
         water_temperature: WaterTemperatureAssessment | None = None,
+        spa_temperature: SpaTemperatureEvidence | None = None,
     ) -> ThermalDesiredState:
         if requested_mode is ThermalRequestedMode.OFF:
             return _off_desired(
@@ -977,6 +1085,7 @@ class ThermalRuntimeEvaluator:
                         in {
                             WaterTemperatureDisposition.TRUSTED,
                             WaterTemperatureDisposition.REUSED,
+                            WaterTemperatureDisposition.RETAINED,
                         }
                     )
                     else (
@@ -1000,12 +1109,118 @@ class ThermalRuntimeEvaluator:
                 solar_configured=(
                     _string_or_none(values.get("pool.raw_heater_id")) == "H0002"
                 ),
+                retained_water_reference=(
+                    water_temperature is not None
+                    and water_temperature.disposition
+                    is WaterTemperatureDisposition.RETAINED
+                ),
             )
-            return desired_pool_state(
+            desired = desired_pool_state(
                 source_input,
                 self.pool_selector.evaluate(source_input),
                 evidence_usable=evidence_usable,
                 blockers=blockers,
+            )
+            pool_active = _bool_or_none(values.get("pool.active"))
+            spa_active = _bool_or_none(values.get("spa.active"))
+            if pool_active is not True:
+                return desired
+            purpose_evidence_usable = (
+                spa_active is False
+                and isinstance(values.get("solar.active"), bool)
+                and isinstance(values.get("heater.active"), bool)
+                and _string_or_none(values.get("pool.raw_heater_id"))
+                in {"00000", "H0001", "H0002"}
+                and not bool(
+                    {
+                        "pool.active",
+                        "spa.active",
+                        "pool.raw_heater_id",
+                        "solar.active",
+                        "heater.active",
+                    }
+                    & (
+                        set(evidence.missing_native_concepts)
+                        | set(evidence.stale_native_concepts)
+                    )
+                )
+            )
+            active_purpose = assess_thermal_operating_purpose(
+                ThermalOperatingPurposeEvidence(
+                    body=ThermalBody.POOL,
+                    body_active=pool_active,
+                    other_body_active=spa_active,
+                    selected_source=_physical_source(
+                        _string_or_none(values.get("pool.raw_heater_id"))
+                    ),
+                    solar_active=_bool_or_none(values.get("solar.active")),
+                    heater_active=_bool_or_none(values.get("heater.active")),
+                    body_heating_demand_active=_bool_or_none(
+                        values.get("heater.active")
+                    ),
+                    evidence_usable=purpose_evidence_usable,
+                    temperature_acquisition_owned=(
+                        evidence.pool_temperature_probe_execution is not None
+                        and evidence.pool_temperature_probe_execution.phase
+                        is PoolTemperatureProbeExecutionPhase.ACQUIRING
+                        and water_temperature is not None
+                        and water_temperature.disposition
+                        is WaterTemperatureDisposition.PROBING
+                    ),
+                )
+            )
+            purpose_blockers = desired.blockers
+            if not active_purpose.evidence_usable:
+                purpose_blockers = tuple(
+                    dict.fromkeys(
+                        (*purpose_blockers, "pool_active_source_evidence_unusable")
+                    )
+                )
+            required_rpm = desired.required_pump_rpm
+            if (
+                desired.selected_source is PhysicalHeatMode.OFF
+                and desired.required_pump_rpm is None
+                and evidence.pool_temperature_probe_execution is None
+                and active_purpose.required_pump_rpm is not None
+            ):
+                required_rpm = active_purpose.required_pump_rpm
+            planned_purpose = (
+                active_purpose.purpose.value
+                if desired.selected_source is PhysicalHeatMode.OFF
+                else (
+                    "solar_heating"
+                    if desired.selected_source is PhysicalHeatMode.SOLAR
+                    else "gas_heating"
+                )
+            )
+            return replace(
+                desired,
+                reason_code=(
+                    "active_pool_session_operating_purpose"
+                    if desired.selected_source is PhysicalHeatMode.OFF
+                    and required_rpm is not None
+                    and desired.reason_code != "pool_temperature_probe_required"
+                    and evidence.pool_temperature_probe_execution is None
+                    else desired.reason_code
+                ),
+                required_pump_rpm=required_rpm,
+                rpm_reason_code=(
+                    desired.rpm_reason_code
+                    if required_rpm == desired.required_pump_rpm
+                    else (
+                        "operating_purpose:"
+                        f"{active_purpose.purpose.value}:{required_rpm}_rpm"
+                    )
+                ),
+                evidence={
+                    **dict(desired.evidence),
+                    "active_operating_purpose": planned_purpose,
+                    "current_operating_purpose": active_purpose.purpose.value,
+                    "active_operating_purpose_reason": active_purpose.reason_code,
+                },
+                evidence_usable=desired.evidence_usable
+                and active_purpose.evidence_usable,
+                blockers=purpose_blockers,
             )
         spa_mode = (
             SpaHeatingMode.GAS_ONLY
@@ -1019,13 +1234,151 @@ class ThermalRuntimeEvaluator:
         )
         pool_temperature = _number(values.get("pool.temperature"))
         pool_target = _number(values.get("pool.target_temperature"))
+        spa_active = values.get("spa.active") is True
+        spa_session_kind = (
+            evidence.spa_session_kind
+            if spa_active
+            and evidence.spa_session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+            else (
+                SpaSessionKind.EXTERNAL_USER
+                if spa_active
+                else SpaSessionKind.INACTIVE
+            )
+        )
+        active_purpose = assess_thermal_operating_purpose(
+            ThermalOperatingPurposeEvidence(
+                body=ThermalBody.HOT_TUB,
+                body_active=_bool_or_none(values.get("spa.active")),
+                other_body_active=_bool_or_none(values.get("pool.active")),
+                selected_source=_physical_source(
+                    _string_or_none(values.get("spa.raw_heater_id"))
+                ),
+                solar_active=_bool_or_none(values.get("solar.active")),
+                heater_active=_bool_or_none(values.get("heater.active")),
+                body_heating_demand_active=_bool_or_none(
+                    values.get("spa.heating_demand_active")
+                ),
+                evidence_usable=(
+                    not bool(
+                        {
+                            "pool.active",
+                            "spa.active",
+                            "spa.raw_heater_id",
+                            "solar.active",
+                            "heater.active",
+                            "spa.heating_demand_active",
+                        }
+                        & (
+                            set(evidence.missing_native_concepts)
+                            | set(evidence.stale_native_concepts)
+                        )
+                    )
+                    and all(
+                        isinstance(values.get(concept), bool)
+                        for concept in (
+                            "pool.active",
+                            "spa.active",
+                            "solar.active",
+                            "heater.active",
+                            "spa.heating_demand_active",
+                        )
+                    )
+                    and _string_or_none(values.get("spa.raw_heater_id"))
+                    in {"00000", "H0001", "H0002"}
+                ),
+            )
+        )
+        active_heat_source = {
+            PhysicalHeatMode.SOLAR: ThermalHeatSource.SOLAR,
+            PhysicalHeatMode.GAS: ThermalHeatSource.GAS,
+        }.get(
+            active_purpose.active_source
+            if active_purpose.active_source is not None
+            else PhysicalHeatMode.OFF,
+            ThermalHeatSource.NONE,
+        )
+        spa_temperature_trusted = bool(
+            spa_temperature is not None
+            and spa_temperature.disposition is SpaTemperatureDisposition.TRUSTED
+        )
+        trusted_spa_temperature = (
+            None
+            if not spa_temperature_trusted or spa_temperature is None
+            else spa_temperature.trusted_temperature_f
+        )
+        if spa_active and (
+            not active_purpose.evidence_usable
+            or (
+                spa_session_kind is SpaSessionKind.EXTERNAL_USER
+                and not spa_temperature_trusted
+            )
+        ):
+            active_blockers = tuple(blockers)
+            if not active_purpose.evidence_usable:
+                active_blockers = tuple(
+                    dict.fromkeys(
+                        (*active_blockers, "spa_active_source_evidence_unusable")
+                    )
+                )
+            if active_purpose.required_pump_rpm is None:
+                active_blockers = tuple(
+                    dict.fromkeys(
+                        (*active_blockers, "spa_operating_purpose_unresolved")
+                    )
+                )
+            return ThermalDesiredState(
+                evaluated_at=evidence.evaluated_at,
+                body=ThermalBody.HOT_TUB,
+                requested_mode=requested_mode.value,
+                selected_source=(
+                    _physical_source(_string_or_none(values.get("spa.raw_heater_id")))
+                    if active_purpose.required_pump_rpm is not None
+                    else PhysicalHeatMode.OFF
+                ),
+                required_pump_rpm=active_purpose.required_pump_rpm,
+                reason_code="external_spa_session_operating_purpose",
+                rpm_reason_code=(
+                    None
+                    if active_purpose.required_pump_rpm is None
+                    else (
+                        "operating_purpose:"
+                        f"{active_purpose.purpose.value}:"
+                        f"{active_purpose.required_pump_rpm}_rpm"
+                    )
+                ),
+                rationale=(
+                    "External Spa body ownership remains external.",
+                    "Pump governance follows authoritative active heat delivery.",
+                ),
+                criteria=(
+                    "external_spa_session",
+                    active_purpose.reason_code,
+                    "spa_temperature_pending_current_circulation",
+                    "source_selection_retained",
+                ),
+                evidence={
+                    "session_kind": spa_session_kind.value,
+                    "active_operating_purpose": active_purpose.purpose.value,
+                    "selected_source": _physical_source(
+                        _string_or_none(values.get("spa.raw_heater_id"))
+                    ).value,
+                    "spa_temperature_disposition": (
+                        None
+                        if spa_temperature is None
+                        else spa_temperature.disposition.value
+                    ),
+                    "body_activation_owned": False,
+                },
+                evidence_usable=not active_blockers,
+                blockers=active_blockers,
+            )
         spa_input = SpaPolicyInput(
             evaluated_at=evidence.evaluated_at,
-            spa_active=values.get("spa.active") is True,
+            spa_active=spa_active,
             transition_source=(
                 SpaUserSource.NATIVE if values.get("spa.active") is True else None
             ),
-            spa_temperature_f=_number(values.get("spa.temperature")),
+            spa_temperature_f=trusted_spa_temperature,
             spa_target_f=_number(values.get("spa.target_temperature")),
             collector_temperature_f=_number(values.get("solar.temperature")),
             heating_mode=spa_mode,
@@ -1036,12 +1389,60 @@ class ThermalRuntimeEvaluator:
                 and pool_temperature >= pool_target
             ),
             filtration_debt=evidence.filtration_debt,
+            session_kind=spa_session_kind,
+            spa_temperature_trusted=spa_temperature_trusted,
+            active_heat_source=active_heat_source,
+            active_heat_source_usable=active_purpose.evidence_usable,
         )
-        return desired_spa_state(
+        spa_desired = desired_spa_state(
             spa_input,
             self.spa_tracker.evaluate(spa_input),
             evidence_usable=evidence_usable,
             blockers=blockers,
+        )
+        if not spa_active or not spa_temperature_trusted:
+            return spa_desired
+
+        target = _number(values.get("spa.target_temperature"))
+        below_target = (
+            trusted_spa_temperature is not None
+            and target is not None
+            and trusted_spa_temperature < target
+        )
+        selected_source = _physical_source(
+            _string_or_none(values.get("spa.raw_heater_id"))
+        )
+        required_rpm = spa_desired.required_pump_rpm
+        planned_purpose = active_purpose.purpose.value
+        if (
+            below_target
+            and spa_desired.selected_source is PhysicalHeatMode.GAS
+        ):
+            required_rpm = _PUMP_BASELINES.gas_heating_rpm
+            planned_purpose = "gas_heating"
+        elif (
+            below_target
+            and spa_desired.selected_source is PhysicalHeatMode.SOLAR
+        ):
+            required_rpm = _PUMP_BASELINES.solar_heating_rpm
+            planned_purpose = "solar_heating"
+        elif not below_target and active_heat_source is ThermalHeatSource.NONE:
+            required_rpm = _PUMP_BASELINES.filtration_rpm
+            planned_purpose = "ordinary_circulation"
+            spa_desired = replace(spa_desired, selected_source=selected_source)
+        return replace(
+            spa_desired,
+            required_pump_rpm=required_rpm,
+            rpm_reason_code=(
+                None
+                if required_rpm is None
+                else f"operating_purpose:{planned_purpose}:{required_rpm}_rpm"
+            ),
+            evidence={
+                **dict(spa_desired.evidence),
+                "active_operating_purpose": planned_purpose,
+                "current_operating_purpose": active_purpose.purpose.value,
+            },
         )
 
 
@@ -1084,6 +1485,7 @@ def _evaluation_id(evidence: ThermalRuntimeEvidence) -> str:
         "hot_tub_requested_mode": evidence.hot_tub_requested_mode.value,
         "native_values": dict(sorted(evidence.native_values.items())),
         "pool_pump_circuit_id": evidence.pool_pump_circuit_id,
+        "spa_pump_circuit_id": evidence.spa_pump_circuit_id,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return "thermal-runtime-evaluation-" + sha256(canonical.encode()).hexdigest()[:24]

@@ -352,6 +352,61 @@ def test_suspended_filtration_recovers_running_without_redundant_commands() -> N
     assert len(delivery.operations) == commands_before
 
 
+def test_verified_filtration_yields_to_spa_and_can_restart_fresh() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    commands_before = len(delivery.operations)
+
+    yielded = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=False,
+                spa=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert yielded.blocker == "automatic_filtration_yielded_to_spa"
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert driver.ownership.filtration_lease is None
+    assert len(delivery.operations) == commands_before
+
+    restarted = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=False,
+                spa=False,
+                rpm=0,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert restarted.command_delivery_performed
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is True
+
+
+def test_manual_pool_off_suppression_blocks_new_filtration_without_adoption() -> None:
+    driver, delivery, factory = _enabled_driver()
+    frame = replace(
+        _frame(NOW + timedelta(seconds=1), pool=False, rpm=0, configured=2600),
+        pool_automatic_control_suppressed=True,
+    )
+
+    result = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
+
+    assert result.state is FiltrationAutomaticDriverState.BLOCKED
+    assert result.blocker == "automatic_filtration_manual_pool_off_suppressed"
+    assert delivery.operations == []
+    assert driver.ownership.filtration_lease is None
+
+
 def test_suspended_filtration_observes_pool_already_off_without_redundant_cleanup() -> None:
     driver, delivery, factory = _verified_filtration_driver()
     commands_before = len(delivery.operations)

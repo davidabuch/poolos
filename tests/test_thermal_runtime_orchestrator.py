@@ -1100,15 +1100,20 @@ def test_production_module_contains_no_delivery_or_filtration_dependency() -> No
     assert "SetBodyActive" not in source
 
 
-def test_probe_continuity_requires_exact_current_hydraulic_state() -> None:
+def test_probe_continuity_requires_current_pool_routed_circulation() -> None:
     valid = assess_pool_temperature_probe_continuity(
         generated_at=NOW,
         observations=_observations(NOW, pump_rpm=1500, configured_rpm=1500),
         prior_grid_disposition=GridOutageDisposition.ON_GRID,
     )
-    wrong_rpm = assess_pool_temperature_probe_continuity(
+    different_positive_rpm = assess_pool_temperature_probe_continuity(
         generated_at=NOW,
         observations=_observations(NOW, pump_rpm=1526, configured_rpm=1500),
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+    )
+    stopped = assess_pool_temperature_probe_continuity(
+        generated_at=NOW,
+        observations=_observations(NOW, pump_rpm=0, configured_rpm=1500),
         prior_grid_disposition=GridOutageDisposition.ON_GRID,
     )
     shared = assess_pool_temperature_probe_continuity(
@@ -1136,7 +1141,11 @@ def test_probe_continuity_requires_exact_current_hydraulic_state() -> None:
     )
 
     assert valid.valid
-    assert wrong_rpm.blocker == "temperature_probe_actual_rpm_not_verified"
+    assert (
+        different_positive_rpm.blocker
+        == "temperature_probe_pool_circulation_not_proven"
+    )
+    assert stopped.blocker == "temperature_probe_pool_circulation_not_proven"
     assert shared.blocker == "thermal_orchestration_shared_hydraulic_conflict:jets.active"
     assert unusable_temperature.valid
     assert not unusable_temperature.temperature_sample_usable

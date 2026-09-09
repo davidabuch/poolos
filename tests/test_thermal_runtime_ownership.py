@@ -198,16 +198,19 @@ def attribution(operation: str) -> NativeConsequenceAttribution:
 def thermal_assessment(
     *,
     at: datetime = NOW,
+    body: ThermalBody = ThermalBody.POOL,
     requested_mode: str = "solar",
     source: PhysicalHeatMode = PhysicalHeatMode.SOLAR,
     rpm: int = 2900,
     current_source: PhysicalHeatMode = PhysicalHeatMode.OFF,
     current_rpm: int = 2600,
 ) -> ThermalExecutionPlanAssessment:
-    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(
+    return ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0102" if body is ThermalBody.POOL else "p0198"
+    ).build(
         ThermalDesiredState(
             evaluated_at=at,
-            body=ThermalBody.POOL,
+            body=body,
             requested_mode=requested_mode,
             selected_source=source,
             required_pump_rpm=rpm,
@@ -219,7 +222,7 @@ def thermal_assessment(
         ),
         ThermalCurrentState(
             observed_at=at,
-            body=ThermalBody.POOL,
+            body=body,
             selected_source=current_source,
             pump_rpm=current_rpm,
             body_active=True,
@@ -1545,6 +1548,106 @@ def test_terminal_ownership_never_silently_becomes_owned_again() -> None:
 
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
     assert manager.state.status is ThermalRuntimeOwnershipStatus.PREEMPTED
+
+
+def test_preempted_external_body_session_cannot_reestablish_automatically() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(
+        manager,
+        execution_ownership(body=ThermalBody.HOT_TUB, pump_rpm=2600),
+    )
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=NOW + timedelta(seconds=1),
+            pump_rpm=2900,
+            configured_pump_rpm=2600,
+            heat_source=PhysicalHeatMode.OFF,
+        )
+    )
+
+    decision = manager.promote_session_provenance(
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            pump_rpm=3000,
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+            execution_plan_id="execution-plan-2",
+        ),
+        promoted_at=NOW + timedelta(seconds=2),
+        requested_mode="Gas",
+        originating_context=ThermalLiveExecutionContext(
+            "evaluation-2",
+            "plan-2",
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert decision.reason_code.endswith("ownership_terminal")
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.PREEMPTED
+
+
+def test_superseded_external_body_session_can_start_fresh_accepted_generation() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(pump_rpm=2600))
+    manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+            heat_source=PhysicalHeatMode.OFF,
+            pump_rpm=2600,
+            configured_pump_rpm=2600,
+        )
+    )
+    entitlement = manager.residual_termination
+    assert entitlement is not None
+    assert manager.consume_residual_termination(
+        entitlement_id=entitlement.entitlement_id
+    )
+    successor_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=2),
+        body=ThermalBody.HOT_TUB,
+        requested_mode="gas",
+        source=PhysicalHeatMode.GAS,
+        rpm=3000,
+        current_rpm=2600,
+    )
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        successor_plan,
+        evaluation_id="evaluation-2",
+    )
+
+    decision = manager.promote_session_provenance(
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            pump_rpm=3000,
+            evaluation_id="evaluation-2",
+            plan_id=currentness.plan_id,
+            execution_plan_id="execution-plan-2",
+        ),
+        promoted_at=NOW + timedelta(seconds=2),
+        requested_mode="Gas",
+        originating_context=ThermalLiveExecutionContext(
+            "evaluation-2",
+            currentness.plan_id,
+            currentness,
+        ),
+        execution_progress=ThermalExecutionProgress(
+            accepted_current=operation_signature(
+                successor_plan.operations[0],
+                successor_plan.step_specifications[0].metadata,
+            ),
+        ),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.generation == 2
+    assert lease.body_activation is None
+    assert lease.pump_setpoint is not None
 
 
 def test_external_exact_matching_rpm_does_not_manufacture_unowned_ownership() -> None:

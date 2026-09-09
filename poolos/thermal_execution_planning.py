@@ -85,9 +85,17 @@ class ThermalDesiredState:
             if self.required_pump_rpm is not None:
                 if self.required_pump_rpm <= 0:
                     raise ValueError("required pump RPM must be positive")
-                if self.reason_code != "pool_temperature_probe_required":
+                if self.reason_code not in {
+                    "pool_temperature_probe_required",
+                    "spa_temperature_acquisition_required",
+                    "opportunistic_target_cap_reached",
+                    "opportunistic_roof_low_hold",
+                    "six_pm_preserve",
+                    "external_spa_session_operating_purpose",
+                    "active_pool_session_operating_purpose",
+                }:
                     raise ValueError(
-                        "off heat source may require pump RPM only for pool temperature probe"
+                        "off heat source RPM requires an explicit acquisition or hold purpose"
                     )
         elif self.required_pump_rpm is None or self.required_pump_rpm <= 0:
             raise ValueError("selected heat source requires a positive pump RPM")
@@ -231,6 +239,7 @@ def desired_pool_state(
         ),
         "solar_engaged": assessment.solar_assessment.solar_engaged,
         "solar_configured": assessment.solar_assessment.solar_configured,
+        "retained_water_reference": observation.retained_water_reference,
         "solar_continuation_eligible": (
             assessment.solar_assessment.continuation_eligible
         ),
@@ -270,7 +279,7 @@ def desired_spa_state(
 
     selected_source = _physical_mode(assessment.heat_source)
     permission_blocked = assessment.reason_code == "gas_permission_veto"
-    spa_temperature_available = (
+    spa_temperature_available = observation.spa_temperature_trusted and (
         observation.spa_temperature_f is not None
         and observation.spa_target_f is not None
     )
@@ -319,6 +328,19 @@ def desired_spa_state(
                 else observation.filtration_debt.total_seconds()
             ),
             "higher_priority_conflict": observation.higher_priority_conflict,
+            "session_kind": assessment.session_kind.value,
+            "spa_temperature_trusted": observation.spa_temperature_trusted,
+            "active_heat_source": observation.active_heat_source.value,
+            "active_heat_source_usable": observation.active_heat_source_usable,
+            "active_operating_purpose": (
+                "solar_heating"
+                if observation.active_heat_source is ThermalHeatSource.SOLAR
+                else (
+                    "gas_heating"
+                    if observation.active_heat_source is ThermalHeatSource.GAS
+                    else "ordinary_circulation"
+                )
+            ),
         },
         fallback_reason=(
             assessment.reason_code if assessment.heat_source is ThermalHeatSource.GAS else None
@@ -333,6 +355,7 @@ class ThermalExecutionPlanBuilder:
     """Create ordered canonical operations without authorizing or delivering them."""
 
     pump_equipment_id: str | None = None
+    configured_speed_concept: str = POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
     pump_rpm_tolerance: int = 25
 
     def __post_init__(self) -> None:
@@ -342,6 +365,8 @@ class ThermalExecutionPlanBuilder:
             raise ValueError("pump_equipment_id must be a concrete p01xx identity")
         if self.pump_rpm_tolerance < 0:
             raise ValueError("pump_rpm_tolerance must not be negative")
+        if not self.configured_speed_concept.strip():
+            raise ValueError("configured_speed_concept must not be empty")
 
     def build(
         self,
@@ -392,25 +417,61 @@ class ThermalExecutionPlanBuilder:
             desired_rpm,
             tolerance=self.pump_rpm_tolerance,
         )
-        if not source_changed and not rpm_changed:
-            return self._non_ready(desired, current, ())
-
         ordering: list[str] = []
 
+        pool_temperature_acquisition = (
+            desired.body is ThermalBody.POOL
+            and desired.reason_code == "pool_temperature_probe_required"
+            and desired.selected_source is PhysicalHeatMode.OFF
+            and desired.required_pump_rpm is not None
+        )
         circulation_required = desired.required_pump_rpm is not None
         body_start_required = circulation_required and current.body_active is False
 
+        if not source_changed and not rpm_changed and not body_start_required:
+            return self._non_ready(desired, current, ())
+
         priming = PumpPrimingPolicy().evaluate(
-            circulation_requested=circulation_required,
+            circulation_requested=(
+                circulation_required and not pool_temperature_acquisition
+            ),
             currently_circulating=(
                 current.pump_rpm is not None and current.pump_rpm > 0
             ),
         )
 
-        if body_start_required:
+        opportunistic_spa_start = (
+            desired.body is ThermalBody.HOT_TUB
+            and desired.evidence.get("session_kind") == "poolos_opportunistic"
+            and body_start_required
+        )
+
+        if pool_temperature_acquisition:
+            # Prove exact source-Off before activating the Pool.  The current
+            # delivery contract cannot verify an inactive body's configured
+            # PMPCIRC setpoint independently of actual RPM, so use the bounded
+            # fallback: activate, immediately request the exact acquisition
+            # baseline, then begin timing only after both configured and actual
+            # 1500-RPM consequences verify.
+            if source_changed:
+                ordering.append("source")
+                source_changed = False
+            if body_start_required:
+                ordering.append("body")
+            if rpm_changed:
+                ordering.append("rpm")
+        elif opportunistic_spa_start:
+            # A dormant Spa can immediately act on its configured heater when
+            # activated.  Exact Solar/Off preconditioning therefore precedes
+            # the only PoolOS-owned opportunistic body activation.
+            ordering.append("source")
+
+        if body_start_required and not pool_temperature_acquisition:
             ordering.append("body")
 
-        if priming.priming_required:
+        if pool_temperature_acquisition:
+            pass
+        elif priming.priming_required:
             ordering.append("prime")
 
             if (
@@ -419,9 +480,12 @@ class ThermalExecutionPlanBuilder:
             ):
                 ordering.append("rpm")
 
-            if source_changed:
+            if source_changed and not opportunistic_spa_start:
                 ordering.append("source")
-        elif desired.selected_source is PhysicalHeatMode.OFF:
+        elif (
+            desired.selected_source is PhysicalHeatMode.OFF
+            and not pool_temperature_acquisition
+        ):
             if source_changed:
                 ordering.append("source")
             if rpm_changed:
@@ -484,15 +548,25 @@ class ThermalExecutionPlanBuilder:
                     },
                 )
                 expected = {"pump.rpm": priming.priming_rpm}
+                if desired.body is ThermalBody.HOT_TUB:
+                    expected[self.configured_speed_concept] = priming.priming_rpm
                 metadata = {
                     "verification_truth": "authoritative_native_pump_rpm",
                     "numeric_tolerance:pump.rpm": str(self.pump_rpm_tolerance),
+                    **(
+                        {f"numeric_tolerance:{self.configured_speed_concept}": "0"}
+                        if desired.body is ThermalBody.HOT_TUB
+                        else {}
+                    ),
                     "priming_step": "true",
                     "minimum_verified_hold_seconds": str(
                         int(priming.minimum_duration.total_seconds())
                     ),
                 }
             elif kind == "source":
+                probe_source_precondition = (
+                    desired.reason_code == "pool_temperature_probe_required"
+                )
                 operation = SetHeatMode(
                     equipment_id=desired.body.value,
                     mode=desired.selected_source,
@@ -510,11 +584,28 @@ class ThermalExecutionPlanBuilder:
                 metadata = {
                     "verification_truth": "HEATER",
                     "htmode_is_context_only": "true",
+                    **(
+                        {
+                            "pool_temperature_probe_source_precondition": "true",
+                            "strict_post_delivery_observation": "true",
+                        }
+                        if probe_source_precondition
+                        else {}
+                    ),
+                    **(
+                        {"spa_opportunistic_source_precondition": "true"}
+                        if opportunistic_spa_start
+                        and current.body_active is False
+                        else {}
+                    ),
                 }
             else:
                 assert desired.required_pump_rpm is not None
                 assert self.pump_equipment_id is not None
                 probe_step = desired.reason_code == "pool_temperature_probe_required"
+                spa_acquisition_step = (
+                    desired.reason_code == "spa_temperature_acquisition_required"
+                )
                 operation = SetPumpSpeed(
                     equipment_id=self.pump_equipment_id,
                     rpm=desired.required_pump_rpm,
@@ -522,28 +613,45 @@ class ThermalExecutionPlanBuilder:
                     metadata={
                         "reason_code": (
                             desired.reason_code
-                            if probe_step
+                            if probe_step or spa_acquisition_step
                             else desired.rpm_reason_code or "thermal_pump_baseline"
+                        ),
+                        "operating_purpose": str(
+                            (
+                                "temperature_acquisition"
+                                if probe_step or spa_acquisition_step
+                                else desired.evidence.get(
+                                    "active_operating_purpose", ""
+                                )
+                            )
                         ),
                         "command_delivery_enabled": False,
                     },
                 )
                 expected = {"pump.rpm": desired.required_pump_rpm}
-                if probe_step:
-                    expected[POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT] = (
+                if probe_step or desired.body is ThermalBody.HOT_TUB:
+                    expected[self.configured_speed_concept] = (
                         desired.required_pump_rpm
                     )
                 metadata = {
                     "verification_truth": "authoritative_native_pump_rpm",
                     "numeric_tolerance:pump.rpm": str(self.pump_rpm_tolerance),
                     **(
+                        {f"numeric_tolerance:{self.configured_speed_concept}": "0"}
+                        if probe_step or desired.body is ThermalBody.HOT_TUB
+                        else {}
+                    ),
+                    **(
                         {
                             "pool_temperature_probe_step": "true",
                             "strict_post_delivery_observation": "true",
-                            f"numeric_tolerance:{POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT}": "0",
                         }
                         if probe_step
-                        else {}
+                        else (
+                            {"spa_temperature_acquisition_step": "true"}
+                            if spa_acquisition_step
+                            else {}
+                        )
                     ),
                 }
             operations.append(operation)
@@ -580,6 +688,12 @@ class ThermalExecutionPlanBuilder:
             )
             if changed
         )
+        if opportunistic_spa_start:
+            change_reasons = tuple(
+                dict.fromkeys(
+                    (*change_reasons, "opportunistic_source_preconditioning_required")
+                )
+            )
         return ThermalExecutionPlanAssessment(
             plan_id=plan_id,
             disposition=ThermalPlanDisposition.READY,

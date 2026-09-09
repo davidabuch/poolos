@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 import math
+from zoneinfo import ZoneInfo
 
-from .operating_baselines import PumpOperatingBaselines
+from .filtration_policy import FiltrationOperationalDayPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +19,7 @@ class WaterTemperaturePolicy:
     maximum_probe_duration: timedelta = timedelta(minutes=5)
     maximum_smooth_rate_f_per_minute: float = 2.0
     collector_actionable_f: float = 90.0
-    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    timezone_name: str = "America/Los_Angeles"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,7 @@ class TemperatureSample:
 class WaterTemperatureDisposition(str, Enum):
     TRUSTED = "trusted"
     REUSED = "reused"
+    RETAINED = "retained"
     NOT_REQUIRED = "not_required"
     PROBE_REQUIRED = "probe_required"
     PROBING = "probing"
@@ -51,6 +53,7 @@ class WaterTemperatureAssessment:
     trusted_at: datetime | None
     recommended_pump_rpm: int | None
     reason_code: str
+    retained_operational_day: date | None = None
     authority: str = "none"
     command_delivery_enabled: bool = False
 
@@ -62,7 +65,13 @@ class WaterTemperatureTracker:
         self._policy = policy
         self._trusted_temperature_f: float | None = None
         self._trusted_at: datetime | None = None
+        self._trusted_operational_day: date | None = None
+        self._retained_temperature_f: float | None = None
+        self._retained_at: datetime | None = None
+        self._retained_operational_day: date | None = None
         self._last_evaluated_at: datetime | None = None
+        self._timezone = ZoneInfo(policy.timezone_name)
+        self._operational_day = FiltrationOperationalDayPolicy()
 
     @property
     def policy(self) -> WaterTemperaturePolicy:
@@ -84,7 +93,37 @@ class WaterTemperatureTracker:
             self._trusted_at,
             rpm,
             reason,
+            self._retained_operational_day,
         )
+
+    @property
+    def retained_temperature_f(self) -> float | None:
+        """Return the in-memory current-day bulk-water reference, if any."""
+
+        return self._retained_temperature_f
+
+    @property
+    def retained_operational_day(self) -> date | None:
+        return self._retained_operational_day
+
+    def invalidate_retained_reference(self) -> None:
+        """Discard Pool water evidence across an incompatible hydraulic epoch."""
+
+        self._trusted_temperature_f = None
+        self._trusted_at = None
+        self._trusted_operational_day = None
+        self._retained_temperature_f = None
+        self._retained_at = None
+        self._retained_operational_day = None
+
+    def _accept_bulk_water(self, temperature_f: float, at: datetime) -> None:
+        operational_day = self._operational_day.day_for(at, self._timezone)
+        self._trusted_temperature_f = temperature_f
+        self._trusted_at = at
+        self._trusted_operational_day = operational_day
+        self._retained_temperature_f = temperature_f
+        self._retained_at = at
+        self._retained_operational_day = operational_day
 
     def evaluate(
         self,
@@ -104,6 +143,15 @@ class WaterTemperatureTracker:
         if self._last_evaluated_at is not None and evaluated_at < self._last_evaluated_at:
             raise ValueError("temperature evaluations must be chronological")
         self._last_evaluated_at = evaluated_at
+        operational_day = self._operational_day.day_for(
+            evaluated_at,
+            self._timezone,
+        )
+        if (
+            self._retained_operational_day is not None
+            and self._retained_operational_day != operational_day
+        ):
+            self.invalidate_retained_reference()
 
         if (
             existing_circulation_trust_allowed
@@ -111,8 +159,7 @@ class WaterTemperatureTracker:
             and not probe_active
             and observed_temperature_f is not None
         ):
-            self._trusted_temperature_f = observed_temperature_f
-            self._trusted_at = evaluated_at
+            self._accept_bulk_water(observed_temperature_f, evaluated_at)
             return self._result(evaluated_at, WaterTemperatureDisposition.TRUSTED, "existing_circulation")
 
         if probe_active:
@@ -122,16 +169,30 @@ class WaterTemperatureTracker:
             if elapsed >= self._policy.maximum_probe_duration:
                 return self._result(evaluated_at, WaterTemperatureDisposition.ACQUISITION_FAILED, "probe_maximum_exceeded")
             if elapsed < self._policy.minimum_probe_duration:
-                return self._result(evaluated_at, WaterTemperatureDisposition.PROBING, "probe_minimum_duration", self._policy.baselines.temperature_probe_rpm)
+                return self._result(evaluated_at, WaterTemperatureDisposition.PROBING, "probe_minimum_duration")
             stable = _stable_window(samples, evaluated_at=evaluated_at, policy=self._policy)
             if stable is not None:
-                self._trusted_temperature_f = stable
-                self._trusted_at = evaluated_at
+                self._accept_bulk_water(stable, evaluated_at)
                 return self._result(evaluated_at, WaterTemperatureDisposition.TRUSTED, "probe_settled")
-            return self._result(evaluated_at, WaterTemperatureDisposition.PROBING, "probe_not_settled", self._policy.baselines.temperature_probe_rpm)
+            return self._result(evaluated_at, WaterTemperatureDisposition.PROBING, "probe_not_settled")
 
-        if self._trusted_at is not None and evaluated_at - self._trusted_at <= self._policy.trusted_after_circulation:
+        if (
+            self._trusted_at is not None
+            and self._trusted_operational_day == operational_day
+            and evaluated_at - self._trusted_at <= self._policy.trusted_after_circulation
+        ):
             return self._result(evaluated_at, WaterTemperatureDisposition.REUSED, "trusted_temperature_within_reuse_window")
+        if (
+            self._retained_temperature_f is not None
+            and self._retained_operational_day == operational_day
+        ):
+            self._trusted_temperature_f = self._retained_temperature_f
+            self._trusted_at = self._retained_at
+            return self._result(
+                evaluated_at,
+                WaterTemperatureDisposition.RETAINED,
+                "current_operational_day_bulk_water_reference",
+            )
 
         actionable = (
             thermal_decision_requested
@@ -139,7 +200,7 @@ class WaterTemperatureTracker:
             and collector_temperature_f >= self._policy.collector_actionable_f
         )
         if actionable:
-            return self._result(evaluated_at, WaterTemperatureDisposition.PROBE_REQUIRED, "thermal_decision_requires_trusted_water", self._policy.baselines.temperature_probe_rpm)
+            return self._result(evaluated_at, WaterTemperatureDisposition.PROBE_REQUIRED, "thermal_decision_requires_trusted_water")
         return self._result(evaluated_at, WaterTemperatureDisposition.NOT_REQUIRED, "no_actionable_thermal_decision")
 
 

@@ -457,10 +457,9 @@ def _pump_handoff_eligible(
     filtration: FiltrationSuccessorEvidence,
 ) -> bool:
     pump = entitlement.pump_setpoint
-    if pump is None or filtration.successor_target_rpm is None:
+    if filtration.successor_target_rpm is None:
         return False
-    intended = pump.intended_value
-    if not isinstance(intended, int) or isinstance(intended, bool):
+    if pump is None and entitlement.body_activation is None:
         return False
     if not all(
         (
@@ -480,6 +479,15 @@ def _pump_handoff_eligible(
             ),
         )
     ):
+        return False
+    if pump is None:
+        # Accepted body provenance can survive a purpose boundary even when
+        # the prior pump provenance has already been relinquished. Filtration
+        # still gains pump provenance only from a fresh canonical successor
+        # delivery; observed RPM equality alone grants nothing.
+        return True
+    intended = pump.intended_value
+    if not isinstance(intended, int) or isinstance(intended, bool):
         return False
     return bool(
         evidence.pump_rpm is not None

@@ -396,6 +396,107 @@ def test_manual_matching_prefix_removal_does_not_manufacture_progress() -> None:
     assert decision.reason_code == "thermal_execution_residual_plan_incompatible"
 
 
+def test_pool_probe_accepts_only_attributed_source_body_and_acquisition_progress() -> None:
+    original_assessment = _assessment(
+        source=PhysicalHeatMode.OFF,
+        rpm=1500,
+        reason="pool_temperature_probe_required",
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=0,
+        body_active=False,
+    )
+    originating = _currentness(original_assessment, "evaluation-origin")
+    after_source = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            source=PhysicalHeatMode.OFF,
+            rpm=1500,
+            reason="pool_temperature_probe_required",
+            current_source=PhysicalHeatMode.OFF,
+            current_rpm=0,
+            body_active=False,
+        ),
+        "evaluation-after-source",
+    )
+    after_body = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=2),
+            source=PhysicalHeatMode.OFF,
+            rpm=1500,
+            reason="pool_temperature_probe_required",
+            current_source=PhysicalHeatMode.OFF,
+            current_rpm=2600,
+            body_active=True,
+        ),
+        "evaluation-after-body",
+    )
+    converged = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=3),
+            source=PhysicalHeatMode.OFF,
+            rpm=1500,
+            reason="pool_temperature_probe_required",
+            current_source=PhysicalHeatMode.OFF,
+            current_rpm=1500,
+            body_active=True,
+        ),
+        "evaluation-converged",
+    )
+    source_off = _signature(original_assessment, 0)
+    body_activation = _signature(original_assessment, 1)
+    acquisition_rpm = _signature(original_assessment, 2)
+
+    source_accepted = assess_execution_compatibility(
+        originating,
+        after_source,
+        progress=ThermalExecutionProgress(accepted_current=source_off),
+    )
+    source_verified = assess_execution_compatibility(
+        originating,
+        after_source,
+        progress=ThermalExecutionProgress(verified_prefix=(source_off,)),
+    )
+    body_accepted = assess_execution_compatibility(
+        originating,
+        after_body,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(source_off,),
+            accepted_current=body_activation,
+        ),
+    )
+    body_verified = assess_execution_compatibility(
+        originating,
+        after_body,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(source_off, body_activation),
+        ),
+    )
+    pump_accepted = assess_execution_compatibility(
+        originating,
+        converged,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(source_off, body_activation),
+            accepted_current=acquisition_rpm,
+        ),
+    )
+    pump_verified = assess_execution_compatibility(
+        originating,
+        converged,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(source_off, body_activation, acquisition_rpm),
+        ),
+    )
+    unowned = assess_execution_compatibility(originating, after_source)
+
+    assert source_accepted.continuation_allowed
+    assert source_verified.continuation_allowed
+    assert body_accepted.continuation_allowed
+    assert body_verified.continuation_allowed
+    assert pump_accepted.continuation_allowed
+    assert pump_verified.disposition is ThermalExecutionCompatibilityDisposition.CONVERGED
+    assert unowned.disposition is ThermalExecutionCompatibilityDisposition.UNKNOWN
+
+
 def test_reordered_or_unexpectedly_grown_residual_plan_fails_closed() -> None:
     original = _currentness(_assessment(), "evaluation-origin")
     reversed_residual = replace(

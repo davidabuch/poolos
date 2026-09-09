@@ -58,8 +58,6 @@ class ThermalCirculationCleanupProvenance:
         if self.established_at < self.originating_lease_established_at:
             raise ValueError("cleanup provenance cannot predate originating lease")
         object.__setattr__(self, "body", ThermalBody(self.body))
-        if self.body is not ThermalBody.POOL:
-            raise ValueError("circulation cleanup is commissioned only for Pool")
         if self.body_activation is None and self.pump_setpoint is None:
             raise ValueError("cleanup provenance requires an owned body or pump concept")
 
@@ -73,8 +71,7 @@ class ThermalCirculationCleanupProvenance:
         """Copy only circulation provenance; never infer it from hardware."""
 
         if (
-            entitlement.body is not ThermalBody.POOL
-            or (
+            (
                 entitlement.body_activation is None
                 and entitlement.pump_setpoint is None
             )
@@ -162,12 +159,13 @@ class ThermalCirculationCleanupCandidate:
             ThermalCirculationCleanupAction(self.action),
         )
         if self.action is ThermalCirculationCleanupAction.BODY_DEACTIVATION:
+            expected_body = self.operation.equipment_id if isinstance(self.operation, SetBodyActive) else None
             if not (
                 isinstance(self.operation, SetBodyActive)
-                and self.operation.equipment_id == ThermalBody.POOL.value
+                and expected_body in {ThermalBody.POOL.value, ThermalBody.HOT_TUB.value}
                 and self.operation.active is False
             ):
-                raise ValueError("body cleanup candidate must be exact Pool Off")
+                raise ValueError("body cleanup candidate must be exact body Off")
         elif not (
             isinstance(self.operation, SetPumpSpeed)
             and is_pmpcirc_native_id(self.operation.equipment_id)
@@ -236,6 +234,56 @@ class ThermalCirculationCleanupCandidate:
             action=action,
             operation=operation,
             arbitration_reason_code=assessment.reason_code,
+        )
+
+    @classmethod
+    def for_owned_hot_tub_release(
+        cls,
+        *,
+        provenance: ThermalCirculationCleanupProvenance,
+        epoch_identity: str,
+        evaluated_at: datetime,
+    ) -> ThermalCirculationCleanupCandidate | None:
+        """Create only exact Spa Off from retained PoolOS activation proof."""
+
+        if (
+            provenance.body is not ThermalBody.HOT_TUB
+            or provenance.body_activation is None
+            or evaluated_at < provenance.established_at
+        ):
+            return None
+        action = ThermalCirculationCleanupAction.BODY_DEACTIVATION
+        operation = SetBodyActive(
+            equipment_id=ThermalBody.HOT_TUB.value,
+            active=False,
+            metadata={
+                "thermal_circulation_cleanup": True,
+                "cleanup_provenance_id": provenance.provenance_id,
+                "cleanup_action": action.value,
+                "session_kind": "poolos_opportunistic",
+            },
+        )
+        payload = json.dumps(
+            {
+                "epoch_identity": epoch_identity,
+                "provenance_id": provenance.provenance_id,
+                "generation": provenance.generation,
+                "action": action.value,
+                "operation_id": operation.operation_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return cls(
+            candidate_id="thermal-cleanup-candidate-"
+            + sha256(payload.encode()).hexdigest()[:24],
+            epoch_identity=epoch_identity,
+            evaluated_at=evaluated_at,
+            provenance_id=provenance.provenance_id,
+            provenance_generation=provenance.generation,
+            action=action,
+            operation=operation,
+            arbitration_reason_code="hot_tub_opportunistic_owned_release",
         )
 
 

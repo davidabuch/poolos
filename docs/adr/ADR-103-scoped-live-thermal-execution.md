@@ -56,30 +56,48 @@ conflicts. Gas is blocked by native Gas/Heater/Spa RPM or general RPM ownership
 conflicts. Native configuration is never rewritten.
 
 Pool water-temperature acquisition has a separate, narrower authority purpose.
-It admits only the exact current Pool `C0006` PMPCIRC operation at the canonical
-temperature-probe RPM after the existing Pool body-establishment and verified
-priming steps. The operation must retain the canonical probe reason, plan/step
-metadata, execution-purpose identity, current epoch, and both actual-RPM and
-configured-speed expectations. No arbitrary Off-source circulation, Hot Tub
-operation, heat-source mutation, or unrelated 1500-RPM purpose can use this
-envelope. Final matching is type-exact so boolean/integer equality cannot widen
-the boundary.
+It admits only the exact operations in the current canonical Pool probe plan:
+exact Pool `HEATER=00000` preconditioning followed by Pool body activation when
+needed and the exact discovered Pool `PMPCIRC` semantic acquisition setpoint of
+1500 RPM. Source Off is an owned
+configuration mutation, is verified from exact raw native HEATER truth, and is
+available only from a step carrying the canonical probe-source-precondition
+marker and exact `pool.raw_heater_id=00000` consequence. Every operation remains
+bound to the canonical probe reason, plan/step metadata, execution-purpose
+identity, current epoch, and exact target/value. No arbitrary Off-source
+circulation, Hot Tub operation, or Gas/Solar source selection
+can use this envelope. Final matching is type-exact so
+boolean/integer equality cannot widen the boundary.
 
-Accepted probe-RPM delivery is not acquisition. Later authoritative evidence
+Accepted body activation is not acquisition. Later authoritative evidence
 must prove Pool active, Spa inactive, complete inactive shared hydraulics,
-authoritatively on-grid state, exact configured Pool PMPCIRC speed, and actual RPM
-within the existing inclusive 25-RPM tolerance. That verification evidence must
-be strictly later than delivery. Only then does one in-memory acquisition epoch
-start. Verified priming time contributes zero acquisition time.
+authoritatively on-grid state, the configured semantic Pool `PMPCIRC` setpoint
+at exactly 1500 RPM, and actual pump RPM within the commissioned analog
+tolerance of 1500. The bounded fallback order is source Off, Pool body On, then
+the 1500-RPM setpoint; it does not synthesize a native 3000-RPM priming phase.
+Acquisition timing begins only after both configured and physical RPM evidence
+verify in a later authoritative frame. Only then does one in-memory acquisition
+epoch start.
 
 The command-free water-temperature tracker remains the policy authority for the
 two-minute minimum acquisition, one-minute stability window, 2 F/minute smooth-
-rate limit, five-minute fail-closed maximum, and 30-minute trusted-temperature
-reuse. Samples are authoritative, chronological, bounded, strictly later than
-the acquisition boundary, and never combined across a topology, RPM,
-configured-speed, shared-hydraulic, grid, external-takeover, currentness, or
-ownership break. Matching hardware without accepted PoolOS provenance cannot
-start or restore an acquisition.
+rate limit, five-minute fail-closed maximum, and current-operational-day retained
+bulk-water reference. Samples are authoritative, chronological, bounded,
+strictly later than the acquisition boundary, and never combined across a
+topology, shared-hydraulic, grid, external-takeover, currentness, or ownership
+break. Matching hardware without accepted PoolOS provenance cannot start or
+restore an acquisition.
+
+The Pool operational day is the filtration day, 08:00 local through the next
+08:00. A successful acquisition retains its trusted bulk-water value in memory
+for that operational day so later Pool-off Solar opportunities do not repeatedly
+reactivate circulation. The retained reference is invalidated on restart,
+operational-day rollover, or Spa routing; fresh trustworthy Pool circulation
+supersedes it. With Pool inactive, a retained-reference Solar trial requires
+collector temperature at least 90 F and differential at least 7 F. Once the Pool
+is circulating, fresh water evidence governs: differential 6 F or higher
+continues, 5 F or lower aborts, and the already-started trial remains active in
+the bounded 5-to-6 F hysteresis band.
 
 Probe success publishes canonical trusted water evidence only. A fresh normal
 thermal evaluation independently selects Solar, Gas fallback, Off, or no eligible
@@ -227,9 +245,10 @@ Gate, scope, unload, or newer-snapshot changes invalidate that context, which is
 rechecked inside the existing command lock immediately before transport.
 
 Residual source de-selection reuses that same serialized task and final gateway
-with a distinct typed termination purpose. The final boundary admits only Pool
-`body_heat_source=00000` for that purpose; body activation/deactivation, Gas,
-Solar, RPM changes, routing, and pump stop are rejected. Thermal Live,
+with a distinct typed termination purpose. The final boundary admits only the
+provenance-bound target body `body_heat_source=00000` for that purpose; body
+activation/deactivation, Gas, Solar, RPM changes, routing, and pump stop are
+rejected. Thermal Live,
 commissioning scope, Maintenance, controller mode, authoritative epoch, and
 unload checks still apply. The normal automatic gate does not become a cleanup
 bypass: while it is Off no termination command is scheduled. An accepted Off
@@ -251,6 +270,25 @@ capability, so later target changes cannot create repeated filtration control;
 independent body provenance may remain until filtration ceases to be an
 immediate successor. Restart, unload, gate loss, or external/hydraulic takeover
 discards cleanup provenance without a compensating command.
+
+A separate persistent human-Off restraint prevents automatic Pool control from
+undoing an operator's deliberate Pool-Off action. A Pool Off requested through
+PoolOS manual control arms the restraint synchronously before delivery; an
+uncorrelated authoritative native Pool On-to-Off transition also arms it.
+Baseline Off and a correlated PoolOS cleanup consequence do not. While armed,
+the final gateway independently denies automatic Pool thermal, filtration, and
+grid-outage mutations, while manual commands remain subject to their ordinary
+authority checks. Active automatic work is preempted without retry. A verified
+filtration session may retain only its exact existing cleanup provenance while
+evidence is unavailable; the restraint never manufactures ownership from
+matching hardware.
+
+The Home Assistant restraint entity restores only the latched restraint across
+restart. It never restores a session, expectation, receipt, or ownership lease.
+Explicit Resume is command-free and merely permits a later fresh evaluation;
+it does not replay prior work. A controller-side Off that happens while PoolOS
+and Home Assistant are offline cannot be distinguished from baseline Off after
+restart, so that case remains an explicit operator-review limitation.
 
 The generic Pentair physical endpoint independently rejects `pump.set_speed`
 unless its target exactly matches the Pool PMPCIRC identity bound into that
@@ -279,13 +317,46 @@ remain unchanged.
 - No authority is granted to `StartPump`, `StopPump`, `SetHydraulicRoute`,
   arbitrary body deactivation, arbitrary circuits or vendor commands,
   Spillway, generic filtration execution, Hot Tub probing, grid outage, lighting,
-  chemistry, schedules, or configuration changes. The sole body-deactivation
-  envelope is provenance-bound Pool cleanup after thermal purpose ends.
-- Inactive-body manual configuration remains available, but autonomous
-  inactive-body `HEATER` preselection remains uncommissioned and prohibited.
-- Pool temperature-probe authority is limited to the provenance-bound acquisition
-  envelope above; 1500 RPM remains rejected everywhere else. Hot Tub automatic
-  execution remains blocked pending body-specific configured-pump ownership evidence. Physical outage
-  response remains separate work. Source termination remains ownership-scoped
-  Pool source Off; post-source circulation cleanup is separately provenance-
-  and epoch-bound as described above.
+  chemistry, schedules, or configuration changes. Body deactivation exists only
+  as provenance-bound cleanup after Pool thermal purpose or a PoolOS-owned
+  opportunistic Spa purpose ends; externally started Spa remains ineligible.
+- Inactive-body manual configuration remains available. Autonomous inactive-Spa
+  `HEATER` preselection is admitted only for a PoolOS opportunistic plan, only
+  as exact Solar or Off, and only before provenance-bound Spa activation while
+  Pool is authoritatively inactive.
+- Pool temperature-acquisition authority is limited to the provenance-bound,
+  pump-write-free envelope above. Hot Tub temperature acquisition has no
+  automatic fixed RPM unless a separately commissioned runtime purpose requires
+  one. Physical outage response remains
+  separate work. Source termination remains ownership-scoped exact body source
+  Off; post-source circulation cleanup is separately provenance- and epoch-bound.
+
+## Hot Tub execution-governance foundation
+
+Hot Tub runtime uses a separately resolved, generation-current `PMPCIRC` whose
+native circuit is Spa `C0001`; it never inherits the Pool `C0006` identity.
+Configured `PMPCIRC.SPEED` and physical parent-pump RPM are separate required
+verification facts. The commissioned purpose baselines remain body-neutral:
+1500 temperature acquisition, 2600 ordinary circulation, 2900 actively engaged
+Solar, and 3000 actively firing Gas. Selected `HEATER=H0001/H0002` remains exact source
+configuration truth, but does not by itself establish active heat delivery.
+
+An externally started Spa remains externally body-owned. PoolOS may establish
+only pump/source provenance through its own accepted commands and later native
+verification; it cannot acquire body-Off authority from `spa.active=True` or
+matching RPM. A PoolOS opportunistic Spa session is distinct and exists only
+after accepted B1202 activation provenance. That in-memory session kind is not
+restored. Source Solar/Off is verified while the Spa is still inactive before
+an opportunistic activation, preventing a retained Gas selection from firing
+during startup. Gas is never selected by opportunistic policy.
+
+Exact Spa source-Off termination and B1202-Off cleanup are separate typed
+gateway purposes. Spa deactivation is available only from retained accepted
+PoolOS B1202 activation provenance and must be verified by a later authoritative
+Spa-Off observation. It grants no pump stop, route operation, arbitrary RPM, or
+right to deactivate an externally started Spa. Spa temperature evaluation is
+command-free: inactive or ambiguously routed Spa temperature is not trusted. A
+current native Spa temperature is usable only after a later frame proves Spa
+exclusively active and actual RPM positive; this never grants body ownership.
+External Spa sessions first normalize no-heat circulation to 2600, then may
+prepare 3000 before PoolOS selects Gas from trusted demand evidence.

@@ -22,6 +22,9 @@ from poolos.physical_command_authority import (
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppression,
+)
 from poolos.thermal_runtime_orchestration import (
     ThermalOrchestrationLifecycle,
     ThermalRuntimeOrchestrationAssessment,
@@ -100,6 +103,9 @@ class PoolOSFiltrationAutomaticRuntime:
     ownership: PoolCirculationOwnershipRegistry
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
+    pool_automatic_control: PoolAutomaticControlSuppression = field(
+        default_factory=PoolAutomaticControlSuppression
+    )
     driver: FiltrationAutomaticExecutionDriver = field(init=False)
     _latest_frame: FiltrationAutomaticExecutionFrame | None = field(
         default=None, init=False, repr=False
@@ -169,6 +175,9 @@ class PoolOSFiltrationAutomaticRuntime:
             ),
             thermal_owned=self.ownership.owner.value == "thermal",
             external_changes=external_changes,
+            pool_automatic_control_suppressed=(
+                self.pool_automatic_control.state.suppressed
+            ),
         )
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
             return
@@ -181,7 +190,10 @@ class PoolOSFiltrationAutomaticRuntime:
         self._schedule_if_idle()
 
     def diagnostics(self) -> dict[str, object]:
-        return dict(self.driver.diagnostics())
+        return {
+            **dict(self.driver.diagnostics()),
+            **dict(self.pool_automatic_control.diagnostics()),
+        }
 
     def orchestration_failed(
         self,
