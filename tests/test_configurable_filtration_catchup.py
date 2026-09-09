@@ -3,6 +3,8 @@
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from poolos.filtration_policy import (
     FiltrationAccountingTracker,
     FiltrationDisposition,
@@ -59,6 +61,58 @@ def test_2200_preference_preserves_completion_capacity_backstop() -> None:
         30,
         tzinfo=LOCAL,
     )
+
+
+@pytest.mark.parametrize(
+    ("evaluated_at", "expected"),
+    (
+        (datetime(2026, 9, 9, 21, 59, 59, tzinfo=LOCAL), FiltrationDisposition.DEFERRED_OPTIMIZATION),
+        (datetime(2026, 9, 9, 22, 0, tzinfo=LOCAL), FiltrationDisposition.RUN_NOW),
+        (datetime(2026, 9, 9, 22, 0, 1, tzinfo=LOCAL), FiltrationDisposition.RUN_NOW),
+    ),
+)
+def test_configured_preferred_catchup_boundary(
+    evaluated_at: datetime,
+    expected: FiltrationDisposition,
+) -> None:
+    policy = FiltrationPolicy(
+        LADWP_INITIAL_PROFILE,
+        preferred_catchup_start=time(hour=22),
+    )
+
+    result = policy.evaluate(
+        FiltrationObligation(timedelta(hours=6)),
+        evaluated_at=evaluated_at,
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is expected
+
+
+@pytest.mark.parametrize(
+    ("evaluated_at", "expected"),
+    (
+        (datetime(2026, 9, 9, 19, 29, 59, tzinfo=LOCAL), FiltrationDisposition.DEFERRED_OPTIMIZATION),
+        (datetime(2026, 9, 9, 19, 30, tzinfo=LOCAL), FiltrationDisposition.RUN_NOW),
+        (datetime(2026, 9, 9, 19, 30, 1, tzinfo=LOCAL), FiltrationDisposition.RUN_NOW),
+    ),
+)
+def test_latest_safe_start_boundary_overrides_later_catchup(
+    evaluated_at: datetime,
+    expected: FiltrationDisposition,
+) -> None:
+    policy = FiltrationPolicy(
+        LADWP_INITIAL_PROFILE,
+        preferred_catchup_start=time(hour=22),
+    )
+
+    result = policy.evaluate(
+        FiltrationObligation(timedelta(hours=12)),
+        evaluated_at=evaluated_at,
+        safely_deferrable=True,
+    )
+
+    assert result.disposition is expected
 
 
 def test_accounting_tracker_accepts_preferred_catchup_start() -> None:

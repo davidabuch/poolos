@@ -161,6 +161,11 @@ def filtration(
         carried_prior_day_debt=timedelta(0),
         total_remaining_runtime=remaining,
         disposition=disposition,
+        independent_disposition=(
+            FiltrationDisposition.RUN_NOW
+            if disposition is FiltrationDisposition.CREDITING
+            else disposition
+        ),
         tou_tier=SimpleNamespace(name="OFF_PEAK"),
         next_suitable_at=None,
         ordinary_filtration_rpm=2600,

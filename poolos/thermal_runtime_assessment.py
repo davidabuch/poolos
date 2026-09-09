@@ -344,6 +344,7 @@ class ThermalRuntimeEvidence:
     spa_pump_circuit_id: str | None = None
     native_observed_at: Mapping[str, datetime] = field(default_factory=dict)
     filtration_debt: timedelta | None = None
+    filtration_immediate_circulation_required: bool | None = None
     pending_durable_incident_confirmation: bool = False
     durable_incident_confirmed: bool = False
     pool_temperature_probe_execution: PoolTemperatureProbeExecutionEvidence | None = None
@@ -1177,15 +1178,23 @@ class ThermalRuntimeEvaluator:
                     )
                 )
             required_rpm = desired.required_pump_rpm
+            filtration_immediate = (
+                evidence.filtration_immediate_circulation_required is True
+            )
             if (
                 desired.selected_source is PhysicalHeatMode.OFF
                 and desired.required_pump_rpm is None
                 and evidence.pool_temperature_probe_execution is None
                 and active_purpose.required_pump_rpm is not None
+                and filtration_immediate
             ):
                 required_rpm = active_purpose.required_pump_rpm
             planned_purpose = (
-                active_purpose.purpose.value
+                (
+                    active_purpose.purpose.value
+                    if filtration_immediate and required_rpm is not None
+                    else None
+                )
                 if desired.selected_source is PhysicalHeatMode.OFF
                 else (
                     "solar_heating"
@@ -1216,6 +1225,9 @@ class ThermalRuntimeEvaluator:
                     **dict(desired.evidence),
                     "active_operating_purpose": planned_purpose,
                     "current_operating_purpose": active_purpose.purpose.value,
+                    "filtration_immediate_circulation_required": (
+                        evidence.filtration_immediate_circulation_required
+                    ),
                     "active_operating_purpose_reason": active_purpose.reason_code,
                 },
                 evidence_usable=desired.evidence_usable
@@ -1414,7 +1426,32 @@ class ThermalRuntimeEvaluator:
         )
         required_rpm = spa_desired.required_pump_rpm
         planned_purpose = active_purpose.purpose.value
-        if (
+        if spa_session_kind is SpaSessionKind.EXTERNAL_USER:
+            # A user-owned Spa session keeps body ownership external. PoolOS
+            # uses actual heat delivery for steady-state RPM, while preserving
+            # the planner's flow-before-source preparation contract when it
+            # must newly select a requested heat source.
+            source_preparation_required = (
+                below_target
+                and active_heat_source is ThermalHeatSource.NONE
+                and spa_desired.selected_source
+                in {PhysicalHeatMode.GAS, PhysicalHeatMode.SOLAR}
+                and selected_source is not spa_desired.selected_source
+            )
+            if source_preparation_required:
+                required_rpm = (
+                    _PUMP_BASELINES.gas_heating_rpm
+                    if spa_desired.selected_source is PhysicalHeatMode.GAS
+                    else _PUMP_BASELINES.solar_heating_rpm
+                )
+                planned_purpose = (
+                    "gas_heating"
+                    if spa_desired.selected_source is PhysicalHeatMode.GAS
+                    else "solar_heating"
+                )
+            else:
+                required_rpm = active_purpose.required_pump_rpm
+        elif (
             below_target
             and spa_desired.selected_source is PhysicalHeatMode.GAS
         ):

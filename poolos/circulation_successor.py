@@ -57,9 +57,10 @@ class FiltrationSuccessorEvidence:
 
     evaluated_at: datetime
     disposition: FiltrationDisposition
+    independent_disposition: FiltrationDisposition
     total_remaining_runtime: timedelta
     currently_earning_credit: bool
-    immediate_circulation_required: bool
+    immediate_circulation_required: bool | None
     successor_target_rpm: int | None
     target_semantics: FiltrationTargetSemantics
     authority: str = "none"
@@ -73,10 +74,25 @@ class FiltrationSuccessorEvidence:
             raise ValueError("filtration successor target must be positive")
         if self.authority != "none" or self.command_delivery_enabled:
             raise ValueError("filtration successor evidence must be command-disabled")
-        if self.immediate_circulation_required != (
-            self.disposition in {FiltrationDisposition.CREDITING, FiltrationDisposition.RUN_NOW}
+        if self.independent_disposition is FiltrationDisposition.CREDITING:
+            raise ValueError("independent filtration disposition cannot be crediting")
+        if (
+            self.disposition is not FiltrationDisposition.CREDITING
+            and self.independent_disposition is not self.disposition
         ):
-            raise ValueError("immediate need must match canonical filtration disposition")
+            raise ValueError(
+                "non-crediting current and independent dispositions must match"
+            )
+        expected_immediate = (
+            None
+            if self.independent_disposition
+            is FiltrationDisposition.EVIDENCE_UNAVAILABLE
+            else self.independent_disposition is FiltrationDisposition.RUN_NOW
+        )
+        if self.immediate_circulation_required is not expected_immediate:
+            raise ValueError(
+                "immediate need must match independent filtration disposition"
+            )
         if self.currently_earning_credit != (
             self.disposition is FiltrationDisposition.CREDITING
         ):
@@ -99,14 +115,12 @@ class FiltrationSuccessorEvidence:
         *,
         include_target: bool = True,
     ) -> FiltrationSuccessorEvidence:
-        immediate = assessment.disposition in {
-            FiltrationDisposition.CREDITING,
-            FiltrationDisposition.RUN_NOW,
-        }
+        immediate = assessment.immediate_circulation_required
         target = assessment.ordinary_filtration_rpm if immediate and include_target else None
         return cls(
             evaluated_at=assessment.evaluated_at,
             disposition=assessment.disposition,
+            independent_disposition=assessment.independent_disposition,
             total_remaining_runtime=assessment.total_remaining_runtime,
             currently_earning_credit=assessment.currently_earning_credit,
             immediate_circulation_required=immediate,
@@ -278,7 +292,10 @@ class CirculationSuccessorArbitrator:
             return _blocked(at, "circulation_source_cleanup_not_complete", facts)
         if filtration is None or not facts.filtration_evidence_current:
             return _blocked(at, "circulation_filtration_evidence_not_current", facts)
-        if filtration.disposition is FiltrationDisposition.EVIDENCE_UNAVAILABLE:
+        if (
+            filtration.disposition is FiltrationDisposition.EVIDENCE_UNAVAILABLE
+            or filtration.immediate_circulation_required is None
+        ):
             return _blocked(at, "circulation_filtration_evidence_unavailable", facts)
         if filtration.immediate_circulation_required:
             pump_eligible = _pump_handoff_eligible(entitlement, evidence, filtration)

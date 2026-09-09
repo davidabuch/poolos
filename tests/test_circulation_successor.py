@@ -156,14 +156,18 @@ def _filtration(
     debt: timedelta = timedelta(0),
     target: int | None = None,
     evaluated_at: datetime = AT,
+    independent_disposition: FiltrationDisposition | None = None,
 ) -> FiltrationSuccessorEvidence:
-    immediate = disposition in {
-        FiltrationDisposition.CREDITING,
-        FiltrationDisposition.RUN_NOW,
-    }
+    independent = independent_disposition or disposition
+    immediate = (
+        None
+        if independent is FiltrationDisposition.EVIDENCE_UNAVAILABLE
+        else independent is FiltrationDisposition.RUN_NOW
+    )
     return FiltrationSuccessorEvidence(
         evaluated_at=evaluated_at,
         disposition=disposition,
+        independent_disposition=independent,
         total_remaining_runtime=debt,
         currently_earning_credit=disposition is FiltrationDisposition.CREDITING,
         immediate_circulation_required=immediate,
@@ -259,13 +263,24 @@ def test_preexisting_body_with_owned_pump_can_normalize_immediate_filtration_onl
 
 
 @pytest.mark.parametrize(
-    "disposition",
-    [FiltrationDisposition.RUN_NOW, FiltrationDisposition.CREDITING],
+    ("disposition", "independent_disposition"),
+    [
+        (FiltrationDisposition.RUN_NOW, FiltrationDisposition.RUN_NOW),
+        (FiltrationDisposition.CREDITING, FiltrationDisposition.RUN_NOW),
+    ],
 )
 def test_immediate_filtration_is_a_typed_successor(
     disposition: FiltrationDisposition,
+    independent_disposition: FiltrationDisposition,
 ) -> None:
-    result = _evaluate(filtration=_filtration(disposition, debt=timedelta(hours=2), target=2600))
+    result = _evaluate(
+        filtration=_filtration(
+            disposition,
+            debt=timedelta(hours=2),
+            target=2600,
+            independent_disposition=independent_disposition,
+        )
+    )
 
     assert result.successor_kind is CirculationSuccessorKind.FILTRATION
     assert result.filtration_debt_present is True
@@ -294,6 +309,38 @@ def test_deferred_debt_is_not_immediate_filtration(
     assert result.filtration_immediate_need is False
     assert result.successor_kind is CirculationSuccessorKind.NONE
     assert result.body_deactivation_eligible
+
+
+def test_crediting_with_deferrable_counterfactual_is_not_a_successor() -> None:
+    result = _evaluate(
+        filtration=_filtration(
+            FiltrationDisposition.CREDITING,
+            debt=timedelta(hours=2),
+            independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        )
+    )
+
+    assert result.filtration_debt_present is True
+    assert result.filtration_immediate_need is False
+    assert result.successor_kind is CirculationSuccessorKind.NONE
+    assert result.body_deactivation_eligible
+
+
+def test_stale_crediting_cannot_perpetuate_circulation() -> None:
+    result = _evaluate(
+        filtration=_filtration(
+            FiltrationDisposition.CREDITING,
+            debt=timedelta(hours=2),
+            target=2600,
+            independent_disposition=FiltrationDisposition.RUN_NOW,
+            evaluated_at=NOW,
+        )
+    )
+
+    assert result.disposition is CirculationArbitrationDisposition.BLOCKED
+    assert result.reason_code == "circulation_filtration_evidence_not_current"
+    assert not result.pump_handoff_eligible
+    assert not result.body_deactivation_eligible
 
 
 def test_latest_satisfied_filtration_truth_does_not_retain_stale_debt() -> None:
@@ -791,6 +838,11 @@ def test_filtration_evidence_adapter_preserves_canonical_state() -> None:
     evidence = FiltrationSuccessorEvidence.from_accounting(snapshot)
 
     assert evidence.disposition is snapshot.disposition
+    assert evidence.independent_disposition is snapshot.independent_disposition
+    assert (
+        evidence.immediate_circulation_required
+        is snapshot.immediate_circulation_required
+    )
     assert evidence.total_remaining_runtime == snapshot.total_remaining_runtime
     assert evidence.successor_target_rpm == snapshot.ordinary_filtration_rpm
     assert evidence.command_delivery_enabled is False

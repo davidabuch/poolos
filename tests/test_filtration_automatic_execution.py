@@ -71,6 +71,7 @@ def _accounting(at: datetime, *, satisfied: bool = False):
         remaining_runtime=timedelta(0),
         total_remaining_runtime=timedelta(0),
         disposition=FiltrationDisposition.SATISFIED,
+        independent_disposition=FiltrationDisposition.SATISFIED,
         currently_earning_credit=False,
         reason_code="filtration_obligation_satisfied",
     )
@@ -716,6 +717,33 @@ def test_off_to_filtration_owned_to_off_is_closed_loop_and_provenance_based() ->
     assert stopped.blocker == "automatic_filtration_pool_off_verified"
     assert driver.ownership.owner is PoolCirculationOwner.NONE
     assert driver.ownership.filtration_lease is None
+
+
+def test_crediting_cannot_perpetuate_owned_filtration_when_independently_deferrable() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    current = _frame(
+        NOW + timedelta(seconds=3),
+        pool=True,
+        rpm=2600,
+        configured=2600,
+    )
+    assert current.filtration is not None
+    current = replace(
+        current,
+        filtration=replace(
+            current.filtration,
+            disposition=FiltrationDisposition.CREDITING,
+            independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+            currently_earning_credit=True,
+            reason_code="qualifying_filtration_credit_in_progress",
+        ),
+    )
+
+    result = asyncio.run(driver.process_epoch(current, delivery_factory=factory))
+
+    assert result.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is False
 
 
 def test_complete_off_filtration_thermal_filtration_off_ownership_lifecycle() -> None:

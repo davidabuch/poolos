@@ -13,7 +13,7 @@ exposes a deliberately tiny mutation surface:
 * set one commissioned IntelliChlor Pool/Spa output percentage
 * turn explicitly allow-listed Jets, Slide, Spillway, and Pool Light circuits on or off
 * change the Pool Light IntelliBrite effect on C0002
-* change the dynamically identified Pool PMPCIRC RPM setpoint
+* change an authority-bound, dynamically identified Pool/Spa PMPCIRC RPM setpoint
 
 No generic SETPARAMLIST interface is exposed to Home Assistant entities.
 """
@@ -39,7 +39,10 @@ from poolos.physical_command_authority import (
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.intellicenter_readonly import (
+    POOL_CIRCUIT_NATIVE_ID,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_CIRCUIT_NATIVE_ID,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     is_pmpcirc_native_id,
 )
 
@@ -81,10 +84,10 @@ _ALLOWED_HEAT_SOURCE_IDS = frozenset(
     }
 )
 
-# Pool PMPCIRC identity is discovered dynamically because IntelliCenter may
+# PMPCIRC identity is discovered dynamically because IntelliCenter may
 # recycle p01xx object IDs when pump-speed assignments are deleted/recreated.
-# Only a PMPCIRC assigned to the commissioned Pool circuit may be mutated.
-_POOL_CIRCUIT_OBJNAM = "C0006"
+# Automatic thermal delivery may bind either commissioned body; all other
+# callers retain the narrower Pool-only command surface.
 _PUMP_RPM_MODE = "RPM"
 
 _MIN_TARGET_TEMPERATURE = 40
@@ -613,8 +616,14 @@ class ManualIntelliCenterControl:
 
         await self._require_available()
 
+        thermal_body = (
+            None
+            if automatic_thermal_context is None
+            else automatic_thermal_context.body
+        )
         _parent_id, minimum, maximum = self._pump_circuit_rpm_limits(
-            pump_circuit_objnam
+            pump_circuit_objnam,
+            thermal_body=thermal_body,
         )
 
         if not minimum <= target <= maximum:
@@ -622,6 +631,11 @@ class ManualIntelliCenterControl:
                 f"pump RPM must be between {minimum} and {maximum}"
             )
 
+        configured_speed_concept = (
+            SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            if thermal_body == "hot_tub"
+            else POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        )
         await self._async_deliver(
             request=PhysicalCommandRequest(
                 operation="pump_circuit_speed",
@@ -633,7 +647,7 @@ class ManualIntelliCenterControl:
                 grid_outage_context=grid_outage_context,
             ),
             consequence=ExpectedNativeConsequence(
-                concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+                concept=configured_speed_concept,
                 native_object_id=pump_circuit_objnam,
                 expected_value=float(target),
             ),
@@ -673,7 +687,9 @@ class ManualIntelliCenterControl:
                 "allowed_body_ids": sorted(_ALLOWED_BODY_IDS),
                 "allowed_circuit_ids": sorted(_ALLOWED_CIRCUIT_IDS),
                 "pool_pump_circuit_selection": "dynamic_native_circuit",
-                "pool_circuit_objnam": _POOL_CIRCUIT_OBJNAM,
+                "spa_pump_circuit_selection": "dynamic_native_circuit",
+                "pool_circuit_objnam": POOL_CIRCUIT_NATIVE_ID,
+                "spa_circuit_objnam": SPA_CIRCUIT_NATIVE_ID,
                 "pump_rpm_requires_native_limits": True,
                 "pump_rpm_requires_explicit_rpm_mode": True,
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
@@ -770,36 +786,51 @@ class ManualIntelliCenterControl:
     def _pump_circuit_rpm_limits(
         self,
         pump_circuit_objnam: str,
+        *,
+        thermal_body: str | None = None,
     ) -> tuple[str, int, int]:
-        """Validate PMPCIRC identity/mode and return parent identity/limits."""
+        """Validate one exact body-bound PMPCIRC and its native RPM limits."""
+
+        circuit_id = (
+            SPA_CIRCUIT_NATIVE_ID
+            if thermal_body == "hot_tub"
+            else POOL_CIRCUIT_NATIVE_ID
+        )
+        body_label = "Hot Tub" if thermal_body == "hot_tub" else "Pool"
         matches: list[tuple[str, str, int, int]] = []
         for candidate in self._model.get_by_type(PMPCIRC_TYPE):
             candidate_id = str(candidate.objnam)
-            resolved = self._validated_pool_pump_circuit(candidate)
+            resolved = self._validated_body_pump_circuit(
+                candidate,
+                circuit_id=circuit_id,
+            )
             if resolved is not None:
                 parent_id, minimum, maximum = resolved
                 matches.append((candidate_id, parent_id, minimum, maximum))
         if len(matches) != 1 or matches[0][0] != pump_circuit_objnam:
             raise ManualIntelliCenterCommandError(
-                f"{pump_circuit_objnam} is not the unique live Pool PMPCIRC object"
+                f"{pump_circuit_objnam} is not the unique live {body_label} "
+                "PMPCIRC object"
             )
         _candidate_id, parent_id, minimum, maximum = matches[0]
         return parent_id, minimum, maximum
 
-    def _validated_pool_pump_circuit(
+    def _validated_body_pump_circuit(
         self,
         item: Any,
+        *,
+        circuit_id: str,
     ) -> tuple[str, int, int] | None:
-        """Return parent and limits only for one valid Pool RPM assignment."""
+        """Return parent and limits only for one exact body RPM assignment."""
 
         if item is None or str(item.objtype).upper() != str(PMPCIRC_TYPE).upper():
             return None
         if not is_pmpcirc_native_id(str(item.objnam)):
             return None
 
-        circuit_id = item[CIRCUIT_ATTR]
+        assigned_circuit_id = item[CIRCUIT_ATTR]
 
-        if circuit_id is None or str(circuit_id) != _POOL_CIRCUIT_OBJNAM:
+        if assigned_circuit_id is None or str(assigned_circuit_id) != circuit_id:
             return None
 
         mode = item[SELECT_ATTR]

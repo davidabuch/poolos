@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 
+from poolos.filtration_policy import FiltrationDisposition
 from poolos.integration import SetPumpSpeed, ThermalBody
 from poolos.native_configuration_policy import (
     AutonomousCapability,
@@ -14,6 +15,7 @@ from poolos.native_configuration_policy import (
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
+from poolos.observations import ObservationQuality
 
 
 NOW = datetime(2026, 8, 27, 20, 0, tzinfo=UTC)
@@ -42,6 +44,24 @@ def _load_runtime_class():
 
 
 PoolOSThermalRuntime = _load_runtime_class()
+
+
+def _load_filtration_runtime_class():
+    package_name = "_poolos_phase3_runtime_test"
+    module_name = f"{package_name}.filtration_runtime"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing.PoolOSFiltrationRuntime
+    path = ROOT / "custom_components" / "poolos" / "filtration_runtime.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module.PoolOSFiltrationRuntime
+
+
+PoolOSFiltrationRuntime = _load_filtration_runtime_class()
 
 
 @dataclass
@@ -154,6 +174,36 @@ def runtime_fixture(
     return runtime, coordinator, manual
 
 
+def _publish_runtime_frame(
+    runtime,
+    coordinator: FakeCoordinator,
+    filtration_runtime,
+    *,
+    at: datetime,
+    values: dict[str, object],
+) -> None:
+    observations = tuple(
+        SimpleNamespace(
+            observation_id=key,
+            value=value,
+            source_id=f"native:{key}",
+            observed_at=at,
+            quality=ObservationQuality.GOOD,
+        )
+        for key, value in values.items()
+    )
+    snapshot = SimpleNamespace(
+        generated_at=at,
+        observations=observations,
+        stale_entities=(),
+        healthy=True,
+    )
+    coordinator.data = snapshot
+    coordinator.native_intellicenter_snapshot.observations = observations
+    filtration_runtime.refresh(snapshot)
+    runtime.refresh(snapshot)
+
+
 def test_runtime_binds_current_recycled_pool_pmpcirc_into_assessment() -> None:
     runtime, _, _ = runtime_fixture(pool_pmpcirc_id="p0101")
 
@@ -165,11 +215,238 @@ def test_runtime_binds_current_recycled_pool_pmpcirc_into_assessment() -> None:
         for operation in runtime.assessment.pool.plan.operations
         if isinstance(operation, SetPumpSpeed)
     )
+
+
+def test_runtime_passes_deferrable_filtration_as_non_immediate_thermal_evidence() -> None:
+    runtime, coordinator, manual = runtime_fixture()
+    coordinator.native_intellicenter_snapshot.observations = tuple(
+        SimpleNamespace(
+            observation_id=item.observation_id,
+            value=(
+                90.0
+                if item.observation_id == "pool.temperature"
+                else (
+                    80.0
+                    if item.observation_id == "solar.temperature"
+                    else item.value
+                )
+            ),
+            source_id=item.source_id,
+        )
+        for item in coordinator.native_intellicenter_snapshot.observations
+    )
+    runtime.filtration_runtime = SimpleNamespace(
+        assessment=SimpleNamespace(
+            disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+            independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+            immediate_circulation_required=False,
+            total_remaining_runtime=timedelta(hours=5),
+        )
+    )
+
+    runtime.refresh()
+
+    assert runtime.assessment is not None
+    desired = runtime.assessment.pool.plan.desired
+    assert desired.required_pump_rpm is None
+    assert desired.evidence["current_operating_purpose"] == "ordinary_circulation"
+    assert desired.evidence["filtration_immediate_circulation_required"] is False
+    assert manual.command_calls == []
     assert all(
         operation.equipment_id == "p0198"
         for operation in runtime.assessment.hot_tub.plan.operations
         if isinstance(operation, SetPumpSpeed)
     )
+
+
+def test_runtime_does_not_treat_crediting_as_independent_successor_need() -> None:
+    """Incidental Solar credit cannot perpetuate Pool circulation."""
+
+    runtime, coordinator, manual = runtime_fixture()
+    coordinator.native_intellicenter_snapshot.observations = tuple(
+        SimpleNamespace(
+            observation_id=item.observation_id,
+            value=(
+                90.0
+                if item.observation_id == "pool.temperature"
+                else (
+                    80.0
+                    if item.observation_id == "solar.temperature"
+                    else item.value
+                )
+            ),
+            source_id=item.source_id,
+        )
+        for item in coordinator.native_intellicenter_snapshot.observations
+    )
+    runtime.filtration_runtime = SimpleNamespace(
+        assessment=SimpleNamespace(
+            disposition=FiltrationDisposition.CREDITING,
+            independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+            immediate_circulation_required=False,
+            total_remaining_runtime=timedelta(hours=5),
+        )
+    )
+
+    runtime.refresh()
+
+    assert runtime.assessment is not None
+    desired = runtime.assessment.pool.plan.desired
+    assert desired.required_pump_rpm is None
+    assert desired.evidence["current_operating_purpose"] == "ordinary_circulation"
+    assert desired.evidence["filtration_immediate_circulation_required"] is False
+    assert manual.command_calls == []
+
+
+def test_runtime_retains_crediting_when_independent_policy_is_run_now() -> None:
+    """Incidental credit may continue when policy independently requires it now."""
+
+    runtime, coordinator, manual = runtime_fixture()
+    coordinator.native_intellicenter_snapshot.observations = tuple(
+        SimpleNamespace(
+            observation_id=item.observation_id,
+            value=(
+                90.0
+                if item.observation_id == "pool.temperature"
+                else (
+                    80.0
+                    if item.observation_id == "solar.temperature"
+                    else item.value
+                )
+            ),
+            source_id=item.source_id,
+        )
+        for item in coordinator.native_intellicenter_snapshot.observations
+    )
+    runtime.filtration_runtime = SimpleNamespace(
+        assessment=SimpleNamespace(
+            disposition=FiltrationDisposition.CREDITING,
+            independent_disposition=FiltrationDisposition.RUN_NOW,
+            immediate_circulation_required=True,
+            total_remaining_runtime=timedelta(hours=5),
+        )
+    )
+
+    runtime.refresh()
+
+    assert runtime.assessment is not None
+    desired = runtime.assessment.pool.plan.desired
+    assert desired.required_pump_rpm == 2600
+    assert desired.evidence["filtration_immediate_circulation_required"] is True
+    assert manual.command_calls == []
+
+
+def test_solar_end_crediting_transition_uses_filtration_counterfactual() -> None:
+    """HA filtration truth prevents transient CREDITING from self-perpetuating."""
+
+    runtime, coordinator, manual = runtime_fixture()
+    filtration_runtime = PoolOSFiltrationRuntime(coordinator=SimpleNamespace())
+    runtime.filtration_runtime = filtration_runtime
+
+    solar = _native_values()
+    solar.update(
+        {
+            "pool.temperature": 82.0,
+            "pool.target_temperature": 83.0,
+            "pool.raw_heater_id": "H0002",
+            "pump.rpm": 2900,
+            "solar.active": True,
+        }
+    )
+    _publish_runtime_frame(
+        runtime,
+        coordinator,
+        filtration_runtime,
+        at=NOW + timedelta(seconds=1),
+        values=solar,
+    )
+    assert filtration_runtime.assessment is not None
+    assert filtration_runtime.assessment.disposition is FiltrationDisposition.CREDITING
+
+    ended = dict(solar)
+    ended.update(
+        {
+            "pool.temperature": 84.0,
+            "pool.raw_heater_id": "00000",
+            "solar.active": False,
+        }
+    )
+    _publish_runtime_frame(
+        runtime,
+        coordinator,
+        filtration_runtime,
+        at=NOW + timedelta(seconds=2),
+        values=ended,
+    )
+    assert filtration_runtime.assessment is not None
+    assert filtration_runtime.assessment.disposition is FiltrationDisposition.CREDITING
+    assert (
+        filtration_runtime.assessment.independent_disposition
+        is FiltrationDisposition.DEFERRED_TOU
+    )
+    assert runtime.assessment is not None
+    assert runtime.assessment.pool.plan.desired.required_pump_rpm is None
+
+    _publish_runtime_frame(
+        runtime,
+        coordinator,
+        filtration_runtime,
+        at=NOW + timedelta(seconds=3),
+        values=ended,
+    )
+    assert runtime.assessment is not None
+    assert runtime.assessment.pool.plan.desired.required_pump_rpm is None
+    assert manual.command_calls == []
+
+
+def test_solar_end_crediting_transition_retains_independent_run_now() -> None:
+    runtime, coordinator, manual = runtime_fixture()
+    filtration_runtime = PoolOSFiltrationRuntime(coordinator=SimpleNamespace())
+    runtime.filtration_runtime = filtration_runtime
+    catchup = NOW + timedelta(hours=7)
+    solar = _native_values()
+    solar.update(
+        {
+            "pool.temperature": 82.0,
+            "pool.target_temperature": 83.0,
+            "pool.raw_heater_id": "H0002",
+            "pump.rpm": 2900,
+            "solar.active": True,
+        }
+    )
+    _publish_runtime_frame(
+        runtime,
+        coordinator,
+        filtration_runtime,
+        at=catchup + timedelta(seconds=1),
+        values=solar,
+    )
+
+    ended = dict(solar)
+    ended.update(
+        {
+            "pool.temperature": 84.0,
+            "pool.raw_heater_id": "00000",
+            "solar.active": False,
+        }
+    )
+    _publish_runtime_frame(
+        runtime,
+        coordinator,
+        filtration_runtime,
+        at=catchup + timedelta(seconds=2),
+        values=ended,
+    )
+
+    assert filtration_runtime.assessment is not None
+    assert filtration_runtime.assessment.disposition is FiltrationDisposition.CREDITING
+    assert (
+        filtration_runtime.assessment.independent_disposition
+        is FiltrationDisposition.RUN_NOW
+    )
+    assert runtime.assessment is not None
+    assert runtime.assessment.pool.plan.desired.required_pump_rpm == 2600
+    assert manual.command_calls == []
 
 
 def test_first_install_and_every_new_runtime_start_effectively_disabled() -> None:

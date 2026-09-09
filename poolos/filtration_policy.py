@@ -553,6 +553,7 @@ class FiltrationAccountingSnapshot:
     carried_prior_day_debt: timedelta
     total_remaining_runtime: timedelta
     disposition: FiltrationDisposition
+    independent_disposition: FiltrationDisposition
     tou_tier: TimeOfUseTier
     next_suitable_at: datetime | None
     ordinary_filtration_rpm: int
@@ -581,8 +582,34 @@ class FiltrationAccountingSnapshot:
             raise ValueError("ordinary_filtration_rpm must be positive")
         if self.authority != "none" or self.command_delivery_enabled:
             raise ValueError("filtration accounting must remain command-disabled")
+        if self.currently_earning_credit != (
+            self.disposition is FiltrationDisposition.CREDITING
+        ):
+            raise ValueError("earning-credit state must match current disposition")
+        if self.independent_disposition is FiltrationDisposition.CREDITING:
+            raise ValueError("independent filtration disposition cannot be crediting")
+        if (
+            self.disposition is not FiltrationDisposition.CREDITING
+            and self.independent_disposition is not self.disposition
+        ):
+            raise ValueError(
+                "non-crediting current and independent dispositions must match"
+            )
         object.__setattr__(self, "rationale", tuple(self.rationale))
         object.__setattr__(self, "debt_days", tuple(self.debt_days))
+
+    @property
+    def immediate_circulation_required(self) -> bool | None:
+        """Return whether filtration independently requires circulation now.
+
+        The independent disposition is evaluated as if incidental circulation
+        were not already earning credit.  This prevents CREDITING from using
+        its own physical precondition as justification to continue.
+        """
+
+        if self.independent_disposition is FiltrationDisposition.EVIDENCE_UNAVAILABLE:
+            return None
+        return self.independent_disposition is FiltrationDisposition.RUN_NOW
 
     def diagnostics(self) -> Mapping[str, Any]:
         """Return compact Recorder-safe accounting evidence."""
@@ -600,6 +627,10 @@ class FiltrationAccountingSnapshot:
                     self.total_remaining_runtime.total_seconds()
                 ),
                 "disposition": self.disposition.value,
+                "independent_disposition": self.independent_disposition.value,
+                "immediate_circulation_required": (
+                    self.immediate_circulation_required
+                ),
                 "tou_tier": self.tou_tier.name.lower(),
                 "reason_code": self.reason_code,
                 "currently_earning_credit": self.currently_earning_credit,
@@ -993,6 +1024,13 @@ class FiltrationAccountingTracker:
             higher_priority_requirement=higher_priority_requirement,
             filtration_in_progress=filtration_in_progress,
         )
+        independent_policy = self._policy.evaluate(
+            FiltrationObligation(total_required, total_credited),
+            evaluated_at=evaluated_at,
+            safely_deferrable=safely_deferrable,
+            higher_priority_requirement=higher_priority_requirement,
+            filtration_in_progress=False,
+        )
         reason_code = {
             FiltrationDisposition.SATISFIED: "filtration_obligation_satisfied",
             FiltrationDisposition.CREDITING: (
@@ -1044,6 +1082,7 @@ class FiltrationAccountingTracker:
             carried_prior_day_debt=carried,
             total_remaining_runtime=self._ledger.remaining_runtime,
             disposition=policy.disposition,
+            independent_disposition=independent_policy.disposition,
             tou_tier=policy.tou_tier,
             next_suitable_at=policy.next_suitable_at,
             ordinary_filtration_rpm=self._baselines.filtration_rpm,
@@ -1081,6 +1120,7 @@ class FiltrationAccountingTracker:
             carried_prior_day_debt=snapshot.carried_prior_day_debt,
             total_remaining_runtime=snapshot.total_remaining_runtime,
             disposition=snapshot.disposition,
+            independent_disposition=snapshot.independent_disposition,
             tou_tier=snapshot.tou_tier,
             next_suitable_at=snapshot.next_suitable_at,
             ordinary_filtration_rpm=snapshot.ordinary_filtration_rpm,

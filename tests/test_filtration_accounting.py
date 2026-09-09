@@ -115,6 +115,50 @@ def test_gpm_is_not_filtration_evidence_and_zero_rpm_earns_no_credit() -> None:
     assert result.credited_runtime == timedelta(0)
 
 
+def test_crediting_exposes_deferrable_independent_successor_policy() -> None:
+    """Current incidental circulation cannot make its own successor necessary."""
+
+    tracker = accounting()
+    at = datetime(2026, 9, 9, 10, 0, tzinfo=LOCAL)
+
+    result = tracker.observe(observation(at, pool_active=True, rpm=2900))
+
+    assert result is not None
+    assert result.disposition is FiltrationDisposition.CREDITING
+    assert result.independent_disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
+    assert result.immediate_circulation_required is False
+
+
+def test_crediting_exposes_run_now_when_independently_due() -> None:
+    tracker = accounting()
+    at = datetime(2026, 9, 9, 20, 0, tzinfo=LOCAL)
+
+    result = tracker.observe(observation(at, pool_active=True, rpm=2900))
+
+    assert result is not None
+    assert result.disposition is FiltrationDisposition.CREDITING
+    assert result.independent_disposition is FiltrationDisposition.RUN_NOW
+    assert result.immediate_circulation_required is True
+
+
+def test_independent_successor_assessment_is_read_only_and_repeatable() -> None:
+    tracker = accounting()
+    at = datetime(2026, 9, 9, 10, 0, tzinfo=LOCAL)
+    result = tracker.observe(observation(at, pool_active=True, rpm=2900))
+    assert result is not None
+    ledger_before = tracker.ledger
+    current_before = tracker.current
+
+    first = result.immediate_circulation_required
+    second = result.immediate_circulation_required
+
+    assert first is False
+    assert second is False
+    assert tracker.ledger == ledger_before
+    assert tracker.current is current_before
+    assert result.credited_runtime == timedelta(0)
+
+
 def test_unusable_evidence_breaks_credit_continuity_fail_closed() -> None:
     tracker = accounting()
     start = datetime(2026, 8, 28, 8, 0, tzinfo=LOCAL)
