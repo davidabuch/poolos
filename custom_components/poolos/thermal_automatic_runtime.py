@@ -100,12 +100,15 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             purpose = AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
             if isinstance(operation, SetBodyActive):
                 operation_name = "body_active"
+                authority_target = "B1101"
                 requested_value: bool | int | str = operation.active
             elif isinstance(operation, SetPumpSpeed):
                 operation_name = "pump_circuit_speed"
+                authority_target = operation.equipment_id
                 requested_value = operation.rpm
             elif isinstance(operation, SetHeatMode):
                 operation_name = "body_heat_source"
+                authority_target = "B1101"
                 requested_value = {
                     PhysicalHeatMode.OFF: "00000",
                     PhysicalHeatMode.GAS: "H0001",
@@ -117,7 +120,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 epoch_identity=epoch_identity,
                 operation_id=operation.operation_id,
                 operation=operation_name,
-                target=operation.equipment_id,
+                target=authority_target,
                 requested_value=requested_value,
             )
             probe_operation_id = operation.operation_id

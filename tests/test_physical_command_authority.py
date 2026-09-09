@@ -1450,14 +1450,45 @@ def test_probe_authority_binds_every_exact_canonical_probe_step(
     )
 
 
-def test_probe_authority_rejects_any_pump_registration() -> None:
+def test_probe_authority_admits_only_exact_temperature_probe_pump_registration() -> None:
     authority = ready()
 
-    with pytest.raises(ValueError, match="unsupported Pool temperature-probe operation"):
+    context = _probe_context(
+        authority,
+        operation="pump_circuit_speed",
+        target="p0102",
+        value=1500,
+    )
+    exact = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=1500,
+        automatic_thermal_context=context,
+    )
+
+    assert authority.assess(exact).allowed
+
+    for value in (1499, 1501, 2600, 2900, 3000):
+        with pytest.raises(
+            ValueError,
+            match="unsupported Pool temperature-probe operation",
+        ):
+            _probe_context(
+                authority,
+                operation="pump_circuit_speed",
+                target="p0102",
+                value=value,
+            )
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported Pool temperature-probe operation",
+    ):
         _probe_context(
             authority,
             operation="pump_circuit_speed",
-            target="p0102",
+            target="not-a-pmpcirc",
             value=1500,
         )
 

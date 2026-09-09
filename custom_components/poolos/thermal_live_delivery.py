@@ -151,7 +151,19 @@ class ManualIntelliCenterThermalLiveDelivery:
         if authority is None or operation.operation_id != authority.operation_id:
             raise ValueError("probe operation does not match bound authority")
         if isinstance(operation, SetBodyActive):
-            actual = ("body_active", _BODY_ID[ThermalBody(operation.equipment_id)], operation.active)
+            actual = (
+                "body_active",
+                _BODY_ID[ThermalBody(operation.equipment_id)],
+                operation.active,
+            )
+        elif isinstance(operation, SetPumpSpeed):
+            if not is_pmpcirc_native_id(operation.equipment_id):
+                raise ValueError("unsupported thermal pump circuit")
+            actual = (
+                "pump_circuit_speed",
+                operation.equipment_id,
+                operation.rpm,
+            )
         elif isinstance(operation, SetHeatMode):
             body_id, heater_id = self._validate_heat_mode(operation)
             actual = ("body_heat_source", body_id, heater_id)
