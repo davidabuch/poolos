@@ -32,7 +32,7 @@ def test_remaining_concepts_are_parity_eligible_without_super_chlorinate() -> No
     assert not any("super" in concept.casefold() for concept in NATIVE_TARGET_CONCEPTS)
 
 
-def test_optional_legacy_mappings_cover_only_supported_parity_inputs() -> None:
+def test_retired_legacy_mappings_are_absent_from_configurable_shadow_inputs() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")
     flow = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
     observation = (COMPONENT / "observation.py").read_text(encoding="utf-8")
@@ -49,11 +49,12 @@ def test_optional_legacy_mappings_cover_only_supported_parity_inputs() -> None:
         "CONF_PUMP_MINIMUM_RPM_ENTITY",
         "CONF_PUMP_MAXIMUM_RPM_ENTITY",
     ):
-        assert token in const
-        assert token in flow
-        assert token in observation
+        assert token not in const
+        assert token not in flow
+        assert token not in observation
 
     combined = (const + flow + observation).casefold()
+    assert "retired_legacy_intellicenter_entity_options" in const.casefold()
     assert "super_chlor" not in combined
     assert "superchlor" not in combined
 
