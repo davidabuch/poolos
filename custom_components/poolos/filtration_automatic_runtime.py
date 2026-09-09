@@ -112,6 +112,7 @@ class PoolOSFiltrationAutomaticRuntime:
     )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _desired_enabled: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.driver = FiltrationAutomaticExecutionDriver(self.ownership)
@@ -119,9 +120,11 @@ class PoolOSFiltrationAutomaticRuntime:
 
     @property
     def enabled(self) -> bool:
-        return self.driver.requested_enabled
+        return self._desired_enabled
 
     def set_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        self._desired_enabled = enabled
         current = None if self._latest_frame is None else self._latest_frame.epoch_identity
         self.driver.set_enabled(
             enabled,

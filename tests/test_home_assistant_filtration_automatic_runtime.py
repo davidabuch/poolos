@@ -252,3 +252,21 @@ def test_unload_invalidates_authority_and_reconstructs_no_task_or_owner() -> Non
         assert runtime._task is None
 
     asyncio.run(scenario())
+
+
+def test_unload_preserves_commissioned_desired_filtration_gate_state() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, _, _, _, driver = _runtime(module)
+
+        runtime.set_enabled(True)
+
+        assert runtime.enabled is True
+        assert driver.requested_enabled is True
+
+        await runtime.async_unload()
+
+        assert driver.requested_enabled is False
+        assert runtime.enabled is True
+
+    asyncio.run(scenario())

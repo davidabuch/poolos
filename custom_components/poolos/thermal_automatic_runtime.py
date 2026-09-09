@@ -236,6 +236,7 @@ class PoolOSThermalAutomaticRuntime:
     )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _desired_enabled: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.driver = ThermalAutomaticExecutionDriver(
@@ -246,11 +247,13 @@ class PoolOSThermalAutomaticRuntime:
 
     @property
     def enabled(self) -> bool:
-        return self.driver.requested_enabled
+        return self._desired_enabled
 
     def set_enabled(self, enabled: bool) -> None:
-        """Change the dedicated gate; never process the cached candidate."""
+        """Change the commissioned desired gate without replaying cached work."""
 
+        enabled = bool(enabled)
+        self._desired_enabled = enabled
         now = datetime.now(UTC)
         current = (
             None if self._latest_frame is None else self._latest_frame.epoch_identity
