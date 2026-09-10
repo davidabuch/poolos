@@ -901,9 +901,13 @@ def _boolean(value: object) -> bool | None:
 
 
 def _integer(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if isinstance(value, bool):
         return None
-    return value
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and value >= 0 and value.is_integer():
+        return int(value)
+    return None
 
 
 def _heat_source(value: object) -> PhysicalHeatMode | None:
