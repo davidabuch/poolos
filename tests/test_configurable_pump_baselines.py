@@ -131,6 +131,7 @@ def test_production_composition_binds_every_nested_core_dependency() -> None:
     assert graph.thermal_orchestrator.baselines is graph.baselines
     assert graph.physical_authority.baselines is graph.baselines
     assert graph.grid_outage_engine.baselines is graph.baselines
+    assert graph.pump_speed_session.baselines is graph.baselines
     assert graph.baselines.spillway_rpm == 2900
 
 

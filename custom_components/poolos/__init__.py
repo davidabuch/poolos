@@ -45,6 +45,7 @@ from .grid_outage_runtime import PoolOSGridOutageSafetyRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .observation import ObservationSnapshot  # noqa: E402
 from .pump_baselines import compose_pump_baseline_runtime  # noqa: E402
+from .pump_speed_session import PoolOSPumpSpeedSessionRuntime  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 from .thermal_automatic_runtime import PoolOSThermalAutomaticRuntime  # noqa: E402
 from poolos.thermal_runtime_orchestration import (  # noqa: E402
@@ -59,6 +60,12 @@ from poolos.physical_command_authority import (  # noqa: E402
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.operating_baselines import PumpOperatingBaselines  # noqa: E402
+from poolos.intellicenter_readonly import (  # noqa: E402
+    NativeIntelliCenterObservationSnapshot,
+    NativeIntelliCenterTransportSnapshot,
+)
+from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
+from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
     PoolCirculationOwnershipRegistry,
 )
@@ -90,6 +97,7 @@ class PoolOSRuntimeData:
     filtration_automatic_runtime: PoolOSFiltrationAutomaticRuntime
     pool_automatic_control: PoolAutomaticControlSuppression
     pump_operating_baselines: PumpOperatingBaselines
+    pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
     spa_automatic_control: SpaAutomaticControlSuppression = field(
         default_factory=SpaAutomaticControlSuppression
     )
@@ -147,6 +155,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     manual_host = str(configured.get("intellicenter_host", "")).strip()
     physical_command_authority = pump_composition.physical_authority
+    pump_speed_session = PoolOSPumpSpeedSessionRuntime(
+        pump_composition.pump_speed_session,
+        physical_command_authority,
+    )
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     spa_automatic_control = SpaAutomaticControlSuppression()
@@ -185,6 +197,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         filtration_runtime=filtration_runtime,
         baselines=pump_baselines,
         evaluator=pump_composition.thermal_evaluator,
+        pump_speed_session=pump_speed_session,
     )
     external_change_runtime = PoolOSExternalChangeRuntime(
         hass=hass,
@@ -203,6 +216,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
         baselines=pump_baselines,
+        pump_speed_session=pump_speed_session,
         circulation_ownership=pool_circulation_ownership,
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
@@ -216,6 +230,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
         baselines=pump_baselines,
+        pump_speed_session=pump_speed_session,
         pool_automatic_control=pool_automatic_control,
     )
     grid_outage_safety_runtime = PoolOSGridOutageSafetyRuntime(
@@ -301,9 +316,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
         pump_operating_baselines=pump_baselines,
+        pump_speed_session=pump_speed_session,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
-    coordinator.set_native_snapshot_observer(external_change_runtime.process)
+    def synchronize_pump_session(
+        native: NativeIntelliCenterObservationSnapshot,
+        transport: NativeIntelliCenterTransportSnapshot,
+        connection_generation: int,
+    ) -> None:
+        special = thermal_automatic_runtime.driver.active_pump_session_purpose()
+        outage = thermal_runtime_orchestrator.assessment
+        pump_speed_session.synchronize(
+            native,
+            transport,
+            connection_generation=connection_generation,
+            probe_active=special is PumpSpeedSessionPurpose.TEMPERATURE_PROBE,
+            priming_active=special is PumpSpeedSessionPurpose.PRIMING,
+            outage_active=bool(
+                outage is not None
+                and outage.outage is not None
+                and outage.outage.disposition
+                is GridOutageDisposition.CONFIRMED_OUTAGE
+            ),
+        )
+
+    def observe_native_snapshot(
+        native: NativeIntelliCenterObservationSnapshot,
+        transport: NativeIntelliCenterTransportSnapshot,
+        connection_generation: int,
+    ) -> None:
+        synchronize_pump_session(native, transport, connection_generation)
+        external_change_runtime.process(native, transport, connection_generation)
+        pump_speed_session.apply_external_changes(
+            external_change_runtime.latest_batch,
+            native,
+        )
+
+    coordinator.set_native_snapshot_observer(observe_native_snapshot)
     thermal_runtime.set_assessment_observer(
         external_change_runtime.refresh_ownership
     )
@@ -319,6 +368,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             thermal=assessment,
             external_changes=external_change_runtime.latest_batch,
         )
+        native = coordinator.native_intellicenter_snapshot
+        transport_runtime = coordinator.independent_intellicenter_transport
+        transport = (
+            None if transport_runtime is None else transport_runtime.latest_snapshot
+        )
+        if native is not None and transport is not None:
+            synchronize_pump_session(
+                native,
+                transport,
+                getattr(transport_runtime, "discovery_generation", 0),
+            )
         thermal_automatic_runtime.observe(
             snapshot,
             assessment,

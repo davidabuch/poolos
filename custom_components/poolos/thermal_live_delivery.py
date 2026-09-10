@@ -238,26 +238,31 @@ class ManualIntelliCenterThermalLiveDelivery:
             self.baselines.priming_rpm,
         }
         if cleanup is not None and cleanup.body == ThermalBody.HOT_TUB.value:
-            expected = {
-                "temperature_acquisition": self.baselines.temperature_probe_rpm,
-                "ordinary_circulation": self.baselines.filtration_rpm,
-                "solar_heating": self.baselines.solar_heating_rpm,
-                "gas_heating": self.baselines.gas_heating_rpm,
-            }.get(
-                cleanup.operating_purpose
-                if cleanup.operating_purpose is not None
-                else ""
+            expected = (
+                cleanup.effective_pump_rpm
+                if cleanup.effective_pump_rpm is not None
+                else {
+                    "temperature_acquisition": self.baselines.temperature_probe_rpm,
+                    "ordinary_circulation": self.baselines.filtration_rpm,
+                    "solar_heating": self.baselines.solar_heating_rpm,
+                    "gas_heating": self.baselines.gas_heating_rpm,
+                }.get(cleanup.operating_purpose or "")
             )
             if operation.rpm != expected:
                 raise ValueError("Hot Tub RPM does not match bound operating purpose")
             return
         if cleanup is not None and cleanup.body == ThermalBody.POOL.value:
-            expected = {
-                None: self.baselines.priming_rpm,
-                "ordinary_circulation": self.baselines.filtration_rpm,
-                "solar_heating": self.baselines.solar_heating_rpm,
-                "gas_heating": self.baselines.gas_heating_rpm,
-            }.get(cleanup.operating_purpose)
+            expected = (
+                cleanup.effective_pump_rpm
+                if cleanup.effective_pump_rpm is not None
+                else {
+                    None: self.baselines.priming_rpm,
+                    "priming": self.baselines.priming_rpm,
+                    "ordinary_circulation": self.baselines.filtration_rpm,
+                    "solar_heating": self.baselines.solar_heating_rpm,
+                    "gas_heating": self.baselines.gas_heating_rpm,
+                }.get(cleanup.operating_purpose)
+            )
             if operation.rpm != expected:
                 raise ValueError("Pool RPM does not match bound operating purpose")
             return

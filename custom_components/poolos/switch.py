@@ -439,6 +439,10 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
         previous = await self.async_get_last_state()
         enabled = previous is not None and previous.state == "on"
         self._runtime.physical_command_authority.resolve_maintenance(enabled)
+        pump_session = getattr(self._runtime, "pump_speed_session", None)
+        if pump_session is not None:
+            pump_session.session.reset_currentness("maintenance_state_restored")
+            pump_session.synchronize_authority()
         if enabled:
             self._runtime.external_change_runtime.maintenance_entered()
 
@@ -455,6 +459,10 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
         self._runtime.physical_command_authority.resolve_maintenance(True)
+        pump_session = getattr(self._runtime, "pump_speed_session", None)
+        if pump_session is not None:
+            pump_session.session.reset_currentness("maintenance_entered")
+            pump_session.synchronize_authority()
         self._runtime.external_change_runtime.maintenance_entered()
         self._publish_authority_change()
         self.async_write_ha_state()
@@ -462,6 +470,10 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         del kwargs
         self._runtime.physical_command_authority.resolve_maintenance(False)
+        pump_session = getattr(self._runtime, "pump_speed_session", None)
+        if pump_session is not None:
+            pump_session.session.reset_currentness("maintenance_exited")
+            pump_session.synchronize_authority()
         self._runtime.external_change_runtime.maintenance_exited()
         self._publish_authority_change()
         self.async_write_ha_state()

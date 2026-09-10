@@ -51,7 +51,12 @@ class ManualIntelliCenterFiltrationDelivery(FiltrationAutomaticDeliveryPort):
             elif isinstance(operation, SetPumpSpeed):
                 if (
                     operation.equipment_id != self.context.pump_circuit_id
-                    or operation.rpm != self.baselines.filtration_rpm
+                    or operation.rpm
+                    != (
+                        self.baselines.filtration_rpm
+                        if self.context.effective_pump_rpm is None
+                        else self.context.effective_pump_rpm
+                    )
                 ):
                     raise ValueError("unsupported automatic filtration pump target")
                 await self.manual.async_set_pump_circuit_speed(

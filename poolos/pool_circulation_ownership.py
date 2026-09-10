@@ -42,6 +42,8 @@ class FiltrationCirculationLease:
     body_activation: ThermalRuntimeConceptProvenance | None = None
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
     pump_established_at: datetime | None = None
+    pump_session_id: str | None = None
+    pump_session_effective_rpm: int | None = None
     body_verified: bool = False
     verified: bool = False
 
@@ -62,10 +64,24 @@ class FiltrationCirculationLease:
             _require_aware(self.pump_established_at)
             if self.pump_setpoint is None:
                 raise ValueError("filtration pump timestamp requires pump provenance")
+        if (self.pump_session_id is None) != (
+            self.pump_session_effective_rpm is None
+        ):
+            raise ValueError("filtration pump session binding must be paired")
+        if self.pump_session_effective_rpm is not None and (
+            type(self.pump_session_effective_rpm) is not int
+            or self.pump_session_effective_rpm < 1
+        ):
+            raise ValueError("filtration session RPM must be a positive integer")
+        if self.pump_setpoint is not None and self.pump_session_effective_rpm is not None:
+            raise ValueError("filtration pump provenance and session binding are exclusive")
         if self.verified and (
             not self.body_verified
             or self.body_activation is None
-            or self.pump_setpoint is None
+            or (
+                self.pump_setpoint is None
+                and self.pump_session_effective_rpm is None
+            )
         ):
             raise ValueError("verified filtration ownership requires body and pump proof")
 
@@ -198,6 +214,8 @@ class PoolCirculationOwnershipRegistry:
                 lease,
                 pump_setpoint=provenance,
                 pump_established_at=accepted_at,
+                pump_session_id=None,
+                pump_session_effective_rpm=None,
                 last_confirmed_at=accepted_at,
             )
         else:
@@ -241,6 +259,42 @@ class PoolCirculationOwnershipRegistry:
             last_confirmed_at=confirmed_at,
         )
         self.owner = PoolCirculationOwner.FILTRATION
+
+    def retain_body_for_pump_session_requirement(
+        self,
+        *,
+        session_id: str,
+        pump_circuit_id: str,
+        pump_session_id: str,
+        effective_rpm: int,
+        confirmed_at: datetime,
+    ) -> None:
+        """Relinquish only pump provenance to one exact session requirement."""
+
+        _require_aware(confirmed_at)
+        lease = self.filtration_lease
+        if (
+            lease is None
+            or lease.session_id != session_id
+            or lease.pool_pump_circuit_id != pump_circuit_id
+            or not lease.verified
+            or self.owner not in {
+                PoolCirculationOwner.FILTRATION,
+                PoolCirculationOwner.FILTRATION_SUSPENDED,
+            }
+            or type(effective_rpm) is not int
+            or effective_rpm < 1
+            or not pump_session_id.strip()
+        ):
+            raise ValueError("pump override requires current verified filtration")
+        self.filtration_lease = replace(
+            lease,
+            pump_setpoint=None,
+            pump_established_at=None,
+            pump_session_id=pump_session_id,
+            pump_session_effective_rpm=effective_rpm,
+            last_confirmed_at=confirmed_at,
+        )
 
     def suspend_filtration(self, *, session_id: str) -> None:
         """Retain verified provenance while current evidence is unusable."""

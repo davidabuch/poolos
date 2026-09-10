@@ -68,6 +68,7 @@ class PhysicalAuthorityReason(StrEnum):
     GRID_OUTAGE_CONTEXT_STALE = "grid_outage_context_stale"
     GRID_OUTAGE_OPERATION_UNAUTHORIZED = "grid_outage_operation_unauthorized"
     GRID_OUTAGE_DRIVER_UNLOADED = "grid_outage_driver_unloaded"
+    MANUAL_PUMP_SESSION_STALE = "manual_pump_session_stale"
 
 
 class GridOutageDispatchPurpose(StrEnum):
@@ -305,6 +306,8 @@ class AutomaticThermalDispatchContext:
     probe_authority: AutomaticThermalProbeAuthority | None = None
     policy_fingerprint: str = PumpOperatingBaselines().fingerprint
     runtime_binding: str = ""
+    pump_session_id: str | None = None
+    effective_pump_rpm: int | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -332,8 +335,11 @@ class AutomaticThermalDispatchContext:
             "ordinary_circulation",
             "solar_heating",
             "gas_heating",
+            "priming",
         }:
             raise ValueError("unsupported thermal operating purpose")
+        if (self.pump_session_id is None) != (self.effective_pump_rpm is None):
+            raise ValueError("pump session identity and effective RPM must be paired")
         cleanup_purposes = {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
@@ -389,6 +395,8 @@ class AutomaticFiltrationDispatchContext:
     )
     policy_fingerprint: str = PumpOperatingBaselines().fingerprint
     runtime_binding: str = ""
+    pump_session_id: str | None = None
+    effective_pump_rpm: int | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -406,6 +414,8 @@ class AutomaticFiltrationDispatchContext:
                 raise ValueError(f"{name} must not be empty")
         if not is_pmpcirc_native_id(self.pump_circuit_id):
             raise ValueError("automatic filtration requires a concrete Pool PMPCIRC")
+        if (self.pump_session_id is None) != (self.effective_pump_rpm is None):
+            raise ValueError("pump session identity and effective RPM must be paired")
         object.__setattr__(
             self,
             "purpose",
@@ -455,6 +465,7 @@ class PhysicalCommandRequest:
     source: PhysicalRequestSource
     requested_value: bool | int | float | str
     request_id: str = field(default_factory=lambda: str(uuid4()))
+    manual_pump_session_id: str | None = None
     automatic_thermal_context: AutomaticThermalDispatchContext | None = None
     automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None
     grid_outage_context: GridOutageDispatchContext | None = None
@@ -464,6 +475,14 @@ class PhysicalCommandRequest:
             raise ValueError("physical command operation and target are required")
         if not self.request_id.strip():
             raise ValueError("physical command request_id is required")
+        if self.manual_pump_session_id is not None and not (
+            self.source is PhysicalRequestSource.MANUAL
+            and self.operation == "pump_circuit_speed"
+            and self.manual_pump_session_id.strip()
+        ):
+            raise ValueError(
+                "manual pump session identity requires a manual pump request"
+            )
         if (
             self.source is not PhysicalRequestSource.AUTOMATIC_THERMAL
             and self.automatic_thermal_context is not None
@@ -585,6 +604,9 @@ class PoolOSPhysicalCommandAuthority:
     )
     _native_truth: dict[tuple[str, str], Any] = field(
         default_factory=dict, init=False, repr=False
+    )
+    _pump_session_binding: tuple[str, str, str, str, int] | None = field(
+        default=None, init=False, repr=False
     )
     _automatic_thermal_driver_enabled: bool = field(
         default=False, init=False, repr=False
@@ -750,6 +772,38 @@ class PoolOSPhysicalCommandAuthority:
         if changed:
             self._invalidate_automatic_thermal_context()
 
+    def synchronize_pump_speed_session(
+        self,
+        *,
+        session_id: str | None,
+        body: str | None,
+        purpose: str | None,
+        pump_circuit_id: str | None,
+        effective_rpm: int | None,
+    ) -> None:
+        """Bind exact current pump intent without granting physical authority."""
+
+        values = (session_id, body, purpose, pump_circuit_id, effective_rpm)
+        if all(value is None for value in values):
+            self._pump_session_binding = None
+            return
+        if any(value is None for value in values):
+            raise ValueError("pump session authority binding must be complete")
+        assert session_id is not None
+        assert body is not None
+        assert purpose is not None
+        assert pump_circuit_id is not None
+        assert effective_rpm is not None
+        if body not in {"pool", "hot_tub"} or effective_rpm <= 0:
+            raise ValueError("invalid pump session authority binding")
+        self._pump_session_binding = (
+            session_id,
+            body,
+            purpose,
+            pump_circuit_id,
+            effective_rpm,
+        )
+
     def begin_automatic_thermal_epoch(self, epoch_identity: str) -> None:
         """Invalidate older queued work at each authoritative runtime epoch."""
 
@@ -834,6 +888,8 @@ class PoolOSPhysicalCommandAuthority:
         purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL,
         cleanup_candidate_identity: str | None = None,
         probe_operation_id: str | None = None,
+        pump_session_id: str | None = None,
+        effective_pump_rpm: int | None = None,
     ) -> AutomaticThermalDispatchContext:
         """Bind one current session to the latest authoritative epoch."""
 
@@ -885,6 +941,8 @@ class PoolOSPhysicalCommandAuthority:
             probe_authority=probe,
             policy_fingerprint=self.baselines.fingerprint,
             runtime_binding=self._runtime_binding,
+            pump_session_id=pump_session_id,
+            effective_pump_rpm=effective_pump_rpm,
         )
 
     def unload_automatic_thermal_driver(self) -> None:
@@ -925,16 +983,21 @@ class PoolOSPhysicalCommandAuthority:
         cleanup: bool = False,
         ownership_lease_id: str | None = None,
         body_activation_receipt_id: str | None = None,
+        pump_session_id: str | None = None,
+        effective_pump_rpm: int | None = None,
     ) -> AutomaticFiltrationDispatchContext:
         """Bind exactly one current canonical filtration operation."""
 
         if epoch_identity != self._automatic_filtration_epoch_identity:
             raise ValueError("automatic filtration epoch is not current")
-        if (
-            operation == "pump_circuit_speed"
-            and requested_value != self.baselines.filtration_rpm
-        ):
-            raise ValueError("operation exceeds exact automatic filtration envelope")
+        if operation == "pump_circuit_speed":
+            expected = (
+                self.baselines.filtration_rpm
+                if effective_pump_rpm is None
+                else effective_pump_rpm
+            )
+            if requested_value != expected:
+                raise ValueError("operation exceeds exact automatic filtration envelope")
         context = AutomaticFiltrationDispatchContext(
             generation=self._automatic_filtration_generation,
             epoch_identity=epoch_identity,
@@ -953,6 +1016,8 @@ class PoolOSPhysicalCommandAuthority:
             ),
             policy_fingerprint=self.baselines.fingerprint,
             runtime_binding=self._runtime_binding,
+            pump_session_id=pump_session_id,
+            effective_pump_rpm=effective_pump_rpm,
         )
         self._automatic_filtration_context = context
         return context
@@ -1124,6 +1189,14 @@ class PoolOSPhysicalCommandAuthority:
             reason = PhysicalAuthorityReason.SPA_AUTOMATIC_CONTROL_SUPPRESSED
         if (
             reason is PhysicalAuthorityReason.ALLOWED
+            and request.source is PhysicalRequestSource.MANUAL
+            and request.operation == "pump_circuit_speed"
+            and request.manual_pump_session_id is not None
+            and not self._manual_pump_session_request_current(request)
+        ):
+            reason = PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
             and request.source is PhysicalRequestSource.AUTOMATIC_THERMAL
         ):
             reason = self._automatic_thermal_reason(request)
@@ -1143,6 +1216,19 @@ class PoolOSPhysicalCommandAuthority:
             request=request,
             maintenance_mode=self._maintenance_mode,
             controller_mode=self._controller_mode,
+        )
+
+    def _manual_pump_session_request_current(
+        self,
+        request: PhysicalCommandRequest,
+    ) -> bool:
+        binding = self._pump_session_binding
+        return bool(
+            binding is not None
+            and request.manual_pump_session_id == binding[0]
+            and request.target == binding[3]
+            and type(request.requested_value) is int
+            and request.requested_value == binding[4]
         )
 
     @property
@@ -1182,6 +1268,11 @@ class PoolOSPhysicalCommandAuthority:
         ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
         if context.policy_fingerprint != self.baselines.fingerprint:
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+        if (
+            request.operation == "pump_circuit_speed"
+            and not self._pump_session_context_current(context)
+        ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
         if not _automatic_thermal_request_matches_context(
             request,
@@ -1256,6 +1347,11 @@ class PoolOSPhysicalCommandAuthority:
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
         if context.policy_fingerprint != self.baselines.fingerprint:
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
+        if (
+            request.operation == "pump_circuit_speed"
+            and not self._pump_session_context_current(context)
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
         if context != self._automatic_filtration_context or (
             context.generation != self._automatic_filtration_generation
             or context.epoch_identity != self._automatic_filtration_epoch_identity
@@ -1270,6 +1366,27 @@ class PoolOSPhysicalCommandAuthority:
         if not _automatic_filtration_request_matches_context(request, context):
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_OPERATION_UNAUTHORIZED
         return PhysicalAuthorityReason.ALLOWED
+
+    def _pump_session_context_current(
+        self,
+        context: AutomaticThermalDispatchContext | AutomaticFiltrationDispatchContext,
+    ) -> bool:
+        if context.pump_session_id is None:
+            # Backward-compatible default-baseline contexts remain exact and
+            # restrictive; configured overrides require the stronger binding.
+            return context.effective_pump_rpm is None
+        purpose = (
+            context.operating_purpose
+            if isinstance(context, AutomaticThermalDispatchContext)
+            else "ordinary_circulation"
+        )
+        return self._pump_session_binding == (
+            context.pump_session_id,
+            context.body if isinstance(context, AutomaticThermalDispatchContext) else "pool",
+            purpose,
+            context.pump_circuit_id,
+            context.effective_pump_rpm,
+        )
 
     def require_allowed(self, request: PhysicalCommandRequest) -> None:
         decision = self.assess(request)
@@ -1452,6 +1569,11 @@ def _automatic_thermal_request_matches_context(
             and request.target == probe.target
             and type(request.requested_value) is type(probe.requested_value)
             and request.requested_value == probe.requested_value
+            and (
+                context.effective_pump_rpm is None
+                or request.operation != "pump_circuit_speed"
+                or request.requested_value == context.effective_pump_rpm
+            )
         )
     if context.purpose is AutomaticThermalDispatchPurpose.TERMINATION:
         return (
@@ -1478,8 +1600,9 @@ def _automatic_thermal_request_matches_context(
             and request.requested_value in {"00000", "H0001", "H0002"}
         )
     if request.operation == "pump_circuit_speed":
+        session_rpm = context.effective_pump_rpm
         if context.body == "hot_tub":
-            expected_hot_tub_rpm = {
+            expected_hot_tub_rpm = session_rpm if session_rpm is not None else {
                 "temperature_acquisition": baselines.temperature_probe_rpm,
                 "ordinary_circulation": baselines.filtration_rpm,
                 "solar_heating": baselines.solar_heating_rpm,
@@ -1495,8 +1618,9 @@ def _automatic_thermal_request_matches_context(
                 and type(request.requested_value) is int
                 and request.requested_value == expected_hot_tub_rpm
             )
-        expected_pool_rpm = {
+        expected_pool_rpm = session_rpm if session_rpm is not None else {
             None: baselines.priming_rpm,
+            "priming": baselines.priming_rpm,
             "ordinary_circulation": baselines.filtration_rpm,
             "solar_heating": baselines.solar_heating_rpm,
             "gas_heating": baselines.gas_heating_rpm,

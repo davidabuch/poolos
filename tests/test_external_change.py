@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from poolos.external_change import (
     ExternalChangeBatch,
     ExternalChangeEvent,
@@ -13,6 +15,7 @@ from poolos.external_change import (
 )
 from poolos.intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterReadAdapter,
     NativeIntelliCenterStatus,
@@ -140,9 +143,17 @@ def test_product_policy_distinguishes_adopt_accept_observe_and_notifications() -
     assert events["freeze.active"].external_policy is ExternalChangePolicy.OBSERVE
 
 
-def test_configured_pool_pump_speed_is_classified_as_canonical_external_change() -> None:
+@pytest.mark.parametrize(
+    "concept",
+    (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ),
+)
+def test_configured_body_pump_speed_is_classified_as_canonical_external_change(
+    concept: str,
+) -> None:
     monitor = ExternalNativeChangeMonitor(authority())
-    concept = POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
     process(monitor, NOW, {concept: (2600, "p0102")})
 
     batch = process(

@@ -21,6 +21,7 @@ from poolos.intellicenter_readonly import (
 )
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionEvidence
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
+from poolos.pump_speed_session import PumpSpeedOverrideState
 from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionPolicy,
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from .coordinator import PoolOSCoordinator
     from .filtration_runtime import PoolOSFiltrationRuntime
     from .manual_intellicenter import ManualIntelliCenterControl
+    from .pump_speed_session import PoolOSPumpSpeedSessionRuntime
 
 
 _EVALUATION_ERROR_MESSAGE_LIMIT = 256
@@ -54,6 +56,7 @@ class PoolOSThermalRuntime:
     filtration_runtime: PoolOSFiltrationRuntime | None = None
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     evaluator: ThermalRuntimeEvaluator = field(default_factory=ThermalRuntimeEvaluator)
+    pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
     effective_live_enabled: bool = False
     commissioning_scope: ThermalLiveCommissioningScope = (
         ThermalLiveCommissioningScope.DISABLED
@@ -234,10 +237,32 @@ class PoolOSThermalRuntime:
             if item.source_id in stale_sources
         )
         health = self.coordinator.health_incident_diagnostics()
+        pump_session = (
+            None
+            if self.pump_speed_session is None
+            else self.pump_speed_session.session.snapshot
+        )
         policy = ThermalLiveExecutionPolicy(
             thermal_live_execution_enabled=self.effective_live_enabled,
             commissioning_scope=self.commissioning_scope,
             baselines=self.baselines,
+            pump_session_id=None if pump_session is None else pump_session.session_id,
+            pump_session_body=(
+                None
+                if pump_session is None or pump_session.body is None
+                else pump_session.body.value
+            ),
+            pump_session_purpose=(
+                None
+                if pump_session is None or pump_session.purpose is None
+                else pump_session.purpose.value
+            ),
+            pump_session_pump_circuit_id=(
+                None if pump_session is None else pump_session.pump_circuit_id
+            ),
+            pump_session_effective_rpm=(
+                None if pump_session is None else pump_session.effective_rpm
+            ),
         )
         filtration = (
             None
@@ -322,6 +347,26 @@ class PoolOSThermalRuntime:
                         None
                         if self._spa_session_kind_provider is None
                         else self._spa_session_kind_provider()
+                    ),
+                    pump_session_body=(
+                        None if pump_session is None else pump_session.body
+                    ),
+                    pump_session_id=(
+                        None if pump_session is None else pump_session.session_id
+                    ),
+                    pump_session_purpose=(
+                        None if pump_session is None else pump_session.purpose
+                    ),
+                    pump_session_pump_circuit_id=(
+                        None if pump_session is None else pump_session.pump_circuit_id
+                    ),
+                    pump_session_effective_rpm=(
+                        None if pump_session is None else pump_session.effective_rpm
+                    ),
+                    pump_session_override_state=(
+                        PumpSpeedOverrideState.NONE
+                        if pump_session is None
+                        else pump_session.override_state
                     ),
                 ),
                 live_policy=policy,

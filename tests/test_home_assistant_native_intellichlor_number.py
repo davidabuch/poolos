@@ -106,7 +106,15 @@ def _load_module():
         class ManualIntelliCenterCommandError(RuntimeError):
             pass
 
+        class ManualIntelliCenterCommandOutcomeUnknownError(
+            ManualIntelliCenterCommandError
+        ):
+            pass
+
         manual.ManualIntelliCenterCommandError = ManualIntelliCenterCommandError
+        manual.ManualIntelliCenterCommandOutcomeUnknownError = (
+            ManualIntelliCenterCommandOutcomeUnknownError
+        )
         sys.modules[f"{package_name}.manual_intellicenter"] = manual
         spec = importlib.util.spec_from_file_location(
             module_name,
@@ -259,3 +267,61 @@ def test_number_surface_contains_no_super_chlorinate_or_autonomous_authority() -
     assert "async_set_intellichlor_output(" in source
     assert "set_super_chlorinate" not in source
     assert "SUPER_ATTR" not in source
+
+
+def test_manual_pump_number_binds_pending_session_before_gateway_dispatch() -> None:
+    module = _load_module()
+    events: list[str] = []
+    request = SimpleNamespace(
+        request_id="manual-rpm-request",
+        session_id="pool-ordinary-session",
+    )
+
+    class Session:
+        def begin_manual_request(self, **kwargs):
+            assert kwargs["body"] is module.PumpSpeedSessionBody.POOL
+            assert kwargs["pump_circuit_id"] == "p0197"
+            assert kwargs["requested_rpm"] == 3200
+            events.append("begin")
+            return request
+
+        def manual_delivery_accepted(self, current, **kwargs):
+            assert current is request
+            assert "accepted_at" in kwargs
+            events.append("accepted")
+
+        def manual_delivery_failed(self, current):
+            assert current is request
+            events.append("failed")
+
+    async def deliver(*args, **kwargs):
+        assert args == ("p0197", 3200)
+        assert kwargs == {
+            "manual_body": "pool",
+            "request_id": "manual-rpm-request",
+            "pump_session_id": "pool-ordinary-session",
+        }
+        events.append("dispatch")
+
+    adapter = SimpleNamespace(
+        session=Session(),
+        synchronize_authority=lambda: events.append("sync"),
+    )
+    runtime = SimpleNamespace(
+        manual_intellicenter=SimpleNamespace(
+            async_set_pump_circuit_speed=deliver,
+        ),
+        pump_speed_session=adapter,
+    )
+
+    asyncio.run(
+        module._async_set_manual_pump_speed(
+            runtime,
+            body=module.PumpSpeedSessionBody.POOL,
+            manual_body="pool",
+            pump_circuit_id="p0197",
+            value=3200.0,
+        )
+    )
+
+    assert events == ["begin", "sync", "dispatch", "accepted", "sync"]

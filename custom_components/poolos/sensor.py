@@ -212,6 +212,7 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
         }
     diagnostics = snapshot.diagnostics()
     pump_policy = runtime.pump_operating_baselines
+    pump_session = getattr(runtime, "pump_speed_session", None)
     return {
         "healthy": bool(diagnostics.get("healthy", False)),
         "mapped_observations": diagnostics.get("observation_count", 0),
@@ -228,6 +229,11 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
         "generated_at": diagnostics.get("generated_at"),
         "pump_operating_baselines": dict(pump_policy.as_dict()),
         "pump_operating_baselines_fingerprint": pump_policy.fingerprint,
+        "pump_speed_session": (
+            None
+            if pump_session is None
+            else dict(pump_session.session.diagnostics())
+        ),
     }
 
 

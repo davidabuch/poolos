@@ -147,6 +147,11 @@ class ThermalLiveExecutionPolicy:
     verification_timeout: timedelta = timedelta(seconds=30)
     observation_freshness: timedelta = timedelta(seconds=30)
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    pump_session_id: str | None = None
+    pump_session_body: str | None = None
+    pump_session_purpose: str | None = None
+    pump_session_pump_circuit_id: str | None = None
+    pump_session_effective_rpm: int | None = None
 
     def __post_init__(self) -> None:
         if self.maximum_plan_age <= timedelta(0):
@@ -155,6 +160,17 @@ class ThermalLiveExecutionPolicy:
             raise ValueError("verification_timeout must be positive")
         if self.observation_freshness <= timedelta(0):
             raise ValueError("observation_freshness must be positive")
+        session_values = (
+            self.pump_session_id,
+            self.pump_session_body,
+            self.pump_session_purpose,
+            self.pump_session_pump_circuit_id,
+            self.pump_session_effective_rpm,
+        )
+        if any(value is not None for value in session_values) and any(
+            value is None for value in session_values
+        ):
+            raise ValueError("thermal pump session policy binding must be complete")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1006,7 +1022,12 @@ class ThermalLiveAuthorizationEngine:
             if assessment.desired.body is ThermalBody.HOT_TUB:
                 purpose_value = operation.metadata.get("operating_purpose")
                 purpose = purpose_value if isinstance(purpose_value, str) else ""
-                expected_rpm = {
+                expected_rpm = _session_effective_rpm(
+                    policy,
+                    body=ThermalBody.HOT_TUB,
+                    purpose=purpose,
+                    pump_circuit_id=operation.equipment_id,
+                ) or {
                     "temperature_acquisition": policy.baselines.temperature_probe_rpm,
                     "ordinary_circulation": policy.baselines.filtration_rpm,
                     "solar_heating": policy.baselines.solar_heating_rpm,
@@ -1023,13 +1044,29 @@ class ThermalLiveAuthorizationEngine:
                 and operation.metadata.get("operating_purpose")
                 == "ordinary_circulation"
             ):
-                if operation.rpm != policy.baselines.filtration_rpm:
+                expected_ordinary = _session_effective_rpm(
+                    policy,
+                    body=ThermalBody.POOL,
+                    purpose="ordinary_circulation",
+                    pump_circuit_id=operation.equipment_id,
+                ) or policy.baselines.filtration_rpm
+                if operation.rpm != expected_ordinary:
                     return ("pool_ordinary_circulation_rpm_mismatch",)
                 if assessment.desired.required_pump_rpm != operation.rpm:
                     return ("pump_rpm_does_not_match_thermal_plan",)
                 return ()
 
-            expected_rpm = {
+            purpose = (
+                "solar_heating"
+                if assessment.desired.selected_source is PhysicalHeatMode.SOLAR
+                else "gas_heating"
+            )
+            expected_rpm = _session_effective_rpm(
+                policy,
+                body=ThermalBody.POOL,
+                purpose=purpose,
+                pump_circuit_id=operation.equipment_id,
+            ) or {
                 PhysicalHeatMode.SOLAR: policy.baselines.solar_heating_rpm,
                 PhysicalHeatMode.GAS: policy.baselines.gas_heating_rpm,
             }.get(assessment.desired.selected_source)
@@ -2047,6 +2084,23 @@ def _hydraulic_continuity_failure_reason(
             return f"target_body_unexpectedly_active:{target.value}"
         return f"target_body_inactive:{target.value}"
     return None
+
+
+def _session_effective_rpm(
+    policy: ThermalLiveExecutionPolicy,
+    *,
+    body: ThermalBody,
+    purpose: str,
+    pump_circuit_id: str,
+) -> int | None:
+    if (
+        policy.pump_session_id is None
+        or policy.pump_session_body != body.value
+        or policy.pump_session_purpose != purpose
+        or policy.pump_session_pump_circuit_id != pump_circuit_id
+    ):
+        return None
+    return policy.pump_session_effective_rpm
 
 
 def _minimum_verified_hold(step: ExecutionStep) -> timedelta:

@@ -108,6 +108,9 @@ ManualIntelliCenterCommandError = (
 ManualIntelliCenterCommandNotDispatchedError = (
     manual_module.ManualIntelliCenterCommandNotDispatchedError
 )
+ManualIntelliCenterCommandOutcomeUnknownError = (
+    manual_module.ManualIntelliCenterCommandOutcomeUnknownError
+)
 ManualIntelliCenterControl = manual_module.ManualIntelliCenterControl
 ManualIntelliCenterState = manual_module.ManualIntelliCenterState
 
@@ -353,6 +356,32 @@ def test_automatic_hot_tub_can_deliver_exact_dynamic_spa_pmpcirc_speed(
     )
     assert attribution is not None
     assert attribution.request_source is PhysicalRequestSource.AUTOMATIC_THERMAL
+
+
+def test_manual_pump_receipt_preserves_explicit_session_request_identity(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(minimum_rpm=450, maximum_rpm=3450)
+    pool_circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=2650,
+    )
+    gateway, recorder = _gateway([pump, pool_circuit])
+
+    receipt = _run(
+        gateway.async_set_pump_circuit_speed(
+            "p0102",
+            3200,
+            manual_body="pool",
+            request_id="pump-session-manual-request",
+        )
+    )
+
+    assert recorder.calls == [("p0102", {"SPEED": "3200"})]
+    assert receipt.request_id == "pump-session-manual-request"
 
 
 def test_automatic_hot_tub_cannot_write_pool_bound_pmpcirc(
@@ -664,7 +693,7 @@ def test_command_failure_is_not_reported_as_success(
     )
 
     with pytest.raises(
-        ManualIntelliCenterCommandError,
+        ManualIntelliCenterCommandOutcomeUnknownError,
         match="failed to set p0102 pump circuit speed",
     ):
         _run(
@@ -1056,6 +1085,59 @@ def test_queued_outage_reduction_loses_stale_frame_authority_inside_command_lock
         with pytest.raises(
             ManualIntelliCenterCommandNotDispatchedError,
             match="grid_outage_context_stale",
+        ):
+            await task
+        assert recorder.calls == []
+
+    asyncio.run(scenario())
+
+
+def test_queued_manual_rpm_loses_stale_session_authority_inside_command_lock(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    async def scenario() -> None:
+        gateway, recorder = _gateway(
+            [
+                pump_object_factory(),
+                pump_circuit_object_factory(
+                    objnam="p0102",
+                    circuit_id="C0006",
+                ),
+            ]
+        )
+        authority = gateway._command_authority
+        authority.synchronize_pump_speed_session(
+            session_id="ordinary-session",
+            body="pool",
+            purpose="ordinary_circulation",
+            pump_circuit_id="p0102",
+            effective_rpm=3200,
+        )
+        await gateway._command_lock.acquire()
+        task = asyncio.create_task(
+            gateway.async_set_pump_circuit_speed(
+                "p0102",
+                3200,
+                manual_body="pool",
+                request_id="manual-rpm-request",
+                pump_session_id="ordinary-session",
+            )
+        )
+        await asyncio.sleep(0)
+
+        authority.synchronize_pump_speed_session(
+            session_id="solar-session",
+            body="pool",
+            purpose="solar_heating",
+            pump_circuit_id="p0102",
+            effective_rpm=2900,
+        )
+        gateway._command_lock.release()
+
+        with pytest.raises(
+            ManualIntelliCenterCommandNotDispatchedError,
+            match="manual_pump_session_stale",
         ):
             await task
         assert recorder.calls == []

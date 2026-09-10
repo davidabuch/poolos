@@ -96,6 +96,9 @@ def _frame(
     grid_on: bool = True,
     physical_ready: bool = True,
     pump_circuit_id: str | None = "p0102",
+    pump_session_id: str | None = None,
+    pump_session_effective_rpm: int | None = None,
+    pump_session_override_current: bool = False,
 ) -> FiltrationAutomaticExecutionFrame:
     values = (
         ("pool.active", pool),
@@ -145,6 +148,9 @@ def _frame(
         thermal_candidate_ready=thermal,
         thermal_owned=False,
         external_changes=changes,
+        pump_session_id=pump_session_id,
+        pump_session_effective_rpm=pump_session_effective_rpm,
+        pump_session_override_current=pump_session_override_current,
     )
 
 
@@ -1055,6 +1061,129 @@ def test_external_change_after_lease_preempts_but_prelease_event_does_not() -> N
     )
     assert preempted.state is FiltrationAutomaticDriverState.PREEMPTED
     assert driver.ownership.owner is PoolCirculationOwner.NONE
+
+
+def test_verified_session_rpm_override_relinquishes_only_pump_provenance() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    before = len(delivery.operations)
+    changed_at = NOW + timedelta(seconds=3)
+    configured_change = ExternalChangeEvent(
+        concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="p0102",
+        previous_value=2600,
+        new_value=3200,
+        observed_at=changed_at,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+    )
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                changed_at,
+                pool=True,
+                rpm=3200,
+                configured=3200,
+                changes=ExternalChangeBatch((configured_change,)),
+                pump_session_id="pool-ordinary-session",
+                pump_session_effective_rpm=3200,
+                pump_session_override_current=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    lease = driver.ownership.filtration_lease
+    assert result.state is FiltrationAutomaticDriverState.OWNED
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.pump_setpoint is None
+    assert lease.pump_session_id == "pool-ordinary-session"
+    assert lease.pump_session_effective_rpm == 3200
+    assert result.owned_concepts == ("body_activation",)
+    assert len(delivery.operations) == before
+
+    stable = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                changed_at + timedelta(seconds=1),
+                pool=True,
+                rpm=3200,
+                configured=3200,
+                pump_session_id="pool-ordinary-session",
+                pump_session_effective_rpm=3200,
+                pump_session_override_current=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert stable.state is FiltrationAutomaticDriverState.OWNED
+    assert len(delivery.operations) == before
+
+    next_changed_at = changed_at + timedelta(seconds=2)
+    second_change = replace(
+        configured_change,
+        previous_value=3200,
+        new_value=3100,
+        observed_at=next_changed_at,
+    )
+    updated = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                next_changed_at,
+                pool=True,
+                rpm=3100,
+                configured=3100,
+                changes=ExternalChangeBatch((second_change,)),
+                pump_session_id="pool-ordinary-session",
+                pump_session_effective_rpm=3100,
+                pump_session_override_current=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    lease = driver.ownership.filtration_lease
+    assert updated.state is FiltrationAutomaticDriverState.OWNED
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.pump_setpoint is None
+    assert lease.pump_session_id == "pool-ordinary-session"
+    assert lease.pump_session_effective_rpm == 3100
+    assert len(delivery.operations) == before
+
+    baseline_at = changed_at + timedelta(seconds=3)
+    baseline_change = replace(
+        configured_change,
+        previous_value=3100,
+        new_value=2600,
+        observed_at=baseline_at,
+    )
+    handed_back = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                baseline_at,
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                changes=ExternalChangeBatch((baseline_change,)),
+                pump_session_id="pool-ordinary-session",
+                pump_session_effective_rpm=2600,
+                pump_session_override_current=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    lease = driver.ownership.filtration_lease
+    assert handed_back.state is FiltrationAutomaticDriverState.OWNED
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.pump_setpoint is None
+    assert lease.pump_session_id == "pool-ordinary-session"
+    assert lease.pump_session_effective_rpm == 2600
+    assert len(delivery.operations) == before
 
 
 def test_normal_startup_prime_and_aligned_actual_rpm_do_not_self_preempt() -> None:

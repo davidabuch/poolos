@@ -46,6 +46,114 @@ def ready() -> PoolOSPhysicalCommandAuthority:
     return authority
 
 
+def test_automatic_filtration_override_requires_exact_current_pump_session() -> None:
+    authority = ready()
+    authority.configure_automatic_filtration(enabled=True)
+    authority.begin_automatic_filtration_epoch("override-epoch")
+    authority.synchronize_pump_speed_session(
+        session_id="pump-session-1",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_rpm=3200,
+    )
+    context = authority.bind_automatic_filtration_dispatch(
+        epoch_identity="override-epoch",
+        session_identity="filtration-session",
+        operation_identity="operation",
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=3200,
+        pump_circuit_id="p0102",
+        pump_session_id="pump-session-1",
+        effective_pump_rpm=3200,
+    )
+    allowed = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        requested_value=3200,
+        automatic_filtration_context=context,
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.ALLOWED
+
+    authority.synchronize_pump_speed_session(
+        session_id="pump-session-2",
+        body="pool",
+        purpose="solar_heating",
+        pump_circuit_id="p0102",
+        effective_rpm=2900,
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
+
+
+def test_automatic_thermal_override_is_exact_body_purpose_and_rpm_bound() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("override-epoch")
+    authority.synchronize_pump_speed_session(
+        session_id="pump-session",
+        body="pool",
+        purpose="solar_heating",
+        pump_circuit_id="p0102",
+        effective_rpm=3200,
+    )
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="override-epoch",
+        session_identity="thermal-session",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
+        pump_session_id="pump-session",
+        effective_pump_rpm=3200,
+    )
+    allowed = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=3200,
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.ALLOWED
+    wrong = replace(allowed, requested_value=3100)
+    assert authority.assess(wrong).reason is PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+
+
+def test_manual_pump_request_fails_closed_after_session_transition() -> None:
+    authority = ready()
+    authority.synchronize_pump_speed_session(
+        session_id="ordinary-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_rpm=3200,
+    )
+    request = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=3200,
+        manual_pump_session_id="ordinary-session",
+    )
+    assert authority.assess(request).reason is PhysicalAuthorityReason.ALLOWED
+
+    authority.synchronize_pump_speed_session(
+        session_id="solar-session",
+        body="pool",
+        purpose="solar_heating",
+        pump_circuit_id="p0102",
+        effective_rpm=2900,
+    )
+    assert (
+        authority.assess(request).reason
+        is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+
+
 def test_startup_and_maintenance_fail_closed_for_every_request_source() -> None:
     authority = PoolOSPhysicalCommandAuthority()
     for source in PhysicalRequestSource:
