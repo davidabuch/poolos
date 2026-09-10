@@ -625,3 +625,36 @@ def test_same_value_reload_rejects_stale_runtime_thermal_context() -> None:
 
     assert stale.reason is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
     assert current.reason is PhysicalAuthorityReason.ALLOWED
+
+
+def test_pump_baseline_config_flow_uses_serializable_number_selectors() -> None:
+    """Pump RPM options must remain serializable by Home Assistant config flows."""
+
+    flow_source = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
+
+    assert "_valid_pump_rpm" not in flow_source
+    assert "vol.All(" not in flow_source[
+        flow_source.index("pump_speed_selector = selector.NumberSelector("):
+        flow_source.index("CONF_INTELLICENTER_HOST")
+    ]
+
+    assert (
+        "min=PumpOperatingBaselines.MINIMUM_CONFIGURABLE_RPM"
+        in flow_source
+    )
+    assert (
+        "max=PumpOperatingBaselines.MAXIMUM_CONFIGURABLE_RPM"
+        in flow_source
+    )
+    assert "step=10" in flow_source
+    assert 'mode="box"' in flow_source
+
+    for key in (
+        "CONF_PUMP_FILTRATION_RPM",
+        "CONF_PUMP_SOLAR_HEATING_RPM",
+        "CONF_PUMP_GAS_HEATING_RPM",
+        "CONF_PUMP_TEMPERATURE_PROBE_RPM",
+        "CONF_PUMP_PRIMING_RPM",
+        "CONF_PUMP_GRID_OUTAGE_RPM",
+    ):
+        assert key in flow_source

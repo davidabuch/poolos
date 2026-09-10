@@ -170,9 +170,8 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         )
     )
     for key, default in pump_speed_fields.items():
-        fields[vol.Required(key, default=current.get(key, default))] = vol.All(
-            pump_speed_selector,
-            _valid_pump_rpm,
+        fields[vol.Required(key, default=current.get(key, default))] = (
+            pump_speed_selector
         )
     fields[
         vol.Optional(
@@ -191,17 +190,3 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
     ] = vol.In(INTELLICENTER_TRANSPORT_OPTIONS)
     assert set(ALL_ENTITY_OPTIONS) == required.keys() | optional.keys()
     return vol.Schema(fields)
-
-
-def _valid_pump_rpm(value: Any) -> int:
-    """Reject non-integer or out-of-contract pump configuration values."""
-
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise vol.Invalid("pump speed must be an integer RPM")
-    if not (
-        PumpOperatingBaselines.MINIMUM_CONFIGURABLE_RPM
-        <= value
-        <= PumpOperatingBaselines.MAXIMUM_CONFIGURABLE_RPM
-    ):
-        raise vol.Invalid("pump speed is outside the supported native RPM range")
-    return value
