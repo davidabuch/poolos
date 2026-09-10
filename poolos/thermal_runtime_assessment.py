@@ -22,6 +22,11 @@ from .intellicenter_readonly import (
 )
 from .native_configuration_policy import NativeConfigurationAssessment
 from .operating_baselines import PumpOperatingBaselines
+from .pump_speed_session import (
+    PumpSpeedOverrideState,
+    PumpSpeedSessionBody,
+    PumpSpeedSessionPurpose,
+)
 from .pump_priming_policy import PumpPrimingPolicy
 from .pool_temperature_probe_execution import (
     PoolTemperatureProbeContinuityEvidence,
@@ -42,6 +47,7 @@ from .spa_temperature_policy import (
     current_spa_temperature_evidence,
 )
 from .thermal_operating_purpose import (
+    ThermalOperatingPurpose,
     ThermalOperatingPurposeEvidence,
     assess_thermal_operating_purpose,
 )
@@ -354,6 +360,12 @@ class ThermalRuntimeEvidence:
     pool_temperature_probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None
     spa_temperature_evidence: SpaTemperatureEvidence | None = None
     spa_session_kind: SpaSessionKind | None = None
+    pump_session_body: PumpSpeedSessionBody | None = None
+    pump_session_id: str | None = None
+    pump_session_purpose: PumpSpeedSessionPurpose | None = None
+    pump_session_pump_circuit_id: str | None = None
+    pump_session_effective_rpm: int | None = None
+    pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at)
@@ -402,6 +414,10 @@ class ThermalBodyRuntimeAssessment:
     live_safety_evidence: ThermalLiveSafetyEvidence | None = None
     water_temperature: WaterTemperatureAssessment | None = None
     spa_temperature: SpaTemperatureEvidence | None = None
+    pump_session_id: str | None = None
+    pump_session_purpose: PumpSpeedSessionPurpose | None = None
+    pump_session_effective_rpm: int | None = None
+    pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE
     pool_temperature_probe_diagnostics: Mapping[str, object] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -1039,6 +1055,24 @@ class ThermalRuntimeEvaluator:
             plan_id=plan.plan_id,
             blocking_reasons=technical_blockers,
         )
+        session_rpm = (
+            evidence.pump_session_effective_rpm
+            if (
+                evidence.pump_session_body
+                is (
+                    PumpSpeedSessionBody.POOL
+                    if body is ThermalBody.POOL
+                    else PumpSpeedSessionBody.HOT_TUB
+                )
+                and evidence.pump_session_pump_circuit_id == pump_circuit_id
+                and evidence.pump_session_purpose is not None
+                and desired.evidence.get("active_operating_purpose")
+                == evidence.pump_session_purpose.value
+                and desired.required_pump_rpm
+                == evidence.pump_session_effective_rpm
+            )
+            else None
+        )
         return ThermalBodyRuntimeAssessment(
             body=body,
             requested_mode=requested_mode,
@@ -1055,6 +1089,18 @@ class ThermalRuntimeEvaluator:
             live_safety_evidence=safety,
             water_temperature=water_temperature,
             spa_temperature=spa_temperature,
+            pump_session_id=(
+                evidence.pump_session_id if session_rpm is not None else None
+            ),
+            pump_session_purpose=(
+                evidence.pump_session_purpose if session_rpm is not None else None
+            ),
+            pump_session_effective_rpm=session_rpm,
+            pump_session_override_state=(
+                evidence.pump_session_override_state
+                if session_rpm is not None
+                else PumpSpeedOverrideState.NONE
+            ),
             pool_temperature_probe_diagnostics=(
                 self.pool_temperature_probe.diagnostics(
                     evaluated_at=evidence.evaluated_at,
@@ -1087,6 +1133,11 @@ class ThermalRuntimeEvaluator:
                 evidence_usable=evidence_usable,
             )
         values = evidence.native_values
+        pump_circuit_id = (
+            evidence.pool_pump_circuit_id
+            if body is ThermalBody.POOL
+            else evidence.spa_pump_circuit_id
+        )
         if body is ThermalBody.POOL:
             pool_mode = {
                 ThermalRequestedMode.SOLAR: PoolHeatingMode.SOLAR_ONLY,
@@ -1196,6 +1247,12 @@ class ThermalRuntimeEvaluator:
                 ),
                 baselines=self.baselines,
             )
+            session_rpm = _current_session_rpm(
+                evidence,
+                body=body,
+                purpose=active_purpose.purpose,
+                pump_circuit_id=pump_circuit_id,
+            )
             purpose_blockers = desired.blockers
             if not active_purpose.evidence_usable:
                 purpose_blockers = tuple(
@@ -1215,6 +1272,19 @@ class ThermalRuntimeEvaluator:
                 and filtration_immediate
             ):
                 required_rpm = active_purpose.required_pump_rpm
+            if (
+                session_rpm is not None
+                and required_rpm is not None
+                and (
+                    desired.selected_source is active_purpose.active_source
+                    or (
+                        desired.selected_source is PhysicalHeatMode.OFF
+                        and active_purpose.purpose
+                        is ThermalOperatingPurpose.ORDINARY_CIRCULATION
+                    )
+                )
+            ):
+                required_rpm = session_rpm
             planned_purpose = (
                 (
                     active_purpose.purpose.value
@@ -1326,6 +1396,12 @@ class ThermalRuntimeEvaluator:
                 ),
             ),
             baselines=self.baselines,
+        )
+        session_rpm = _current_session_rpm(
+            evidence,
+            body=body,
+            purpose=active_purpose.purpose,
+            pump_circuit_id=pump_circuit_id,
         )
         active_heat_source = {
             PhysicalHeatMode.SOLAR: ThermalHeatSource.SOLAR,
@@ -1494,6 +1570,12 @@ class ThermalRuntimeEvaluator:
             required_rpm = self.baselines.filtration_rpm
             planned_purpose = "ordinary_circulation"
             spa_desired = replace(spa_desired, selected_source=selected_source)
+        if (
+            session_rpm is not None
+            and required_rpm is not None
+            and planned_purpose == active_purpose.purpose.value
+        ):
+            required_rpm = session_rpm
         return replace(
             spa_desired,
             required_pump_rpm=required_rpm,
@@ -1508,6 +1590,33 @@ class ThermalRuntimeEvaluator:
                 "current_operating_purpose": active_purpose.purpose.value,
             },
         )
+
+
+def _current_session_rpm(
+    evidence: ThermalRuntimeEvidence,
+    *,
+    body: ThermalBody,
+    purpose: ThermalOperatingPurpose,
+    pump_circuit_id: str | None,
+) -> int | None:
+    session_purpose = {
+        ThermalOperatingPurpose.ORDINARY_CIRCULATION: PumpSpeedSessionPurpose.ORDINARY,
+        ThermalOperatingPurpose.SOLAR_HEATING: PumpSpeedSessionPurpose.SOLAR,
+        ThermalOperatingPurpose.GAS_HEATING: PumpSpeedSessionPurpose.GAS,
+    }.get(purpose)
+    session_body = (
+        PumpSpeedSessionBody.POOL
+        if body is ThermalBody.POOL
+        else PumpSpeedSessionBody.HOT_TUB
+    )
+    if (
+        session_purpose is None
+        or evidence.pump_session_body is not session_body
+        or evidence.pump_session_purpose is not session_purpose
+        or evidence.pump_session_pump_circuit_id != pump_circuit_id
+    ):
+        return None
+    return evidence.pump_session_effective_rpm
 
 
 def _off_desired(

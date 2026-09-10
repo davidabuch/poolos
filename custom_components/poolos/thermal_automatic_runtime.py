@@ -26,6 +26,7 @@ from poolos.integration import (
 from poolos.external_change import ExternalChangeBatch
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_speed_session import PumpSpeedSessionRuntime
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
     SpaAutomaticControlSuppression,
@@ -53,6 +54,7 @@ from poolos.thermal_runtime_orchestration import (
 from .coordinator import PoolOSCoordinator
 from .manual_intellicenter import ManualIntelliCenterControl
 from .observation import ObservationSnapshot
+from .pump_speed_session import PoolOSPumpSpeedSessionRuntime
 from .thermal_live_delivery import ManualIntelliCenterThermalLiveDelivery
 from .thermal_runtime import PoolOSThermalRuntime
 
@@ -65,6 +67,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
     manual: ManualIntelliCenterControl
     authority: PoolOSPhysicalCommandAuthority
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    pump_speed_session: PumpSpeedSessionRuntime | None = None
 
     def for_session(
         self,
@@ -92,6 +95,8 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 purpose_value = current_operation.metadata.get("operating_purpose")
                 if isinstance(purpose_value, str) and purpose_value:
                     operating_purpose = purpose_value
+                elif current_operation.metadata.get("priming_step") == "true":
+                    operating_purpose = "priming"
         currentness = session.originating_currentness
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
             sequence = session.coordination.current_step_sequence
@@ -126,6 +131,20 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 requested_value=requested_value,
             )
             probe_operation_id = operation.operation_id
+        pump_session_id = None
+        effective_pump_rpm = None
+        if self.pump_speed_session is not None and operating_purpose is not None:
+            pump_state = self.pump_speed_session.snapshot
+            if (
+                pump_state.active
+                and pump_state.body is not None
+                and pump_state.body.value == session.assessment.desired.body.value
+                and pump_state.purpose is not None
+                and pump_state.purpose.value == operating_purpose
+                and pump_state.pump_circuit_id == pump_circuit_id
+            ):
+                pump_session_id = pump_state.session_id
+                effective_pump_rpm = pump_state.effective_rpm
         context = self.authority.bind_automatic_thermal_dispatch(
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
@@ -134,6 +153,8 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             operating_purpose=operating_purpose,
             purpose=purpose,
             probe_operation_id=probe_operation_id,
+            pump_session_id=pump_session_id,
+            effective_pump_rpm=effective_pump_rpm,
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,
@@ -227,6 +248,7 @@ class PoolOSThermalAutomaticRuntime:
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
     pool_automatic_control: PoolAutomaticControlSuppression = field(
         default_factory=PoolAutomaticControlSuppression
     )
@@ -293,6 +315,11 @@ class PoolOSThermalAutomaticRuntime:
             return
         reason = self.authority.base_authority_reason
         ready = reason is PhysicalAuthorityReason.ALLOWED
+        pump_session = (
+            None
+            if self.pump_speed_session is None
+            else self.pump_speed_session.session.snapshot
+        )
         frame = ThermalAutomaticExecutionFrame(
             epoch_identity=orchestration.snapshot_identity,
             observed_at=snapshot.generated_at,
@@ -305,6 +332,25 @@ class PoolOSThermalAutomaticRuntime:
                 ),
                 commissioning_scope=self.thermal_runtime.commissioning_scope,
                 baselines=self.baselines,
+                pump_session_id=(
+                    None if pump_session is None else pump_session.session_id
+                ),
+                pump_session_body=(
+                    None
+                    if pump_session is None or pump_session.body is None
+                    else pump_session.body.value
+                ),
+                pump_session_purpose=(
+                    None
+                    if pump_session is None or pump_session.purpose is None
+                    else pump_session.purpose.value
+                ),
+                pump_session_pump_circuit_id=(
+                    None if pump_session is None else pump_session.pump_circuit_id
+                ),
+                pump_session_effective_rpm=(
+                    None if pump_session is None else pump_session.effective_rpm
+                ),
             ),
             physical_authority_ready=ready,
             physical_authority_blocker=(
@@ -408,6 +454,7 @@ class PoolOSThermalAutomaticRuntime:
             self.manual,
             self.authority,
             self.baselines,
+            None if self.pump_speed_session is None else self.pump_speed_session.session,
         )
         self._task = self.hass.async_create_task(
             self.driver.process_epoch(frame, delivery_factory=factory),

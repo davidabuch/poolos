@@ -46,6 +46,7 @@ from .thermal_runtime_ownership import (
 )
 from .pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
 from .operating_baselines import PumpOperatingBaselines
+from .pump_speed_session import PumpSpeedOverrideState
 
 # The independent native transport performs bounded keepalive reads every 90
 # seconds and the HA coordinator provides a 30-second reconciliation backstop.
@@ -565,6 +566,15 @@ def build_thermal_runtime_ownership_evidence(
         configured_pump_speed_observation_fresh=configured.fresh,
         configured_pump_speed_observation_usable=configured.usable,
         configured_pump_speed_observed_at=configured.observed_at,
+        pump_session_id=getattr(body, "pump_session_id", None),
+        pump_session_purpose=getattr(body, "pump_session_purpose", None),
+        pump_session_pump_circuit_id=getattr(body, "pump_circuit_id", None),
+        pump_session_effective_rpm=getattr(
+            body, "pump_session_effective_rpm", None
+        ),
+        pump_session_override_state=getattr(
+            body, "pump_session_override_state", PumpSpeedOverrideState.NONE
+        ),
         effective_heat_source=_heat_source(source.value),
         heat_source_observation_fresh=source.fresh,
         heat_source_observation_usable=source.usable,

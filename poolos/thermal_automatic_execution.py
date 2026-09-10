@@ -47,8 +47,10 @@ from .pool_circulation_ownership import (
     PoolCirculationOwnershipRegistry,
 )
 from .operating_baselines import PumpOperatingBaselines
+from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .spa_thermal_policy import SpaSessionKind
 from .thermal_execution_currentness import ThermalExecutionPurposeKind
+from .thermal_execution_planning import ThermalPlanDisposition
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
     ThermalLiveCommissioningScope,
@@ -393,6 +395,24 @@ class ThermalAutomaticExecutionDriver:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
         return None
 
+    def active_pump_session_purpose(self) -> PumpSpeedSessionPurpose | None:
+        """Expose only explicit probe/priming execution-purpose boundaries."""
+
+        session = self.active_session
+        if session is None:
+            return None
+        sequence = session.coordination.current_step_sequence
+        if sequence is not None:
+            step = session.execution_plan.steps[sequence - 1]
+            if step.metadata.get("priming_step") == "true":
+                return PumpSpeedSessionPurpose.PRIMING
+        if (
+            session.originating_currentness.purpose.kind
+            is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+        ):
+            return PumpSpeedSessionPurpose.TEMPERATURE_PROBE
+        return None
+
     def set_enabled(
         self,
         enabled: bool,
@@ -692,6 +712,51 @@ class ThermalAutomaticExecutionDriver:
                         state=ThermalAutomaticDriverState.CONVERGED,
                         evaluated_at=frame.observed_at,
                         blocker=None,
+                        frame=frame,
+                        body=body,
+                        preflight=None,
+                        failure=None,
+                        command_delivery_performed=False,
+                    )
+                lease = self.orchestrator.ownership.state.lease
+                session_requirement_current = bool(
+                    lease is not None
+                    and lease.pump_setpoint is None
+                    and lease.pump_session_id is not None
+                    and lease.pump_session_id == body.pump_session_id
+                    and lease.pump_session_effective_rpm
+                    == body.pump_session_effective_rpm
+                )
+                if (
+                    body.pump_session_override_state
+                    in {
+                        PumpSpeedOverrideState.PENDING,
+                        PumpSpeedOverrideState.VERIFIED,
+                    }
+                    or session_requirement_current
+                ):
+                    pending = (
+                        body.pump_session_override_state
+                        is PumpSpeedOverrideState.PENDING
+                    )
+                    return self._publish(
+                        state=(
+                            ThermalAutomaticDriverState.SESSION_ACTIVE
+                            if pending
+                            or body.plan.disposition is ThermalPlanDisposition.READY
+                            else ThermalAutomaticDriverState.CONVERGED
+                        ),
+                        evaluated_at=frame.observed_at,
+                        blocker=(
+                            "automatic_thermal_pump_override_pending"
+                            if pending
+                            else (
+                                "automatic_thermal_pump_override_awaiting_actual_rpm"
+                                if body.plan.disposition
+                                is ThermalPlanDisposition.READY
+                                else None
+                            )
+                        ),
                         frame=frame,
                         body=body,
                         preflight=None,

@@ -16,6 +16,7 @@ from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
 )
+from poolos.pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from poolos.thermal_execution_currentness import (
     ThermalExecutionCurrentness,
     ThermalExecutionProgress,
@@ -115,6 +116,11 @@ def evidence(
     pump_observed_at: datetime | None = None,
     configured_pump_observed_at: datetime | None = None,
     source_observed_at: datetime | None = None,
+    pump_session_id: str | None = None,
+    pump_session_purpose: PumpSpeedSessionPurpose | None = None,
+    pump_session_pump_circuit_id: str | None = None,
+    pump_session_effective_rpm: int | None = None,
+    pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
 ) -> ThermalRuntimeOwnershipEvidence:
     if pool_active is _UNSET:
         pool_active = body is ThermalBody.POOL
@@ -153,6 +159,11 @@ def evidence(
         pump_observed_at=pump_observed_at,
         configured_pump_speed_observed_at=configured_pump_observed_at,
         heat_source_observed_at=source_observed_at,
+        pump_session_id=pump_session_id,
+        pump_session_purpose=pump_session_purpose,
+        pump_session_pump_circuit_id=pump_session_pump_circuit_id,
+        pump_session_effective_rpm=pump_session_effective_rpm,
+        pump_session_override_state=pump_session_override_state,
     )
 
 
@@ -1406,6 +1417,167 @@ def test_runtime_ownership_survives_compatible_new_evaluation_epoch() -> None:
     assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
     assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+@pytest.mark.parametrize(
+    "override_state",
+    (PumpSpeedOverrideState.PENDING, PumpSpeedOverrideState.VERIFIED),
+)
+def test_same_purpose_pump_override_preserves_body_and_source_provenance(
+    override_state: PumpSpeedOverrideState,
+) -> None:
+    original_plan = thermal_assessment()
+    originating = ThermalExecutionCurrentness.from_assessment(
+        original_plan,
+        evaluation_id="evaluation-1",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    manager.establish(
+        execution_ownership(
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+            plan_id=originating.plan_id,
+        ),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            originating.evaluation_id,
+            originating.plan_id,
+            originating,
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+    current_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=1),
+        rpm=3200,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=(3200 if override_state is PumpSpeedOverrideState.VERIFIED else 2900),
+    )
+    current = ThermalExecutionCurrentness.from_assessment(
+        current_plan,
+        evaluation_id="evaluation-2",
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id=current.evaluation_id,
+            plan_id=current.plan_id,
+            execution_currentness=current,
+            pump_rpm=(
+                3200 if override_state is PumpSpeedOverrideState.VERIFIED else 2900
+            ),
+            configured_pump_rpm=(
+                3200 if override_state is PumpSpeedOverrideState.VERIFIED else 2900
+            ),
+            pump_session_id="pool-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0102",
+            pump_session_effective_rpm=3200,
+            pump_session_override_state=override_state,
+        )
+    )
+
+    lease = manager.state.lease
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.heat_source is not None
+    if override_state is PumpSpeedOverrideState.VERIFIED:
+        assert lease.pump_setpoint is None
+        assert lease.pump_session_id == "pool-solar-session"
+        assert lease.pump_session_effective_rpm == 3200
+        assert lease.originating_currentness == current
+    else:
+        assert lease.pump_setpoint is not None
+        assert lease.originating_currentness == originating
+
+
+def test_return_to_baseline_preserves_body_and_source_after_override() -> None:
+    original_plan = thermal_assessment()
+    originating = ThermalExecutionCurrentness.from_assessment(
+        original_plan,
+        evaluation_id="evaluation-1",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    manager.establish(
+        execution_ownership(
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+            plan_id=originating.plan_id,
+        ),
+        established_at=NOW,
+        requested_mode="Solar",
+        current_context=ThermalLiveExecutionContext(
+            originating.evaluation_id,
+            originating.plan_id,
+            originating,
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+    overridden_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=1),
+        rpm=3200,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=3200,
+    )
+    overridden = ThermalExecutionCurrentness.from_assessment(
+        overridden_plan,
+        evaluation_id="evaluation-2",
+    )
+    manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id=overridden.evaluation_id,
+            plan_id=overridden.plan_id,
+            execution_currentness=overridden,
+            pump_rpm=3200,
+            configured_pump_rpm=3200,
+            pump_session_id="pool-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0102",
+            pump_session_effective_rpm=3200,
+            pump_session_override_state=PumpSpeedOverrideState.VERIFIED,
+        )
+    )
+    baseline_plan = thermal_assessment(
+        at=NOW + timedelta(seconds=2),
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=2900,
+    )
+    baseline = ThermalExecutionCurrentness.from_assessment(
+        baseline_plan,
+        evaluation_id="evaluation-3",
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=NOW + timedelta(seconds=2),
+            evaluation_id=baseline.evaluation_id,
+            plan_id=baseline.plan_id,
+            execution_currentness=baseline,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            pump_session_id="pool-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0102",
+            pump_session_effective_rpm=2900,
+            pump_session_override_state=PumpSpeedOverrideState.NONE,
+        )
+    )
+
+    lease = manager.state.lease
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.heat_source is not None
+    assert lease.pump_setpoint is None
+    assert lease.pump_session_id == "pool-solar-session"
+    assert lease.pump_session_effective_rpm == 2900
+    assert lease.originating_currentness == baseline
 
 
 def test_typed_runtime_ownership_fails_closed_without_current_purpose() -> None:

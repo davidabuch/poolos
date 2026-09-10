@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from poolos.grid_outage_physical_safety import GridOutagePhysicalSafetyEngine
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+from poolos.pump_speed_session import PumpSpeedSessionRuntime
 from poolos.thermal_runtime_assessment import ThermalRuntimeEvaluator
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
 
@@ -53,6 +54,7 @@ class PumpBaselineRuntimeComposition:
     thermal_orchestrator: ThermalRuntimeOrchestrator
     physical_authority: PoolOSPhysicalCommandAuthority
     grid_outage_engine: GridOutagePhysicalSafetyEngine
+    pump_speed_session: PumpSpeedSessionRuntime
 
 
 def compose_pump_baseline_runtime(
@@ -67,6 +69,7 @@ def compose_pump_baseline_runtime(
         thermal_orchestrator=ThermalRuntimeOrchestrator(baselines=baselines),
         physical_authority=PoolOSPhysicalCommandAuthority(baselines=baselines),
         grid_outage_engine=GridOutagePhysicalSafetyEngine(baselines=baselines),
+        pump_speed_session=PumpSpeedSessionRuntime(baselines=baselines),
     )
 
 

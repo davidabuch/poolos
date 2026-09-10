@@ -72,6 +72,9 @@ class FiltrationAutomaticExecutionFrame:
     thermal_owned: bool
     external_changes: ExternalChangeBatch = ExternalChangeBatch(())
     pool_automatic_control_suppressed: bool = False
+    pump_session_id: str | None = None
+    pump_session_effective_rpm: int | None = None
+    pump_session_override_current: bool = False
 
     def __post_init__(self) -> None:
         if not self.epoch_identity.strip():
@@ -83,6 +86,10 @@ class FiltrationAutomaticExecutionFrame:
             self.pool_pump_circuit_id
         ):
             raise ValueError("filtration requires a concrete Pool PMPCIRC identity")
+        if (self.pump_session_id is None) != (
+            self.pump_session_effective_rpm is None
+        ):
+            raise ValueError("filtration pump session binding must be paired")
         object.__setattr__(self, "observations", tuple(self.observations))
 
 
@@ -273,6 +280,32 @@ class FiltrationAutomaticExecutionDriver:
                 frame=frame,
                 command=False,
             )
+        if (
+            lease is not None
+            and lease.verified
+            and frame.pump_session_id is not None
+            and frame.pump_session_effective_rpm is not None
+            and (
+                (
+                    lease.pump_setpoint is not None
+                    and lease.pump_setpoint.intended_value
+                    != frame.pump_session_effective_rpm
+                )
+                or (
+                    lease.pump_setpoint is None
+                    and lease.pump_session_effective_rpm
+                    != frame.pump_session_effective_rpm
+                )
+            )
+        ):
+            self.ownership.retain_body_for_pump_session_requirement(
+                session_id=lease.session_id,
+                pump_circuit_id=lease.pool_pump_circuit_id,
+                pump_session_id=frame.pump_session_id,
+                effective_rpm=frame.pump_session_effective_rpm,
+                confirmed_at=frame.observed_at,
+            )
+            lease = self.ownership.filtration_lease
         if self._externally_preempted(frame, lease):
             if lease is not None:
                 self.ownership.release_filtration(session_id=lease.session_id)
@@ -508,13 +541,17 @@ class FiltrationAutomaticExecutionDriver:
             frame.observed_at,
         )
         actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+        expected_rpm = (
+            pump_provenance.intended_value
+            if pump_provenance is not None
+            else lease.pump_session_effective_rpm
+        )
         if (
-            pump_provenance is None
-            or type(pump_provenance.intended_value) is not int
-            or configured.value != pump_provenance.intended_value
+            type(expected_rpm) is not int
+            or configured.value != expected_rpm
             or isinstance(actual.value, bool)
             or not isinstance(actual.value, (int, float))
-            or abs(float(actual.value) - pump_provenance.intended_value)
+            or abs(float(actual.value) - expected_rpm)
             > self.pump_rpm_tolerance
         ):
             return self._fail(
@@ -785,6 +822,16 @@ class FiltrationAutomaticExecutionDriver:
                 event.concept not in POOL_CIRCULATION_TAKEOVER_CONCEPTS
                 or event.observed_at < lease.established_at
                 or event.observed_at > frame.observed_at
+            ):
+                continue
+            if (
+                event.concept == POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                and frame.pump_session_id is not None
+                and frame.pump_session_effective_rpm is not None
+                and isinstance(event.new_value, (int, float))
+                and not isinstance(event.new_value, bool)
+                and float(event.new_value)
+                == float(frame.pump_session_effective_rpm)
             ):
                 continue
             if event.concept == "pump.rpm":

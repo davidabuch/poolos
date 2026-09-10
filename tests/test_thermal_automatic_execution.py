@@ -48,6 +48,12 @@ from poolos.pool_circulation_ownership import (
     PoolCirculationOwner,
     PoolCirculationOwnershipRegistry,
 )
+from poolos.pump_speed_session import (
+    PumpSpeedOverrideState,
+    PumpSpeedSessionBody,
+    PumpSpeedSessionPurpose,
+)
+from poolos.thermal_execution_currentness import ThermalExecutionProgress
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
@@ -59,6 +65,8 @@ from poolos.thermal_circulation_cleanup import (
 )
 from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
+    ThermalLiveExecutionContext,
+    ThermalLiveExecutionOwnership,
     ThermalLiveExecutionPolicy,
 )
 from poolos.thermal_runtime_assessment import (
@@ -215,6 +223,10 @@ def _frame(
     driver: ThermalAutomaticExecutionDriver | None = None,
     external_changes: ExternalChangeBatch = ExternalChangeBatch(()),
     verification_timeout: timedelta = timedelta(seconds=30),
+    pump_session_id: str | None = None,
+    pump_session_purpose: PumpSpeedSessionPurpose | None = None,
+    pump_session_effective_rpm: int | None = None,
+    pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
 ) -> ThermalAutomaticExecutionFrame:
     evidence_at = at if native_observation_at is None else native_observation_at
     values = _values(
@@ -315,6 +327,18 @@ def _frame(
                 is PoolTemperatureProbeExecutionPhase.ACQUIRING
                 else None
             ),
+            pump_session_body=(
+                PumpSpeedSessionBody.POOL
+                if pump_session_id is not None
+                else None
+            ),
+            pump_session_id=pump_session_id,
+            pump_session_purpose=pump_session_purpose,
+            pump_session_pump_circuit_id=(
+                "p0102" if pump_session_id is not None else None
+            ),
+            pump_session_effective_rpm=pump_session_effective_rpm,
+            pump_session_override_state=pump_session_override_state,
         ),
         live_policy=policy,
     )
@@ -504,6 +528,7 @@ def _driver_awaiting_source_off_verification():
         pump_rpm=3000,
         configured_rpm=3000,
         pool_heater="H0001",
+        heater_active=True,
         mode=ThermalRequestedMode.OFF,
     )
     requested = asyncio.run(driver.process_epoch(ending, delivery_factory=factory))
@@ -794,6 +819,10 @@ def test_priming_hold_uses_later_epochs_and_never_chains_delivery() -> None:
         _frame(orchestrator, NOW + timedelta(seconds=2), pool_active=True),
     ):
         asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
+    assert (
+        driver.active_pump_session_purpose()
+        is PumpSpeedSessionPurpose.PRIMING
+    )
 
     holding = _frame(
         orchestrator,
@@ -854,6 +883,107 @@ def test_accepted_body_activation_waits_for_authoritative_consequence() -> None:
     assert pending.accepted_delivery_count == 1
     assert len(delivery.calls) == 1
     assert isinstance(delivery.calls[0], SetBodyActive)
+
+
+def test_owned_thermal_session_respects_verified_pump_override_without_delivery() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    original = _frame(
+        orchestrator,
+        NOW,
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="H0001",
+        heater_active=True,
+        mode=ThermalRequestedMode.GAS,
+    )
+    body = original.thermal.pool
+    currentness = body.execution_currentness
+    established = orchestrator.ownership.establish(
+        ThermalLiveExecutionOwnership(
+            evaluation_id=body.evaluation_id,
+            thermal_plan_id=body.plan.plan_id,
+            execution_plan_id="owned-gas-session",
+            target_body=ThermalBody.POOL,
+            body_activation_operation_id="body-operation",
+            body_activation_receipt_id="body-receipt",
+            body_activation_correlation_id="body-correlation",
+            pump_operation_id="pump-operation",
+            pump_receipt_id="pump-receipt",
+            pump_correlation_id="pump-correlation",
+            commanded_pump_rpm=3000,
+            heat_source_operation_id="source-operation",
+            heat_source_receipt_id="source-receipt",
+            heat_source_correlation_id="source-correlation",
+            commanded_heat_source=PhysicalHeatMode.GAS,
+        ),
+        established_at=NOW,
+        requested_mode="Gas",
+        current_context=ThermalLiveExecutionContext(
+            body.evaluation_id,
+            body.plan.plan_id,
+            currentness,
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+    assert established.current_state.status is ThermalRuntimeOwnershipStatus.OWNED
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=original.epoch_identity,
+    )
+
+    overridden = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=3200,
+        configured_rpm=3200,
+        pool_heater="H0001",
+        heater_active=True,
+        mode=ThermalRequestedMode.GAS,
+        pump_session_id="pool-gas-session",
+        pump_session_purpose=PumpSpeedSessionPurpose.GAS,
+        pump_session_effective_rpm=3200,
+        pump_session_override_state=PumpSpeedOverrideState.VERIFIED,
+    )
+    result = asyncio.run(driver.process_epoch(overridden, delivery_factory=factory))
+
+    lease = orchestrator.ownership.state.lease
+    assert result.state is ThermalAutomaticDriverState.CONVERGED, result.blocker
+    assert result.command_delivery_performed is False
+    assert delivery.calls == []
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.heat_source is not None
+    assert lease.pump_setpoint is None
+
+    returned = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=2),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="H0001",
+        heater_active=True,
+        mode=ThermalRequestedMode.GAS,
+        pump_session_id="pool-gas-session",
+        pump_session_purpose=PumpSpeedSessionPurpose.GAS,
+        pump_session_effective_rpm=3000,
+        pump_session_override_state=PumpSpeedOverrideState.NONE,
+    )
+    result = asyncio.run(driver.process_epoch(returned, delivery_factory=factory))
+    lease = orchestrator.ownership.state.lease
+    assert result.state is ThermalAutomaticDriverState.CONVERGED, result.blocker
+    assert result.command_delivery_performed is False
+    assert delivery.calls == []
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.heat_source is not None
+    assert lease.pump_setpoint is None
 
 
 @pytest.mark.parametrize(
@@ -1708,6 +1838,10 @@ def test_probe_plan_can_begin_with_exact_pool_body_activation() -> None:
     result = asyncio.run(driver.process_epoch(probe, delivery_factory=factory))
 
     assert result.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert (
+        driver.active_pump_session_purpose()
+        is PumpSpeedSessionPurpose.TEMPERATURE_PROBE
+    )
     assert len(delivery.calls) == 1
     assert isinstance(delivery.calls[0], SetBodyActive)
 

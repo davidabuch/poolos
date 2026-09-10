@@ -17,6 +17,7 @@ from poolos.pool_temperature_probe_execution import (
     PoolTemperatureProbeExecutionEvidence,
     PoolTemperatureProbeExecutionPhase,
 )
+from poolos.pump_speed_session import PumpSpeedSessionBody, PumpSpeedSessionPurpose
 from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionPolicy,
@@ -80,6 +81,10 @@ def evidence(
     probe_execution: PoolTemperatureProbeExecutionEvidence | None = None,
     probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None,
     trusted_spa: bool = True,
+    pump_session_body: PumpSpeedSessionBody | None = None,
+    pump_session_purpose: PumpSpeedSessionPurpose | None = None,
+    pump_session_pump_circuit_id: str | None = None,
+    pump_session_effective_rpm: int | None = None,
 ) -> ThermalRuntimeEvidence:
     return ThermalRuntimeEvidence(
         evaluated_at=at,
@@ -131,7 +136,48 @@ def evidence(
             if trusted_spa
             else None
         ),
+        pump_session_body=pump_session_body,
+        pump_session_purpose=pump_session_purpose,
+        pump_session_pump_circuit_id=pump_session_pump_circuit_id,
+        pump_session_effective_rpm=pump_session_effective_rpm,
     )
+
+
+def test_current_pool_solar_session_override_replaces_only_matching_rpm_requirement() -> None:
+    native = values()
+    native["solar.active"] = True
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            pump_session_body=PumpSpeedSessionBody.POOL,
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0102",
+            pump_session_effective_rpm=3200,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.required_pump_rpm == 3200
+    assert result.pool.plan.desired.evidence["current_operating_purpose"] == "solar_heating"
+
+
+def test_stale_or_cross_body_session_override_cannot_change_thermal_requirement() -> None:
+    native = values()
+    native["solar.active"] = True
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            pump_session_body=PumpSpeedSessionBody.HOT_TUB,
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0198",
+            pump_session_effective_rpm=3200,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.required_pump_rpm == 2900
 
 
 def disabled_policy() -> ThermalLiveExecutionPolicy:

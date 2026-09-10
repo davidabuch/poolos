@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
+from uuid import uuid4
 
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchContext,
@@ -123,6 +124,10 @@ class ManualIntelliCenterCommandNotDispatchedError(ManualIntelliCenterCommandErr
     """Raised when PoolOS positively rejected a request before transport."""
 
 
+class ManualIntelliCenterCommandOutcomeUnknownError(ManualIntelliCenterCommandError):
+    """Raised when transport dispatch started but its final outcome is unknown."""
+
+
 @dataclass(frozen=True, slots=True)
 class ManualCommandReceipt:
     """Describe one accepted manual control request."""
@@ -130,6 +135,7 @@ class ManualCommandReceipt:
     body_objnam: str
     operation: str
     value: bool | int | str
+    request_id: str | None = None
 
 
 class _ManualConnectionHandler(ICConnectionHandler):
@@ -603,6 +609,8 @@ class ManualIntelliCenterControl:
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
+        request_id: str | None = None,
+        pump_session_id: str | None = None,
     ) -> ManualCommandReceipt:
         """Set one explicitly allow-listed PMPCIRC RPM setpoint."""
 
@@ -640,16 +648,19 @@ class ManualIntelliCenterControl:
             if thermal_body == "hot_tub"
             else POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
         )
+        request = PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target=pump_circuit_objnam,
+            source=request_source,
+            requested_value=target,
+            request_id=(request_id if request_id is not None else str(uuid4())),
+            manual_pump_session_id=pump_session_id,
+            automatic_thermal_context=automatic_thermal_context,
+            automatic_filtration_context=automatic_filtration_context,
+            grid_outage_context=grid_outage_context,
+        )
         await self._async_deliver(
-            request=PhysicalCommandRequest(
-                operation="pump_circuit_speed",
-                target=pump_circuit_objnam,
-                source=request_source,
-                requested_value=target,
-                automatic_thermal_context=automatic_thermal_context,
-                automatic_filtration_context=automatic_filtration_context,
-                grid_outage_context=grid_outage_context,
-            ),
+            request=request,
             consequence=ExpectedNativeConsequence(
                 concept=configured_speed_concept,
                 native_object_id=pump_circuit_objnam,
@@ -669,6 +680,7 @@ class ManualIntelliCenterControl:
             body_objnam=pump_circuit_objnam,
             operation="pump_circuit_speed",
             value=target,
+            request_id=request.request_id,
         )
 
     def diagnostics(self) -> Mapping[str, Any]:
@@ -744,14 +756,21 @@ class ManualIntelliCenterControl:
                 if expectation_id is not None:
                     self._command_authority.cancel(expectation_id)
                 raise ManualIntelliCenterCommandNotDispatchedError(str(exc)) from exc
-            except ManualIntelliCenterCommandError:
+            except ManualIntelliCenterCommandError as exc:
                 if expectation_id is not None and not dispatch_started:
                     self._command_authority.cancel(expectation_id)
-                raise
+                    raise
+                raise ManualIntelliCenterCommandOutcomeUnknownError(
+                    failure_message
+                ) from exc
             except Exception as exc:
                 if expectation_id is not None and not dispatch_started:
                     self._command_authority.cancel(expectation_id)
                 self._last_error_code = type(exc).__name__.upper()
+                if dispatch_started:
+                    raise ManualIntelliCenterCommandOutcomeUnknownError(
+                        failure_message
+                    ) from exc
                 raise ManualIntelliCenterCommandError(failure_message) from exc
 
     async def _require_available(self) -> None:

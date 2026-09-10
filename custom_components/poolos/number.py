@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import math
 from typing import Any
 
@@ -17,11 +18,15 @@ from poolos.intellicenter_readonly import (
     resolve_body_pump_circuit,
     resolve_pool_pump_circuit,
 )
+from poolos.pump_speed_session import PumpSpeedSessionBody
 
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import PoolOSCoordinator
-from .manual_intellicenter import ManualIntelliCenterCommandError
+from .manual_intellicenter import (
+    ManualIntelliCenterCommandError,
+    ManualIntelliCenterCommandOutcomeUnknownError,
+)
 
 
 _POOL_PMPCIRC_TYPE = "PMPCIRC"
@@ -33,6 +38,69 @@ _INTELLICHLOR_OBJNAM = "CHR01"
 _INTELLICHLOR_MIN_PERCENT = 0
 _INTELLICHLOR_MAX_PERCENT = 100
 _INTELLICHLOR_STEP_PERCENT = 1
+
+
+async def _async_set_manual_pump_speed(
+    runtime: PoolOSRuntimeData,
+    *,
+    body: PumpSpeedSessionBody,
+    manual_body: str,
+    pump_circuit_id: str,
+    value: float,
+) -> None:
+    """Bind explicit HA intent to the current session transaction."""
+
+    manual = runtime.manual_intellicenter
+    if manual is None:
+        raise ManualIntelliCenterCommandError(
+            "manual IntelliCenter command connection is not configured"
+        )
+    session_runtime = getattr(runtime, "pump_speed_session", None)
+    if session_runtime is None:
+        await manual.async_set_pump_circuit_speed(
+            pump_circuit_id,
+            value,
+            manual_body=manual_body,
+        )
+        return
+    numeric = float(value)
+    target = int(round(numeric))
+    if numeric != float(target):
+        raise ManualIntelliCenterCommandError("pump RPM must be a whole number")
+    try:
+        request = session_runtime.session.begin_manual_request(
+            body=body,
+            pump_circuit_id=pump_circuit_id,
+            requested_rpm=target,
+            requested_at=datetime.now(UTC),
+        )
+    except ValueError as exc:
+        raise ManualIntelliCenterCommandError(str(exc)) from exc
+    session_runtime.synchronize_authority()
+    try:
+        await manual.async_set_pump_circuit_speed(
+            pump_circuit_id,
+            target,
+            manual_body=manual_body,
+            request_id=request.request_id,
+            pump_session_id=request.session_id,
+        )
+    except ManualIntelliCenterCommandOutcomeUnknownError:
+        session_runtime.session.manual_delivery_outcome_unknown(
+            request,
+            outcome_unknown_at=datetime.now(UTC),
+        )
+        session_runtime.synchronize_authority()
+        raise
+    except Exception:
+        session_runtime.session.manual_delivery_failed(request)
+        session_runtime.synchronize_authority()
+        raise
+    session_runtime.session.manual_delivery_accepted(
+        request,
+        accepted_at=datetime.now(UTC),
+    )
+    session_runtime.synchronize_authority()
 
 
 def _raw_snapshot(coordinator: PoolOSCoordinator) -> Any:
@@ -247,10 +315,12 @@ class PoolOSNativeIntelliCenterPoolRPM(
                 "unique live Pool PMPCIRC is unavailable"
             )
 
-        await manual.async_set_pump_circuit_speed(
-            str(item.native_id),
-            value,
+        await _async_set_manual_pump_speed(
+            self._runtime,
+            body=PumpSpeedSessionBody.POOL,
             manual_body="pool",
+            pump_circuit_id=str(item.native_id),
+            value=value,
         )
 
     @property
@@ -382,10 +452,12 @@ class PoolOSNativeIntelliCenterHotTubRPM(
                 "unique live Hot Tub PMPCIRC is unavailable"
             )
 
-        await manual.async_set_pump_circuit_speed(
-            str(item.native_id),
-            value,
+        await _async_set_manual_pump_speed(
+            self._runtime,
+            body=PumpSpeedSessionBody.HOT_TUB,
             manual_body="hot_tub",
+            pump_circuit_id=str(item.native_id),
+            value=value,
         )
 
     @property

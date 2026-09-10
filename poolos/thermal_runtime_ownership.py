@@ -17,6 +17,7 @@ from typing import Mapping
 
 from .external_change import ExternalChangeBatch, ExternalChangeEvent
 from .integration import PhysicalHeatMode, ThermalBody
+from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .thermal_execution_currentness import (
     ThermalExecutionCompatibilityDisposition,
     ThermalExecutionCurrentness,
@@ -210,6 +211,8 @@ class ThermalRuntimeOwnershipLease:
     body_activation_accepted_at: datetime | None = None
     pump_setpoint_accepted_at: datetime | None = None
     heat_source_accepted_at: datetime | None = None
+    pump_session_id: str | None = None
+    pump_session_effective_rpm: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -286,6 +289,12 @@ class ThermalRuntimeOwnershipLease:
         }
         if any(provenance_by_concept[concept] is None for concept in verified):
             raise ValueError("verified concept requires accepted provenance")
+        if (self.pump_session_id is None) != (
+            self.pump_session_effective_rpm is None
+        ):
+            raise ValueError("pump session relinquishment binding must be paired")
+        if self.pump_session_id is not None and self.pump_setpoint is not None:
+            raise ValueError("owned and relinquished pump concepts are exclusive")
 
     @property
     def owns_body_activation(self) -> bool:
@@ -419,6 +428,11 @@ class ThermalRuntimeOwnershipEvidence:
     spa_activity_observed_at: datetime | None = None
     pump_observed_at: datetime | None = None
     configured_pump_speed_observed_at: datetime | None = None
+    pump_session_id: str | None = None
+    pump_session_purpose: PumpSpeedSessionPurpose | None = None
+    pump_session_pump_circuit_id: str | None = None
+    pump_session_effective_rpm: int | None = None
+    pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE
 
     def __post_init__(self) -> None:
         _require_aware(self.evaluated_at, "evaluated_at")
@@ -693,6 +707,63 @@ class ThermalRuntimeOwnershipManager:
                 evidence.evaluated_at,
             )
         lease = self._confirm_accepted_consequence(lease, evidence)
+        override_transition = _pump_session_override_transition(lease, evidence)
+        if override_transition is PumpSpeedOverrideState.PENDING:
+            reason = self._continuation_failure_reason(
+                lease,
+                evidence,
+                check_identity=False,
+                check_pump=False,
+            )
+            if reason is not None:
+                return self._terminate(
+                    lease,
+                    reason=reason,
+                    at=evidence.evaluated_at,
+                    evidence=evidence,
+                )
+            retained = replace(
+                lease,
+                last_confirmed_at=evidence.evaluated_at,
+                reason_code="runtime_ownership_retained:pump_override_pending",
+            )
+            self._state = ThermalRuntimeOwnershipState(
+                status=retained.status,
+                lease=retained,
+                reason_code=retained.reason_code,
+            )
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.RETAINED,
+                retained.reason_code,
+                previous,
+                evidence.evaluated_at,
+            )
+        if override_transition is PumpSpeedOverrideState.VERIFIED:
+            currentness = evidence.current_context.execution_currentness
+            assert currentness is not None
+            lease = replace(
+                lease,
+                evaluation_id=currentness.evaluation_id,
+                thermal_plan_id=currentness.plan_id,
+                originating_currentness=currentness,
+                execution_progress=ThermalExecutionProgress(),
+                pump_setpoint=None,
+                pump_setpoint_accepted_at=None,
+                pump_session_id=evidence.pump_session_id,
+                pump_session_effective_rpm=evidence.pump_session_effective_rpm,
+                verified_concepts=tuple(
+                    concept
+                    for concept in lease.verified_concepts
+                    if concept is not ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+                ),
+                last_confirmed_at=evidence.evaluated_at,
+                reason_code="runtime_ownership_retained:pump_override_verified",
+            )
+            self._state = ThermalRuntimeOwnershipState(
+                status=lease.status,
+                lease=lease,
+                reason_code=lease.reason_code,
+            )
         reason = self._continuation_failure_reason(lease, evidence)
         if reason is not None:
             return self._terminate(
@@ -926,6 +997,10 @@ class ThermalRuntimeOwnershipManager:
             reason_code="runtime_ownership_promoted:accepted_session_delivery",
             body_activation=activation or lease.body_activation,
             pump_setpoint=pump or lease.pump_setpoint,
+            pump_session_id=(None if pump is not None else lease.pump_session_id),
+            pump_session_effective_rpm=(
+                None if pump is not None else lease.pump_session_effective_rpm
+            ),
             heat_source=source or lease.heat_source,
             execution_progress=execution_progress,
             verified_concepts=_promoted_verified_concepts(
@@ -1018,6 +1093,8 @@ class ThermalRuntimeOwnershipManager:
             pump_setpoint=(
                 None if request.replace_pump_setpoint else lease.pump_setpoint
             ),
+            pump_session_id=None,
+            pump_session_effective_rpm=None,
             heat_source=(
                 None if request.replace_heat_source else lease.heat_source
             ),
@@ -1187,6 +1264,7 @@ class ThermalRuntimeOwnershipManager:
         *,
         check_identity: bool = True,
         check_requested_mode: bool = True,
+        check_pump: bool = True,
     ) -> str | None:
         accepted_role = (
             None
@@ -1242,7 +1320,7 @@ class ThermalRuntimeOwnershipManager:
             "pool_temperature_probe",
             "thermal_pump_target",
         }
-        if lease.pump_setpoint is not None and not pump_consequence_pending:
+        if check_pump and lease.pump_setpoint is not None and not pump_consequence_pending:
             if evidence.configured_pump_speed_rpm is None:
                 return "runtime_ownership_preempted:pump_setpoint_evidence_missing"
             if not evidence.configured_pump_speed_observation_fresh:
@@ -1588,6 +1666,79 @@ def _external_preemption_reason(
         ):
             return "runtime_ownership_preempted:source_external_change"
     return None
+
+
+def _pump_session_override_transition(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+) -> PumpSpeedOverrideState | None:
+    """Prove one same-purpose RPM override without granting pump ownership."""
+
+    state = evidence.pump_session_override_state
+    if state is PumpSpeedOverrideState.NONE and lease.pump_setpoint is not None:
+        return None
+    if not isinstance(state, PumpSpeedOverrideState):
+        return None
+    original = lease.originating_currentness
+    current = evidence.current_context.execution_currentness
+    if (
+        original is None
+        or current is None
+        or evidence.pump_session_id is None
+        or evidence.pump_session_pump_circuit_id is None
+        or type(evidence.pump_session_effective_rpm) is not int
+        or evidence.pump_session_effective_rpm < 1
+    ):
+        return None
+    if (
+        lease.pump_session_id is not None
+        and evidence.pump_session_id != lease.pump_session_id
+    ):
+        return None
+    before = original.purpose
+    after = current.purpose
+    expected_purpose = {
+        PhysicalHeatMode.OFF: PumpSpeedSessionPurpose.ORDINARY,
+        PhysicalHeatMode.SOLAR: PumpSpeedSessionPurpose.SOLAR,
+        PhysicalHeatMode.GAS: PumpSpeedSessionPurpose.GAS,
+    }.get(after.selected_source)
+    if (
+        evidence.pump_session_purpose is not expected_purpose
+        or before.body is not after.body
+        or before.body is not lease.body
+        or before.requested_mode != after.requested_mode
+        or before.selected_source is not after.selected_source
+        or before.target_temperature_f != after.target_temperature_f
+        or before.kind is not after.kind
+        or before.required_pump_rpm == after.required_pump_rpm
+        or after.required_pump_rpm != evidence.pump_session_effective_rpm
+    ):
+        return None
+    pump_ids = {
+        operation.equipment_id
+        for operation in original.residual_plan.operations
+        if operation.operation_type == "SetPumpSpeed"
+    }
+    if pump_ids and pump_ids != {evidence.pump_session_pump_circuit_id}:
+        return None
+    if state is PumpSpeedOverrideState.VERIFIED and (
+        evidence.configured_pump_speed_rpm != evidence.pump_session_effective_rpm
+        or not evidence.configured_pump_speed_observation_fresh
+        or not evidence.configured_pump_speed_observation_usable
+    ):
+        return None
+    if state is PumpSpeedOverrideState.NONE:
+        if (
+            not evidence.configured_pump_speed_observation_fresh
+            or not evidence.configured_pump_speed_observation_usable
+        ):
+            return None
+        if evidence.configured_pump_speed_rpm == after.required_pump_rpm:
+            return PumpSpeedOverrideState.VERIFIED
+        if evidence.configured_pump_speed_rpm == before.required_pump_rpm:
+            return PumpSpeedOverrideState.PENDING
+        return None
+    return state
 
 
 def _lease_id(

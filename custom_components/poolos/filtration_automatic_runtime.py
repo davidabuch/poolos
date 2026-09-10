@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import logging
 
@@ -23,6 +23,12 @@ from poolos.physical_command_authority import (
 )
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_speed_session import (
+    PumpSpeedOverrideState,
+    PumpSpeedSessionBody,
+    PumpSpeedSessionPurpose,
+    PumpSpeedSessionRuntime,
+)
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
 )
@@ -36,6 +42,7 @@ from .filtration_live_delivery import ManualIntelliCenterFiltrationDelivery
 from .filtration_runtime import PoolOSFiltrationRuntime
 from .manual_intellicenter import ManualIntelliCenterControl
 from .observation import ObservationSnapshot
+from .pump_speed_session import PoolOSPumpSpeedSessionRuntime
 from .thermal_runtime import PoolOSThermalRuntime
 
 LOGGER = logging.getLogger(__name__)
@@ -47,6 +54,7 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
     authority: PoolOSPhysicalCommandAuthority
     ownership: PoolCirculationOwnershipRegistry
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    pump_speed_session: PumpSpeedSessionRuntime | None = None
 
     def for_operation(
         self,
@@ -81,6 +89,16 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
                 raise ValueError("filtration cleanup ownership is not current")
             ownership_lease_id = lease.lease_id
             body_activation_receipt_id = lease.body_activation.receipt_id
+        pump_session_id = None
+        effective_pump_rpm = None
+        if self.pump_speed_session is not None:
+            effective_pump_rpm = self.pump_speed_session.effective_rpm_for(
+                body=PumpSpeedSessionBody.POOL,
+                purpose=PumpSpeedSessionPurpose.ORDINARY,
+                pump_circuit_id=frame.pool_pump_circuit_id,
+            )
+            if effective_pump_rpm is not None:
+                pump_session_id = self.pump_speed_session.snapshot.session_id
         context = self.authority.bind_automatic_filtration_dispatch(
             epoch_identity=frame.epoch_identity,
             session_identity=session_id,
@@ -92,6 +110,8 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             cleanup=cleanup,
             ownership_lease_id=ownership_lease_id,
             body_activation_receipt_id=body_activation_receipt_id,
+            pump_session_id=pump_session_id,
+            effective_pump_rpm=effective_pump_rpm,
         )
         return ManualIntelliCenterFiltrationDelivery(
             self.manual,
@@ -110,6 +130,7 @@ class PoolOSFiltrationAutomaticRuntime:
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
     pool_automatic_control: PoolAutomaticControlSuppression = field(
         default_factory=PoolAutomaticControlSuppression
     )
@@ -152,11 +173,29 @@ class PoolOSFiltrationAutomaticRuntime:
             return
         authority_reason = self.authority.base_authority_reason
         thermal = self.thermal_runtime.assessment
+        filtration = self.filtration_runtime.assessment
+        pump_session_state = None
+        session_rpm = None
+        if filtration is not None and self.pump_speed_session is not None:
+            pump_session_state = self.pump_speed_session.session.snapshot
+            session_rpm = self.pump_speed_session.session.effective_rpm_for(
+                body=PumpSpeedSessionBody.POOL,
+                purpose=PumpSpeedSessionPurpose.ORDINARY,
+                pump_circuit_id=(
+                    "" if thermal is None or thermal.pool_pump_circuit_id is None
+                    else thermal.pool_pump_circuit_id
+                ),
+            )
+            if session_rpm is not None:
+                filtration = replace(
+                    filtration,
+                    ordinary_filtration_rpm=session_rpm,
+                )
         frame = FiltrationAutomaticExecutionFrame(
             epoch_identity=orchestration.snapshot_identity,
             observed_at=snapshot.generated_at,
             observations=tuple(snapshot.observations),
-            filtration=self.filtration_runtime.assessment,
+            filtration=filtration,
             pool_pump_circuit_id=(
                 None if thermal is None else thermal.pool_pump_circuit_id
             ),
@@ -187,6 +226,16 @@ class PoolOSFiltrationAutomaticRuntime:
             external_changes=external_changes,
             pool_automatic_control_suppressed=(
                 self.pool_automatic_control.state.suppressed
+            ),
+            pump_session_id=(
+                pump_session_state.session_id if session_rpm is not None else None
+            ),
+            pump_session_effective_rpm=session_rpm,
+            pump_session_override_current=bool(
+                session_rpm is not None
+                and pump_session_state is not None
+                and pump_session_state.override_state
+                is PumpSpeedOverrideState.VERIFIED
             ),
         )
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
@@ -257,6 +306,7 @@ class PoolOSFiltrationAutomaticRuntime:
             self.authority,
             self.ownership,
             self.baselines,
+            None if self.pump_speed_session is None else self.pump_speed_session.session,
         )
         frame = self._latest_frame
         self._task = self.hass.async_create_task(
