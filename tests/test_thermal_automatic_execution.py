@@ -4753,3 +4753,494 @@ def test_accepted_unverified_body_times_out_without_cleanup_or_retry() -> None:
     )
     assert fresh.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
     assert len(delivery.calls) == 2
+
+def test_preempted_thermal_session_allows_genuinely_fresh_successor_session() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+
+    baseline = _frame(orchestrator, NOW, pool_active=False)
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    # Session A: PoolOS accepts a body activation and begins an owned lifecycle.
+    first = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+    )
+    started = asyncio.run(
+        driver.process_epoch(first, delivery_factory=factory)
+    )
+    assert started.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is True
+
+    confirmed = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=2),
+        pool_active=True,
+    )
+    asyncio.run(driver.process_epoch(confirmed, delivery_factory=factory))
+
+    first_lease = orchestrator.ownership.state.lease
+    assert first_lease is not None
+    first_generation = first_lease.generation
+    first_lease_id = first_lease.lease_id
+
+    # Session A is preempted through the real automatic-driver path:
+    # authoritative native Pool OFF appears after PoolOS established ownership.
+    native_off = ExternalChangeEvent(
+        concept="pool.active",
+        semantic_event_type="native_value_changed",
+        native_object_id="B1101",
+        previous_value=True,
+        new_value=False,
+        observed_at=NOW + timedelta(seconds=3),
+        external_policy="accept",
+        action_taken="observe",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    preempted_frame = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=3),
+        pool_active=False,
+    )
+
+    preempted_result = asyncio.run(
+        driver.process_epoch(
+            replace(
+                preempted_frame,
+                external_changes=ExternalChangeBatch((native_off,)),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert preempted_result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert (
+        orchestrator.ownership.state.status
+        is ThermalRuntimeOwnershipStatus.PREEMPTED
+    )
+
+    first_terminal_lease = orchestrator.ownership.state.lease
+    assert first_terminal_lease is not None
+    assert first_terminal_lease.lease_id == first_lease_id
+
+    # Do NOT disable/re-enable the thermal execution driver here.
+    # Production remains enabled. The old execution has ended physically;
+    # a later authoritative epoch presents a genuinely fresh opportunity.
+    # Session B begins on the very next fresh authoritative Pool-OFF epoch.
+    calls_before = len(delivery.calls)
+
+    off_epoch = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=4),
+        pool_active=False,
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(
+            off_epoch,
+            delivery_factory=factory,
+        )
+    )
+
+    assert result.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert result.blocker != "runtime_ownership_promotion_denied:ownership_terminal"
+    assert len(delivery.calls) == calls_before + 1
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is True
+
+    # Fresh Session B must immediately own a new generation derived only from
+    # its newly accepted delivery.
+    second_lease = orchestrator.ownership.state.lease
+    assert second_lease is not None
+    assert second_lease.lease_id != first_lease_id
+    assert second_lease.generation > first_generation
+    assert (
+        orchestrator.ownership.state.status
+        is ThermalRuntimeOwnershipStatus.OWNED
+    )
+
+    successor_confirmed = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=5),
+        pool_active=True,
+    )
+    asyncio.run(
+        driver.process_epoch(successor_confirmed, delivery_factory=factory)
+    )
+
+    second_lease = orchestrator.ownership.state.lease
+    assert second_lease is not None
+    assert second_lease.lease_id != first_lease_id
+    assert second_lease.generation > first_generation
+    assert (
+        orchestrator.ownership.state.status
+        is ThermalRuntimeOwnershipStatus.OWNED
+    )
+
+
+def test_preempted_session_successor_completes_solar_and_defers_filtration() -> None:
+    """A fresh successor generation must complete the full Pool Solar lifecycle."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    #
+    # SESSION A
+    #
+    # Establish real PoolOS ownership, then terminate it as PREEMPTED through
+    # the same automatic-driver/native-event path exercised by production.
+    #
+    baseline_a = _frame(orchestrator, NOW, pool_active=False)
+    driver.note_disabled_epoch(baseline_a)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline_a.epoch_identity,
+    )
+
+    started_a = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert started_a.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is True
+
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=2),
+                pool_active=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    lease_a = orchestrator.ownership.state.lease
+    assert lease_a is not None
+    lease_a_id = lease_a.lease_id
+    generation_a = lease_a.generation
+
+    native_off = ExternalChangeEvent(
+        concept="pool.active",
+        semantic_event_type="native_value_changed",
+        native_object_id="B1101",
+        previous_value=True,
+        new_value=False,
+        observed_at=NOW + timedelta(seconds=3),
+        external_policy="accept",
+        action_taken="observe",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    preempted_a = asyncio.run(
+        driver.process_epoch(
+            replace(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=3),
+                    pool_active=False,
+                ),
+                external_changes=ExternalChangeBatch((native_off,)),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert preempted_a.state is ThermalAutomaticDriverState.PREEMPTED
+    assert (
+        orchestrator.ownership.state.status
+        is ThermalRuntimeOwnershipStatus.PREEMPTED
+    )
+
+    #
+    # SESSION B
+    #
+    # Start a genuinely new PoolOS-controlled Solar lifecycle on the same
+    # continuously-enabled driver. Use the already-proven probe sequence.
+    #
+    session_b = NOW + timedelta(seconds=10)
+
+    probe_baseline = _frame(
+        orchestrator,
+        session_b,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=1500,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=90.0,
+        evaluator=evaluator,
+        driver=driver,
+    )
+
+    assert probe_baseline.thermal is not None
+    assert probe_baseline.thermal.pool.plan.desired.reason_code == (
+        "pool_temperature_probe_required"
+    )
+
+    results = []
+
+    for seconds, active, rpm, configured, heater, temperature_missing in (
+        (1.0, False, 0, 1500, "00000", True),
+        (2.0, True, 0, 1500, "00000", True),
+        (3.0, True, 1500, 1500, "00000", True),
+        (34.0, True, 1500, 1500, "00000", False),
+        (64.0, True, 1500, 1500, "00000", False),
+        (124.0, True, 1500, 1500, "00000", False),
+        (125.0, True, 2900, 2900, "00000", False),
+        (126.0, True, 2900, 2900, "00000", False),
+        (127.0, True, 2900, 2900, "H0002", False),
+    ):
+        results.append(
+            asyncio.run(
+                driver.process_epoch(
+                    _frame(
+                        orchestrator,
+                        session_b + timedelta(seconds=seconds),
+                        pool_active=active,
+                        pump_rpm=rpm,
+                        configured_rpm=configured,
+                        pool_heater=heater,
+                        mode=ThermalRequestedMode.SOLAR,
+                        missing=("pool.temperature",) if temperature_missing else (),
+                        solar_temperature=91.0,
+                        evaluator=evaluator,
+                        driver=driver,
+                        verification_timeout=timedelta(seconds=300),
+                    ),
+                    delivery_factory=factory,
+                )
+            )
+        )
+
+    assert all(
+        result.blocker != "runtime_ownership_promotion_denied:ownership_terminal"
+        for result in results
+    )
+
+    lease_b = orchestrator.ownership.state.lease
+    assert lease_b is not None
+    assert lease_b.lease_id != lease_a_id
+    assert lease_b.generation > generation_a
+
+    result = results[-1]
+    assert result.state is ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+
+    for seconds in (128, 158):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    session_b + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    solar_active=True,
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=91.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    assert result.blocker == "automatic_thermal_solar_engaged"
+
+    #
+    # TARGET SATISFIED
+    #
+    # Remaining filtration exists but is explicitly deferrable. Thermal
+    # cleanup must therefore choose NO immediate 2600 RPM successor.
+    #
+    for seconds in (279, 879):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    session_b + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    pool_temperature=90.0,
+                    solar_active=True,
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=91.0,
+                    filtration_remaining=timedelta(hours=2),
+                    filtration_disposition=FiltrationDisposition.CREDITING,
+                    filtration_independent_disposition=(
+                        FiltrationDisposition.DEFERRED_OPTIMIZATION
+                    ),
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    assert result.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
+
+    source_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                session_b + timedelta(seconds=880),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                filtration_disposition=FiltrationDisposition.CREDITING,
+                filtration_independent_disposition=(
+                    FiltrationDisposition.DEFERRED_OPTIMIZATION
+                ),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert source_off.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.body_activation is not None
+
+    cleanup_frame = _frame(
+        orchestrator,
+        session_b + timedelta(seconds=881),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="00000",
+        pool_temperature=90.0,
+        mode=ThermalRequestedMode.SOLAR,
+        solar_temperature=91.0,
+        filtration_remaining=timedelta(hours=2),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=(
+            FiltrationDisposition.DEFERRED_OPTIMIZATION
+        ),
+        evaluator=evaluator,
+        driver=driver,
+    )
+
+    assert cleanup_frame.filtration_successor is not None
+    assert cleanup_frame.filtration_successor.total_remaining_runtime > timedelta(0)
+    assert cleanup_frame.filtration_successor.independent_disposition is (
+        FiltrationDisposition.DEFERRED_OPTIMIZATION
+    )
+    assert cleanup_frame.filtration_successor.immediate_circulation_required is False
+    assert cleanup_frame.filtration_successor.successor_target_rpm is None
+    assert cleanup_frame.filtration_successor.target_semantics is (
+        FiltrationTargetSemantics.NONE
+    )
+
+    calls_before_pool_off = len(delivery.calls)
+
+    requested_off = asyncio.run(
+        driver.process_epoch(
+            cleanup_frame,
+            delivery_factory=factory,
+        )
+    )
+
+    assert requested_off.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert len(delivery.calls) == calls_before_pool_off + 1
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].equipment_id == ThermalBody.POOL.value
+    assert delivery.calls[-1].active is False
+
+    pending_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                session_b + timedelta(seconds=882),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                filtration_disposition=FiltrationDisposition.CREDITING,
+                filtration_independent_disposition=(
+                    FiltrationDisposition.DEFERRED_OPTIMIZATION
+                ),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert pending_off.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+
+    verified_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                session_b + timedelta(seconds=883),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=91.0,
+                filtration_remaining=timedelta(hours=2),
+                filtration_disposition=FiltrationDisposition.CREDITING,
+                filtration_independent_disposition=(
+                    FiltrationDisposition.DEFERRED_OPTIMIZATION
+                ),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert verified_off.state is ThermalAutomaticDriverState.CONVERGED
+    assert verified_off.blocker == "thermal_cleanup_pool_body_off_verified"
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
+
+    # The remaining filtration obligation must NOT trigger immediate ordinary
+    # filtration during this thermal cleanup.
+    assert not any(
+        isinstance(operation, SetPumpSpeed) and operation.rpm == 2600
+        for operation in delivery.calls
+    )

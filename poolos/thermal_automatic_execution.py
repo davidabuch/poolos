@@ -2101,13 +2101,34 @@ class ThermalAutomaticExecutionDriver:
             # circulation. Keep its accepted provenance on the live session
             # until the body-activation operation is itself accepted.
             return None
-        decision = self.orchestrator.ownership.promote_session_provenance(
-            ownership,
-            promoted_at=promoted_at,
-            requested_mode=requested_mode,
-            originating_context=session.originating_context,
-            execution_progress=session.execution_progress,
-        )
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.PREEMPTED
+            and lease.execution_plan_id != ownership.execution_plan_id
+        ):
+            # PREEMPTED is terminal for the prior execution generation, not
+            # for all future autonomous thermal work. A genuinely new live
+            # execution may establish a fresh lease only from its own accepted
+            # delivery provenance. ThermalRuntimeOwnershipManager.establish()
+            # independently rejects provenance reuse and never copies prior
+            # concept ownership into the successor generation.
+            decision = self.orchestrator.ownership.establish(
+                ownership,
+                established_at=promoted_at,
+                requested_mode=requested_mode,
+                current_context=session.originating_context,
+                execution_progress=session.execution_progress,
+            )
+        else:
+            decision = self.orchestrator.ownership.promote_session_provenance(
+                ownership,
+                promoted_at=promoted_at,
+                requested_mode=requested_mode,
+                originating_context=session.originating_context,
+                execution_progress=session.execution_progress,
+            )
+
         if decision.current_state.status is not ThermalRuntimeOwnershipStatus.OWNED:
             return decision.reason_code
         return None
