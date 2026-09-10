@@ -64,10 +64,10 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.9",
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.10",
         "pyintellicenter==0.1.20",
     ]
-    assert manifest["version"] == "0.11.9"
+    assert manifest["version"] == "0.11.10"
 
 
 def test_custom_integration_uses_runtime_english_translation() -> None:
