@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import asyncio
 import sys
@@ -143,6 +144,9 @@ def test_pool_autonomous_control_restores_off_without_command_or_ownership() -> 
             runtime_data=SimpleNamespace(
                 physical_command_authority=authority,
                 pool_automatic_control=restraint,
+                coordinator=SimpleNamespace(
+                    local_timezone=ZoneInfo("America/Los_Angeles")
+                ),
             ),
         )
         entity = module.PoolOSPoolAutonomousControlSwitch(entry)
@@ -182,6 +186,9 @@ def test_spa_autonomous_control_restores_off_without_affecting_pool() -> None:
                 physical_command_authority=authority,
                 spa_automatic_control=spa,
                 pool_automatic_control=pool,
+                coordinator=SimpleNamespace(
+                    local_timezone=ZoneInfo("America/Los_Angeles")
+                ),
             ),
         )
         entity = module.PoolOSSpaAutonomousControlSwitch(entry)
@@ -1330,5 +1337,166 @@ def test_failed_solar_command_does_not_change_requested_mode() -> None:
             await solar.async_turn_on()
 
         assert entry.runtime_data.thermal_runtime.pool_requested_mode is original
+
+    asyncio.run(run())
+
+def test_pool_autonomous_control_drops_prior_operational_day_manual_off_on_restore(
+    monkeypatch,
+) -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+                coordinator=SimpleNamespace(
+                    local_timezone=ZoneInfo("America/Los_Angeles")
+                ),
+            ),
+        )
+
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                state="off",
+                attributes={
+                    "pool_manual_off_suppression_source":
+                        "manual_poolos_off_request",
+                    "pool_manual_off_suppression_at":
+                        "2026-09-10T18:00:00-07:00",
+                    "pool_manual_off_suppression_reason":
+                        "manual_poolos_off_request",
+                },
+            )
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.async_on_remove = lambda _remove: None
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = datetime(2026, 9, 11, 15, 0, tzinfo=UTC)
+                return value if tz is None else value.astimezone(tz)
+
+        monkeypatch.setattr(module, "datetime", FixedDateTime)
+
+        await entity.async_added_to_hass()
+
+        assert not restraint.state.suppressed
+        assert entity.is_on
+        assert not authority.pool_automatic_control_suppressed
+        assert entity.extra_state_attributes["command_delivery_performed"] is False
+        assert entity.extra_state_attributes["resume_creates_ownership"] is False
+
+    asyncio.run(run())
+
+
+def test_pool_autonomous_control_keeps_same_day_manual_off_until_boundary(
+    monkeypatch,
+) -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+                coordinator=SimpleNamespace(
+                    local_timezone=ZoneInfo("America/Los_Angeles")
+                ),
+            ),
+        )
+
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                state="off",
+                attributes={
+                    "pool_manual_off_suppression_source":
+                        "manual_poolos_off_request",
+                    "pool_manual_off_suppression_at":
+                        "2026-09-10T18:00:00-07:00",
+                    "pool_manual_off_suppression_reason":
+                        "manual_poolos_off_request",
+                },
+            )
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.async_on_remove = lambda _remove: None
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                # 07:59 PDT on Sep 11
+                value = datetime(2026, 9, 11, 14, 59, tzinfo=UTC)
+                return value if tz is None else value.astimezone(tz)
+
+        monkeypatch.setattr(module, "datetime", FixedDateTime)
+
+        await entity.async_added_to_hass()
+
+        assert restraint.state.suppressed
+        assert not entity.is_on
+        assert authority.pool_automatic_control_suppressed
+
+    asyncio.run(run())
+
+
+def test_pool_operator_restraint_survives_operational_day_boundary_on_restore(
+    monkeypatch,
+) -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+                coordinator=SimpleNamespace(
+                    local_timezone=ZoneInfo("America/Los_Angeles")
+                ),
+            ),
+        )
+
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                state="off",
+                attributes={
+                    "pool_manual_off_suppression_source":
+                        "operator_restraint",
+                    "pool_manual_off_suppression_at":
+                        "2026-09-08T16:00:00+00:00",
+                    "pool_manual_off_suppression_reason":
+                        "operator_disabled",
+                },
+            )
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.async_on_remove = lambda _remove: None
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = datetime(2026, 9, 11, 15, 0, tzinfo=UTC)
+                return value if tz is None else value.astimezone(tz)
+
+        monkeypatch.setattr(module, "datetime", FixedDateTime)
+
+        await entity.async_added_to_hass()
+
+        assert restraint.state.suppressed
+        assert not entity.is_on
+        assert authority.pool_automatic_control_suppressed
 
     asyncio.run(run())
