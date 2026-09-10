@@ -641,3 +641,59 @@ def test_malformed_or_unsupported_purpose_identity_is_rejected() -> None:
             kind=purpose.kind,
             schema_version=2,
         )
+
+
+def test_same_purpose_native_convergence_after_verified_progress_is_compatible() -> None:
+    """Verified PoolOS progress may be followed by exact coupled native convergence."""
+
+    originating = _currentness(_assessment(), "evaluation-origin")
+    original_operations = originating.residual_plan.operations
+
+    assert original_operations
+
+    converged = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            current_source=PhysicalHeatMode.SOLAR,
+            current_rpm=2900,
+        ),
+        "evaluation-converged",
+    )
+
+    decision = assess_execution_compatibility(
+        originating,
+        converged,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(original_operations[0],),
+        ),
+    )
+
+    assert (
+        decision.disposition
+        is ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE
+    )
+    assert decision.continuation_allowed
+    assert (
+        decision.reason_code
+        == "thermal_execution_native_convergence_after_verified_progress"
+    )
+
+
+def test_same_purpose_native_convergence_without_verified_progress_still_fails_closed() -> None:
+    """Matching physical state alone must never manufacture execution currentness."""
+
+    originating = _currentness(_assessment(), "evaluation-origin")
+    converged = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            current_source=PhysicalHeatMode.SOLAR,
+            current_rpm=2900,
+        ),
+        "evaluation-converged",
+    )
+
+    decision = assess_execution_compatibility(originating, converged)
+
+    assert decision.disposition is ThermalExecutionCompatibilityDisposition.UNKNOWN
+    assert decision.reason_code == "thermal_execution_convergence_not_attributed"
+    assert not decision.continuation_allowed

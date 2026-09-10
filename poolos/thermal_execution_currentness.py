@@ -413,6 +413,21 @@ def assess_execution_compatibility(
                 ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE,
                 "thermal_execution_convergence_pending_step_verification",
             )
+        if verified:
+            # A controller may perform coupled native consequences after a
+            # PoolOS operation has been authoritatively verified. If the
+            # resulting planner state is fully converged to the exact same
+            # execution purpose, that convergence does not supersede the
+            # PoolOS execution.
+            #
+            # This is currentness only: it does not grant provenance or
+            # ownership for native pump/source consequences that PoolOS did
+            # not command and verify itself. A zero-progress look-alike still
+            # fails closed below.
+            return result(
+                ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE,
+                "thermal_execution_native_convergence_after_verified_progress",
+            )
         return result(
             ThermalExecutionCompatibilityDisposition.UNKNOWN,
             "thermal_execution_convergence_not_attributed",
