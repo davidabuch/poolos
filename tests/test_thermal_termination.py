@@ -214,7 +214,9 @@ def test_hydraulic_takeover_and_unusable_evidence_fail_closed() -> None:
     )
 
     assert spa.disposition is ThermalTerminationDisposition.INVALIDATED
-    assert stale.disposition is ThermalTerminationDisposition.INVALIDATED
+    # Unusable evidence blocks consumption of provenance but is not positive
+    # evidence that the originating body epoch was replaced.
+    assert stale.disposition is ThermalTerminationDisposition.BLOCKED
     assert spa.operation is None
     assert stale.operation is None
 

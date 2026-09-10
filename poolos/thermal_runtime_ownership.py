@@ -15,7 +15,7 @@ import json
 from types import MappingProxyType
 from typing import Mapping
 
-from .external_change import ExternalChangeBatch
+from .external_change import ExternalChangeBatch, ExternalChangeEvent
 from .integration import PhysicalHeatMode, ThermalBody
 from .thermal_execution_currentness import (
     ThermalExecutionCompatibilityDisposition,
@@ -206,6 +206,10 @@ class ThermalRuntimeOwnershipLease:
     ended_at: datetime | None = None
     originating_currentness: ThermalExecutionCurrentness | None = None
     execution_progress: ThermalExecutionProgress | None = None
+    verified_concepts: tuple[ThermalRuntimeOwnedConcept, ...] = ()
+    body_activation_accepted_at: datetime | None = None
+    pump_setpoint_accepted_at: datetime | None = None
+    heat_source_accepted_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -239,6 +243,49 @@ class ThermalRuntimeOwnershipLease:
             or self.originating_currentness.plan_id != self.thermal_plan_id
         ):
             raise ValueError("ownership currentness must reference lease origin")
+        verified = tuple(
+            ThermalRuntimeOwnedConcept(concept)
+            for concept in self.verified_concepts
+        )
+        if len(verified) != len(set(verified)):
+            raise ValueError("verified ownership concepts must be unique")
+        object.__setattr__(self, "verified_concepts", verified)
+        for name in (
+            "body_activation_accepted_at",
+            "pump_setpoint_accepted_at",
+            "heat_source_accepted_at",
+        ):
+            accepted_at = getattr(self, name)
+            if accepted_at is not None:
+                _require_aware(accepted_at, name)
+        for provenance, accepted_at, label in (
+            (
+                self.body_activation,
+                self.body_activation_accepted_at,
+                "body activation",
+            ),
+            (
+                self.pump_setpoint,
+                self.pump_setpoint_accepted_at,
+                "pump setpoint",
+            ),
+            (
+                self.heat_source,
+                self.heat_source_accepted_at,
+                "heat source",
+            ),
+        ):
+            if (provenance is None) != (accepted_at is None):
+                raise ValueError(
+                    f"{label} provenance and acceptance time must be supplied together"
+                )
+        provenance_by_concept = {
+            ThermalRuntimeOwnedConcept.BODY_ACTIVATION: self.body_activation,
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT: self.pump_setpoint,
+            ThermalRuntimeOwnedConcept.HEAT_SOURCE: self.heat_source,
+        }
+        if any(provenance_by_concept[concept] is None for concept in verified):
+            raise ValueError("verified concept requires accepted provenance")
 
     @property
     def owns_body_activation(self) -> bool:
@@ -293,6 +340,53 @@ class ThermalRuntimeOwnershipDecision:
             raise ValueError("reason_code must not be empty")
         if self.command_delivery_enabled:
             raise ValueError("runtime ownership decisions cannot deliver commands")
+
+
+@dataclass(frozen=True, slots=True)
+class ThermalRuntimeOwnershipTransitionDiagnostic:
+    """Bounded evidence explaining the latest terminal ownership transition."""
+
+    previous_status: ThermalRuntimeOwnershipStatus
+    current_status: ThermalRuntimeOwnershipStatus
+    occurred_at: datetime
+    reason_code: str
+    affected_concept: ThermalRuntimeOwnedConcept | None
+    expected_value: bool | int | str | None
+    observed_value: bool | int | str | None
+    observed_at: datetime | None
+    operation_id: str | None
+    correlation_id: str | None
+    accepted_at: datetime | None
+    execution_purpose_id: str | None
+    currentness_disposition: str | None
+    external_event_id: str | None
+    external_event_concept: str | None
+    external_event_observed_at: datetime | None
+
+    def __post_init__(self) -> None:
+        _require_aware(self.occurred_at, "occurred_at")
+        for name in ("observed_at", "accepted_at", "external_event_observed_at"):
+            value = getattr(self, name)
+            if value is not None:
+                _require_aware(value, name)
+        if not self.reason_code.strip():
+            raise ValueError("transition diagnostic reason_code must not be empty")
+        object.__setattr__(
+            self,
+            "previous_status",
+            ThermalRuntimeOwnershipStatus(self.previous_status),
+        )
+        object.__setattr__(
+            self,
+            "current_status",
+            ThermalRuntimeOwnershipStatus(self.current_status),
+        )
+        if self.affected_concept is not None:
+            object.__setattr__(
+                self,
+                "affected_concept",
+                ThermalRuntimeOwnedConcept(self.affected_concept),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,6 +512,9 @@ class ThermalRuntimeOwnershipManager:
         init=False,
         repr=False,
     )
+    _last_terminal_transition: ThermalRuntimeOwnershipTransitionDiagnostic | None = (
+        field(default=None, init=False, repr=False)
+    )
 
     def __post_init__(self) -> None:
         if self.pump_rpm_tolerance < 0:
@@ -432,6 +529,14 @@ class ThermalRuntimeOwnershipManager:
         """Return current in-memory termination proof, never normal authority."""
 
         return self._residual_termination
+
+    @property
+    def last_terminal_transition(
+        self,
+    ) -> ThermalRuntimeOwnershipTransitionDiagnostic | None:
+        """Return bounded diagnostics for the latest terminal transition."""
+
+        return self._last_terminal_transition
 
     def establish(
         self,
@@ -525,6 +630,30 @@ class ThermalRuntimeOwnershipManager:
             heat_source=source,
             originating_currentness=originating_currentness,
             execution_progress=execution_progress,
+            # Accepted provenance is provisional. Only a later exact native
+            # consequence may add a verified concept.
+            verified_concepts=(),
+            body_activation_accepted_at=(
+                _accepted_boundary(
+                    established_at,
+                    ownership.body_activation_accepted_at,
+                )
+                if activation is not None
+                else None
+            ),
+            pump_setpoint_accepted_at=(
+                _accepted_boundary(established_at, ownership.pump_accepted_at)
+                if pump is not None
+                else None
+            ),
+            heat_source_accepted_at=(
+                _accepted_boundary(
+                    established_at,
+                    ownership.heat_source_accepted_at,
+                )
+                if source is not None
+                else None
+            ),
         )
         # A new positively-proven session generation makes every older cleanup
         # token stale. Hardware equality never recreates the discarded proof.
@@ -563,9 +692,15 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 evidence.evaluated_at,
             )
+        lease = self._confirm_accepted_consequence(lease, evidence)
         reason = self._continuation_failure_reason(lease, evidence)
         if reason is not None:
-            return self._terminate(lease, reason=reason, at=evidence.evaluated_at)
+            return self._terminate(
+                lease,
+                reason=reason,
+                at=evidence.evaluated_at,
+                evidence=evidence,
+            )
         retained = replace(
             lease,
             last_confirmed_at=evidence.evaluated_at,
@@ -582,6 +717,109 @@ class ThermalRuntimeOwnershipManager:
             previous,
             evidence.evaluated_at,
         )
+
+    def _confirm_accepted_consequence(
+        self,
+        lease: ThermalRuntimeOwnershipLease,
+        evidence: ThermalRuntimeOwnershipEvidence,
+    ) -> ThermalRuntimeOwnershipLease:
+        """Record exact post-acceptance native proof before currentness changes."""
+
+        progress = lease.execution_progress
+        accepted = None if progress is None else progress.accepted_current
+        if accepted is None or progress is None or progress.accepted_operation_id is None:
+            return lease
+        concept: ThermalRuntimeOwnedConcept | None = None
+        proven = False
+        if accepted.role == "body_activation":
+            active = (
+                evidence.pool_active
+                if lease.body is ThermalBody.POOL
+                else evidence.spa_active
+            )
+            fresh = (
+                evidence.pool_activity_fresh
+                if lease.body is ThermalBody.POOL
+                else evidence.spa_activity_fresh
+            )
+            usable = (
+                evidence.pool_activity_usable
+                if lease.body is ThermalBody.POOL
+                else evidence.spa_activity_usable
+            )
+            observed_at = (
+                evidence.pool_activity_observed_at
+                if lease.body is ThermalBody.POOL
+                else evidence.spa_activity_observed_at
+            )
+            accepted_at = lease.body_activation_accepted_at
+            concept = ThermalRuntimeOwnedConcept.BODY_ACTIVATION
+            proven = (
+                lease.body_activation is not None
+                and progress.accepted_operation_id
+                == lease.body_activation.operation_id
+                and active is True
+                and fresh
+                and usable
+                and observed_at is not None
+                and accepted_at is not None
+                and observed_at > accepted_at
+            )
+        elif accepted.role in {
+            "priming",
+            "pool_temperature_probe",
+            "thermal_pump_target",
+        }:
+            concept = ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+            expected = lease.pump_setpoint
+            intended = None if expected is None else expected.intended_value
+            accepted_at = lease.pump_setpoint_accepted_at
+            assert intended is None or isinstance(intended, int)
+            proven = (
+                intended is not None
+                and expected is not None
+                and progress.accepted_operation_id == expected.operation_id
+                and accepted_at is not None
+                and evidence.configured_pump_speed_rpm is not None
+                and evidence.pump_rpm is not None
+                and evidence.configured_pump_speed_observation_fresh
+                and evidence.configured_pump_speed_observation_usable
+                and evidence.pump_observation_fresh
+                and evidence.pump_observation_usable
+                and evidence.configured_pump_speed_observed_at is not None
+                and evidence.pump_observed_at is not None
+                and evidence.configured_pump_speed_observed_at
+                > accepted_at
+                and evidence.pump_observed_at > accepted_at
+                and evidence.configured_pump_speed_rpm == intended
+                and abs(evidence.pump_rpm - intended) <= self.pump_rpm_tolerance
+            )
+        elif accepted.role == "heat_source":
+            concept = ThermalRuntimeOwnedConcept.HEAT_SOURCE
+            expected = lease.heat_source
+            accepted_at = lease.heat_source_accepted_at
+            proven = (
+                expected is not None
+                and progress.accepted_operation_id == expected.operation_id
+                and accepted_at is not None
+                and evidence.effective_heat_source is expected.intended_value
+                and evidence.heat_source_observation_fresh
+                and evidence.heat_source_observation_usable
+                and evidence.heat_source_observed_at is not None
+                and evidence.heat_source_observed_at > accepted_at
+            )
+        if not proven or concept is None or concept in lease.verified_concepts:
+            return lease
+        confirmed = replace(
+            lease,
+            verified_concepts=(*lease.verified_concepts, concept),
+        )
+        self._state = ThermalRuntimeOwnershipState(
+            status=confirmed.status,
+            lease=confirmed,
+            reason_code=confirmed.reason_code,
+        )
+        return confirmed
 
     def current_external_preemption_reason(
         self,
@@ -621,7 +859,11 @@ class ThermalRuntimeOwnershipManager:
                 execution_progress=execution_progress,
             )
         if (
-            lease.status is ThermalRuntimeOwnershipStatus.SUPERSEDED
+            lease.status
+            in {
+                ThermalRuntimeOwnershipStatus.SUPERSEDED,
+                ThermalRuntimeOwnershipStatus.RELINQUISHED,
+            }
             and self._residual_termination is None
         ):
             # The terminal lease is historical after its exact residual token
@@ -686,6 +928,39 @@ class ThermalRuntimeOwnershipManager:
             pump_setpoint=pump or lease.pump_setpoint,
             heat_source=source or lease.heat_source,
             execution_progress=execution_progress,
+            verified_concepts=_promoted_verified_concepts(
+                lease,
+                activation=activation,
+                pump=pump,
+                source=source,
+            ),
+            body_activation_accepted_at=_promoted_accepted_at(
+                activation,
+                previous=lease.body_activation,
+                previous_accepted_at=lease.body_activation_accepted_at,
+                promoted_at=_accepted_boundary(
+                    promoted_at,
+                    ownership.body_activation_accepted_at,
+                ),
+            ),
+            pump_setpoint_accepted_at=_promoted_accepted_at(
+                pump,
+                previous=lease.pump_setpoint,
+                previous_accepted_at=lease.pump_setpoint_accepted_at,
+                promoted_at=_accepted_boundary(
+                    promoted_at,
+                    ownership.pump_accepted_at,
+                ),
+            ),
+            heat_source_accepted_at=_promoted_accepted_at(
+                source,
+                previous=lease.heat_source,
+                previous_accepted_at=lease.heat_source_accepted_at,
+                promoted_at=_accepted_boundary(
+                    promoted_at,
+                    ownership.heat_source_accepted_at,
+                ),
+            ),
         )
         self._state = ThermalRuntimeOwnershipState(
             status=promoted.status,
@@ -746,6 +1021,28 @@ class ThermalRuntimeOwnershipManager:
             heat_source=(
                 None if request.replace_heat_source else lease.heat_source
             ),
+            pump_setpoint_accepted_at=(
+                None
+                if request.replace_pump_setpoint
+                else lease.pump_setpoint_accepted_at
+            ),
+            heat_source_accepted_at=(
+                None
+                if request.replace_heat_source
+                else lease.heat_source_accepted_at
+            ),
+            verified_concepts=tuple(
+                concept
+                for concept in lease.verified_concepts
+                if not (
+                    concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+                    and request.replace_pump_setpoint
+                )
+                and not (
+                    concept is ThermalRuntimeOwnedConcept.HEAT_SOURCE
+                    and request.replace_heat_source
+                )
+            ),
         )
         self._state = ThermalRuntimeOwnershipState(
             status=successor.status,
@@ -787,7 +1084,12 @@ class ThermalRuntimeOwnershipManager:
             check_requested_mode=True,
         )
         if failure is not None:
-            return self._terminate(lease, reason=failure, at=evidence.evaluated_at)
+            return self._terminate(
+                lease,
+                reason=failure,
+                at=evidence.evaluated_at,
+                evidence=evidence,
+            )
         retained = replace(
             lease,
             last_confirmed_at=evidence.evaluated_at,
@@ -843,6 +1145,11 @@ class ThermalRuntimeOwnershipManager:
             lease=terminal,
             reason_code=reason,
         )
+        self._last_terminal_transition = _relinquishment_transition_diagnostic(
+            lease,
+            reason=reason,
+            occurred_at=relinquished_at,
+        )
         self._residual_termination = (
             _residual_entitlement(lease, at=relinquished_at, reason=reason)
             if retain_termination_entitlement
@@ -881,6 +1188,12 @@ class ThermalRuntimeOwnershipManager:
         check_identity: bool = True,
         check_requested_mode: bool = True,
     ) -> str | None:
+        accepted_role = (
+            None
+            if lease.execution_progress is None
+            or lease.execution_progress.accepted_current is None
+            else lease.execution_progress.accepted_current.role
+        )
         if evidence.evaluated_at < lease.last_confirmed_at:
             return "runtime_ownership_preempted:evidence_temporal_regression"
         if check_identity:
@@ -914,13 +1227,22 @@ class ThermalRuntimeOwnershipManager:
                     return "runtime_ownership_superseded:plan_id"
         if check_requested_mode and evidence.requested_mode != lease.requested_mode:
             return "runtime_ownership_superseded:requested_mode"
-        hydraulic = _hydraulic_failure_reason(lease.body, evidence)
+        hydraulic = _hydraulic_failure_reason(
+            lease.body,
+            evidence,
+            target_activation_pending=accepted_role == "body_activation",
+        )
         if hydraulic is not None:
             return hydraulic
         shared = _shared_hydraulic_failure_reason(evidence)
         if shared is not None:
             return shared
-        if lease.pump_setpoint is not None:
+        pump_consequence_pending = accepted_role in {
+            "priming",
+            "pool_temperature_probe",
+            "thermal_pump_target",
+        }
+        if lease.pump_setpoint is not None and not pump_consequence_pending:
             if evidence.configured_pump_speed_rpm is None:
                 return "runtime_ownership_preempted:pump_setpoint_evidence_missing"
             if not evidence.configured_pump_speed_observation_fresh:
@@ -942,7 +1264,7 @@ class ThermalRuntimeOwnershipManager:
                 return "runtime_ownership_preempted:pump_setpoint_external_change"
             if abs(evidence.pump_rpm - expected_rpm) > self.pump_rpm_tolerance:
                 return "runtime_ownership_preempted:pump_external_change"
-        if lease.heat_source is not None:
+        if lease.heat_source is not None and accepted_role != "heat_source":
             if evidence.effective_heat_source is None:
                 return "runtime_ownership_preempted:source_evidence_missing"
             if not evidence.heat_source_observation_fresh:
@@ -1035,6 +1357,7 @@ class ThermalRuntimeOwnershipManager:
         *,
         reason: str,
         at: datetime,
+        evidence: ThermalRuntimeOwnershipEvidence,
     ) -> ThermalRuntimeOwnershipDecision:
         superseded = reason.startswith("runtime_ownership_superseded:")
         status = (
@@ -1059,11 +1382,31 @@ class ThermalRuntimeOwnershipManager:
             lease=terminal,
             reason_code=reason,
         )
-        self._residual_termination = (
-            _residual_entitlement(lease, at=at, reason=reason)
-            if superseded
-            else None
+        self._last_terminal_transition = _terminal_transition_diagnostic(
+            lease,
+            evidence,
+            status=status,
+            reason=reason,
+            occurred_at=at,
         )
+        if _body_origin_invalidated_by_evidence(lease, evidence):
+            self._residual_termination = None
+        elif superseded:
+            self._residual_termination = _residual_entitlement(
+                lease,
+                at=at,
+                reason=reason,
+                include_body=_body_origin_continuity_proven(lease, evidence),
+            )
+        elif not _body_origin_continuity_proven(lease, evidence):
+            self._residual_termination = None
+        else:
+            self._residual_termination = _preempted_body_entitlement(
+                lease,
+                evidence,
+                at=at,
+                reason=reason,
+            )
         return self._decision(disposition, reason, previous, at)
 
     def _decision(
@@ -1154,6 +1497,8 @@ def _source_provenance(
 def _hydraulic_failure_reason(
     body: ThermalBody,
     evidence: ThermalRuntimeOwnershipEvidence,
+    *,
+    target_activation_pending: bool = False,
 ) -> str | None:
     for prefix, value, fresh, usable in (
         (
@@ -1180,12 +1525,12 @@ def _hydraulic_failure_reason(
     if body is ThermalBody.POOL:
         if evidence.spa_active is True:
             return "runtime_ownership_preempted:spa_takeover"
-        if evidence.pool_active is not True:
+        if evidence.pool_active is not True and not target_activation_pending:
             return "runtime_ownership_preempted:pool_inactive"
     else:
         if evidence.pool_active is True:
             return "runtime_ownership_preempted:pool_takeover"
-        if evidence.spa_active is not True:
+        if evidence.spa_active is not True and not target_activation_pending:
             return "runtime_ownership_preempted:hot_tub_inactive"
     return None
 
@@ -1274,7 +1619,35 @@ def _residual_entitlement(
     *,
     at: datetime,
     reason: str,
-) -> ThermalResidualTerminationEntitlement:
+    body_only: bool = False,
+    include_body: bool = True,
+) -> ThermalResidualTerminationEntitlement | None:
+    body_activation = (
+        _verified_provenance(
+            lease,
+            ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+        )
+        if include_body
+        else None
+    )
+    pump_setpoint = (
+        None
+        if body_only
+        else _verified_provenance(
+            lease,
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+        )
+    )
+    heat_source = (
+        None
+        if body_only
+        else _verified_provenance(
+            lease,
+            ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+        )
+    )
+    if body_activation is None and pump_setpoint is None and heat_source is None:
+        return None
     payload = json.dumps(
         {
             "lease_id": lease.lease_id,
@@ -1297,10 +1670,465 @@ def _residual_entitlement(
         originating_lease_established_at=lease.established_at,
         retained_at=at,
         reason_code=reason,
-        body_activation=lease.body_activation,
-        pump_setpoint=lease.pump_setpoint,
-        heat_source=lease.heat_source,
+        body_activation=body_activation,
+        pump_setpoint=pump_setpoint,
+        heat_source=heat_source,
     )
+
+
+def _preempted_body_entitlement(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+    *,
+    at: datetime,
+    reason: str,
+) -> ThermalResidualTerminationEntitlement | None:
+    if not _body_origin_continuity_proven(lease, evidence):
+        return None
+    return _residual_entitlement(
+        lease,
+        at=at,
+        reason=reason,
+        body_only=True,
+    )
+
+
+def _body_origin_invalidated_by_evidence(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+) -> bool:
+    """Return whether current positive evidence ends the owned body epoch."""
+
+    target_active = (
+        evidence.pool_active
+        if lease.body is ThermalBody.POOL
+        else evidence.spa_active
+    )
+    target_fresh = (
+        evidence.pool_activity_fresh
+        if lease.body is ThermalBody.POOL
+        else evidence.spa_activity_fresh
+    )
+    target_usable = (
+        evidence.pool_activity_usable
+        if lease.body is ThermalBody.POOL
+        else evidence.spa_activity_usable
+    )
+    if target_active is False and target_fresh and target_usable:
+        return True
+    if (
+        evidence.pool_active is True
+        and evidence.spa_active is True
+        and evidence.pool_activity_fresh
+        and evidence.spa_activity_fresh
+        and evidence.pool_activity_usable
+        and evidence.spa_activity_usable
+    ):
+        return True
+    other_active = (
+        evidence.spa_active
+        if lease.body is ThermalBody.POOL
+        else evidence.pool_active
+    )
+    other_fresh = (
+        evidence.spa_activity_fresh
+        if lease.body is ThermalBody.POOL
+        else evidence.pool_activity_fresh
+    )
+    other_usable = (
+        evidence.spa_activity_usable
+        if lease.body is ThermalBody.POOL
+        else evidence.pool_activity_usable
+    )
+    if other_active is True and other_fresh and other_usable:
+        return True
+    if any(
+        item.active is True
+        and item.fresh
+        and item.usable
+        and item.safety_class is SharedHydraulicSafetyClass.CONFLICTING
+        for item in evidence.shared_hydraulic_circuits
+    ):
+        return True
+    target_concept = (
+        "pool.active" if lease.body is ThermalBody.POOL else "spa.active"
+    )
+    return any(
+        event.observed_at >= lease.established_at
+        and event.concept == target_concept
+        for event in evidence.external_changes.events
+    )
+
+
+def _body_origin_continuity_proven(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+) -> bool:
+    """Require positive current topology before retaining body cleanup proof."""
+
+    if _verified_provenance(
+        lease,
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+    ) is None:
+        return False
+    target_active = (
+        evidence.pool_active
+        if lease.body is ThermalBody.POOL
+        else evidence.spa_active
+    )
+    target_fresh = (
+        evidence.pool_activity_fresh
+        if lease.body is ThermalBody.POOL
+        else evidence.spa_activity_fresh
+    )
+    target_usable = (
+        evidence.pool_activity_usable
+        if lease.body is ThermalBody.POOL
+        else evidence.spa_activity_usable
+    )
+    other_active = (
+        evidence.spa_active
+        if lease.body is ThermalBody.POOL
+        else evidence.pool_active
+    )
+    other_fresh = (
+        evidence.spa_activity_fresh
+        if lease.body is ThermalBody.POOL
+        else evidence.pool_activity_fresh
+    )
+    other_usable = (
+        evidence.spa_activity_usable
+        if lease.body is ThermalBody.POOL
+        else evidence.pool_activity_usable
+    )
+    if not (
+        target_active is True
+        and target_fresh
+        and target_usable
+        and other_active is False
+        and other_fresh
+        and other_usable
+        and evidence.shared_hydraulic_inventory_complete
+    ):
+        return False
+    if any(
+        item.active is not False
+        or not item.fresh
+        or not item.usable
+        or item.safety_class is SharedHydraulicSafetyClass.UNKNOWN
+        for item in evidence.shared_hydraulic_circuits
+    ):
+        return False
+    target_concept = (
+        "pool.active" if lease.body is ThermalBody.POOL else "spa.active"
+    )
+    return not any(
+        event.observed_at >= lease.established_at
+        and event.concept == target_concept
+        for event in evidence.external_changes.events
+    )
+
+
+def _terminal_transition_diagnostic(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+    *,
+    status: ThermalRuntimeOwnershipStatus,
+    reason: str,
+    occurred_at: datetime,
+) -> ThermalRuntimeOwnershipTransitionDiagnostic:
+    concept = _affected_concept(reason)
+    provenance = (
+        None if concept is None else _provenance_for_concept(lease, concept)
+    )
+    expected = None if provenance is None else provenance.intended_value
+    expected_value = (
+        expected.value if isinstance(expected, PhysicalHeatMode) else expected
+    )
+    observed_value, observed_at = _observed_transition_value(
+        lease,
+        evidence,
+        reason=reason,
+        concept=concept,
+    )
+    accepted_at = (
+        None if concept is None else _accepted_at_for_concept(lease, concept)
+    )
+    currentness_disposition: str | None = None
+    purpose_id: str | None = None
+    if lease.originating_currentness is not None:
+        purpose_id = lease.originating_currentness.purpose.purpose_id
+        if (
+            evidence.current_context.execution_currentness is not None
+            and lease.execution_progress is not None
+        ):
+            currentness_disposition = assess_execution_compatibility(
+                lease.originating_currentness,
+                evidence.current_context.execution_currentness,
+                progress=lease.execution_progress,
+            ).disposition.value
+    external = _diagnostic_external_event(lease, evidence, concept)
+    return ThermalRuntimeOwnershipTransitionDiagnostic(
+        previous_status=ThermalRuntimeOwnershipStatus.OWNED,
+        current_status=status,
+        occurred_at=occurred_at,
+        reason_code=reason,
+        affected_concept=concept,
+        expected_value=expected_value,
+        observed_value=observed_value,
+        observed_at=observed_at,
+        operation_id=None if provenance is None else provenance.operation_id,
+        correlation_id=None if provenance is None else provenance.correlation_id,
+        accepted_at=accepted_at,
+        execution_purpose_id=purpose_id,
+        currentness_disposition=currentness_disposition,
+        external_event_id=None if external is None else external.event_id,
+        external_event_concept=None if external is None else external.concept,
+        external_event_observed_at=(
+            None if external is None else external.observed_at
+        ),
+    )
+
+
+def _relinquishment_transition_diagnostic(
+    lease: ThermalRuntimeOwnershipLease,
+    *,
+    reason: str,
+    occurred_at: datetime,
+) -> ThermalRuntimeOwnershipTransitionDiagnostic:
+    accepted = (
+        None
+        if lease.execution_progress is None
+        else lease.execution_progress.accepted_current
+    )
+    role_to_concept = {
+        "body_activation": ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+        "priming": ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+        "pool_temperature_probe": ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+        "thermal_pump_target": ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+        "heat_source": ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+    }
+    concept = None if accepted is None else role_to_concept.get(accepted.role)
+    provenance = (
+        None if concept is None else _provenance_for_concept(lease, concept)
+    )
+    expected = None if provenance is None else provenance.intended_value
+    return ThermalRuntimeOwnershipTransitionDiagnostic(
+        previous_status=ThermalRuntimeOwnershipStatus.OWNED,
+        current_status=ThermalRuntimeOwnershipStatus.RELINQUISHED,
+        occurred_at=occurred_at,
+        reason_code=reason,
+        affected_concept=concept,
+        expected_value=(
+            expected.value if isinstance(expected, PhysicalHeatMode) else expected
+        ),
+        observed_value=None,
+        observed_at=None,
+        operation_id=None if provenance is None else provenance.operation_id,
+        correlation_id=None if provenance is None else provenance.correlation_id,
+        accepted_at=(
+            None if concept is None else _accepted_at_for_concept(lease, concept)
+        ),
+        execution_purpose_id=(
+            None
+            if lease.originating_currentness is None
+            else lease.originating_currentness.purpose.purpose_id
+        ),
+        currentness_disposition=None,
+        external_event_id=None,
+        external_event_concept=None,
+        external_event_observed_at=None,
+    )
+
+
+def _affected_concept(reason: str) -> ThermalRuntimeOwnedConcept | None:
+    detail = reason
+    for prefix in (
+        "runtime_ownership_preempted:",
+        "runtime_ownership_superseded:",
+        "runtime_ownership_relinquished:",
+    ):
+        if detail.startswith(prefix):
+            detail = detail.removeprefix(prefix)
+            break
+    if detail.startswith("shared_hydraulic_"):
+        return ThermalRuntimeOwnedConcept.BODY_ACTIVATION
+    if detail.startswith("pump_"):
+        return ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+    if detail.startswith("source_"):
+        return ThermalRuntimeOwnedConcept.HEAT_SOURCE
+    if detail.startswith(
+        (
+            "pool_activity_",
+            "spa_activity_",
+            "pool_inactive",
+            "hot_tub_inactive",
+            "pool_takeover",
+            "spa_takeover",
+            "body_",
+        )
+    ):
+        return ThermalRuntimeOwnedConcept.BODY_ACTIVATION
+    return None
+
+
+def _provenance_for_concept(
+    lease: ThermalRuntimeOwnershipLease,
+    concept: ThermalRuntimeOwnedConcept,
+) -> ThermalRuntimeConceptProvenance | None:
+    return {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION: lease.body_activation,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT: lease.pump_setpoint,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE: lease.heat_source,
+    }[concept]
+
+
+def _accepted_at_for_concept(
+    lease: ThermalRuntimeOwnershipLease,
+    concept: ThermalRuntimeOwnedConcept,
+) -> datetime | None:
+    return {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION: lease.body_activation_accepted_at,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT: lease.pump_setpoint_accepted_at,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE: lease.heat_source_accepted_at,
+    }[concept]
+
+
+def _observed_transition_value(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+    *,
+    reason: str,
+    concept: ThermalRuntimeOwnedConcept | None,
+) -> tuple[bool | int | str | None, datetime | None]:
+    if concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT:
+        if "setpoint" in reason:
+            return (
+                evidence.configured_pump_speed_rpm,
+                evidence.configured_pump_speed_observed_at,
+            )
+        return evidence.pump_rpm, evidence.pump_observed_at
+    if concept is ThermalRuntimeOwnedConcept.HEAT_SOURCE:
+        value = evidence.effective_heat_source
+        return (
+            None if value is None else value.value,
+            evidence.heat_source_observed_at,
+        )
+    if concept is ThermalRuntimeOwnedConcept.BODY_ACTIVATION:
+        if "shared_hydraulic" in reason:
+            conflicting = next(
+                (
+                    item
+                    for item in evidence.shared_hydraulic_circuits
+                    if item.active is not False
+                ),
+                None,
+            )
+            return (
+                None if conflicting is None else conflicting.active,
+                None if conflicting is None else conflicting.observed_at,
+            )
+        if lease.body is ThermalBody.POOL:
+            return evidence.pool_active, evidence.pool_activity_observed_at
+        return evidence.spa_active, evidence.spa_activity_observed_at
+    return None, None
+
+
+def _diagnostic_external_event(
+    lease: ThermalRuntimeOwnershipLease,
+    evidence: ThermalRuntimeOwnershipEvidence,
+    concept: ThermalRuntimeOwnedConcept | None,
+) -> ExternalChangeEvent | None:
+    def relevant(event: ExternalChangeEvent) -> bool:
+        if concept is ThermalRuntimeOwnedConcept.BODY_ACTIVATION:
+            return event.concept == (
+                "pool.active" if lease.body is ThermalBody.POOL else "spa.active"
+            )
+        if concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT:
+            return event.concept == "pump.rpm" or event.concept.endswith(
+                ".configured_speed_rpm"
+            )
+        if concept is ThermalRuntimeOwnedConcept.HEAT_SOURCE:
+            return event.concept == (
+                "pool.raw_heater_id"
+                if lease.body is ThermalBody.POOL
+                else "spa.raw_heater_id"
+            )
+        return False
+
+    candidates = tuple(
+        event
+        for event in evidence.external_changes.events
+        if event.observed_at >= lease.established_at
+        and (
+            concept is ThermalRuntimeOwnedConcept.BODY_ACTIVATION
+            or event.reconciliation_required
+        )
+        and relevant(event)
+    )
+    return max(candidates, key=lambda event: event.observed_at, default=None)
+
+
+def _verified_provenance(
+    lease: ThermalRuntimeOwnershipLease,
+    concept: ThermalRuntimeOwnedConcept,
+) -> ThermalRuntimeConceptProvenance | None:
+    provenance = {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION: lease.body_activation,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT: lease.pump_setpoint,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE: lease.heat_source,
+    }[concept]
+    if provenance is None or concept not in lease.verified_concepts:
+        return None
+    return provenance
+
+
+def _promoted_verified_concepts(
+    lease: ThermalRuntimeOwnershipLease,
+    *,
+    activation: ThermalRuntimeConceptProvenance | None,
+    pump: ThermalRuntimeConceptProvenance | None,
+    source: ThermalRuntimeConceptProvenance | None,
+) -> tuple[ThermalRuntimeOwnedConcept, ...]:
+    current = {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION: activation or lease.body_activation,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT: pump or lease.pump_setpoint,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE: source or lease.heat_source,
+    }
+    prior = {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION: lease.body_activation,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT: lease.pump_setpoint,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE: lease.heat_source,
+    }
+    derived: set[ThermalRuntimeOwnedConcept] = set()
+    for concept in lease.verified_concepts:
+        if prior[concept] == current[concept]:
+            derived.add(concept)
+    return tuple(concept for concept in ThermalRuntimeOwnedConcept if concept in derived)
+
+
+def _promoted_accepted_at(
+    provenance: ThermalRuntimeConceptProvenance | None,
+    *,
+    previous: ThermalRuntimeConceptProvenance | None,
+    previous_accepted_at: datetime | None,
+    promoted_at: datetime,
+) -> datetime | None:
+    if provenance is None:
+        return previous_accepted_at
+    if provenance == previous:
+        return previous_accepted_at
+    return promoted_at
+
+
+def _accepted_boundary(
+    promoted_at: datetime,
+    receipt_accepted_at: datetime | None,
+) -> datetime:
+    if receipt_accepted_at is None:
+        return promoted_at
+    _require_aware(receipt_accepted_at, "receipt_accepted_at")
+    return receipt_accepted_at
 
 
 def _require_aware(value: datetime, label: str) -> None:
@@ -1323,5 +2151,6 @@ __all__ = [
     "ThermalRuntimeOwnershipManager",
     "ThermalRuntimeOwnershipState",
     "ThermalRuntimeOwnershipStatus",
+    "ThermalRuntimeOwnershipTransitionDiagnostic",
     "shared_hydraulic_safety_class",
 ]

@@ -16,6 +16,7 @@ from poolos.execution_verification import (
 from poolos.integration import (
     PhysicalHeatMode,
     PoolOperation,
+    SetBodyActive,
     SetHeatMode,
     SetPumpSpeed,
     StartPump,
@@ -179,7 +180,7 @@ def test_arbitrary_metadata_cannot_enable_transient_mismatch_settling() -> None:
     assert result.reason == "fresh_observations_do_not_match_expectations"
 
 
-def test_heat_source_mismatch_fails_fast_and_never_verifies() -> None:
+def test_accepted_heat_source_waits_for_authoritative_consequence_until_deadline() -> None:
     store = ObservationStore()
     store.put(observation("pool.raw_heater_id", "H0001"))
     execution_step = step(
@@ -202,8 +203,27 @@ def test_heat_source_mismatch_fails_fast_and_never_verifies() -> None:
         )
     )
 
-    assert failed.status is VerificationStatus.FAILED
+    assert failed.status is VerificationStatus.PENDING
+    assert failed.reason == "transient_observation_mismatch_pending"
     assert timed_out.status is VerificationStatus.TIMED_OUT
+
+
+def test_accepted_body_activation_waits_for_authoritative_consequence() -> None:
+    store = ObservationStore()
+    store.put(observation("pool.active", False))
+    execution_step = step(
+        expected={"pool.active": True},
+        operation=SetBodyActive(
+            equipment_id="pool",
+            active=True,
+            operation_id="op-1",
+        ),
+    )
+
+    result = ExecutionVerificationEngine().verify(request(execution_step, store))
+
+    assert result.status is VerificationStatus.PENDING
+    assert result.reason == "transient_observation_mismatch_pending"
 
 
 def test_numeric_tolerance_metadata_is_ignored_for_unrelated_operations() -> None:

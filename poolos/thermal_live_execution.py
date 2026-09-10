@@ -366,20 +366,31 @@ class ThermalLiveExecutionOwnership:
     body_activation_operation_id: str | None = None
     body_activation_receipt_id: str | None = None
     body_activation_correlation_id: str | None = None
+    body_activation_accepted_at: datetime | None = None
     pump_operation_id: str | None = None
     pump_receipt_id: str | None = None
     pump_correlation_id: str | None = None
     commanded_pump_rpm: int | None = None
+    pump_accepted_at: datetime | None = None
     heat_source_operation_id: str | None = None
     heat_source_receipt_id: str | None = None
     heat_source_correlation_id: str | None = None
     commanded_heat_source: PhysicalHeatMode | None = None
+    heat_source_accepted_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in ("evaluation_id", "thermal_plan_id", "execution_plan_id"):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         object.__setattr__(self, "target_body", ThermalBody(self.target_body))
+        for name in (
+            "body_activation_accepted_at",
+            "pump_accepted_at",
+            "heat_source_accepted_at",
+        ):
+            accepted_at = getattr(self, name)
+            if accepted_at is not None:
+                _require_aware(accepted_at, name)
 
     @property
     def owns_body_activation(self) -> bool:
@@ -399,6 +410,7 @@ class ThermalLiveExecutionOwnership:
         *,
         receipt: CommandReceipt,
         correlation_id: str,
+        delivered_at: datetime,
     ) -> ThermalLiveExecutionOwnership:
         """Return ownership including one accepted, session-bound operation."""
 
@@ -408,6 +420,10 @@ class ThermalLiveExecutionOwnership:
             raise ValueError("ownership requires a delivery receipt identity")
         if not correlation_id.strip():
             raise ValueError("ownership requires delivery correlation")
+        _require_aware(delivered_at, "delivered_at")
+        receipt_accepted_at = receipt.acknowledged_at or receipt.issued_at
+        accepted_at = max(delivered_at, receipt_accepted_at)
+        _require_aware(accepted_at, "receipt accepted_at")
         if isinstance(operation, SetBodyActive) and operation.active:
             if operation.equipment_id != self.target_body.value:
                 raise ValueError("body activation ownership target mismatch")
@@ -416,6 +432,7 @@ class ThermalLiveExecutionOwnership:
                 body_activation_operation_id=operation.operation_id,
                 body_activation_receipt_id=receipt.command_id,
                 body_activation_correlation_id=correlation_id,
+                body_activation_accepted_at=accepted_at,
             )
         if isinstance(operation, SetPumpSpeed):
             return replace(
@@ -424,6 +441,7 @@ class ThermalLiveExecutionOwnership:
                 pump_receipt_id=receipt.command_id,
                 pump_correlation_id=correlation_id,
                 commanded_pump_rpm=operation.rpm,
+                pump_accepted_at=accepted_at,
             )
         if isinstance(operation, SetHeatMode):
             if operation.equipment_id != self.target_body.value:
@@ -434,6 +452,7 @@ class ThermalLiveExecutionOwnership:
                 heat_source_receipt_id=receipt.command_id,
                 heat_source_correlation_id=correlation_id,
                 commanded_heat_source=operation.mode,
+                heat_source_accepted_at=accepted_at,
             )
         raise ValueError("unsupported thermal ownership operation")
 
@@ -445,14 +464,17 @@ class ThermalLiveExecutionOwnership:
             body_activation_operation_id=None,
             body_activation_receipt_id=None,
             body_activation_correlation_id=None,
+            body_activation_accepted_at=None,
             pump_operation_id=None,
             pump_receipt_id=None,
             pump_correlation_id=None,
             commanded_pump_rpm=None,
+            pump_accepted_at=None,
             heat_source_operation_id=None,
             heat_source_receipt_id=None,
             heat_source_correlation_id=None,
             commanded_heat_source=None,
+            heat_source_accepted_at=None,
         )
 
 
@@ -527,7 +549,9 @@ class ThermalLiveExecutionSession:
         )
         accepted = (
             None
-            if self.current_attempt is None or self.current_attempt.receipt is None
+            if self.current_attempt is None
+            or self.current_attempt.receipt is None
+            or self.current_attempt.lifecycle.status is ExecutionStepStatus.VERIFIED
             else operation_signature(
                 self.current_attempt.step.operation,
                 self.current_attempt.step.metadata,
@@ -536,6 +560,11 @@ class ThermalLiveExecutionSession:
         return ThermalExecutionProgress(
             verified_prefix=verified,
             accepted_current=accepted,
+            accepted_operation_id=(
+                None
+                if accepted is None or self.current_attempt is None
+                else self.current_attempt.step.operation.operation_id
+            ),
         )
 
 
@@ -1361,6 +1390,7 @@ class ThermalLiveExecutionEngine:
                 step.operation,
                 receipt=receipt,
                 correlation_id=correlation_id,
+                delivered_at=evidence.evaluated_at,
             )
         except ValueError as exc:
             reason = f"delivery_ownership_invalid:{exc}"
@@ -1444,10 +1474,15 @@ class ThermalLiveExecutionEngine:
                 observations,
                 target=hydraulic_target,
                 required_target_active=(
-                    attempt.step.metadata.get(
-                        "pool_temperature_probe_source_precondition"
+                    None
+                    if isinstance(attempt.step.operation, SetBodyActive)
+                    and attempt.step.operation.active is True
+                    else (
+                        attempt.step.metadata.get(
+                            "pool_temperature_probe_source_precondition"
+                        )
+                        != "true"
                     )
-                    != "true"
                 ),
                 evaluated_at=evaluated_at,
                 freshness_policy=FreshnessPolicy(
@@ -1957,7 +1992,7 @@ def _hydraulic_continuity_failure_reason(
     observations: ObservationStore,
     *,
     target: ThermalBody,
-    required_target_active: bool = True,
+    required_target_active: bool | None = True,
     evaluated_at: datetime,
     freshness_policy: FreshnessPolicy,
     source_id: str | None,
@@ -2004,7 +2039,10 @@ def _hydraulic_continuity_failure_reason(
     )
     if active[other]:
         return f"other_body_active:{other.value}"
-    if active[target] is not required_target_active:
+    if (
+        required_target_active is not None
+        and active[target] is not required_target_active
+    ):
         if not required_target_active:
             return f"target_body_unexpectedly_active:{target.value}"
         return f"target_body_inactive:{target.value}"

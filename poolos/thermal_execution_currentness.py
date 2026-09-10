@@ -151,9 +151,12 @@ class ThermalExecutionProgress:
 
     verified_prefix: tuple[ThermalOperationSignature, ...] = ()
     accepted_current: ThermalOperationSignature | None = None
+    accepted_operation_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "verified_prefix", tuple(self.verified_prefix))
+        if self.accepted_operation_id is not None and not self.accepted_operation_id.strip():
+            raise ValueError("accepted_operation_id must not be empty")
 
 
 class ThermalExecutionCompatibilityDisposition(StrEnum):
@@ -436,9 +439,40 @@ def assess_execution_compatibility(
             ),
         )
 
+    if (
+        accepted is not None
+        and residual
+        and _same_physical_consequence(accepted, residual[0])
+        and original[maximum_removed:] == residual[1:]
+    ):
+        # A cold-start priming write can remain physically unsettled after the
+        # body becomes active.  A fresh planner frame then describes the same
+        # RPM consequence as the steady thermal target instead of as priming.
+        # The original session retains its stronger verified-hold contract;
+        # this relationship only prevents the new label from self-preempting
+        # that already accepted operation.
+        return result(
+            ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE,
+            "thermal_execution_accepted_consequence_still_pending",
+        )
+
     return result(
         ThermalExecutionCompatibilityDisposition.UNKNOWN,
         "thermal_execution_residual_plan_incompatible",
+    )
+
+
+def _same_physical_consequence(
+    left: ThermalOperationSignature,
+    right: ThermalOperationSignature,
+) -> bool:
+    return (
+        left.role == "priming"
+        and right.role == "thermal_pump_target"
+        and left.operation_type == "SetPumpSpeed"
+        and right.operation_type == "SetPumpSpeed"
+        and left.equipment_id == right.equipment_id
+        and left.requested_value == right.requested_value
     )
 
 
