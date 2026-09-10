@@ -599,6 +599,7 @@ class ManualIntelliCenterControl:
         rpm: int | float,
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
+        manual_body: str | None = None,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
@@ -616,10 +617,13 @@ class ManualIntelliCenterControl:
 
         await self._require_available()
 
+        if manual_body not in {None, "pool", "hot_tub"}:
+            raise ValueError("manual_body must be pool or hot_tub")
+
         thermal_body = (
-            None
-            if automatic_thermal_context is None
-            else automatic_thermal_context.body
+            automatic_thermal_context.body
+            if automatic_thermal_context is not None
+            else manual_body
         )
         _parent_id, minimum, maximum = self._pump_circuit_rpm_limits(
             pump_circuit_objnam,

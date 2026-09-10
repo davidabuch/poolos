@@ -12,7 +12,11 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from poolos.intellicenter_readonly import resolve_pool_pump_circuit
+from poolos.intellicenter_readonly import (
+    NativeBodyKind,
+    resolve_body_pump_circuit,
+    resolve_pool_pump_circuit,
+)
 
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
@@ -84,6 +88,54 @@ def _pool_pump_circuit(
     return item, _raw_attributes(item)
 
 
+def _hot_tub_pump_circuit(
+    coordinator: PoolOSCoordinator,
+) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
+    """Return the unique live RPM PMPCIRC assigned to the Hot Tub circuit."""
+
+    snapshot = _raw_snapshot(coordinator)
+
+    if snapshot is None:
+        return None, {}
+
+    identity = resolve_body_pump_circuit(
+        snapshot,
+        body=NativeBodyKind.SPA,
+    )
+
+    if identity is None:
+        return None, {}
+
+    item = next(
+        candidate
+        for candidate in snapshot.raw_inventory
+        if candidate.object_type.upper() == _POOL_PMPCIRC_TYPE
+        and candidate.native_id == identity.native_id
+    )
+
+    return item, _raw_attributes(item)
+
+
+def _hot_tub_rpm_limits(
+    coordinator: PoolOSCoordinator,
+) -> tuple[int, int]:
+    snapshot = _raw_snapshot(coordinator)
+
+    identity = (
+        None
+        if snapshot is None
+        else resolve_body_pump_circuit(
+            snapshot,
+            body=NativeBodyKind.SPA,
+        )
+    )
+
+    if identity is None:
+        return _DEFAULT_MIN_RPM, _DEFAULT_MAX_RPM
+
+    return identity.minimum_rpm, identity.maximum_rpm
+
+
 def _rpm_limits(
     coordinator: PoolOSCoordinator,
 ) -> tuple[int, int]:
@@ -131,7 +183,7 @@ class PoolOSNativeIntelliCenterPoolRPM(
 
     @property
     def available(self) -> bool:
-        """Return whether native PMPCIRC truth and manual delivery are usable."""
+        """Return whether active Pool PMPCIRC truth is manually usable."""
 
         native = self.coordinator.native_intellicenter_snapshot
         manual = self._runtime.manual_intellicenter
@@ -139,8 +191,16 @@ class PoolOSNativeIntelliCenterPoolRPM(
 
         mode = str(attributes.get("SELECT") or _RPM_MODE).upper()
 
+        pool_active = False
+        if native is not None:
+            for observation in native.observations:
+                if observation.observation_id == "pool.active":
+                    pool_active = observation.value is True
+                    break
+
         return (
-            native is not None
+            pool_active
+            and native is not None
             and bool(getattr(native, "available", False))
             and item is not None
             and mode == _RPM_MODE
@@ -190,6 +250,7 @@ class PoolOSNativeIntelliCenterPoolRPM(
         await manual.async_set_pump_circuit_speed(
             str(item.native_id),
             value,
+            manual_body="pool",
         )
 
     @property
@@ -214,6 +275,140 @@ class PoolOSNativeIntelliCenterPoolRPM(
             "native_min_rpm": minimum,
             "native_max_rpm": maximum,
             "actual_pump_rpm_concept": "pump.rpm",
+            "observation_source": "poolos.independent_intellicenter",
+            "observation_authority": "native_intellicenter",
+            "manual_command_delivery_enabled": (
+                manual is not None and manual.available
+            ),
+            "autonomous_command_delivery_enabled": False,
+            "optimistic": False,
+        }
+
+
+class PoolOSNativeIntelliCenterHotTubRPM(
+    CoordinatorEntity[PoolOSCoordinator],
+    NumberEntity,
+):
+    """Represent the native Hot Tub PMPCIRC RPM setpoint."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Hot Tub RPM"
+    _attr_icon = "mdi:speedometer"
+    _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_step = _RPM_STEP
+    _attr_native_unit_of_measurement = "rpm"
+
+    def __init__(
+        self,
+        coordinator: PoolOSCoordinator,
+        entry: ConfigEntry[PoolOSRuntimeData],
+    ) -> None:
+        super().__init__(coordinator)
+
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = (
+            f"{entry.entry_id}_native_intellicenter_hot_tub_rpm"
+        )
+        self._attr_device_info = {
+            "identifiers": {
+                (DOMAIN, f"{entry.entry_id}_native_intellicenter")
+            },
+            "name": "PoolOS Native IntelliCenter",
+            "manufacturer": "PoolOS",
+            "model": "Native IntelliCenter Manual Pump Control",
+            "sw_version": INTEGRATION_VERSION,
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return whether active Hot Tub PMPCIRC truth is manually usable."""
+
+        native = self.coordinator.native_intellicenter_snapshot
+        manual = self._runtime.manual_intellicenter
+        item, attributes = _hot_tub_pump_circuit(self.coordinator)
+
+        mode = str(attributes.get("SELECT") or _RPM_MODE).upper()
+
+        spa_active = False
+        if native is not None:
+            for observation in native.observations:
+                if observation.observation_id == "spa.active":
+                    spa_active = observation.value is True
+                    break
+
+        return (
+            spa_active
+            and native is not None
+            and bool(getattr(native, "available", False))
+            and item is not None
+            and mode == _RPM_MODE
+            and _positive_int(attributes.get("SPEED")) is not None
+            and manual is not None
+            and manual.available
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return native-authoritative Hot Tub PMPCIRC SPEED."""
+
+        _item, attributes = _hot_tub_pump_circuit(self.coordinator)
+        return _positive_int(attributes.get("SPEED"))
+
+    @property
+    def native_min_value(self) -> float:
+        minimum, _maximum = _hot_tub_rpm_limits(self.coordinator)
+        return float(minimum)
+
+    @property
+    def native_max_value(self) -> float:
+        _minimum, maximum = _hot_tub_rpm_limits(self.coordinator)
+        return float(maximum)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Send an explicit manual Hot Tub PMPCIRC RPM request."""
+
+        manual = self._runtime.manual_intellicenter
+
+        if manual is None:
+            raise ManualIntelliCenterCommandError(
+                "manual IntelliCenter command connection is not configured"
+            )
+
+        item, _attributes = _hot_tub_pump_circuit(self.coordinator)
+
+        if item is None:
+            raise ManualIntelliCenterCommandError(
+                "unique live Hot Tub PMPCIRC is unavailable"
+            )
+
+        await manual.async_set_pump_circuit_speed(
+            str(item.native_id),
+            value,
+            manual_body="hot_tub",
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        manual = self._runtime.manual_intellicenter
+        item, attributes = _hot_tub_pump_circuit(self.coordinator)
+        minimum, maximum = _hot_tub_rpm_limits(self.coordinator)
+
+        return {
+            "pmpcirc_objnam": None if item is None else str(item.native_id),
+            "native_object_type": (
+                None if item is None else item.object_type
+            ),
+            "parent_pump_objnam": attributes.get("PARENT"),
+            "circuit_objnam": attributes.get("CIRCUIT"),
+            "control_mode": attributes.get("SELECT"),
+            "native_speed_setpoint": _positive_int(
+                attributes.get("SPEED")
+            ),
+            "native_min_rpm": minimum,
+            "native_max_rpm": maximum,
+            "actual_pump_rpm_concept": "pump.rpm",
+            "associated_body": "Hot Tub",
             "observation_source": "poolos.independent_intellicenter",
             "observation_authority": "native_intellicenter",
             "manual_command_delivery_enabled": (
@@ -395,6 +590,10 @@ async def async_setup_entry(
     async_add_entities(
         [
             PoolOSNativeIntelliCenterPoolRPM(
+                entry.runtime_data.coordinator,
+                entry,
+            ),
+            PoolOSNativeIntelliCenterHotTubRPM(
                 entry.runtime_data.coordinator,
                 entry,
             ),
