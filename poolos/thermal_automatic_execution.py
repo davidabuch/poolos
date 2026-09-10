@@ -89,9 +89,6 @@ from .thermal_termination import (
     ThermalTerminationPolicy,
 )
 
-_PUMP_BASELINES = PumpOperatingBaselines()
-
-
 class ThermalAutomaticDriverState(StrEnum):
     """Bounded lifecycle state for one config-entry automatic driver."""
 
@@ -271,6 +268,7 @@ class ThermalAutomaticExecutionDriver:
     """Advance existing live execution only from authoritative epochs."""
 
     orchestrator: ThermalRuntimeOrchestrator
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     engine: ThermalLiveExecutionEngine = field(default_factory=ThermalLiveExecutionEngine)
     circulation_ownership: PoolCirculationOwnershipRegistry = field(
         default_factory=PoolCirculationOwnershipRegistry
@@ -2151,7 +2149,7 @@ class ThermalAutomaticExecutionDriver:
             or not lease.owns_pump_setpoint
             or lease.pump_setpoint is None
             or lease.pump_setpoint.intended_value
-            != _PUMP_BASELINES.temperature_probe_rpm
+            != self.baselines.temperature_probe_rpm
         ):
             return
         self._probe_acquisition = PoolTemperatureProbeExecutionEvidence(

@@ -12,6 +12,8 @@ from poolos.integration import (
     SetPumpSpeed,
     ThermalBody,
 )
+from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_priming_policy import PumpPrimingPolicy
 from poolos.spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
@@ -883,6 +885,36 @@ def test_active_body_with_stopped_pump_still_requires_cold_start_prime() -> None
     assert plan.operations[1].rpm == 2900
 
     assert "cold_start_priming_required" in plan.change_reasons
+
+
+def test_cold_start_plan_uses_configured_priming_and_solar_baselines() -> None:
+    baselines = PumpOperatingBaselines(
+        priming_rpm=3050,
+        solar_heating_rpm=2950,
+    )
+    desired = _desired(PhysicalHeatMode.SOLAR, 2950)
+    current = ThermalCurrentState(
+        NOW,
+        ThermalBody.POOL,
+        PhysicalHeatMode.OFF,
+        0,
+        body_active=False,
+    )
+    builder = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0102",
+        priming_policy=PumpPrimingPolicy(baselines=baselines),
+    )
+
+    plan = builder.build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert isinstance(plan.operations[1], SetPumpSpeed)
+    assert plan.operations[1].rpm == 3050
+    assert plan.step_specifications[1].expected_observations == {
+        "pump.rpm": 3050
+    }
+    assert isinstance(plan.operations[2], SetPumpSpeed)
+    assert plan.operations[2].rpm == 2950
 
 
 def test_pool_temperature_probe_cold_start_uses_bounded_1500_fallback() -> None:

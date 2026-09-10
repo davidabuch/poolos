@@ -205,6 +205,8 @@ class ManualIntelliCenterThermalLiveDelivery:
     def _validate_pump(self, operation: SetPumpSpeed) -> None:
         if not is_pmpcirc_native_id(operation.equipment_id):
             raise ValueError("unsupported thermal pump circuit")
+        if type(operation.rpm) is not int:
+            raise ValueError("thermal pump RPM must be an integer")
         cleanup = self.automatic_thermal_context
         if (
             cleanup is not None
@@ -249,15 +251,15 @@ class ManualIntelliCenterThermalLiveDelivery:
             if operation.rpm != expected:
                 raise ValueError("Hot Tub RPM does not match bound operating purpose")
             return
-        if (
-            cleanup is not None
-            and cleanup.body == ThermalBody.POOL.value
-            and cleanup.operating_purpose == "ordinary_circulation"
-        ):
-            if operation.rpm != self.baselines.filtration_rpm:
-                raise ValueError(
-                    "Pool RPM does not match bound ordinary-circulation purpose"
-                )
+        if cleanup is not None and cleanup.body == ThermalBody.POOL.value:
+            expected = {
+                None: self.baselines.priming_rpm,
+                "ordinary_circulation": self.baselines.filtration_rpm,
+                "solar_heating": self.baselines.solar_heating_rpm,
+                "gas_heating": self.baselines.gas_heating_rpm,
+            }.get(cleanup.operating_purpose)
+            if operation.rpm != expected:
+                raise ValueError("Pool RPM does not match bound operating purpose")
             return
         if operation.rpm not in allowed:
             raise ValueError("unsupported thermal pump RPM baseline")

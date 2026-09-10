@@ -22,6 +22,7 @@ from poolos.physical_command_authority import (
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
 )
@@ -45,6 +46,7 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
     manual: ManualIntelliCenterControl
     authority: PoolOSPhysicalCommandAuthority
     ownership: PoolCirculationOwnershipRegistry
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
 
     def for_operation(
         self,
@@ -91,7 +93,11 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             ownership_lease_id=ownership_lease_id,
             body_activation_receipt_id=body_activation_receipt_id,
         )
-        return ManualIntelliCenterFiltrationDelivery(self.manual, context)
+        return ManualIntelliCenterFiltrationDelivery(
+            self.manual,
+            context,
+            self.baselines,
+        )
 
 
 @dataclass(slots=True)
@@ -103,6 +109,7 @@ class PoolOSFiltrationAutomaticRuntime:
     ownership: PoolCirculationOwnershipRegistry
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     pool_automatic_control: PoolAutomaticControlSuppression = field(
         default_factory=PoolAutomaticControlSuppression
     )
@@ -245,7 +252,12 @@ class PoolOSFiltrationAutomaticRuntime:
             )
             self.coordinator.async_update_listeners()
             return
-        factory = _DeliveryFactory(self.manual, self.authority, self.ownership)
+        factory = _DeliveryFactory(
+            self.manual,
+            self.authority,
+            self.ownership,
+            self.baselines,
+        )
         frame = self._latest_frame
         self._task = self.hass.async_create_task(
             self.driver.process_epoch(frame, delivery_factory=factory),

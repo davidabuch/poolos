@@ -357,6 +357,7 @@ class ThermalExecutionPlanBuilder:
     pump_equipment_id: str | None = None
     configured_speed_concept: str = POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
     pump_rpm_tolerance: int = 25
+    priming_policy: PumpPrimingPolicy = PumpPrimingPolicy()
 
     def __post_init__(self) -> None:
         if self.pump_equipment_id is not None and not is_pmpcirc_native_id(
@@ -431,7 +432,7 @@ class ThermalExecutionPlanBuilder:
         if not source_changed and not rpm_changed and not body_start_required:
             return self._non_ready(desired, current, ())
 
-        priming = PumpPrimingPolicy().evaluate(
+        priming = self.priming_policy.evaluate(
             circulation_requested=(
                 circulation_required and not pool_temperature_acquisition
             ),

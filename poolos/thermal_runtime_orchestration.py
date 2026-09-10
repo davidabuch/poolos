@@ -65,7 +65,6 @@ _LIVE_MINIMUM_CONFIDENCE = 0.5
 _LIVE_ACCEPTED_QUALITIES = frozenset(
     {ObservationQuality.GOOD, ObservationQuality.DEGRADED}
 )
-_PUMP_BASELINES = PumpOperatingBaselines()
 _ACTUAL_PUMP_RPM_TOLERANCE = 25
 _EMPTY_EXTERNAL_CHANGES = ExternalChangeBatch(())
 _ORCHESTRATION_OBSERVATION_IDS = frozenset(
@@ -130,6 +129,7 @@ class ThermalRuntimeOrchestrationAssessment:
 class ThermalRuntimeOrchestrator:
     """Coordinate current lifecycle truth without owning a delivery port."""
 
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     ownership: ThermalRuntimeOwnershipManager = field(
         default_factory=ThermalRuntimeOwnershipManager
     )
@@ -717,6 +717,7 @@ def assess_pool_temperature_probe_continuity(
     prior_grid_disposition: GridOutageDisposition | None,
     lifecycle_blocker: str | None = None,
     external_preemption_reason: str | None = None,
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines(),
 ) -> PoolTemperatureProbeContinuityEvidence:
     """Prove current Pool probe hydraulics before accepting a sample."""
 
@@ -751,10 +752,10 @@ def assess_pool_temperature_probe_continuity(
         if (
             not pump.usable
             or pump_rpm is None
-            or abs(pump_rpm - _PUMP_BASELINES.temperature_probe_rpm)
+            or abs(pump_rpm - baselines.temperature_probe_rpm)
             > _ACTUAL_PUMP_RPM_TOLERANCE
             or not configured.usable
-            or configured_rpm != _PUMP_BASELINES.temperature_probe_rpm
+            or configured_rpm != baselines.temperature_probe_rpm
         ):
             blocker = "temperature_probe_pool_circulation_not_proven"
     temperature = _observation_state(by_id.get("pool.temperature"), generated_at)

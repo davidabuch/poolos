@@ -14,6 +14,7 @@ from poolos.filtration_policy import (
     FiltrationOperationalDayPolicy,
 )
 from poolos.observations import ObservationQuality, RecordedObservationEvent
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
 from .observation import ObservationSnapshot
@@ -28,6 +29,7 @@ class PoolOSFiltrationRuntime:
 
     coordinator: PoolOSCoordinator
     preferred_catchup_start: time = time(hour=20)
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     tracker: FiltrationAccountingTracker = field(init=False)
     assessment: FiltrationAccountingSnapshot | None = None
     restore_error: str | None = None
@@ -36,6 +38,7 @@ class PoolOSFiltrationRuntime:
         self.tracker = FiltrationAccountingTracker(
             tou_profile=LADWP_INITIAL_PROFILE,
             preferred_catchup_start=self.preferred_catchup_start,
+            baselines=self.baselines,
         )
 
     async def async_restore(self, *, restored_at: datetime) -> None:

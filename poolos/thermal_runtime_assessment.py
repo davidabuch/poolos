@@ -22,6 +22,7 @@ from .intellicenter_readonly import (
 )
 from .native_configuration_policy import NativeConfigurationAssessment
 from .operating_baselines import PumpOperatingBaselines
+from .pump_priming_policy import PumpPrimingPolicy
 from .pool_temperature_probe_execution import (
     PoolTemperatureProbeContinuityEvidence,
     PoolTemperatureProbeExecutionEvidence,
@@ -30,6 +31,7 @@ from .pool_temperature_probe_execution import (
 from .spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
+    SpaPolicyConfig,
     SpaSessionKind,
     SpaThermalPolicyTracker,
     SpaUserSource,
@@ -66,6 +68,7 @@ from .thermal_source_policy import (
     PoolHeatingMode,
     ThermalHeatSource,
     ThermalSourceInput,
+    ThermalSourcePolicyConfig,
     ThermalSourceSelector,
 )
 from .water_temperature_policy import (
@@ -75,7 +78,6 @@ from .water_temperature_policy import (
     WaterTemperatureTracker,
 )
 
-_PUMP_BASELINES = PumpOperatingBaselines()
 _ACTUAL_PUMP_RPM_TOLERANCE = 25
 
 
@@ -209,6 +211,7 @@ class PoolTemperatureProbeRuntimeState:
         *,
         evaluated_at: datetime,
         maximum_duration: timedelta,
+        baselines: PumpOperatingBaselines = PumpOperatingBaselines(),
     ) -> Mapping[str, object]:
         """Return a bounded, observational snapshot of acquisition state."""
 
@@ -235,7 +238,7 @@ class PoolTemperatureProbeRuntimeState:
                     if started_at is None
                     else (started_at + maximum_duration).isoformat()
                 ),
-                "probe_rpm_target": _PUMP_BASELINES.temperature_probe_rpm,
+                "probe_rpm_target": baselines.temperature_probe_rpm,
                 "probe_rpm_requirement": (
                     "authoritative_configured_and_actual_pool_acquisition_rpm"
                 ),
@@ -555,6 +558,7 @@ class ThermalRuntimeAssessment:
 class ThermalRuntimeEvaluator:
     """Evaluate both bodies without importing or invoking physical execution."""
 
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     pool_selector: ThermalSourceSelector = field(default_factory=ThermalSourceSelector)
     spa_tracker: SpaThermalPolicyTracker = field(default_factory=SpaThermalPolicyTracker)
     water_temperature_tracker: WaterTemperatureTracker = field(
@@ -577,6 +581,26 @@ class ThermalRuntimeEvaluator:
         init=False,
         repr=False,
     )
+
+    @classmethod
+    def with_baselines(
+        cls,
+        baselines: PumpOperatingBaselines,
+    ) -> ThermalRuntimeEvaluator:
+        """Build every nested thermal policy from one logical baseline source."""
+
+        return cls(
+            baselines=baselines,
+            pool_selector=ThermalSourceSelector(
+                ThermalSourcePolicyConfig(baselines=baselines)
+            ),
+            spa_tracker=SpaThermalPolicyTracker(
+                SpaPolicyConfig(baselines=baselines)
+            ),
+            planner=ThermalExecutionPlanBuilder(
+                priming_policy=PumpPrimingPolicy(baselines=baselines)
+            ),
+        )
 
     def evaluate(
         self,
@@ -745,12 +769,12 @@ class ThermalRuntimeEvaluator:
             probe_circulating = (
                 ordinary_pool_circulating
                 and pump_rpm is not None
-                and abs(pump_rpm - _PUMP_BASELINES.temperature_probe_rpm)
+                and abs(pump_rpm - self.baselines.temperature_probe_rpm)
                 <= _ACTUAL_PUMP_RPM_TOLERANCE
                 and _int_or_none(
                     values.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT)
                 )
-                == _PUMP_BASELINES.temperature_probe_rpm
+                == self.baselines.temperature_probe_rpm
             )
             self.pool_temperature_probe.synchronize_execution(
                 execution,
@@ -1037,6 +1061,7 @@ class ThermalRuntimeEvaluator:
                     maximum_duration=(
                         self.water_temperature_tracker.policy.maximum_probe_duration
                     ),
+                    baselines=self.baselines,
                 )
                 if body is ThermalBody.POOL
                 else MappingProxyType({})
@@ -1168,7 +1193,8 @@ class ThermalRuntimeEvaluator:
                         and water_temperature.disposition
                         is WaterTemperatureDisposition.PROBING
                     ),
-                )
+                ),
+                baselines=self.baselines,
             )
             purpose_blockers = desired.blockers
             if not active_purpose.evidence_usable:
@@ -1298,7 +1324,8 @@ class ThermalRuntimeEvaluator:
                     and _string_or_none(values.get("spa.raw_heater_id"))
                     in {"00000", "H0001", "H0002"}
                 ),
-            )
+            ),
+            baselines=self.baselines,
         )
         active_heat_source = {
             PhysicalHeatMode.SOLAR: ThermalHeatSource.SOLAR,
@@ -1440,9 +1467,9 @@ class ThermalRuntimeEvaluator:
             )
             if source_preparation_required:
                 required_rpm = (
-                    _PUMP_BASELINES.gas_heating_rpm
+                    self.baselines.gas_heating_rpm
                     if spa_desired.selected_source is PhysicalHeatMode.GAS
-                    else _PUMP_BASELINES.solar_heating_rpm
+                    else self.baselines.solar_heating_rpm
                 )
                 planned_purpose = (
                     "gas_heating"
@@ -1455,16 +1482,16 @@ class ThermalRuntimeEvaluator:
             below_target
             and spa_desired.selected_source is PhysicalHeatMode.GAS
         ):
-            required_rpm = _PUMP_BASELINES.gas_heating_rpm
+            required_rpm = self.baselines.gas_heating_rpm
             planned_purpose = "gas_heating"
         elif (
             below_target
             and spa_desired.selected_source is PhysicalHeatMode.SOLAR
         ):
-            required_rpm = _PUMP_BASELINES.solar_heating_rpm
+            required_rpm = self.baselines.solar_heating_rpm
             planned_purpose = "solar_heating"
         elif not below_target and active_heat_source is ThermalHeatSource.NONE:
-            required_rpm = _PUMP_BASELINES.filtration_rpm
+            required_rpm = self.baselines.filtration_rpm
             planned_purpose = "ordinary_circulation"
             spa_desired = replace(spa_desired, selected_source=selected_source)
         return replace(

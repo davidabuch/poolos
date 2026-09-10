@@ -16,6 +16,12 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_PREFERRED_FILTRATION_CATCHUP_START,
+    CONF_PUMP_FILTRATION_RPM,
+    CONF_PUMP_GAS_HEATING_RPM,
+    CONF_PUMP_GRID_OUTAGE_RPM,
+    CONF_PUMP_PRIMING_RPM,
+    CONF_PUMP_SOLAR_HEATING_RPM,
+    CONF_PUMP_TEMPERATURE_PROBE_RPM,
     CONF_HEATER_ACTIVE_ENTITY,
     CONF_INTELLICENTER_HOST,
     CONF_INTELLICENTER_TRANSPORT,
@@ -42,6 +48,7 @@ from .const import (
     NAME,
     INTELLICENTER_TRANSPORT_OPTIONS,
 )
+from poolos.operating_baselines import PumpOperatingBaselines
 
 
 class PoolOSConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -144,6 +151,29 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
             ),
         )
     ] = selector.TimeSelector()
+    defaults = PumpOperatingBaselines()
+    pump_speed_fields = {
+        CONF_PUMP_FILTRATION_RPM: defaults.filtration_rpm,
+        CONF_PUMP_SOLAR_HEATING_RPM: defaults.solar_heating_rpm,
+        CONF_PUMP_GAS_HEATING_RPM: defaults.gas_heating_rpm,
+        CONF_PUMP_TEMPERATURE_PROBE_RPM: defaults.temperature_probe_rpm,
+        CONF_PUMP_PRIMING_RPM: defaults.priming_rpm,
+        CONF_PUMP_GRID_OUTAGE_RPM: defaults.grid_outage_rpm,
+    }
+    pump_speed_selector = selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=PumpOperatingBaselines.MINIMUM_CONFIGURABLE_RPM,
+            max=PumpOperatingBaselines.MAXIMUM_CONFIGURABLE_RPM,
+            step=10,
+            mode="box",
+            unit_of_measurement="rpm",
+        )
+    )
+    for key, default in pump_speed_fields.items():
+        fields[vol.Required(key, default=current.get(key, default))] = vol.All(
+            pump_speed_selector,
+            _valid_pump_rpm,
+        )
     fields[
         vol.Optional(
             CONF_INTELLICENTER_HOST,
@@ -161,3 +191,17 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
     ] = vol.In(INTELLICENTER_TRANSPORT_OPTIONS)
     assert set(ALL_ENTITY_OPTIONS) == required.keys() | optional.keys()
     return vol.Schema(fields)
+
+
+def _valid_pump_rpm(value: Any) -> int:
+    """Reject non-integer or out-of-contract pump configuration values."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise vol.Invalid("pump speed must be an integer RPM")
+    if not (
+        PumpOperatingBaselines.MINIMUM_CONFIGURABLE_RPM
+        <= value
+        <= PumpOperatingBaselines.MAXIMUM_CONFIGURABLE_RPM
+    ):
+        raise vol.Invalid("pump speed is outside the supported native RPM range")
+    return value

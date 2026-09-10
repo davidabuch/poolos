@@ -41,8 +41,9 @@ def test_required_integration_files_exist() -> None:
             "manual_thermal.py",
         "number.py",
         "native_intellicenter.py",
-        "observation.py",
-        "shadow.py",
+            "observation.py",
+            "pump_baselines.py",
+            "shadow.py",
         "select.py",
         "sensor.py",
         "switch.py",
@@ -94,7 +95,7 @@ def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
     assert "type PoolOSConfigEntry = ConfigEntry[PoolOSRuntimeData]" in source
     assert "entry.runtime_data = PoolOSRuntimeData" in source
     assert "async_config_entry_first_refresh" in source
-    assert source.count("ThermalRuntimeOrchestrator()") == 1
+    assert source.count("compose_pump_baseline_runtime(configured)") == 1
     assert "thermal_runtime.set_orchestration_observer(" in source
     assert "thermal_runtime.set_orchestration_failure_observer(" in source
     assert "thermal_runtime_orchestrator.unload(" in source
