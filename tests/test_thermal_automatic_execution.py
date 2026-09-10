@@ -5246,6 +5246,178 @@ def test_preempted_session_successor_completes_solar_and_defers_filtration() -> 
     )
 
 
+
+def test_owned_body_activation_can_verify_when_native_solar_converges_same_epoch() -> None:
+    """Native Solar convergence may arrive in the first body-verification epoch."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    # Match live trusted-temperature prehistory.
+    _frame(
+        orchestrator,
+        NOW - timedelta(seconds=130),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=87.0,
+        solar_temperature=145.0,
+        missing=(),
+        filtration_remaining=timedelta(hours=6),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+    )
+
+    _frame(
+        orchestrator,
+        NOW - timedelta(seconds=5),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=87.0,
+        solar_temperature=145.0,
+        missing=(),
+        filtration_remaining=timedelta(hours=6),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+    )
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=2900,
+        pool_heater="00000",
+        solar_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=87.0,
+        solar_temperature=145.0,
+        missing=(),
+        filtration_remaining=timedelta(hours=6),
+        filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+    )
+
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    started = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=2900,
+                pool_heater="00000",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                pool_temperature=87.0,
+                solar_temperature=145.0,
+                missing=(),
+                filtration_remaining=timedelta(hours=6),
+                filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert started.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is True
+
+    # Reproduce the physical topology seen on 2026-09-10:
+    #
+    # There is no separately processed Pool-ON / Solar-OFF verification
+    # epoch. The first authoritative reobservation after PoolOS requests
+    # Pool ON already contains IntelliCenter's coupled Solar consequence.
+    same_epoch_convergence = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=20),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                pool_temperature=87.0,
+                solar_temperature=145.0,
+                missing=(),
+                filtration_remaining=timedelta(hours=6),
+                filtration_disposition=FiltrationDisposition.CREDITING,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    print("\n===== SAME-EPOCH DIAGNOSTIC =====")
+    print("state:", same_epoch_convergence.state)
+    print("blocker:", same_epoch_convergence.blocker)
+    print("runtime_ownership_status:", same_epoch_convergence.runtime_ownership_status)
+    print(
+        "terminal_status:",
+        same_epoch_convergence.runtime_ownership_summary[
+            "terminal_transition_current_status"
+        ],
+    )
+    print(
+        "terminal_reason:",
+        same_epoch_convergence.runtime_ownership_summary[
+            "terminal_transition_reason_code"
+        ],
+    )
+    print(
+        "currentness:",
+        same_epoch_convergence.runtime_ownership_summary[
+            "terminal_transition_currentness_disposition"
+        ],
+    )
+    print(
+        "verified_owned_concepts:",
+        same_epoch_convergence.runtime_ownership_summary[
+            "verified_owned_concepts"
+        ],
+    )
+    print("===============================\n")
+
+    assert same_epoch_convergence.runtime_ownership_status == "owned"
+    assert same_epoch_convergence.state is not ThermalAutomaticDriverState.PREEMPTED
+    assert (
+        same_epoch_convergence.runtime_ownership_summary[
+            "terminal_transition_current_status"
+        ]
+        is None
+    )
+    assert (
+        same_epoch_convergence.runtime_ownership_summary[
+            "terminal_transition_reason_code"
+        ]
+        is None
+    )
+
 def test_owned_body_activation_survives_native_exact_solar_convergence() -> None:
     """Native controller convergence to the exact live plan must not preempt ownership."""
 
