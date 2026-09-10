@@ -881,9 +881,13 @@ class ThermalRuntimeOwnershipManager:
             )
         if not proven or concept is None or concept in lease.verified_concepts:
             return lease
+        confirmed_progress = ThermalExecutionProgress(
+            verified_prefix=(*progress.verified_prefix, accepted),
+        )
         confirmed = replace(
             lease,
             verified_concepts=(*lease.verified_concepts, concept),
+            execution_progress=confirmed_progress,
         )
         self._state = ThermalRuntimeOwnershipState(
             status=confirmed.status,

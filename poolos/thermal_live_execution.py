@@ -1474,7 +1474,15 @@ class ThermalLiveExecutionEngine:
             session,
             current_context=current_context,
         )
-        if not currentness.continuation_allowed:
+        defer_currentness_until_verification = (
+            not currentness.continuation_allowed
+            and currentness.reason_code
+            == "thermal_execution_convergence_not_attributed"
+        )
+        if (
+            not currentness.continuation_allowed
+            and not defer_currentness_until_verification
+        ):
             return self._terminal(
                 session,
                 ThermalLiveExecutionStatus.SUPERSEDED,
@@ -1623,6 +1631,26 @@ class ThermalLiveExecutionEngine:
                     evaluated_at,
                 )
             finished_attempt = replace(updated_attempt, lifecycle=verified.lifecycle)
+
+            if defer_currentness_until_verification:
+                verified_session = replace(
+                    session,
+                    status=ThermalLiveExecutionStatus.READY,
+                    attempts=(*session.attempts, finished_attempt),
+                    current_attempt=None,
+                )
+                currentness_after_verification = self._currentness_decision(
+                    verified_session,
+                    current_context=current_context,
+                )
+                if not currentness_after_verification.continuation_allowed:
+                    return self._terminal(
+                        replace(updated, current_attempt=finished_attempt),
+                        ThermalLiveExecutionStatus.SUPERSEDED,
+                        currentness_after_verification.reason_code,
+                        evaluated_at,
+                    )
+
             advanced = self.coordinator.acknowledge_step_completion(
                 session.execution_plan,
                 session.coordination,
@@ -1680,6 +1708,14 @@ class ThermalLiveExecutionEngine:
                 updated_at=evaluated_at,
                 attempts=attempts,
                 current_attempt=None,
+            )
+
+        if defer_currentness_until_verification:
+            return self._terminal(
+                updated,
+                ThermalLiveExecutionStatus.SUPERSEDED,
+                currentness.reason_code,
+                evaluated_at,
             )
 
         unusable = {
