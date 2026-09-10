@@ -1268,3 +1268,80 @@ def test_intellichlor_body_order_not_primary_secondary_words_controls_mapping(
         ("CHR01", {"PRIM": "8"}),
         ("CHR01", {"PRIM": "4", "SEC": "60"}),
     ]
+
+
+def test_manual_hot_tub_can_deliver_exact_dynamic_spa_pmpcirc_speed(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(
+        minimum_rpm=450,
+        maximum_rpm=3450,
+    )
+    spa_circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        circuit_id="C0001",
+        mode="RPM",
+        rpm_setpoint=2815,
+    )
+
+    gateway, recorder = _gateway([pump, spa_circuit])
+
+    receipt = _run(
+        gateway.async_set_pump_circuit_speed(
+            "p0102",
+            3200,
+            manual_body="hot_tub",
+        )
+    )
+
+    assert recorder.calls == [
+        (
+            "p0102",
+            {"SPEED": "3200"},
+        )
+    ]
+    assert receipt.body_objnam == "p0102"
+    assert receipt.operation == "pump_circuit_speed"
+    assert receipt.value == 3200
+
+    attribution = gateway._command_authority.correlate(
+        concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        native_object_id="p0102",
+        value=3200.0,
+        observed_at=datetime.now(UTC),
+    )
+    assert attribution is not None
+    assert attribution.request_source is PhysicalRequestSource.MANUAL
+
+
+def test_manual_hot_tub_cannot_write_pool_bound_pmpcirc(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(
+        minimum_rpm=450,
+        maximum_rpm=3450,
+    )
+    pool_circuit = pump_circuit_object_factory(
+        objnam="p0101",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=2600,
+    )
+
+    gateway, recorder = _gateway([pump, pool_circuit])
+
+    with pytest.raises(
+        ManualIntelliCenterCommandError,
+        match="unique live Hot Tub PMPCIRC",
+    ):
+        _run(
+            gateway.async_set_pump_circuit_speed(
+                "p0101",
+                3200,
+                manual_body="hot_tub",
+            )
+        )
+
+    assert recorder.calls == []
