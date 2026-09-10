@@ -25,6 +25,7 @@ from poolos.integration import (
 )
 from poolos.external_change import ExternalChangeBatch
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
     SpaAutomaticControlSuppression,
@@ -63,6 +64,7 @@ LOGGER = logging.getLogger(__name__)
 class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
     manual: ManualIntelliCenterControl
     authority: PoolOSPhysicalCommandAuthority
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
 
     def for_session(
         self,
@@ -135,6 +137,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,
+            baselines=self.baselines,
             request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
             automatic_thermal_context=context,
         )
@@ -156,6 +159,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,
+            baselines=self.baselines,
             request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
             automatic_thermal_context=context,
         )
@@ -206,6 +210,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,
+            baselines=self.baselines,
             request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
             automatic_thermal_context=context,
         )
@@ -221,6 +226,7 @@ class PoolOSThermalAutomaticRuntime:
     orchestrator: ThermalRuntimeOrchestrator
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     pool_automatic_control: PoolAutomaticControlSuppression = field(
         default_factory=PoolAutomaticControlSuppression
     )
@@ -241,6 +247,7 @@ class PoolOSThermalAutomaticRuntime:
     def __post_init__(self) -> None:
         self.driver = ThermalAutomaticExecutionDriver(
             self.orchestrator,
+            baselines=self.baselines,
             circulation_ownership=self.circulation_ownership,
         )
         self._sync_authority_configuration()
@@ -297,6 +304,7 @@ class PoolOSThermalAutomaticRuntime:
                     self.thermal_runtime.effective_live_enabled
                 ),
                 commissioning_scope=self.thermal_runtime.commissioning_scope,
+                baselines=self.baselines,
             ),
             physical_authority_ready=ready,
             physical_authority_blocker=(
@@ -396,7 +404,11 @@ class PoolOSThermalAutomaticRuntime:
             self.coordinator.async_update_listeners()
             return
         frame = self._latest_frame
-        factory = _ManualDeliveryFactory(self.manual, self.authority)
+        factory = _ManualDeliveryFactory(
+            self.manual,
+            self.authority,
+            self.baselines,
+        )
         self._task = self.hass.async_create_task(
             self.driver.process_epoch(frame, delivery_factory=factory),
             "PoolOS automatic thermal execution epoch",

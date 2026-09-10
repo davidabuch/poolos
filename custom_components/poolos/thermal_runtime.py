@@ -13,6 +13,7 @@ from poolos.native_configuration_policy import (
     NativeConfigurationInput,
     NativeRpmAssignment,
 )
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
     resolve_body_pump_circuit,
@@ -51,6 +52,7 @@ class PoolOSThermalRuntime:
     coordinator: PoolOSCoordinator
     manual_intellicenter: ManualIntelliCenterControl | None
     filtration_runtime: PoolOSFiltrationRuntime | None = None
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     evaluator: ThermalRuntimeEvaluator = field(default_factory=ThermalRuntimeEvaluator)
     effective_live_enabled: bool = False
     commissioning_scope: ThermalLiveCommissioningScope = (
@@ -235,6 +237,7 @@ class PoolOSThermalRuntime:
         policy = ThermalLiveExecutionPolicy(
             thermal_live_execution_enabled=self.effective_live_enabled,
             commissioning_scope=self.commissioning_scope,
+            baselines=self.baselines,
         )
         filtration = (
             None

@@ -797,6 +797,13 @@ def test_automatic_thermal_final_gateway_allows_only_commissioned_envelope(
         session_identity="session-1",
         body="pool",
         pump_circuit_id="p0102",
+        operating_purpose=(
+            "solar_heating"
+            if operation == "pump_circuit_speed" and value == 2900
+            else "gas_heating"
+            if operation == "pump_circuit_speed"
+            else None
+        ),
     )
 
     assert authority.assess(
@@ -823,6 +830,7 @@ def test_manual_pool_off_suppression_blocks_automatic_pool_but_not_manual() -> N
         session_identity="session-suppressed",
         body="pool",
         pump_circuit_id="p0199",
+        operating_purpose="solar_heating",
     )
     automatic = PhysicalCommandRequest(
         operation="pump_circuit_speed",
@@ -998,6 +1006,7 @@ def test_manual_spa_off_suppression_is_a_final_spa_only_automatic_gate() -> None
         session_identity="pool-session",
         body="pool",
         pump_circuit_id="p0199",
+        operating_purpose="solar_heating",
     )
     pool_request = PhysicalCommandRequest(
         operation="pump_circuit_speed",
@@ -1023,6 +1032,7 @@ def test_automatic_thermal_authority_binds_exact_recycled_pool_pmpcirc() -> None
         session_identity="session-dynamic-pump",
         body="pool",
         pump_circuit_id="p0199",
+        operating_purpose="solar_heating",
     )
 
     exact = PhysicalCommandRequest(

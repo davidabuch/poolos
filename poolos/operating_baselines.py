@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from hashlib import sha256
+import json
+from types import MappingProxyType
+from typing import Mapping
 
 from .operational_intent import IntentCriterion
 
@@ -21,6 +25,9 @@ class PumpOperatingBaselines:
     spillway_rpm: int = 2900
     gas_heating_rpm: int = 3000
 
+    MINIMUM_CONFIGURABLE_RPM = 450
+    MAXIMUM_CONFIGURABLE_RPM = 3450
+
     def __post_init__(self) -> None:
         for name in (
             "temperature_probe_rpm",
@@ -32,8 +39,39 @@ class PumpOperatingBaselines:
             "gas_heating_rpm",
         ):
             value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-                raise ValueError(f"{name} must be a positive integer")
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer RPM")
+            if not self.MINIMUM_CONFIGURABLE_RPM <= value <= self.MAXIMUM_CONFIGURABLE_RPM:
+                raise ValueError(
+                    f"{name} must be between {self.MINIMUM_CONFIGURABLE_RPM} "
+                    f"and {self.MAXIMUM_CONFIGURABLE_RPM} RPM"
+                )
+
+    @property
+    def fingerprint(self) -> str:
+        """Return a deterministic binding for this exact effective policy."""
+
+        payload = json.dumps(
+            dict(self.as_dict()),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return sha256(payload.encode()).hexdigest()[:24]
+
+    def as_dict(self) -> Mapping[str, int]:
+        """Expose the bounded immutable values used by runtime diagnostics."""
+
+        return MappingProxyType(
+            {
+                "temperature_probe_rpm": self.temperature_probe_rpm,
+                "grid_outage_rpm": self.grid_outage_rpm,
+                "filtration_rpm": self.filtration_rpm,
+                "priming_rpm": self.priming_rpm,
+                "solar_heating_rpm": self.solar_heating_rpm,
+                "spillway_rpm": self.spillway_rpm,
+                "gas_heating_rpm": self.gas_heating_rpm,
+            }
+        )
 
 
 class PumpTransitionOrigin(str, Enum):

@@ -42,6 +42,7 @@ from poolos.observations import (
     ObservationSourceKind,
     PoolObservation,
 )
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
@@ -420,6 +421,20 @@ def test_outage_pump_is_reduction_only_and_never_starts_circulation(
     if result.candidate is not None:
         assert result.candidate.kind is GridOutageReductionKind.POOL_PUMP_REDUCTION
         assert result.candidate.requested_value == 1500
+
+
+def test_configured_outage_rpm_drives_candidate_and_verification() -> None:
+    baselines = PumpOperatingBaselines(grid_outage_rpm=1600)
+    engine = GridOutagePhysicalSafetyEngine(baselines=baselines)
+    engine.set_enabled(True, changed_at=NOW - timedelta(seconds=1))
+    result = engine.evaluate(
+        frame(observations=safe_observations(configured=2600, rpm=2600))
+    )
+
+    assert result.candidate is not None
+    assert result.candidate.kind is GridOutageReductionKind.POOL_PUMP_REDUCTION
+    assert result.candidate.requested_value == 1600
+    assert result.candidate.policy_fingerprint == baselines.fingerprint
 
 
 def test_outage_pump_candidate_binds_exact_current_recycled_pmpcirc() -> None:

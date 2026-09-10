@@ -18,6 +18,7 @@ from poolos.integration import (
     StartPump,
     ThermalBody,
 )
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     AutomaticThermalCleanupAuthority,
     AutomaticThermalDispatchContext,
@@ -118,6 +119,8 @@ def automatic_context() -> AutomaticThermalDispatchContext:
         epoch_identity="epoch-1",
         session_identity="session-1",
         body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
     )
 
 
@@ -543,3 +546,74 @@ def test_adapter_accepts_explicit_priming_rpm_baseline() -> None:
 
     assert receipt.status is CommandStatus.ACKNOWLEDGED
     assert manual.calls == [("pump", "p0102", 3000)]
+
+
+def test_adapter_uses_non_default_effective_thermal_baselines() -> None:
+    manual = FakeManualControl()
+    baselines = PumpOperatingBaselines(
+        solar_heating_rpm=2950,
+        gas_heating_rpm=3050,
+        priming_rpm=3050,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        baselines=baselines,
+    )
+
+    configured = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2950),
+            correlation_id="configured-solar",
+        )
+    )
+    old_default = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2900),
+            correlation_id="old-solar-default",
+        )
+    )
+
+    assert configured.status is CommandStatus.ACKNOWLEDGED
+    assert old_default.status is CommandStatus.REJECTED
+    assert manual.calls == [("pump", "p0102", 2950)]
+
+
+def test_automatic_adapter_binds_non_default_pool_rpm_to_exact_purpose() -> None:
+    manual = FakeManualControl()
+    baselines = PumpOperatingBaselines(
+        solar_heating_rpm=2950,
+        gas_heating_rpm=3050,
+        priming_rpm=3050,
+    )
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="configured-solar-epoch",
+        session_identity="configured-solar-session",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
+        policy_fingerprint=baselines.fingerprint,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        baselines=baselines,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    configured = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2950),
+            correlation_id="configured-solar-purpose",
+        )
+    )
+    wrong_purpose = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=3050),
+            correlation_id="configured-gas-under-solar",
+        )
+    )
+
+    assert configured.status is CommandStatus.ACKNOWLEDGED
+    assert wrong_purpose.status is CommandStatus.REJECTED
+    assert manual.calls == [("pump", "p0102", 2950)]

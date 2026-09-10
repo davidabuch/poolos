@@ -198,6 +198,7 @@ def _shadow(coordinator: PoolOSCoordinator) -> dict[str, Any]:
 def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeData) -> dict[str, Any]:
     snapshot = coordinator.data
     if snapshot is None:
+        pump_policy = runtime.pump_operating_baselines
         return {
             "healthy": False,
             "mapped_observations": 0,
@@ -206,8 +207,11 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
             "stale_entities": [],
             "generated_at": None,
             "diagnostic_reason": "no_snapshot",
+            "pump_operating_baselines": dict(pump_policy.as_dict()),
+            "pump_operating_baselines_fingerprint": pump_policy.fingerprint,
         }
     diagnostics = snapshot.diagnostics()
+    pump_policy = runtime.pump_operating_baselines
     return {
         "healthy": bool(diagnostics.get("healthy", False)),
         "mapped_observations": diagnostics.get("observation_count", 0),
@@ -222,6 +226,8 @@ def _snapshot_attributes(coordinator: PoolOSCoordinator, runtime: PoolOSRuntimeD
         "startup_grace_active": coordinator.in_startup_health_grace(),
         "startup_grace_until": coordinator.health_incident_diagnostics()["startup_grace_until"],
         "generated_at": diagnostics.get("generated_at"),
+        "pump_operating_baselines": dict(pump_policy.as_dict()),
+        "pump_operating_baselines_fingerprint": pump_policy.fingerprint,
     }
 
 

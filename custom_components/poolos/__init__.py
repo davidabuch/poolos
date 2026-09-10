@@ -44,6 +44,7 @@ from .external_change_runtime import PoolOSExternalChangeRuntime  # noqa: E402
 from .grid_outage_runtime import PoolOSGridOutageSafetyRuntime  # noqa: E402
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .observation import ObservationSnapshot  # noqa: E402
+from .pump_baselines import compose_pump_baseline_runtime  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 from .thermal_automatic_runtime import PoolOSThermalAutomaticRuntime  # noqa: E402
 from poolos.thermal_runtime_orchestration import (  # noqa: E402
@@ -57,6 +58,7 @@ from poolos.physical_command_authority import (  # noqa: E402
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
 )
+from poolos.operating_baselines import PumpOperatingBaselines  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
     PoolCirculationOwnershipRegistry,
 )
@@ -67,9 +69,7 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
     SpaAutomaticControlSuppressionSource,
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
-from poolos.thermal_runtime_assessment import (  # noqa: E402
-    ThermalRuntimeAssessment,
-)
+from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +89,7 @@ class PoolOSRuntimeData:
     grid_outage_safety_runtime: PoolOSGridOutageSafetyRuntime
     filtration_automatic_runtime: PoolOSFiltrationAutomaticRuntime
     pool_automatic_control: PoolAutomaticControlSuppression
+    pump_operating_baselines: PumpOperatingBaselines
     spa_automatic_control: SpaAutomaticControlSuppression = field(
         default_factory=SpaAutomaticControlSuppression
     )
@@ -113,6 +114,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     await coordinator.async_initialize_persistence()
 
     configured = {**dict(entry.data), **dict(entry.options)}
+    pump_composition = compose_pump_baseline_runtime(configured)
+    pump_baselines = pump_composition.baselines
     preferred_catchup_text = str(
         configured.get(
             CONF_PREFERRED_FILTRATION_CATCHUP_START,
@@ -130,6 +133,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     filtration_runtime = PoolOSFiltrationRuntime(
         coordinator=coordinator,
         preferred_catchup_start=preferred_catchup_start,
+        baselines=pump_baselines,
     )
     await filtration_runtime.async_restore(restored_at=datetime.now(UTC))
     coordinator.set_filtration_runtime_refresh(filtration_runtime.refresh)
@@ -142,7 +146,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
     )
     manual_host = str(configured.get("intellicenter_host", "")).strip()
-    physical_command_authority = PoolOSPhysicalCommandAuthority()
+    physical_command_authority = pump_composition.physical_authority
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     spa_automatic_control = SpaAutomaticControlSuppression()
@@ -179,6 +183,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         coordinator=coordinator,
         manual_intellicenter=manual_intellicenter,
         filtration_runtime=filtration_runtime,
+        baselines=pump_baselines,
+        evaluator=pump_composition.thermal_evaluator,
     )
     external_change_runtime = PoolOSExternalChangeRuntime(
         hass=hass,
@@ -187,7 +193,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
     )
-    thermal_runtime_orchestrator = ThermalRuntimeOrchestrator()
+    thermal_runtime_orchestrator = pump_composition.thermal_orchestrator
     pool_circulation_ownership = PoolCirculationOwnershipRegistry()
     thermal_automatic_runtime = PoolOSThermalAutomaticRuntime(
         hass=hass,
@@ -196,6 +202,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         orchestrator=thermal_runtime_orchestrator,
         authority=physical_command_authority,
         manual=manual_intellicenter,
+        baselines=pump_baselines,
         circulation_ownership=pool_circulation_ownership,
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
@@ -208,6 +215,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         ownership=pool_circulation_ownership,
         authority=physical_command_authority,
         manual=manual_intellicenter,
+        baselines=pump_baselines,
         pool_automatic_control=pool_automatic_control,
     )
     grid_outage_safety_runtime = PoolOSGridOutageSafetyRuntime(
@@ -216,6 +224,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_runtime=thermal_runtime,
         authority=physical_command_authority,
         manual=manual_intellicenter,
+        engine=pump_composition.grid_outage_engine,
     )
 
     def synchronize_pool_automatic_restraint(_state: object) -> None:
@@ -272,6 +281,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
                     external_change_runtime.latest_batch
                 )
             ),
+            baselines=pump_baselines,
         )
 
     thermal_runtime.set_probe_continuity_provider(probe_continuity)
@@ -290,6 +300,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         filtration_automatic_runtime=filtration_automatic_runtime,
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
+        pump_operating_baselines=pump_baselines,
     )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
     coordinator.set_native_snapshot_observer(external_change_runtime.process)

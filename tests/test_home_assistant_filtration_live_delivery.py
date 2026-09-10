@@ -11,6 +11,7 @@ from types import ModuleType
 
 from poolos.hal import CommandStatus
 from poolos.integration import SetBodyActive, SetPumpSpeed
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import AutomaticFiltrationDispatchContext
 
 
@@ -134,3 +135,31 @@ def test_wrong_body_pump_identity_or_rpm_is_rejected_before_manual_delivery() ->
     assert all(receipt.status is CommandStatus.REJECTED for receipt in receipts)
     assert manual.body_calls == []
     assert manual.pump_calls == []
+
+
+def test_non_default_filtration_rpm_reaches_manual_gateway_exactly() -> None:
+    module = _load_module()
+    manual = FakeManual()
+    baselines = PumpOperatingBaselines(filtration_rpm=2650)
+    delivery = module.ManualIntelliCenterFiltrationDelivery(
+        manual,
+        _context(operation="pump_circuit_speed", target="p0102", value=2650),
+        baselines,
+    )
+
+    configured = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2650),
+            correlation_id="configured",
+        )
+    )
+    old_default = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0102", rpm=2600),
+            correlation_id="old-default",
+        )
+    )
+
+    assert configured.status is CommandStatus.ACKNOWLEDGED
+    assert old_default.status is CommandStatus.REJECTED
+    assert manual.pump_calls[0][0:2] == ("p0102", 2650)

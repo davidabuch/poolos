@@ -15,6 +15,12 @@ DEFAULT_DIAGNOSTICS_ENABLED = True
 
 CONF_PREFERRED_FILTRATION_CATCHUP_START = "preferred_filtration_catchup_start"
 DEFAULT_PREFERRED_FILTRATION_CATCHUP_START = "20:00"
+CONF_PUMP_FILTRATION_RPM = "pump_filtration_rpm"
+CONF_PUMP_SOLAR_HEATING_RPM = "pump_solar_heating_rpm"
+CONF_PUMP_GAS_HEATING_RPM = "pump_gas_heating_rpm"
+CONF_PUMP_TEMPERATURE_PROBE_RPM = "pump_temperature_probe_rpm"
+CONF_PUMP_PRIMING_RPM = "pump_priming_rpm"
+CONF_PUMP_GRID_OUTAGE_RPM = "pump_grid_outage_rpm"
 CONF_INTELLICENTER_HOST = "intellicenter_host"
 CONF_INTELLICENTER_TRANSPORT = "intellicenter_transport"
 DEFAULT_INTELLICENTER_TRANSPORT = "tcp"

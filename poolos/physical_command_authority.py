@@ -20,9 +20,6 @@ from .operating_baselines import PumpOperatingBaselines
 from .intellicenter_readonly import is_pmpcirc_native_id
 
 
-_THERMAL_BASELINES = PumpOperatingBaselines()
-
-
 class PhysicalRequestSource(StrEnum):
     """Origin category for one PoolOS physical mutation request."""
 
@@ -142,6 +139,8 @@ class GridOutageDispatchAuthority:
     operation: str
     target: str
     requested_value: bool | int | str
+    policy_fingerprint: str = PumpOperatingBaselines().fingerprint
+    runtime_binding: str = ""
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -152,6 +151,7 @@ class GridOutageDispatchAuthority:
             "candidate_id",
             "operation",
             "target",
+            "policy_fingerprint",
         ):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
@@ -160,7 +160,7 @@ class GridOutageDispatchAuthority:
             self.operation == "pump_circuit_speed"
             and is_pmpcirc_native_id(self.target)
             and type(self.requested_value) is int
-            and self.requested_value == _THERMAL_BASELINES.grid_outage_rpm
+            and self.requested_value > 0
             if self.purpose is GridOutageDispatchPurpose.POOL_PUMP_REDUCTION
             else _grid_outage_shape_matches(
                 self.operation,
@@ -258,11 +258,18 @@ class AutomaticThermalProbeAuthority:
     operation: str
     target: str
     requested_value: bool | int | str
+    policy_fingerprint: str = PumpOperatingBaselines().fingerprint
 
     def __post_init__(self) -> None:
         if self.generation < 1:
             raise ValueError("probe authority generation must be positive")
-        for name in ("epoch_identity", "operation_id", "operation", "target"):
+        for name in (
+            "epoch_identity",
+            "operation_id",
+            "operation",
+            "target",
+            "policy_fingerprint",
+        ):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         allowed = (
@@ -277,7 +284,7 @@ class AutomaticThermalProbeAuthority:
             self.operation == "pump_circuit_speed"
             and is_pmpcirc_native_id(self.target)
             and type(self.requested_value) is int
-            and self.requested_value == _THERMAL_BASELINES.temperature_probe_rpm
+            and self.requested_value > 0
         )
         if not allowed:
             raise ValueError("unsupported Pool temperature-probe operation")
@@ -296,6 +303,8 @@ class AutomaticThermalDispatchContext:
     purpose: AutomaticThermalDispatchPurpose = AutomaticThermalDispatchPurpose.NORMAL
     cleanup_authority: AutomaticThermalCleanupAuthority | None = None
     probe_authority: AutomaticThermalProbeAuthority | None = None
+    policy_fingerprint: str = PumpOperatingBaselines().fingerprint
+    runtime_binding: str = ""
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -303,6 +312,8 @@ class AutomaticThermalDispatchContext:
         for name in ("epoch_identity", "session_identity", "body"):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
+        if not self.policy_fingerprint.strip():
+            raise ValueError("pump policy fingerprint must not be empty")
         if self.body not in {"pool", "hot_tub"}:
             raise ValueError("unsupported automatic thermal body")
         object.__setattr__(
@@ -344,6 +355,8 @@ class AutomaticThermalDispatchContext:
                 or self.cleanup_authority is not None
                 or self.probe_authority.generation != self.generation
                 or self.probe_authority.epoch_identity != self.epoch_identity
+                or self.probe_authority.policy_fingerprint
+                != self.policy_fingerprint
             ):
                 raise ValueError("probe dispatch requires exact current Pool authority")
         elif self.cleanup_authority is not None or self.probe_authority is not None:
@@ -374,6 +387,8 @@ class AutomaticFiltrationDispatchContext:
     purpose: AutomaticFiltrationDispatchPurpose = (
         AutomaticFiltrationDispatchPurpose.NORMAL
     )
+    policy_fingerprint: str = PumpOperatingBaselines().fingerprint
+    runtime_binding: str = ""
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -385,6 +400,7 @@ class AutomaticFiltrationDispatchContext:
             "operation",
             "target",
             "pump_circuit_id",
+            "policy_fingerprint",
         ):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
@@ -424,7 +440,7 @@ class AutomaticFiltrationDispatchContext:
             and self.operation == "pump_circuit_speed"
             and self.target == self.pump_circuit_id
             and type(self.requested_value) is int
-            and self.requested_value == _THERMAL_BASELINES.filtration_rpm
+            and self.requested_value > 0
         )
         if not allowed:
             raise ValueError("operation exceeds exact automatic filtration envelope")
@@ -539,6 +555,12 @@ class PhysicalCommandDeniedError(RuntimeError):
 class PoolOSPhysicalCommandAuthority:
     """Central, fail-closed authority and bounded correlation registry."""
 
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+    _runtime_binding: str = field(
+        default_factory=lambda: uuid4().hex,
+        init=False,
+        repr=False,
+    )
     expectation_ttl: timedelta = timedelta(seconds=45)
     expectation_limit: int = 64
     _maintenance_mode: bool | None = field(default=None, init=False, repr=False)
@@ -754,6 +776,11 @@ class PoolOSPhysicalCommandAuthority:
 
         if epoch_identity != self._automatic_thermal_epoch_identity:
             raise ValueError("automatic thermal probe epoch is not current")
+        if (
+            operation == "pump_circuit_speed"
+            and requested_value != self.baselines.temperature_probe_rpm
+        ):
+            raise ValueError("unsupported Pool temperature-probe operation")
         authority = AutomaticThermalProbeAuthority(
             generation=self._automatic_thermal_generation,
             epoch_identity=epoch_identity,
@@ -761,6 +788,7 @@ class PoolOSPhysicalCommandAuthority:
             operation=operation,
             target=target,
             requested_value=requested_value,
+            policy_fingerprint=self.baselines.fingerprint,
         )
         self._automatic_thermal_probe_authority = authority
         self._automatic_thermal_cleanup_authority = None
@@ -855,6 +883,8 @@ class PoolOSPhysicalCommandAuthority:
             purpose=purpose,
             cleanup_authority=cleanup,
             probe_authority=probe,
+            policy_fingerprint=self.baselines.fingerprint,
+            runtime_binding=self._runtime_binding,
         )
 
     def unload_automatic_thermal_driver(self) -> None:
@@ -900,6 +930,11 @@ class PoolOSPhysicalCommandAuthority:
 
         if epoch_identity != self._automatic_filtration_epoch_identity:
             raise ValueError("automatic filtration epoch is not current")
+        if (
+            operation == "pump_circuit_speed"
+            and requested_value != self.baselines.filtration_rpm
+        ):
+            raise ValueError("operation exceeds exact automatic filtration envelope")
         context = AutomaticFiltrationDispatchContext(
             generation=self._automatic_filtration_generation,
             epoch_identity=epoch_identity,
@@ -916,6 +951,8 @@ class PoolOSPhysicalCommandAuthority:
                 if cleanup
                 else AutomaticFiltrationDispatchPurpose.NORMAL
             ),
+            policy_fingerprint=self.baselines.fingerprint,
+            runtime_binding=self._runtime_binding,
         )
         self._automatic_filtration_context = context
         return context
@@ -974,6 +1011,11 @@ class PoolOSPhysicalCommandAuthority:
             or frame_identity != self._grid_outage_frame_identity
         ):
             raise ValueError("grid outage candidate frame is not current")
+        if (
+            purpose is GridOutageDispatchPurpose.POOL_PUMP_REDUCTION
+            and requested_value != self.baselines.grid_outage_rpm
+        ):
+            raise ValueError("outage authority does not match exact reduction envelope")
         authority = GridOutageDispatchAuthority(
             generation=self._grid_outage_generation,
             outage_epoch_id=outage_epoch_id,
@@ -983,6 +1025,8 @@ class PoolOSPhysicalCommandAuthority:
             operation=operation,
             target=target,
             requested_value=requested_value,
+            policy_fingerprint=self.baselines.fingerprint,
+            runtime_binding=self._runtime_binding,
         )
         self._grid_outage_authority = authority
         return authority
@@ -1132,7 +1176,18 @@ class PoolOSPhysicalCommandAuthority:
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_SCOPE_DISABLED
         if context is None:
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_MISSING
-        if not _automatic_thermal_request_matches_context(request, context):
+        if (
+            context.runtime_binding
+            and context.runtime_binding != self._runtime_binding
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+        if context.policy_fingerprint != self.baselines.fingerprint:
+            return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+        if not _automatic_thermal_request_matches_context(
+            request,
+            context,
+            self.baselines,
+        ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
         if self._automatic_thermal_scope != context.body:
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_SCOPE_MISMATCH
@@ -1163,6 +1218,13 @@ class PoolOSPhysicalCommandAuthority:
         if context.authority != self._grid_outage_authority:
             return PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_STALE
         if (
+            context.authority.runtime_binding
+            and context.authority.runtime_binding != self._runtime_binding
+        ):
+            return PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_STALE
+        if context.authority.policy_fingerprint != self.baselines.fingerprint:
+            return PhysicalAuthorityReason.GRID_OUTAGE_CONTEXT_STALE
+        if (
             context.generation != self._grid_outage_generation
             or context.outage_epoch_id != self._grid_outage_epoch_id
             or context.frame_identity != self._grid_outage_frame_identity
@@ -1187,6 +1249,13 @@ class PoolOSPhysicalCommandAuthority:
         context = request.automatic_filtration_context
         if context is None:
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_MISSING
+        if (
+            context.runtime_binding
+            and context.runtime_binding != self._runtime_binding
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
+        if context.policy_fingerprint != self.baselines.fingerprint:
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
         if context != self._automatic_filtration_context or (
             context.generation != self._automatic_filtration_generation
             or context.epoch_identity != self._automatic_filtration_epoch_identity
@@ -1311,6 +1380,8 @@ class PoolOSPhysicalCommandAuthority:
                 "physical_commands_allowed": (
                     self._maintenance_mode is False and self._controller_mode == "auto"
                 ),
+                "pump_operating_baselines": dict(self.baselines.as_dict()),
+                "pump_operating_baselines_fingerprint": self.baselines.fingerprint,
                 "pool_automatic_control_suppressed": (
                     self._pool_automatic_control_suppressed
                 ),
@@ -1370,6 +1441,7 @@ class PoolOSPhysicalCommandAuthority:
 def _automatic_thermal_request_matches_context(
     request: PhysicalCommandRequest,
     context: AutomaticThermalDispatchContext,
+    baselines: PumpOperatingBaselines,
 ) -> bool:
     body_target = "B1101" if context.body == "pool" else "B1202"
     if context.purpose is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE:
@@ -1406,17 +1478,12 @@ def _automatic_thermal_request_matches_context(
             and request.requested_value in {"00000", "H0001", "H0002"}
         )
     if request.operation == "pump_circuit_speed":
-        allowed_rpms = {
-            _THERMAL_BASELINES.solar_heating_rpm,
-            _THERMAL_BASELINES.gas_heating_rpm,
-            _THERMAL_BASELINES.priming_rpm,
-        }
         if context.body == "hot_tub":
             expected_hot_tub_rpm = {
-                "temperature_acquisition": _THERMAL_BASELINES.temperature_probe_rpm,
-                "ordinary_circulation": _THERMAL_BASELINES.filtration_rpm,
-                "solar_heating": _THERMAL_BASELINES.solar_heating_rpm,
-                "gas_heating": _THERMAL_BASELINES.gas_heating_rpm,
+                "temperature_acquisition": baselines.temperature_probe_rpm,
+                "ordinary_circulation": baselines.filtration_rpm,
+                "solar_heating": baselines.solar_heating_rpm,
+                "gas_heating": baselines.gas_heating_rpm,
             }.get(
                 context.operating_purpose
                 if context.operating_purpose is not None
@@ -1425,21 +1492,20 @@ def _automatic_thermal_request_matches_context(
             return bool(
                 context.pump_circuit_id is not None
                 and request.target == context.pump_circuit_id
-                and not isinstance(request.requested_value, bool)
+                and type(request.requested_value) is int
                 and request.requested_value == expected_hot_tub_rpm
             )
-        if context.operating_purpose == "ordinary_circulation":
-            return bool(
-                context.pump_circuit_id is not None
-                and request.target == context.pump_circuit_id
-                and not isinstance(request.requested_value, bool)
-                and request.requested_value == _THERMAL_BASELINES.filtration_rpm
-            )
-        return (
+        expected_pool_rpm = {
+            None: baselines.priming_rpm,
+            "ordinary_circulation": baselines.filtration_rpm,
+            "solar_heating": baselines.solar_heating_rpm,
+            "gas_heating": baselines.gas_heating_rpm,
+        }.get(context.operating_purpose)
+        return bool(
             context.pump_circuit_id is not None
             and request.target == context.pump_circuit_id
-            and not isinstance(request.requested_value, bool)
-            and request.requested_value in allowed_rpms
+            and type(request.requested_value) is int
+            and request.requested_value == expected_pool_rpm
         )
     return False
 

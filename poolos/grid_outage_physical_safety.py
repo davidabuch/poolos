@@ -42,7 +42,6 @@ _FRESHNESS = FreshnessPolicy(max_age=timedelta(seconds=30))
 _QUALITIES = frozenset({ObservationQuality.GOOD, ObservationQuality.DEGRADED})
 _MINIMUM_CONFIDENCE = 0.5
 _KNOWN_SOURCES = frozenset({"00000", "H0001", "H0002"})
-_OUTAGE_RPM = PumpOperatingBaselines().grid_outage_rpm
 _RPM_TOLERANCE = 25
 _VERIFICATION_TIMEOUT = timedelta(seconds=45)
 
@@ -117,6 +116,7 @@ class GridOutageReductionCandidate:
     priority: int
     evidence_fingerprint: str
     formed_at: datetime | None = None
+    policy_fingerprint: str = PumpOperatingBaselines().fingerprint
 
     def __post_init__(self) -> None:
         for name in (
@@ -128,6 +128,7 @@ class GridOutageReductionCandidate:
             "expected_concept",
             "expected_native_object_id",
             "evidence_fingerprint",
+            "policy_fingerprint",
         ):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
@@ -136,7 +137,7 @@ class GridOutageReductionCandidate:
                 self.operation == "pump_circuit_speed"
                 and is_pmpcirc_native_id(self.target)
                 and type(self.requested_value) is int
-                and self.requested_value == _OUTAGE_RPM
+                and self.requested_value > 0
                 and self.expected_concept
                 == POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
                 and self.expected_native_object_id == self.target
@@ -461,6 +462,7 @@ def assess_outage_circulation_requirement(
 class GridOutagePhysicalSafetyEngine:
     """Select and verify one exact reduction per authoritative frame."""
 
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     gate_requested: bool = False
     gate_generation: int = 0
     assessment: GridOutageSafetyAssessment | None = None
@@ -683,7 +685,12 @@ class GridOutagePhysicalSafetyEngine:
         if self._last_delivery_frame == frame.frame_identity:
             return self._store_blocked(frame, circulation, "grid_outage_frame_already_dispatched")
 
-        candidate, reason = _select_candidate(frame, circulation, epoch)
+        candidate, reason = _select_candidate(
+            frame,
+            circulation,
+            epoch,
+            self.baselines,
+        )
         lifecycle = (
             GridOutageSafetyLifecycle.CANDIDATE_READY
             if candidate is not None
@@ -817,7 +824,10 @@ class GridOutagePhysicalSafetyEngine:
                 return (
                     "timed_out" if frame.observed_at >= attempt.verification_deadline else "pending"
                 )
-            if rpm is None or abs(rpm - _OUTAGE_RPM) > _RPM_TOLERANCE:
+            if (
+                rpm is None
+                or abs(rpm - self.baselines.grid_outage_rpm) > _RPM_TOLERANCE
+            ):
                 return "failed"
         return "verified"
 
@@ -873,6 +883,7 @@ def _select_candidate(
     frame: GridOutageSafetyFrame,
     circulation: OutageCirculationRequirementAssessment,
     epoch: str,
+    baselines: PumpOperatingBaselines,
 ) -> tuple[GridOutageReductionCandidate | None, str]:
     by_id = {item.observation_id: item for item in frame.observations}
 
@@ -895,7 +906,7 @@ def _select_candidate(
         and spa_source in {"H0001", "H0002"}
     ):
         return _candidate(
-            GridOutageReductionKind.SPA_SOURCE_OFF, frame, epoch
+            GridOutageReductionKind.SPA_SOURCE_OFF, frame, epoch, baselines
         ), "grid_outage_spa_source_reduction_ready"
     if (
         pool.usable
@@ -904,13 +915,13 @@ def _select_candidate(
         and pool_source in {"H0001", "H0002"}
     ):
         return _candidate(
-            GridOutageReductionKind.POOL_SOURCE_OFF, frame, epoch
+            GridOutageReductionKind.POOL_SOURCE_OFF, frame, epoch, baselines
         ), "grid_outage_pool_source_reduction_ready"
 
     light = state("pool_light.active")
     if light.usable and _boolean(light) is True:
         return _candidate(
-            GridOutageReductionKind.POOL_LIGHT_OFF, frame, epoch
+            GridOutageReductionKind.POOL_LIGHT_OFF, frame, epoch, baselines
         ), "grid_outage_pool_light_reduction_ready"
 
     if not pool.usable or not spa.usable or pool_active is None or spa_active is None:
@@ -937,13 +948,16 @@ def _select_candidate(
         if not circuit.usable or _boolean(circuit) is None:
             return None, f"grid_outage_circuit_evidence_unusable:{concept}"
         if _boolean(circuit) is True:
-            return _candidate(kind, frame, epoch), f"grid_outage_{kind.value}_ready"
+            return (
+                _candidate(kind, frame, epoch, baselines),
+                f"grid_outage_{kind.value}_ready",
+            )
 
     if spa_active:
         if spa_source != "00000":
             return None, "grid_outage_spa_source_shutdown_pending"
         return _candidate(
-            GridOutageReductionKind.SPA_BODY_OFF, frame, epoch
+            GridOutageReductionKind.SPA_BODY_OFF, frame, epoch, baselines
         ), "grid_outage_spa_body_reduction_ready"
 
     if circulation.disposition is OutageCirculationDisposition.REQUIRED:
@@ -972,12 +986,15 @@ def _select_candidate(
             return None, "grid_outage_actual_pump_evidence_unusable"
         if actual_rpm <= 0:
             return None, "required_circulation_not_established"
-        if configured_rpm <= _OUTAGE_RPM:
+        if configured_rpm <= baselines.grid_outage_rpm:
             return None, "grid_outage_pump_already_at_or_below_ceiling"
-        if actual_rpm < _OUTAGE_RPM - _RPM_TOLERANCE:
+        if actual_rpm < baselines.grid_outage_rpm - _RPM_TOLERANCE:
             return None, "grid_outage_configured_actual_pump_evidence_contradictory"
         return _candidate(
-            GridOutageReductionKind.POOL_PUMP_REDUCTION, frame, epoch
+            GridOutageReductionKind.POOL_PUMP_REDUCTION,
+            frame,
+            epoch,
+            baselines,
         ), "grid_outage_pump_reduction_ready"
 
     if circulation.disposition is OutageCirculationDisposition.NOT_REQUIRED:
@@ -989,12 +1006,13 @@ def _candidate(
     kind: GridOutageReductionKind,
     frame: GridOutageSafetyFrame,
     epoch: str,
+    baselines: PumpOperatingBaselines,
 ) -> GridOutageReductionCandidate:
     shape = (
         (
             "pump_circuit_speed",
             frame.pool_pump_circuit_id,
-            _OUTAGE_RPM,
+            baselines.grid_outage_rpm,
             POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
             frame.pool_pump_circuit_id,
             9,
@@ -1015,6 +1033,7 @@ def _candidate(
         *shape,
         fingerprint,
         frame.observed_at,
+        baselines.fingerprint,
     )
 
 
