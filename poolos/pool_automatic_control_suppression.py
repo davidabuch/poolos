@@ -10,6 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from zoneinfo import ZoneInfo
+
+from .filtration_policy import FiltrationOperationalDayPolicy
 from types import MappingProxyType
 from typing import Callable, Mapping
 
@@ -30,6 +33,73 @@ class SpaAutomaticControlSuppressionSource(StrEnum):
     EXTERNAL_NATIVE_OFF = "external_native_off"
     OPERATOR_RESTRAINT = "operator_restraint"
     RESTORED = "restored"
+
+
+_TRANSIENT_POOL_SOURCES = frozenset(
+    {
+        PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+        PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
+    }
+)
+
+_TRANSIENT_SPA_SOURCES = frozenset(
+    {
+        SpaAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+        SpaAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
+    }
+)
+
+
+def pool_suppression_is_current(
+    state: "PoolAutomaticControlSuppressionState",
+    *,
+    evaluated_at: datetime,
+    timezone: ZoneInfo,
+) -> bool:
+    """Return whether one Pool restraint remains valid for this operational day."""
+
+    _require_aware(evaluated_at)
+
+    if not state.suppressed:
+        return False
+
+    if state.source not in _TRANSIENT_POOL_SOURCES:
+        return True
+
+    if state.suppressed_at is None:
+        return True
+
+    policy = FiltrationOperationalDayPolicy()
+    return policy.day_for(state.suppressed_at, timezone) == policy.day_for(
+        evaluated_at,
+        timezone,
+    )
+
+
+def spa_suppression_is_current(
+    state: "SpaAutomaticControlSuppressionState",
+    *,
+    evaluated_at: datetime,
+    timezone: ZoneInfo,
+) -> bool:
+    """Return whether one Spa restraint remains valid for this operational day."""
+
+    _require_aware(evaluated_at)
+
+    if not state.suppressed:
+        return False
+
+    if state.source not in _TRANSIENT_SPA_SOURCES:
+        return True
+
+    if state.suppressed_at is None:
+        return True
+
+    policy = FiltrationOperationalDayPolicy()
+    return policy.day_for(state.suppressed_at, timezone) == policy.day_for(
+        evaluated_at,
+        timezone,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,7 +335,9 @@ __all__ = [
     "PoolAutomaticControlSuppression",
     "PoolAutomaticControlSuppressionSource",
     "PoolAutomaticControlSuppressionState",
+    "pool_suppression_is_current",
     "SpaAutomaticControlSuppression",
     "SpaAutomaticControlSuppressionSource",
     "SpaAutomaticControlSuppressionState",
+    "spa_suppression_is_current",
 ]

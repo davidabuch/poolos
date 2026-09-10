@@ -74,6 +74,8 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
     PoolAutomaticControlSuppressionSource,
     SpaAutomaticControlSuppression,
     SpaAutomaticControlSuppressionSource,
+    pool_suppression_is_current,
+    spa_suppression_is_current,
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment  # noqa: E402
@@ -345,6 +347,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         transport: NativeIntelliCenterTransportSnapshot,
         connection_generation: int,
     ) -> None:
+        evaluated_at = datetime.now(UTC)
+
+        if not pool_suppression_is_current(
+            pool_automatic_control.state,
+            evaluated_at=evaluated_at,
+            timezone=coordinator.local_timezone,
+        ):
+            pool_automatic_control.resume(resumed_at=evaluated_at)
+
+        if not spa_suppression_is_current(
+            spa_automatic_control.state,
+            evaluated_at=evaluated_at,
+            timezone=coordinator.local_timezone,
+        ):
+            spa_automatic_control.resume(resumed_at=evaluated_at)
+
         synchronize_pump_session(native, transport, connection_generation)
         external_change_runtime.process(native, transport, connection_generation)
         pump_speed_session.apply_external_changes(

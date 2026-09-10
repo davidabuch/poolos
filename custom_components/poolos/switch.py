@@ -31,6 +31,8 @@ from poolos.physical_command_authority import (
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppressionSource,
     SpaAutomaticControlSuppressionSource,
+    pool_suppression_is_current,
+    spa_suppression_is_current,
 )
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
@@ -541,11 +543,19 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
                 previous.attributes.get("pool_manual_off_suppression_reason")
                 or "restored_manual_pool_off_suppression"
             )
-            self._runtime.pool_automatic_control.suppress(
+            restored = self._runtime.pool_automatic_control.suppress(
                 source=source,
                 suppressed_at=suppressed_at,
                 reason=reason,
             )
+            if not pool_suppression_is_current(
+                restored,
+                evaluated_at=datetime.now(UTC),
+                timezone=self._runtime.coordinator.local_timezone,
+            ):
+                self._runtime.pool_automatic_control.resume(
+                    resumed_at=datetime.now(UTC)
+                )
         self._runtime.physical_command_authority.resolve_pool_automatic_control_suppressed(
             self._runtime.pool_automatic_control.state.suppressed
         )
@@ -628,11 +638,19 @@ class PoolOSSpaAutonomousControlSwitch(RestoreEntity, SwitchEntity):
                 previous.attributes.get("spa_manual_off_suppression_reason")
                 or "restored_manual_spa_off_suppression"
             )
-            self._runtime.spa_automatic_control.suppress(
+            restored = self._runtime.spa_automatic_control.suppress(
                 source=source,
                 suppressed_at=suppressed_at,
                 reason=reason,
             )
+            if not spa_suppression_is_current(
+                restored,
+                evaluated_at=datetime.now(UTC),
+                timezone=self._runtime.coordinator.local_timezone,
+            ):
+                self._runtime.spa_automatic_control.resume(
+                    resumed_at=datetime.now(UTC)
+                )
         self._runtime.physical_command_authority.resolve_spa_automatic_control_suppressed(
             self._runtime.spa_automatic_control.state.suppressed
         )

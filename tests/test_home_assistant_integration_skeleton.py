@@ -132,3 +132,30 @@ def test_adr_and_roadmap_record_no_operational_behavior() -> None:
     assert "no entity discovery" in adr.lower()
     assert "no IntelliCenter discovery" in roadmap
     assert "| 11.1B | Home Assistant integration skeleton | DONE |" in roadmap
+
+def test_native_observer_expires_transient_manual_off_before_runtime_processing() -> None:
+    source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+
+    observer_start = source.index("    def observe_native_snapshot(")
+    observer_end = source.index(
+        "    coordinator.set_native_snapshot_observer(observe_native_snapshot)",
+        observer_start,
+    )
+    observer = source[observer_start:observer_end]
+
+    pool_check = observer.index("pool_suppression_is_current(")
+    pool_resume = observer.index("pool_automatic_control.resume(")
+    spa_check = observer.index("spa_suppression_is_current(")
+    spa_resume = observer.index("spa_automatic_control.resume(")
+    session_sync = observer.index("synchronize_pump_session(")
+    external_process = observer.index("external_change_runtime.process(")
+
+    assert pool_check < pool_resume < session_sync
+    assert spa_check < spa_resume < session_sync
+    assert session_sync < external_process
+
+    # Expiring a stale restraint only changes command eligibility.
+    # The observer itself must not directly dispatch equipment.
+    assert "async_set_body_active" not in observer
+    assert "async_set_pump_circuit_speed" not in observer
+    assert "services.async_call" not in observer
