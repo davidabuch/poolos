@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from .clock import FixedClock
 from .execution_models import ExecutionStep, VerificationStatus
-from .integration import SetPumpSpeed
+from .integration import SetBodyActive, SetHeatMode, SetPumpSpeed
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -227,7 +227,7 @@ class ExecutionVerificationEngine:
             for item in evidence
         )
         unresolved = len(evidence) - matched - mismatched
-        bounded_pump_settling = _is_bounded_pump_settling_step(step)
+        bounded_command_settling = _is_bounded_command_settling_step(step)
 
         if matched == len(evidence):
             status = VerificationStatus.VERIFIED
@@ -235,7 +235,7 @@ class ExecutionVerificationEngine:
         elif request.evaluated_at >= request.deadline:
             status = VerificationStatus.TIMED_OUT
             reason = "verification_deadline_reached"
-        elif mismatched and unresolved == 0 and bounded_pump_settling:
+        elif mismatched and unresolved == 0 and bounded_command_settling:
             status = VerificationStatus.PENDING
             reason = "transient_observation_mismatch_pending"
         elif mismatched and unresolved == 0:
@@ -430,7 +430,7 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _numeric_tolerance(step: ExecutionStep, observation_id: str) -> float | None:
-    if not _is_bounded_pump_settling_step(step) or observation_id != "pump.rpm":
+    if not isinstance(step.operation, SetPumpSpeed) or observation_id != "pump.rpm":
         return None
     raw = step.metadata.get(f"numeric_tolerance:{observation_id}")
     if raw is None:
@@ -444,11 +444,34 @@ def _numeric_tolerance(step: ExecutionStep, observation_id: str) -> float | None
     return tolerance
 
 
-def _is_bounded_pump_settling_step(step: ExecutionStep) -> bool:
-    return (
-        isinstance(step.operation, SetPumpSpeed)
-        and set(step.expected_observations) == {"pump.rpm"}
-    )
+def _is_bounded_command_settling_step(step: ExecutionStep) -> bool:
+    """Allow canonical accepted writes to converge only until their deadline."""
+
+    expected = set(step.expected_observations)
+    operation = step.operation
+    if isinstance(operation, SetPumpSpeed):
+        return "pump.rpm" in expected and all(
+            concept == "pump.rpm"
+            or concept.endswith(".pump_circuit.configured_speed_rpm")
+            for concept in expected
+        )
+    if isinstance(operation, SetBodyActive):
+        body_concept = {
+            "pool": "pool.active",
+            "hot_tub": "spa.active",
+        }.get(operation.equipment_id)
+        if body_concept is None:
+            return False
+        return operation.active is True and expected == {body_concept}
+    if isinstance(operation, SetHeatMode):
+        source_concept = {
+            "pool": "pool.raw_heater_id",
+            "hot_tub": "spa.raw_heater_id",
+        }.get(operation.equipment_id)
+        if source_concept is None:
+            return False
+        return expected == {source_concept}
+    return False
 
 
 def _is_number(value: Any) -> bool:

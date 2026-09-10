@@ -39,6 +39,7 @@ def _assessment(
     current_rpm: int | None = 2600,
     body_active: bool | None = True,
     body: ThermalBody = ThermalBody.POOL,
+    pump_equipment_id: str = "p0102",
 ) -> ThermalExecutionPlanAssessment:
     desired = ThermalDesiredState(
         evaluated_at=evaluated_at,
@@ -61,7 +62,9 @@ def _assessment(
         pump_rpm=current_rpm,
         body_active=body_active,
     )
-    return ThermalExecutionPlanBuilder(pump_equipment_id="p0102").build(desired, current)
+    return ThermalExecutionPlanBuilder(
+        pump_equipment_id=pump_equipment_id
+    ).build(desired, current)
 
 
 def _currentness(
@@ -281,6 +284,56 @@ def test_accepted_priming_explains_residual_plan_before_verification() -> None:
     assert tuple(item.role for item in current.residual_plan.operations) == (
         "thermal_pump_target",
         "heat_source",
+    )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            current_rpm=3000,
+            pump_equipment_id="p0199",
+        ),
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            rpm=2950,
+            current_rpm=3000,
+        ),
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            body=ThermalBody.HOT_TUB,
+            current_rpm=3000,
+        ),
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            requested_mode="gas",
+            source=PhysicalHeatMode.GAS,
+            rpm=3000,
+            current_rpm=3000,
+        ),
+    ),
+)
+def test_priming_label_compatibility_requires_identical_purpose_and_consequence(
+    changed: ThermalExecutionPlanAssessment,
+) -> None:
+    original_assessment = _assessment(current_rpm=0, body_active=False)
+    originating = _currentness(original_assessment, "evaluation-origin")
+    current = _currentness(changed, "evaluation-current")
+
+    decision = assess_execution_compatibility(
+        originating,
+        current,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(_signature(original_assessment, 0),),
+            accepted_current=_signature(original_assessment, 1),
+            accepted_operation_id=original_assessment.operations[1].operation_id,
+        ),
+    )
+
+    assert (
+        decision.disposition
+        is not ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE
     )
 
 

@@ -1093,7 +1093,7 @@ def test_pump_mismatch_at_deadline_times_out() -> None:
     assert result.status is ThermalLiveExecutionStatus.TIMED_OUT
 
 
-def test_wrong_heater_fails_even_when_htmode_context_is_zero() -> None:
+def test_wrong_heater_remains_pending_until_bounded_verification_deadline() -> None:
     plan = thermal_plan(
         PhysicalHeatMode.GAS,
         2900,
@@ -1130,7 +1130,7 @@ def test_wrong_heater_fails_even_when_htmode_context_is_zero() -> None:
         source_id="native-intellicenter",
     )
 
-    assert result.status is ThermalLiveExecutionStatus.FAILED
+    assert result.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
 
 
 def test_correct_heater_verifies_with_htmode_zero_as_context_only() -> None:
@@ -2625,7 +2625,7 @@ def test_current_convergence_does_not_skip_delivered_step_verification() -> None
         source_id="native-intellicenter",
     )
 
-    assert wrong.status is ThermalLiveExecutionStatus.FAILED
+    assert wrong.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
     assert wrong.status is not ThermalLiveExecutionStatus.COMPLETED
 
     second_engine = ThermalLiveExecutionEngine()
@@ -2925,6 +2925,7 @@ def test_accepted_delivery_establishes_only_typed_session_ownership(
         assert waiting.ownership.pump_receipt_id == "receipt-1"
         assert waiting.ownership.pump_correlation_id == waiting.current_attempt.correlation_id
         assert waiting.ownership.commanded_pump_rpm == operation.rpm
+        assert waiting.ownership.pump_accepted_at == NOW
     elif isinstance(operation, SetHeatMode):
         assert waiting.ownership.heat_source_operation_id == operation.operation_id
         assert waiting.ownership.heat_source_receipt_id == "receipt-1"
@@ -2933,6 +2934,7 @@ def test_accepted_delivery_establishes_only_typed_session_ownership(
             == waiting.current_attempt.correlation_id
         )
         assert waiting.ownership.commanded_heat_source is operation.mode
+        assert waiting.ownership.heat_source_accepted_at == NOW
     else:
         assert waiting.ownership.body_activation_operation_id == operation.operation_id
         assert waiting.ownership.body_activation_receipt_id == "receipt-1"
@@ -2940,6 +2942,7 @@ def test_accepted_delivery_establishes_only_typed_session_ownership(
             waiting.ownership.body_activation_correlation_id
             == waiting.current_attempt.correlation_id
         )
+        assert waiting.ownership.body_activation_accepted_at == NOW
 
 
 def test_rejected_delivery_never_establishes_ownership() -> None:

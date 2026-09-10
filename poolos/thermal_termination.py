@@ -132,11 +132,12 @@ class ThermalTerminationPolicy:
                 "thermal_termination_evidence_temporal_regression",
                 **common,
             )
-        hydraulic = _hydraulic_blocker(entitlement, evidence)
+        hydraulic = _hydraulic_disposition(entitlement, evidence)
         if hydraulic is not None:
+            disposition, reason = hydraulic
             return _assessment(
-                ThermalTerminationDisposition.INVALIDATED,
-                hydraulic,
+                disposition,
+                reason,
                 **common,
             )
         external = _external_takeover(entitlement, evidence)
@@ -240,10 +241,12 @@ class ThermalTerminationPolicy:
         )
 
 
-def _hydraulic_blocker(
+def _hydraulic_disposition(
     entitlement: ThermalResidualTerminationEntitlement,
     evidence: ThermalRuntimeOwnershipEvidence,
-) -> str | None:
+) -> tuple[ThermalTerminationDisposition, str] | None:
+    """Separate temporary uncertainty from positive topology invalidation."""
+
     for prefix, value, fresh, usable in (
         (
             "pool",
@@ -259,22 +262,43 @@ def _hydraulic_blocker(
         ),
     ):
         if value is None or not fresh or not usable:
-            return f"thermal_termination_{prefix}_activity_unusable"
+            return (
+                ThermalTerminationDisposition.BLOCKED,
+                f"thermal_termination_{prefix}_activity_unusable",
+            )
     if evidence.pool_active and evidence.spa_active:
-        return "thermal_termination_body_topology_contradictory"
+        return (
+            ThermalTerminationDisposition.INVALIDATED,
+            "thermal_termination_body_topology_contradictory",
+        )
     if entitlement.body is ThermalBody.POOL:
         if evidence.pool_active is not True or evidence.spa_active is not False:
-            return "thermal_termination_pool_topology_lost"
+            return (
+                ThermalTerminationDisposition.INVALIDATED,
+                "thermal_termination_pool_topology_lost",
+            )
     else:
         if evidence.spa_active is not True or evidence.pool_active is not False:
-            return "thermal_termination_hot_tub_topology_lost"
+            return (
+                ThermalTerminationDisposition.INVALIDATED,
+                "thermal_termination_hot_tub_topology_lost",
+            )
     if not evidence.shared_hydraulic_inventory_complete:
-        return "thermal_termination_shared_hydraulic_evidence_incomplete"
+        return (
+            ThermalTerminationDisposition.BLOCKED,
+            "thermal_termination_shared_hydraulic_evidence_incomplete",
+        )
     for item in evidence.shared_hydraulic_circuits:
         if item.active is None or not item.fresh or not item.usable:
-            return f"thermal_termination_shared_hydraulic_unusable:{item.concept}"
+            return (
+                ThermalTerminationDisposition.BLOCKED,
+                f"thermal_termination_shared_hydraulic_unusable:{item.concept}",
+            )
         if item.active and item.safety_class is not SharedHydraulicSafetyClass.NON_CONFLICTING:
-            return f"thermal_termination_shared_hydraulic_takeover:{item.concept}"
+            return (
+                ThermalTerminationDisposition.INVALIDATED,
+                f"thermal_termination_shared_hydraulic_takeover:{item.concept}",
+            )
     return None
 
 

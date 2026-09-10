@@ -318,6 +318,7 @@ class ThermalAutomaticExecutionDriver:
     _filtration_handoff: FiltrationToThermalHandoff | None = field(
         default=None, init=False, repr=False
     )
+    _reenable_required: bool = field(default=False, init=False, repr=False)
 
     def reserve_circulation_candidate(
         self,
@@ -408,6 +409,8 @@ class ThermalAutomaticExecutionDriver:
         if enabled == self.requested_enabled and self.assessment is not None:
             return self.assessment
         self.requested_enabled = enabled
+        if not enabled:
+            self._reenable_required = False
         self._enabled_after_epoch_identity = (
             current_epoch_identity if enabled else None
         )
@@ -526,6 +529,8 @@ class ThermalAutomaticExecutionDriver:
         self._accept_epoch(frame)
         if not self.requested_enabled:
             return self.note_disabled_epoch(frame)
+        if self._reenable_required:
+            return self._blocked(frame, "automatic_thermal_reenable_required")
         if frame.epoch_identity == self._enabled_after_epoch_identity:
             return self._blocked(
                 frame,
@@ -2328,6 +2333,8 @@ class ThermalAutomaticExecutionDriver:
         frame: ThermalAutomaticExecutionFrame,
         reason: str,
     ) -> ThermalAutomaticDriverAssessment:
+        if _terminal_execution_failure_requires_reenable(reason):
+            self._reenable_required = True
         state = (
             ThermalAutomaticDriverState.SUPERSEDED
             if "supersed" in reason
@@ -2409,6 +2416,12 @@ class ThermalAutomaticExecutionDriver:
             step = session.current_attempt.step
         lease = self.orchestrator.ownership.state.lease
         residual = self.orchestrator.ownership.residual_termination
+        terminal_transition = self.orchestrator.ownership.last_terminal_transition
+        accepted_current = (
+            None
+            if lease is None or lease.execution_progress is None
+            else lease.execution_progress.accepted_current
+        )
         termination = None if frame is None else self._termination_assessment(frame)
         circulation = circulation_assessment
         if circulation is None and frame is not None:
@@ -2418,7 +2431,103 @@ class ThermalAutomaticExecutionDriver:
             "owns_body_activation": bool(lease and lease.owns_body_activation),
             "owns_pump_setpoint": bool(lease and lease.owns_pump_setpoint),
             "owns_heat_source": bool(lease and lease.owns_heat_source),
+            "verified_owned_concepts": (
+                []
+                if lease is None
+                else [concept.value for concept in lease.verified_concepts]
+            ),
+            "accepted_consequence_pending_role": (
+                None if accepted_current is None else accepted_current.role
+            ),
+            "accepted_consequence_pending_equipment_id": (
+                None if accepted_current is None else accepted_current.equipment_id
+            ),
+            "accepted_consequence_pending_value": (
+                None if accepted_current is None else accepted_current.requested_value
+            ),
+            "ownership_ended_at": (
+                None
+                if lease is None or lease.ended_at is None
+                else lease.ended_at.isoformat()
+            ),
+            "terminal_transition_prior_status": (
+                None
+                if terminal_transition is None
+                else terminal_transition.previous_status.value
+            ),
+            "terminal_transition_current_status": (
+                None
+                if terminal_transition is None
+                else terminal_transition.current_status.value
+            ),
+            "terminal_transition_at": (
+                None
+                if terminal_transition is None
+                else terminal_transition.occurred_at.isoformat()
+            ),
+            "terminal_transition_reason_code": (
+                None if terminal_transition is None else terminal_transition.reason_code
+            ),
+            "terminal_transition_affected_concept": (
+                None
+                if terminal_transition is None
+                or terminal_transition.affected_concept is None
+                else terminal_transition.affected_concept.value
+            ),
+            "terminal_transition_expected_value": (
+                None if terminal_transition is None else terminal_transition.expected_value
+            ),
+            "terminal_transition_observed_value": (
+                None if terminal_transition is None else terminal_transition.observed_value
+            ),
+            "terminal_transition_observed_at": (
+                None
+                if terminal_transition is None
+                or terminal_transition.observed_at is None
+                else terminal_transition.observed_at.isoformat()
+            ),
+            "terminal_transition_operation_id": (
+                None if terminal_transition is None else terminal_transition.operation_id
+            ),
+            "terminal_transition_correlation_id": (
+                None
+                if terminal_transition is None
+                else terminal_transition.correlation_id
+            ),
+            "terminal_transition_accepted_at": (
+                None
+                if terminal_transition is None
+                or terminal_transition.accepted_at is None
+                else terminal_transition.accepted_at.isoformat()
+            ),
+            "terminal_transition_execution_purpose_id": (
+                None
+                if terminal_transition is None
+                else terminal_transition.execution_purpose_id
+            ),
+            "terminal_transition_currentness_disposition": (
+                None
+                if terminal_transition is None
+                else terminal_transition.currentness_disposition
+            ),
+            "terminal_transition_external_event_id": (
+                None
+                if terminal_transition is None
+                else terminal_transition.external_event_id
+            ),
+            "terminal_transition_external_event_concept": (
+                None
+                if terminal_transition is None
+                else terminal_transition.external_event_concept
+            ),
+            "terminal_transition_external_event_observed_at": (
+                None
+                if terminal_transition is None
+                or terminal_transition.external_event_observed_at is None
+                else terminal_transition.external_event_observed_at.isoformat()
+            ),
             "reason_code": self.orchestrator.ownership.state.reason_code,
+            "automatic_thermal_reenable_required": self._reenable_required,
             "residual_termination_entitlement_id": (
                 None if residual is None else residual.entitlement_id
             ),
@@ -2648,6 +2757,17 @@ def _probe_source_precondition_then_activation(
 
 def _bounded(value: str, limit: int = 256) -> str:
     return " ".join(value.split())[:limit]
+
+
+def _terminal_execution_failure_requires_reenable(reason: str) -> bool:
+    """Prevent automatic replay after a command or verification failure."""
+
+    return (
+        reason.startswith("delivery_")
+        or reason.startswith("automatic_thermal_delivery")
+        or "verification_deadline_reached" in reason
+        or "verification_failed" in reason
+    )
 
 
 def _live_boolean_observation(
