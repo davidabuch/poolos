@@ -5244,3 +5244,190 @@ def test_preempted_session_successor_completes_solar_and_defers_filtration() -> 
         isinstance(operation, SetPumpSpeed) and operation.rpm == 2600
         for operation in delivery.calls
     )
+
+
+def test_owned_body_activation_survives_native_exact_solar_convergence() -> None:
+    """Native controller convergence to the exact live plan must not preempt ownership."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    # Match the live 2026-09-10 precondition: Pool water was recently
+    # authoritatively observed at 87 F during valid Solar circulation.
+    # Two chronological observations establish/stabilize the reusable
+    # circulating water temperature before the operator turns Pool OFF.
+    _frame(
+        orchestrator,
+        NOW - timedelta(seconds=130),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=87.0,
+        solar_temperature=145.0,
+        missing=(),
+        filtration_remaining=timedelta(hours=6),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+    )
+
+    _frame(
+        orchestrator,
+        NOW - timedelta(seconds=5),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=87.0,
+        solar_temperature=145.0,
+        missing=(),
+        filtration_remaining=timedelta(hours=6),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+    )
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=2900,
+        pool_heater="00000",
+        solar_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=87.0,
+        solar_temperature=145.0,
+        missing=(),
+        filtration_remaining=timedelta(hours=6),
+        filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+    )
+
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    # PoolOS begins a fresh Solar execution from Pool OFF.
+    started = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=2900,
+                pool_heater="00000",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                pool_temperature=87.0,
+                solar_temperature=145.0,
+                missing=(),
+                filtration_remaining=timedelta(hours=6),
+                filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert started.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].equipment_id == ThermalBody.POOL.value
+    assert delivery.calls[-1].active is True
+
+    first_lease = orchestrator.ownership.state.lease
+    assert first_lease is not None
+    first_lease_id = first_lease.lease_id
+    first_generation = first_lease.generation
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+    # Authoritative native evidence verifies the body activation.
+    verified_body = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=2),
+                pool_active=True,
+                pump_rpm=0,
+                configured_rpm=2900,
+                pool_heater="00000",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                pool_temperature=87.0,
+                solar_temperature=145.0,
+                missing=(),
+                filtration_remaining=timedelta(hours=6),
+                filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert verified_body.runtime_ownership_summary[
+        "owns_body_activation"
+    ] is True
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+    # IntelliCenter now performs its coupled native behavior after Pool activation:
+    # Solar becomes active and pump converges to the exact PoolOS Solar baseline.
+    # There is no contradictory external-change event and the observed state
+    # exactly matches the still-current live Solar plan.
+    converged = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=20),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                pool_temperature=87.0,
+                solar_temperature=145.0,
+                missing=(),
+                filtration_remaining=timedelta(hours=6),
+                filtration_disposition=FiltrationDisposition.CREDITING,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    # This is the production regression from 2026-09-10.
+    # Before the fix this becomes PREEMPTED with:
+    # runtime_ownership_preempted:execution_currentness_unprovable:
+    # thermal_execution_convergence_not_attributed
+    assert converged.runtime_ownership_status == "owned"
+    assert converged.state is not ThermalAutomaticDriverState.PREEMPTED
+    assert (
+        converged.runtime_ownership_summary["terminal_transition_current_status"]
+        is None
+    )
+    assert (
+        converged.runtime_ownership_summary["terminal_transition_reason_code"]
+        is None
+    )
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.lease_id == first_lease_id
+    assert lease.generation == first_generation
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
