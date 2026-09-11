@@ -226,6 +226,110 @@ def test_valid_current_assessment_creates_command_free_candidate() -> None:
     assert result.command_delivery_performed is False
 
 
+def test_owned_unchanged_native_state_remains_current_through_source_cadence() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    _establish_pool_full_ownership(orchestrator, at=NOW)
+
+    result = _refresh(
+        orchestrator,
+        NOW + timedelta(seconds=120),
+        observations=_observations(NOW),
+    )
+
+    assert result.lifecycle is ThermalOrchestrationLifecycle.OWNED
+    assert result.ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+def test_owned_solar_accepts_asynchronous_per_concept_native_refreshes() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    _establish_pool_full_ownership(orchestrator, at=NOW)
+
+    def observations_at(offsets: dict[str, int], evaluated_second: int):
+        return tuple(
+            _observation(
+                item.observation_id,
+                item.value,
+                at=NOW
+                + timedelta(seconds=offsets.get(item.observation_id, evaluated_second)),
+            )
+            for item in _observations(NOW + timedelta(seconds=evaluated_second))
+        )
+
+    first = _refresh(
+        orchestrator,
+        NOW + timedelta(seconds=100),
+        observations=observations_at(
+            {
+                "pool.active": 100,
+                "spa.active": 20,
+                "pump.rpm": 1,
+                "pool.pump_circuit.configured_speed_rpm": 10,
+                "pool.raw_heater_id": 100,
+            },
+            100,
+        ),
+    )
+    assert first.lifecycle is ThermalOrchestrationLifecycle.OWNED
+
+    second = _refresh(
+        orchestrator,
+        NOW + timedelta(seconds=180),
+        observations=observations_at(
+            {
+                "pool.active": 81,
+                "spa.active": 100,
+                "pump.rpm": 180,
+                "pool.pump_circuit.configured_speed_rpm": 100,
+                "pool.raw_heater_id": 150,
+                "waterfall.active": 100,
+                "jets.active": 100,
+                "slide.active": 100,
+            },
+            180,
+        ),
+    )
+    assert second.lifecycle is ThermalOrchestrationLifecycle.OWNED
+    assert second.ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+@pytest.mark.parametrize(
+    ("concept", "reason"),
+    (
+        ("pool.active", "runtime_ownership_preempted:pool_activity_stale"),
+        ("spa.active", "runtime_ownership_preempted:spa_activity_stale"),
+        ("pump.rpm", "runtime_ownership_preempted:pump_evidence_stale"),
+        (
+            "pool.pump_circuit.configured_speed_rpm",
+            "runtime_ownership_preempted:pump_setpoint_evidence_stale",
+        ),
+        ("pool.raw_heater_id", "runtime_ownership_preempted:source_evidence_stale"),
+    ),
+)
+def test_owned_native_state_beyond_source_cadence_margin_still_fails_closed(
+    concept: str,
+    reason: str,
+) -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    _establish_pool_full_ownership(orchestrator, at=NOW)
+    observations = tuple(
+        _observation(
+            item.observation_id,
+            item.value,
+            at=(NOW if item.observation_id == concept else NOW + timedelta(seconds=121)),
+        )
+        for item in _observations(NOW)
+    )
+
+    result = _refresh(
+        orchestrator,
+        NOW + timedelta(seconds=121),
+        observations=observations,
+    )
+
+    assert result.lifecycle is ThermalOrchestrationLifecycle.PREEMPTED
+    assert result.blocking_reason == reason
+
+
 def test_target_inactive_with_other_body_inactive_remains_cold_start_candidate() -> None:
     result = _refresh(
         ThermalRuntimeOrchestrator(),
