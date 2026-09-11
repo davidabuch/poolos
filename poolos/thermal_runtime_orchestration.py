@@ -48,20 +48,23 @@ from .pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvid
 from .operating_baselines import PumpOperatingBaselines
 from .pump_speed_session import PumpSpeedOverrideState
 
-# The independent native transport performs bounded keepalive reads every 90
-# seconds and the HA coordinator provides a 30-second reconciliation backstop.
-# Candidate admission therefore permits one complete source cadence plus one
-# scheduling interval.  Active ownership, probe continuity, and post-delivery
-# verification deliberately retain the stricter 30-second contract below.
-_NATIVE_CANDIDATE_SOURCE_CADENCE = timedelta(seconds=90)
-_NATIVE_CANDIDATE_SCHEDULING_MARGIN = timedelta(seconds=30)
-_NATIVE_CANDIDATE_FRESHNESS = FreshnessPolicy(
+# The independent native transport configures a 90-second keepalive interval
+# and the HA coordinator provides a 30-second reconciliation backstop.  The
+# keepalive is an intended source cadence, not a protocol-level delivery SLA;
+# missing the combined bound therefore still fails closed.
+# Candidate admission and continued ownership therefore permit one complete
+# source cadence plus one scheduling interval. Probe continuity and
+# post-delivery verification deliberately retain the stricter 30-second
+# contract below because they prove a new physical consequence.
+_NATIVE_ORCHESTRATION_SOURCE_CADENCE = timedelta(seconds=90)
+_NATIVE_ORCHESTRATION_SCHEDULING_MARGIN = timedelta(seconds=30)
+NATIVE_ORCHESTRATION_FRESHNESS = FreshnessPolicy(
     max_age=(
-        _NATIVE_CANDIDATE_SOURCE_CADENCE
-        + _NATIVE_CANDIDATE_SCHEDULING_MARGIN
+        _NATIVE_ORCHESTRATION_SOURCE_CADENCE
+        + _NATIVE_ORCHESTRATION_SCHEDULING_MARGIN
     )
 )
-_LIVE_FRESHNESS = FreshnessPolicy(max_age=timedelta(seconds=30))
+STRICT_LIVE_FRESHNESS = FreshnessPolicy(max_age=timedelta(seconds=30))
 _LIVE_MINIMUM_CONFIDENCE = 0.5
 _LIVE_ACCEPTED_QUALITIES = frozenset(
     {ObservationQuality.GOOD, ObservationQuality.DEGRADED}
@@ -425,6 +428,7 @@ class ThermalRuntimeOrchestrator:
             observations=observations,
             body=body,
             external_changes=external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
         )
         if _probe_successor_handoff_pending(lease, body):
             return self.ownership.evaluate_pending_successor(evidence)
@@ -486,7 +490,7 @@ class ThermalRuntimeOrchestrator:
         hydraulic_reason = _shared_hydraulic_blocker(
             observations,
             evaluated_at=thermal.generated_at,
-            freshness_policy=_NATIVE_CANDIDATE_FRESHNESS,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
         )
         if hydraulic_reason is not None:
             return ThermalOrchestrationLifecycle.BLOCKED, hydraulic_reason, None
@@ -506,7 +510,7 @@ class ThermalRuntimeOrchestrator:
             observations,
             evaluated_at=thermal.generated_at,
             target=candidates[0],
-            freshness_policy=_NATIVE_CANDIDATE_FRESHNESS,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
         )
         if topology_reason is not None:
             return ThermalOrchestrationLifecycle.BLOCKED, topology_reason, None
@@ -523,25 +527,42 @@ def build_thermal_runtime_ownership_evidence(
     observations: dict[str, PoolObservation],
     body: ThermalBodyRuntimeAssessment,
     external_changes: ExternalChangeBatch,
+    freshness_policy: FreshnessPolicy = STRICT_LIVE_FRESHNESS,
 ) -> ThermalRuntimeOwnershipEvidence:
-    pool = _observation_state(observations.get("pool.active"), generated_at)
-    spa = _observation_state(observations.get("spa.active"), generated_at)
-    pump = _observation_state(observations.get("pump.rpm"), generated_at)
+    pool = _observation_state(
+        observations.get("pool.active"), generated_at, freshness_policy=freshness_policy
+    )
+    spa = _observation_state(
+        observations.get("spa.active"), generated_at, freshness_policy=freshness_policy
+    )
+    pump = _observation_state(
+        observations.get("pump.rpm"), generated_at, freshness_policy=freshness_policy
+    )
     configured_concept = (
         POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
         if body.body is ThermalBody.POOL
         else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
     )
     configured = _observation_state(
-        observations.get(configured_concept), generated_at
+        observations.get(configured_concept),
+        generated_at,
+        freshness_policy=freshness_policy,
     )
     source_concept = (
         "pool.raw_heater_id"
         if body.body is ThermalBody.POOL
         else "spa.raw_heater_id"
     )
-    source = _observation_state(observations.get(source_concept), generated_at)
-    circuits, complete = _shared_hydraulic_evidence(observations, generated_at)
+    source = _observation_state(
+        observations.get(source_concept),
+        generated_at,
+        freshness_policy=freshness_policy,
+    )
+    circuits, complete = _shared_hydraulic_evidence(
+        observations,
+        generated_at,
+        freshness_policy=freshness_policy,
+    )
     return ThermalRuntimeOwnershipEvidence(
         evaluated_at=generated_at,
         current_context=ThermalLiveExecutionContext(
@@ -618,7 +639,7 @@ def _observation_state(
     observation: PoolObservation | None,
     evaluated_at: datetime,
     *,
-    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
+    freshness_policy: FreshnessPolicy = STRICT_LIVE_FRESHNESS,
 ) -> _ObservationState:
     if observation is None:
         return _ObservationState(None, False, False, None)
@@ -641,7 +662,7 @@ def _shared_hydraulic_evidence(
     observations: dict[str, PoolObservation],
     evaluated_at: datetime,
     *,
-    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
+    freshness_policy: FreshnessPolicy = STRICT_LIVE_FRESHNESS,
 ) -> tuple[tuple[SharedHydraulicCircuitEvidence, ...], bool]:
     evidence: list[SharedHydraulicCircuitEvidence] = []
     complete = True
@@ -673,7 +694,7 @@ def _shared_hydraulic_blocker(
     observations: dict[str, PoolObservation],
     *,
     evaluated_at: datetime,
-    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
+    freshness_policy: FreshnessPolicy = STRICT_LIVE_FRESHNESS,
 ) -> str | None:
     circuits, complete = _shared_hydraulic_evidence(
         observations,
@@ -693,7 +714,7 @@ def _body_topology_blocker(
     *,
     evaluated_at: datetime,
     target: ThermalBody,
-    freshness_policy: FreshnessPolicy = _LIVE_FRESHNESS,
+    freshness_policy: FreshnessPolicy = STRICT_LIVE_FRESHNESS,
 ) -> str | None:
     pool = _observation_state(
         observations.get("pool.active"),

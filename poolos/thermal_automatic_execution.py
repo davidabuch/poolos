@@ -71,6 +71,8 @@ from .thermal_runtime_assessment import (
     ThermalRuntimeAssessment,
 )
 from .thermal_runtime_orchestration import (
+    NATIVE_ORCHESTRATION_FRESHNESS,
+    STRICT_LIVE_FRESHNESS,
     ThermalOrchestrationLifecycle,
     ThermalRuntimeOrchestrationAssessment,
     ThermalRuntimeOrchestrator,
@@ -757,6 +759,30 @@ class ThermalAutomaticExecutionDriver:
                                 else None
                             )
                         ),
+                        frame=frame,
+                        body=body,
+                        preflight=None,
+                        failure=None,
+                        command_delivery_performed=False,
+                    )
+                if (
+                    lease is not None
+                    and lease.originating_currentness is not None
+                    and currentness is not None
+                    and lease.originating_currentness.purpose == currentness.purpose
+                    and body.plan.disposition
+                    is ThermalPlanDisposition.ALREADY_CONVERGED
+                ):
+                    # Evaluation and plan identifiers are audit identities, not
+                    # a semantic operating-purpose boundary.  Ownership has
+                    # already been revalidated by the orchestrator against the
+                    # current authoritative frame; a fully converged plan for
+                    # the exact same body/source/RPM/target purpose therefore
+                    # needs neither a command nor a successor handoff.
+                    return self._publish(
+                        state=ThermalAutomaticDriverState.CONVERGED,
+                        evaluated_at=frame.observed_at,
+                        blocker=None,
                         frame=frame,
                         body=body,
                         preflight=None,
@@ -1550,6 +1576,11 @@ class ThermalAutomaticExecutionDriver:
                 observations={item.observation_id: item for item in frame.observations},
                 body=body,
                 external_changes=frame.external_changes,
+                freshness_policy=(
+                    NATIVE_ORCHESTRATION_FRESHNESS
+                    if self.termination_attempt is None
+                    else STRICT_LIVE_FRESHNESS
+                ),
             ),
             desired_source=(
                 PhysicalHeatMode.OFF
@@ -1587,6 +1618,7 @@ class ThermalAutomaticExecutionDriver:
                 observations={item.observation_id: item for item in frame.observations},
                 body=body,
                 external_changes=frame.external_changes,
+                freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
             ),
             filtration=frame.filtration_successor,
             outage=frame.orchestration.outage,
@@ -1638,6 +1670,11 @@ class ThermalAutomaticExecutionDriver:
             observations={item.observation_id: item for item in frame.observations},
             body=body,
             external_changes=frame.external_changes,
+            freshness_policy=(
+                NATIVE_ORCHESTRATION_FRESHNESS
+                if self.cleanup_attempt is None
+                else STRICT_LIVE_FRESHNESS
+            ),
         )
         external_reason = self.termination_policy.evaluate(
             provenance.arbitration_entitlement(),
@@ -2197,6 +2234,7 @@ class ThermalAutomaticExecutionDriver:
                 observations={item.observation_id: item for item in frame.observations},
                 body=body,
                 external_changes=frame.external_changes,
+                freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
             ),
         )
         if decision.disposition is not ThermalRuntimeOwnershipDisposition.HANDED_OFF:
