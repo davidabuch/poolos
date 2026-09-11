@@ -905,7 +905,11 @@ class ThermalRuntimeOwnershipManager:
         lease = self._state.lease
         if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
             return None
-        return _external_preemption_reason(lease, batch)
+        return _external_preemption_reason(
+            lease,
+            batch,
+            pump_rpm_tolerance=self.pump_rpm_tolerance,
+        )
 
     def promote_session_provenance(
         self,
@@ -1355,7 +1359,11 @@ class ThermalRuntimeOwnershipManager:
                 return "runtime_ownership_preempted:source_evidence_unusable"
             if evidence.effective_heat_source is not lease.heat_source.intended_value:
                 return "runtime_ownership_preempted:source_external_change"
-        external = _external_preemption_reason(lease, evidence.external_changes)
+        external = _external_preemption_reason(
+            lease,
+            evidence.external_changes,
+            pump_rpm_tolerance=self.pump_rpm_tolerance,
+        )
         if external is not None:
             return external
         return None
@@ -1646,6 +1654,8 @@ def _shared_hydraulic_failure_reason(
 def _external_preemption_reason(
     lease: ThermalRuntimeOwnershipLease,
     batch: ExternalChangeBatch,
+    *,
+    pump_rpm_tolerance: int,
 ) -> str | None:
     target_prefix = "pool" if lease.body is ThermalBody.POOL else "spa"
     target_body_concept = f"{target_prefix}.active"
@@ -1662,6 +1672,28 @@ def _external_preemption_reason(
             and event.concept == "pump.rpm"
             and event.reconciliation_required
         ):
+            expected_rpm = lease.pump_setpoint.intended_value
+            try:
+                observed_rpm = float(event.new_value)
+                intended_rpm = float(expected_rpm)
+            except (TypeError, ValueError, OverflowError):
+                return "runtime_ownership_preempted:pump_external_change"
+
+            # External-change classification may have been produced against an
+            # earlier planner-level steady-state target while the runtime lease
+            # subsequently gained exact accepted/verified pump provenance.
+            #
+            # A retained event whose resulting native value is already aligned
+            # with that currently owned pump intent is not contradictory
+            # evidence and must not destroy ownership. This does not create
+            # ownership from state coincidence: the lease and its command
+            # provenance already exist independently.
+            if (
+                ThermalRuntimeOwnedConcept.PUMP_SETPOINT in lease.verified_concepts
+                and abs(observed_rpm - intended_rpm) <= pump_rpm_tolerance
+            ):
+                continue
+
             return "runtime_ownership_preempted:pump_external_change"
         if (
             lease.heat_source is not None

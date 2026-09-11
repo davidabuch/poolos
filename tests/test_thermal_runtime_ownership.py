@@ -386,8 +386,8 @@ def test_external_event_at_or_after_lease_start_still_preempts(
         (
             external_event(
                 "pump.rpm",
-                2600,
                 2900,
+                2800,
                 observed_at=NOW + offset,
             ),
         )
@@ -403,7 +403,7 @@ def test_external_event_at_or_after_lease_start_still_preempts(
 def test_duplicate_postlease_event_cannot_mutate_terminal_ownership_twice() -> None:
     manager = ThermalRuntimeOwnershipManager()
     establish(manager, execution_ownership(pump_rpm=2900))
-    event = external_event("pump.rpm", 2600, 2900, observed_at=NOW)
+    event = external_event("pump.rpm", 2900, 2800, observed_at=NOW)
     batch = ExternalChangeBatch((event,))
 
     first = manager.evaluate(evidence(at=NOW + timedelta(seconds=1), changes=batch))
@@ -905,6 +905,194 @@ def verified_full_manager() -> ThermalRuntimeOwnershipManager:
         verified_prefix = currentness.residual_plan.operations[: index + 1]
     return manager
 
+
+
+
+def test_unverified_matching_pump_event_still_preempts() -> None:
+    """Accepted pump intent alone cannot suppress external takeover evidence."""
+
+    manager = ThermalRuntimeOwnershipManager()
+    establish(manager, execution_ownership(pump_rpm=2900))
+
+    lease = manager.state.lease
+    assert lease is not None
+    assert ThermalRuntimeOwnedConcept.PUMP_SETPOINT not in lease.verified_concepts
+
+    changed_at = NOW + timedelta(seconds=1)
+    matching_event = external_event(
+        "pump.rpm",
+        2600,
+        2900,
+        reconciliation_required=True,
+        observed_at=changed_at,
+    )
+
+    reason = manager.current_external_preemption_reason(
+        ExternalChangeBatch((matching_event,))
+    )
+
+    assert reason == "runtime_ownership_preempted:pump_external_change"
+
+
+def test_owned_prime_actual_rpm_transition_does_not_self_preempt() -> None:
+    """An exact accepted startup-prime consequence must not look like takeover."""
+
+    accepted_base = NOW - timedelta(seconds=10)
+    assessment = thermal_assessment(
+        at=accepted_base,
+        current_body_active=False,
+        current_rpm=0,
+    )
+    assert len(assessment.operations) >= 3
+
+    body_operation = assessment.operations[0]
+    prime_operation = assessment.operations[1]
+
+    assert body_operation.operation_id.endswith(":body")
+    assert prime_operation.operation_id.endswith(":prime")
+    assert prime_operation.rpm == 3000
+
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        assessment,
+        evaluation_id="evaluation-prime",
+    )
+    context = ThermalLiveExecutionContext(
+        "evaluation-prime",
+        assessment.plan_id,
+        currentness,
+    )
+
+    manager = ThermalRuntimeOwnershipManager()
+
+    body_accepted_at = accepted_base
+    body_ownership = ThermalLiveExecutionOwnership(
+        evaluation_id="evaluation-prime",
+        thermal_plan_id=assessment.plan_id,
+        execution_plan_id="execution-prime",
+        target_body=ThermalBody.POOL,
+        body_activation_operation_id=body_operation.operation_id,
+        body_activation_receipt_id="body-receipt",
+        body_activation_correlation_id="body-correlation",
+        body_activation_accepted_at=body_accepted_at,
+    )
+
+    established = manager.establish(
+        body_ownership,
+        established_at=body_accepted_at,
+        requested_mode="Solar",
+        current_context=context,
+        execution_progress=ThermalExecutionProgress(
+            accepted_current=currentness.residual_plan.operations[0],
+            accepted_operation_id=body_operation.operation_id,
+        ),
+    )
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+
+    body_observed_at = body_accepted_at + timedelta(seconds=1)
+    verified_body = manager.evaluate(
+        evidence(
+            at=body_observed_at,
+            evaluation_id="evaluation-prime",
+            plan_id=assessment.plan_id,
+            execution_currentness=currentness,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=0,
+            configured_pump_rpm=2900,
+            pool_observed_at=body_observed_at,
+        )
+    )
+    assert verified_body.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+
+    prime_accepted_at = body_observed_at + timedelta(seconds=1)
+    prime_ownership = replace(
+        body_ownership,
+        pump_operation_id=prime_operation.operation_id,
+        pump_receipt_id="prime-receipt",
+        pump_correlation_id="prime-correlation",
+        commanded_pump_rpm=3000,
+        pump_accepted_at=prime_accepted_at,
+    )
+
+    promoted = manager.promote_session_provenance(
+        prime_ownership,
+        promoted_at=prime_accepted_at,
+        requested_mode="Solar",
+        originating_context=context,
+        execution_progress=ThermalExecutionProgress(
+            verified_prefix=(currentness.residual_plan.operations[0],),
+            accepted_current=currentness.residual_plan.operations[1],
+            accepted_operation_id=prime_operation.operation_id,
+        ),
+    )
+    assert promoted.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+
+    prime_observed_at = prime_accepted_at + timedelta(seconds=1)
+
+    # Reproduce the live artifact:
+    # steady Solar intent is 2900, while the accepted startup prime is 3000.
+    prime_actual_event = external_event(
+        "pump.rpm",
+        2900,
+        3000,
+        reconciliation_required=True,
+        observed_at=prime_observed_at,
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=prime_observed_at,
+            evaluation_id="evaluation-prime",
+            plan_id=assessment.plan_id,
+            execution_currentness=currentness,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=3000,
+            configured_pump_rpm=3000,
+            pump_observed_at=prime_observed_at,
+            configured_pump_observed_at=prime_observed_at,
+            changes=ExternalChangeBatch((prime_actual_event,)),
+        )
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert decision.current_state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert decision.reason_code == "runtime_ownership_retained:current_evidence_confirmed"
+
+
+def test_true_external_pump_change_still_preempts_after_owned_prime_model() -> None:
+    """A real steady-state RPM takeover must remain fail-closed."""
+
+    manager = ThermalRuntimeOwnershipManager()
+    establish(
+        manager,
+        execution_ownership(
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+        ),
+    )
+
+    changed_at = NOW + timedelta(seconds=1)
+    external = external_event(
+        "pump.rpm",
+        2900,
+        2200,
+        reconciliation_required=True,
+        observed_at=changed_at,
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            at=changed_at,
+            pump_rpm=2200,
+            configured_pump_rpm=2900,
+            changes=ExternalChangeBatch((external,)),
+        )
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+    assert decision.reason_code == "runtime_ownership_preempted:pump_external_change"
 
 def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     manager = full_manager()
