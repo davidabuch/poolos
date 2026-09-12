@@ -41,6 +41,7 @@ class ThermalCirculationCleanupProvenance:
     established_at: datetime
     body_activation: ThermalRuntimeConceptProvenance | None
     pump_setpoint: ThermalRuntimeConceptProvenance | None
+    pump_setpoint_accepted_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -57,6 +58,10 @@ class ThermalCirculationCleanupProvenance:
         _require_aware(self.established_at, "cleanup provenance establishment")
         if self.established_at < self.originating_lease_established_at:
             raise ValueError("cleanup provenance cannot predate originating lease")
+        if self.pump_setpoint_accepted_at is not None:
+            _require_aware(self.pump_setpoint_accepted_at, "pump acceptance")
+            if self.pump_setpoint_accepted_at > self.established_at:
+                raise ValueError("pump acceptance cannot follow cleanup provenance")
         object.__setattr__(self, "body", ThermalBody(self.body))
         if self.body_activation is None and self.pump_setpoint is None:
             raise ValueError("cleanup provenance requires an owned body or pump concept")
@@ -101,6 +106,7 @@ class ThermalCirculationCleanupProvenance:
             established_at=established_at,
             body_activation=entitlement.body_activation,
             pump_setpoint=entitlement.pump_setpoint,
+            pump_setpoint_accepted_at=entitlement.pump_setpoint_accepted_at,
         )
 
     def arbitration_entitlement(self) -> ThermalResidualTerminationEntitlement:
@@ -118,6 +124,7 @@ class ThermalCirculationCleanupProvenance:
             body_activation=self.body_activation,
             pump_setpoint=self.pump_setpoint,
             heat_source=None,
+            pump_setpoint_accepted_at=self.pump_setpoint_accepted_at,
         )
 
     def without_pump(self) -> ThermalCirculationCleanupProvenance | None:
@@ -125,7 +132,11 @@ class ThermalCirculationCleanupProvenance:
 
         if self.body_activation is None:
             return None
-        return replace(self, pump_setpoint=None)
+        return replace(
+            self,
+            pump_setpoint=None,
+            pump_setpoint_accepted_at=None,
+        )
 
 
 @dataclass(frozen=True, slots=True)

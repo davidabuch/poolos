@@ -68,6 +68,7 @@ def _entitlement(
             if pump_owned
             else None
         ),
+        pump_setpoint_accepted_at=(NOW - timedelta(milliseconds=500) if pump_owned else None),
         heat_source=(
             None
             if source is None
@@ -231,6 +232,75 @@ def test_external_pump_takeover_invalidates_source_cleanup_too() -> None:
     assert result.disposition is ThermalTerminationDisposition.INVALIDATED
     assert result.reason_code == "thermal_termination_pump_external_takeover"
     assert result.operation is None
+
+
+def test_retained_aligned_verified_pump_event_does_not_poison_termination() -> None:
+    """A retained event matching verified residual provenance is not takeover."""
+
+    event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2600,
+        new_value=2900,
+        observed_at=NOW,
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2600,
+    )
+
+    result = ThermalTerminationPolicy().evaluate(
+        _entitlement(),
+        _evidence(changes=ExternalChangeBatch((event,))),
+        desired_source=PhysicalHeatMode.OFF,
+    )
+
+    assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
+    assert result.operation is not None
+
+
+def test_earlier_external_pump_event_cannot_be_retroactively_adopted() -> None:
+    event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2900,
+        new_value=3000,
+        observed_at=NOW - timedelta(milliseconds=750),
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2900,
+    )
+
+    result = ThermalTerminationPolicy().evaluate(
+        _entitlement(),
+        _evidence(changes=ExternalChangeBatch((event,))),
+        desired_source=PhysicalHeatMode.OFF,
+    )
+
+    assert result.disposition is ThermalTerminationDisposition.INVALIDATED
+
+
+def test_cleanup_projection_preserves_pump_acceptance_epoch_until_pump_is_removed() -> None:
+    entitlement = _entitlement()
+    provenance = ThermalCirculationCleanupProvenance.from_residual(
+        entitlement,
+        established_at=NOW,
+    )
+
+    assert provenance is not None
+    assert provenance.pump_setpoint_accepted_at == entitlement.pump_setpoint_accepted_at
+    projected = provenance.arbitration_entitlement()
+    assert projected.pump_setpoint_accepted_at == entitlement.pump_setpoint_accepted_at
+
+    body_only = provenance.without_pump()
+    assert body_only is not None
+    assert body_only.pump_setpoint is None
+    assert body_only.pump_setpoint_accepted_at is None
 
 
 def test_hot_tub_residual_allows_only_exact_owned_source_off() -> None:

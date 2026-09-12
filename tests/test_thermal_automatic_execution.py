@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass, field
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from functools import partial
 
 import pytest
 
@@ -12,7 +14,11 @@ from poolos.circulation_successor import (
     FiltrationTargetSemantics,
 )
 from poolos.hal import CommandReceipt, CommandStatus
-from poolos.external_change import ExternalChangeBatch, ExternalChangeEvent
+from poolos.external_change import (
+    ExternalChangeBatch,
+    ExternalChangeEvent,
+    ThermalRuntimeExternalChangeEvidence,
+)
 from poolos.filtration_automatic_execution import (
     FiltrationAutomaticDriverState,
     FiltrationAutomaticExecutionDriver,
@@ -69,6 +75,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionContext,
     ThermalLiveExecutionOwnership,
     ThermalLiveExecutionPolicy,
+    ThermalLiveExecutionStatus,
 )
 from poolos.thermal_runtime_assessment import (
     ThermalRequestedMode,
@@ -88,12 +95,156 @@ from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
 
 NOW = datetime(2026, 9, 4, 18, 0, tzinfo=UTC)
+NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class CommandLedgerDisposition(StrEnum):
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+    TIMED_OUT = "TIMED_OUT"
+    SUPERSEDED = "SUPERSEDED"
+    EXTERNALLY_PREEMPTED = "EXTERNALLY_PREEMPTED"
+
+
+@dataclass(slots=True)
+class CommandLedgerEntry:
+    operation_id: str
+    command_type: str
+    target_concept: str
+    intended_value: object
+    purpose_id: str
+    evaluation_id: str
+    execution_session_id: str
+    runtime_ownership_generation: int | str
+    pump_session_generation: int | str
+    autonomous_resume_generation: int | str
+    termination_entitlement_generation: int | str
+    accepted_at: datetime
+    correlation_id: str
+    expected_consequence: tuple[tuple[str, object], ...]
+    verification_evidence_timestamp: datetime | str = NOT_APPLICABLE
+    terminal_disposition: CommandLedgerDisposition | None = None
+    authority_valid_at_delivery: bool = True
+    _confirmed_concepts: set[str] = field(default_factory=set, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class _LedgerContext:
+    purpose_id: str
+    evaluation_id: str
+    execution_session_id: str
+    runtime_ownership_generation: int | str
+    pump_session_generation: int | str
+    autonomous_resume_generation: int | str
+    termination_entitlement_generation: int | str
+    accepted_at: datetime
+    authority_valid_at_delivery: bool
+
+
+@dataclass(slots=True)
+class StructuredCommandLedger:
+    entries: list[CommandLedgerEntry] = field(default_factory=list)
+
+    def accept(
+        self,
+        operation: PoolOperation,
+        *,
+        correlation_id: str,
+        context: _LedgerContext,
+    ) -> None:
+        assert all(item.operation_id != operation.operation_id for item in self.entries)
+        assert all(item.correlation_id != correlation_id for item in self.entries)
+        target, intended, consequence = _command_consequence(operation)
+        self.entries.append(
+            CommandLedgerEntry(
+                operation_id=operation.operation_id,
+                command_type=type(operation).__name__,
+                target_concept=target,
+                intended_value=intended,
+                purpose_id=context.purpose_id,
+                evaluation_id=context.evaluation_id,
+                execution_session_id=context.execution_session_id,
+                runtime_ownership_generation=context.runtime_ownership_generation,
+                pump_session_generation=context.pump_session_generation,
+                autonomous_resume_generation=context.autonomous_resume_generation,
+                termination_entitlement_generation=(
+                    context.termination_entitlement_generation
+                ),
+                accepted_at=context.accepted_at,
+                correlation_id=correlation_id,
+                expected_consequence=consequence,
+                authority_valid_at_delivery=context.authority_valid_at_delivery,
+            )
+        )
+
+    def observe(self, observations: tuple[PoolObservation, ...]) -> None:
+        for item in self.entries:
+            if item.terminal_disposition is not None:
+                continue
+            evidence_at: list[datetime] = []
+            for concept, expected in item.expected_consequence:
+                matching = [
+                    observation
+                    for observation in observations
+                    if observation.observation_id == concept
+                    and observation.observed_at > item.accepted_at
+                    and observation.value == expected
+                ]
+                if matching:
+                    item._confirmed_concepts.add(concept)
+                    evidence_at.append(max(value.observed_at for value in matching))
+            if len(item._confirmed_concepts) == len(item.expected_consequence):
+                item.terminal_disposition = CommandLedgerDisposition.VERIFIED
+                item.verification_evidence_timestamp = max(evidence_at)
+
+    def assert_complete(self) -> None:
+        assert self.entries
+        assert all(item.authority_valid_at_delivery for item in self.entries)
+        assert all(item.terminal_disposition is not None for item in self.entries)
+        assert len({item.operation_id for item in self.entries}) == len(self.entries)
+        assert len({item.correlation_id for item in self.entries}) == len(self.entries)
+
+
+def _command_consequence(
+    operation: PoolOperation,
+) -> tuple[str, object, tuple[tuple[str, object], ...]]:
+    if isinstance(operation, SetBodyActive):
+        concept = (
+            "pool.active"
+            if operation.equipment_id == ThermalBody.POOL.value
+            else "spa.active"
+        )
+        return concept, operation.active, ((concept, operation.active),)
+    if isinstance(operation, SetPumpSpeed):
+        return (
+            "pump.rpm",
+            operation.rpm,
+            (
+                ("pool.pump_circuit.configured_speed_rpm", operation.rpm),
+                ("pump.rpm", operation.rpm),
+            ),
+        )
+    assert isinstance(operation, SetHeatMode)
+    concept = (
+        "pool.raw_heater_id"
+        if operation.equipment_id == ThermalBody.POOL.value
+        else "spa.raw_heater_id"
+    )
+    raw = {
+        PhysicalHeatMode.OFF: "00000",
+        PhysicalHeatMode.GAS: "H0001",
+        PhysicalHeatMode.SOLAR: "H0002",
+    }[operation.mode]
+    return concept, operation.mode.value, ((concept, raw),)
 
 
 @dataclass
 class FakeDelivery:
     available: bool = True
     calls: list[PoolOperation] = field(default_factory=list)
+    correlation_ids: list[str] = field(default_factory=list)
+    ledger: StructuredCommandLedger | None = None
+    ledger_context: _LedgerContext | None = None
 
     async def deliver(
         self,
@@ -102,6 +253,14 @@ class FakeDelivery:
         correlation_id: str,
     ) -> CommandReceipt:
         self.calls.append(operation)
+        self.correlation_ids.append(correlation_id)
+        if self.ledger is not None:
+            assert self.ledger_context is not None
+            self.ledger.accept(
+                operation,
+                correlation_id=correlation_id,
+                context=self.ledger_context,
+            )
         return CommandReceipt(
             status=CommandStatus.ACKNOWLEDGED,
             command_id=correlation_id,
@@ -115,13 +274,51 @@ class FakeDelivery:
 class FakeDeliveryFactory:
     delivery: FakeDelivery
     bindings: list[tuple[str, str]] = field(default_factory=list)
+    driver: ThermalAutomaticExecutionDriver | None = None
+
+    def _runtime_generation(self) -> int | str:
+        if self.driver is None:
+            return NOT_APPLICABLE
+        lease = self.driver.orchestrator.ownership.state.lease
+        return NOT_APPLICABLE if lease is None else lease.generation
 
     def for_session(self, session, *, epoch_identity: str):
         self.bindings.append((session.execution_plan.plan_id, epoch_identity))
+        self.delivery.ledger_context = _LedgerContext(
+            purpose_id=session.originating_currentness.purpose.purpose_id,
+            evaluation_id=session.evaluation_id,
+            execution_session_id=session.execution_plan.plan_id,
+            runtime_ownership_generation=self._runtime_generation(),
+            pump_session_generation=NOT_APPLICABLE,
+            autonomous_resume_generation=NOT_APPLICABLE,
+            termination_entitlement_generation=NOT_APPLICABLE,
+            accepted_at=session.updated_at,
+            authority_valid_at_delivery=(
+                session.status is ThermalLiveExecutionStatus.READY
+            ),
+        )
         return self.delivery
 
     def for_termination(self, *, body, entitlement_id: str, epoch_identity: str):
         self.bindings.append((f"termination:{entitlement_id}", epoch_identity))
+        if self.delivery.ledger is None:
+            return self.delivery
+        assert self.driver is not None
+        entitlement = self.driver.orchestrator.ownership.residual_termination
+        assert entitlement is not None
+        self.delivery.ledger_context = _LedgerContext(
+            purpose_id="thermal_termination",
+            evaluation_id=epoch_identity,
+            execution_session_id=entitlement_id,
+            runtime_ownership_generation=entitlement.generation,
+            pump_session_generation=NOT_APPLICABLE,
+            autonomous_resume_generation=NOT_APPLICABLE,
+            termination_entitlement_generation=entitlement.generation,
+            accepted_at=self.driver._last_epoch_at,
+            authority_valid_at_delivery=(
+                entitlement.entitlement_id == entitlement_id
+            ),
+        )
         return self.delivery
 
     def for_cleanup(
@@ -131,10 +328,43 @@ class FakeDeliveryFactory:
         epoch_identity: str,
     ):
         self.bindings.append((f"cleanup:{candidate.candidate_id}", epoch_identity))
+        self.delivery.ledger_context = _LedgerContext(
+            purpose_id="thermal_circulation_cleanup",
+            evaluation_id=epoch_identity,
+            execution_session_id=candidate.candidate_id,
+            runtime_ownership_generation=candidate.provenance_generation,
+            pump_session_generation=NOT_APPLICABLE,
+            autonomous_resume_generation=NOT_APPLICABLE,
+            termination_entitlement_generation=candidate.provenance_generation,
+            accepted_at=candidate.evaluated_at,
+            authority_valid_at_delivery=(
+                candidate.provenance_generation > 0
+                and bool(candidate.provenance_id)
+            ),
+        )
         return self.delivery
 
     def for_operation(self, **kwargs: object) -> FakeDelivery:
-        del kwargs
+        frame = kwargs["frame"]
+        session_id = kwargs["session_id"]
+        assert isinstance(frame, FiltrationAutomaticExecutionFrame)
+        assert isinstance(session_id, str)
+        generation: int | str = NOT_APPLICABLE
+        if self.driver is not None:
+            lease = self.driver.circulation_ownership.filtration_lease
+            if lease is not None:
+                generation = lease.generation
+        self.delivery.ledger_context = _LedgerContext(
+            purpose_id="filtration",
+            evaluation_id=frame.epoch_identity,
+            execution_session_id=session_id,
+            runtime_ownership_generation=generation,
+            pump_session_generation=NOT_APPLICABLE,
+            autonomous_resume_generation=NOT_APPLICABLE,
+            termination_entitlement_generation=NOT_APPLICABLE,
+            accepted_at=frame.observed_at,
+            authority_valid_at_delivery=bool(session_id),
+        )
         return self.delivery
 
 
@@ -216,6 +446,7 @@ def _frame(
     heater_active: bool = False,
     spa_heating_demand_active: bool = False,
     native_observation_at: datetime | None = None,
+    observation_times: dict[str, datetime] | None = None,
     body: ThermalBody = ThermalBody.POOL,
     filtration_remaining: timedelta | None = None,
     filtration_disposition: FiltrationDisposition | None = None,
@@ -228,6 +459,7 @@ def _frame(
     pump_session_purpose: PumpSpeedSessionPurpose | None = None,
     pump_session_effective_rpm: int | None = None,
     pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
+    command_ledger: StructuredCommandLedger | None = None,
 ) -> ThermalAutomaticExecutionFrame:
     evidence_at = at if native_observation_at is None else native_observation_at
     values = _values(
@@ -248,6 +480,7 @@ def _frame(
     )
     for concept in missing:
         values.pop(concept, None)
+    observation_times = {} if observation_times is None else observation_times
     observations = tuple(
         _observation(
             concept,
@@ -256,7 +489,7 @@ def _frame(
                 solar_observation_observed_at
                 if concept == "solar.active"
                 and solar_observation_observed_at is not None
-                else evidence_at
+                else observation_times.get(concept, evidence_at)
             ),
         )
         for concept, value in values.items()
@@ -279,6 +512,8 @@ def _frame(
         }
         and not (omit_solar_observation and concept == "solar.active")
     )
+    if command_ledger is not None:
+        command_ledger.observe(observations)
     policy = ThermalLiveExecutionPolicy(
         thermal_live_execution_enabled=True,
         verification_timeout=verification_timeout,
@@ -293,7 +528,10 @@ def _frame(
         ThermalRuntimeEvidence(
             evaluated_at=at,
             native_values=values,
-            native_observed_at={concept: evidence_at for concept in values},
+            native_observed_at={
+                concept: observation_times.get(concept, evidence_at)
+                for concept in values
+            },
             pool_requested_mode=(
                 mode if body is ThermalBody.POOL else ThermalRequestedMode.OFF
             ),
@@ -425,6 +663,7 @@ def _filtration_frame(
     configured_rpm: int,
     satisfied: bool,
     spa_active: bool = False,
+    command_ledger: StructuredCommandLedger | None = None,
 ) -> FiltrationAutomaticExecutionFrame:
     tracker = FiltrationAccountingTracker(tou_profile=LADWP_INITIAL_PROFILE)
     accounting = tracker.observe(
@@ -462,6 +701,8 @@ def _filtration_frame(
             ("slide.active", False),
         )
     )
+    if command_ledger is not None:
+        command_ledger.observe(observations)
     return FiltrationAutomaticExecutionFrame(
         epoch_identity=f"filtration:{at.isoformat()}",
         observed_at=at,
@@ -1295,6 +1536,403 @@ def test_quiescent_solar_cold_start_verifies_h0002_before_engagement() -> None:
     assert confirmed.blocker == "automatic_thermal_solar_engaged"
 
 
+@pytest.mark.parametrize("external_takeover", (False, True))
+def test_retained_prime_event_is_replaced_before_solar_termination_and_cleanup(
+    external_takeover: bool,
+) -> None:
+    """Exercise the HA accumulator epoch across prime, Solar, and cleanup."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    filtration_driver = FiltrationAutomaticExecutionDriver(
+        driver.circulation_ownership
+    )
+    filtration_driver.set_enabled(
+        True,
+        changed_at=NOW - timedelta(seconds=1),
+        current_epoch_identity=None,
+    )
+    ledger = StructuredCommandLedger()
+    lifecycle_frame = partial(_frame, command_ledger=ledger)
+    filtration_frame = partial(_filtration_frame, command_ledger=ledger)
+    delivery = FakeDelivery(ledger=ledger)
+    factory = FakeDeliveryFactory(delivery, driver=driver)
+    evaluator = ThermalRuntimeEvaluator()
+    retained = ThermalRuntimeExternalChangeEvidence()
+
+    # Establish trusted water before the quiescent cold start so this path uses
+    # the commissioned 3000-RPM prime rather than a temperature probe.
+    lifecycle_frame(
+        ThermalRuntimeOrchestrator(),
+        NOW - timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+    )
+    baseline = lifecycle_frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=2900,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    for seconds, active, rpm, configured in (
+        (1, False, 0, 2900),
+        (2, True, 0, 2900),
+        (3, True, 3000, 3000),
+        (63, True, 3000, 3000),
+        (64, True, 2900, 2900),
+    ):
+        phase_frame = lifecycle_frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=active,
+            pump_rpm=rpm,
+            configured_rpm=configured,
+            mode=ThermalRequestedMode.SOLAR,
+            evaluator=evaluator,
+            driver=driver,
+            verification_timeout=timedelta(seconds=120),
+        )
+        result = asyncio.run(
+            driver.process_epoch(
+                phase_frame,
+                delivery_factory=factory,
+            )
+        )
+        calls_after_phase = len(delivery.calls)
+        assert (
+            asyncio.run(
+                driver.process_epoch(phase_frame, delivery_factory=factory)
+            )
+            == result
+        )
+        assert len(delivery.calls) == calls_after_phase
+
+    prime_event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2900,
+        new_value=3000,
+        observed_at=NOW + timedelta(seconds=3),
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2900,
+    )
+    steady_event = replace(
+        prime_event,
+        previous_value=3000,
+        new_value=2900,
+        observed_at=NOW + timedelta(seconds=64),
+        intended_value=3000,
+    )
+    assert retained.update(ExternalChangeBatch((prime_event,))).events == (
+        prime_event,
+    )
+    retained.update(ExternalChangeBatch((steady_event,)))
+    assert retained.retained_count == 1
+
+    for seconds, heater, solar_active in (
+        (65, "00000", False),
+        (66, "H0002", False),
+        (67, "H0002", True),
+        (97, "H0002", True),
+    ):
+        source_frame = lifecycle_frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=True,
+            pump_rpm=2900,
+            configured_rpm=2900,
+            pool_heater=heater,
+            solar_active=solar_active,
+            mode=ThermalRequestedMode.SOLAR,
+            evaluator=evaluator,
+            driver=driver,
+            external_changes=retained.update(ExternalChangeBatch(())),
+            verification_timeout=timedelta(seconds=120),
+        )
+        result = asyncio.run(
+            driver.process_epoch(
+                source_frame,
+                delivery_factory=factory,
+            )
+        )
+        calls_after_phase = len(delivery.calls)
+        assert (
+            asyncio.run(
+                driver.process_epoch(source_frame, delivery_factory=factory)
+            )
+            == result
+        )
+        assert len(delivery.calls) == calls_after_phase
+    assert result.state is ThermalAutomaticDriverState.CONVERGED, result.blocker
+
+    if external_takeover:
+        takeover_event = replace(
+            steady_event,
+            previous_value=2900,
+            new_value=2200,
+            observed_at=NOW + timedelta(seconds=98),
+            intended_value=2900,
+        )
+        assert retained.update(ExternalChangeBatch((takeover_event,))).events == (
+            takeover_event,
+        )
+        takeover_frame = lifecycle_frame(
+            orchestrator,
+            NOW + timedelta(seconds=99),
+            pool_active=True,
+            pump_rpm=2200,
+            configured_rpm=2900,
+            pool_heater="H0002",
+            solar_active=True,
+            mode=ThermalRequestedMode.SOLAR,
+            evaluator=evaluator,
+            driver=driver,
+            external_changes=retained.update(ExternalChangeBatch(())),
+        )
+        assert (
+            takeover_frame.orchestration.lifecycle
+            is ThermalOrchestrationLifecycle.PREEMPTED
+        ), takeover_frame.orchestration
+        assert takeover_frame.epoch_identity != driver.last_epoch_identity
+        preempted = asyncio.run(
+            driver.process_epoch(
+                takeover_frame,
+                delivery_factory=factory,
+            )
+        )
+        assert preempted.state is ThermalAutomaticDriverState.CONVERGED
+        assert preempted.blocker == "thermal_termination_no_owned_active_source"
+        assert orchestrator.ownership.state.status is (
+            ThermalRuntimeOwnershipStatus.PREEMPTED
+        )
+        calls_before = len(delivery.calls)
+        cleanup_blocked = asyncio.run(
+            driver.process_epoch(
+                lifecycle_frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=100),
+                    pool_active=True,
+                    pump_rpm=2200,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    solar_active=True,
+                    mode=ThermalRequestedMode.OFF,
+                    evaluator=evaluator,
+                    driver=driver,
+                    external_changes=retained.update(ExternalChangeBatch(())),
+                    filtration_remaining=timedelta(hours=2),
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert cleanup_blocked.state is ThermalAutomaticDriverState.BLOCKED
+        assert cleanup_blocked.blocker == "automatic_thermal_preexisting_body_unowned"
+        assert len(delivery.calls) == calls_before
+        assert driver.active_session is None
+        assert orchestrator.ownership.residual_termination is None
+        assert driver.cleanup_provenance is None
+        ledger.assert_complete()
+        assert len(ledger.entries) == 4
+        return
+
+    for seconds in (248, 848):
+        result = asyncio.run(
+            driver.process_epoch(
+                lifecycle_frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    pool_temperature=90.0,
+                    solar_active=True,
+                    mode=ThermalRequestedMode.SOLAR,
+                    filtration_remaining=timedelta(hours=2),
+                    evaluator=evaluator,
+                    driver=driver,
+                    external_changes=retained.update(ExternalChangeBatch(())),
+                ),
+                delivery_factory=factory,
+            )
+        )
+    assert result.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION
+
+    source_off = asyncio.run(
+        driver.process_epoch(
+            lifecycle_frame(
+                orchestrator,
+                NOW + timedelta(seconds=849),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+                external_changes=retained.update(ExternalChangeBatch(())),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert source_off.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.pump_setpoint is not None
+    assert driver.cleanup_provenance.pump_setpoint_accepted_at is not None
+
+    cleanup = asyncio.run(
+        driver.process_epoch(
+            lifecycle_frame(
+                orchestrator,
+                NOW + timedelta(seconds=850),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+                external_changes=retained.update(ExternalChangeBatch(())),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert cleanup.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION, (
+        cleanup.blocker,
+        cleanup.runtime_ownership_summary,
+    )
+    assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.pump_setpoint is not None
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+
+    handoff_complete = asyncio.run(
+        driver.process_epoch(
+            lifecycle_frame(
+                orchestrator,
+                NOW + timedelta(seconds=851),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="00000",
+                pool_temperature=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(hours=2),
+                evaluator=evaluator,
+                driver=driver,
+                external_changes=retained.update(ExternalChangeBatch(())),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert handoff_complete.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.cleanup_provenance is None
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.FILTRATION
+
+    owned_filtration = asyncio.run(
+        filtration_driver.process_epoch(
+            filtration_frame(
+                NOW + timedelta(seconds=852),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                satisfied=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert owned_filtration.state is FiltrationAutomaticDriverState.OWNED
+
+    filtration_complete = asyncio.run(
+        filtration_driver.process_epoch(
+            filtration_frame(
+                NOW + timedelta(seconds=853),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert filtration_complete.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is False
+
+    final = asyncio.run(
+        filtration_driver.process_epoch(
+            filtration_frame(
+                NOW + timedelta(seconds=854),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert final.state is FiltrationAutomaticDriverState.BLOCKED
+    assert driver.circulation_ownership.owner is PoolCirculationOwner.NONE
+    assert [type(operation).__name__ for operation in delivery.calls] == [
+        "SetBodyActive",
+        "SetPumpSpeed",
+        "SetPumpSpeed",
+        "SetHeatMode",
+        "SetHeatMode",
+        "SetPumpSpeed",
+        "SetBodyActive",
+    ]
+    assert [
+        operation.rpm
+        for operation in delivery.calls
+        if isinstance(operation, SetPumpSpeed)
+    ] == [3000, 2900, 2600]
+    assert [
+        operation.mode
+        for operation in delivery.calls
+        if isinstance(operation, SetHeatMode)
+    ] == [PhysicalHeatMode.SOLAR, PhysicalHeatMode.OFF]
+    assert len(delivery.correlation_ids) == len(set(delivery.correlation_ids))
+    assert len({operation.operation_id for operation in delivery.calls}) == len(
+        delivery.calls
+    )
+    ledger.assert_complete()
+    assert len(ledger.entries) == 7
+    assert all(
+        item.verification_evidence_timestamp != NOT_APPLICABLE
+        for item in ledger.entries
+    )
+    cleanup_entries = [
+        item
+        for item in ledger.entries
+        if item.purpose_id == "thermal_circulation_cleanup"
+    ]
+    assert len(cleanup_entries) == 1
+    assert cleanup_entries[0].termination_entitlement_generation != NOT_APPLICABLE
+
+
 def test_poolos_started_solar_session_terminates_body_without_restart() -> None:
     """Prove the complete live no-successor cleanup path from accepted origin."""
 
@@ -1993,7 +2631,9 @@ def test_cold_start_probe_hands_off_to_fresh_thermal_provenance(
     assert lease.owns_heat_source is True
 
 
-@pytest.mark.parametrize("target_observation_age", (29, 31, 89, 119, 120, 121))
+@pytest.mark.parametrize(
+    "target_observation_age", (29, 30, 31, 89, 90, 119, 120, 121)
+)
 def test_normal_day_pool_and_spa_complete_lifecycle(
     target_observation_age: int,
 ) -> None:
@@ -2009,10 +2649,13 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
         changed_at=NOW - timedelta(seconds=1),
         current_epoch_identity=None,
     )
-    delivery = FakeDelivery()
-    factory = FakeDeliveryFactory(delivery)
+    ledger = StructuredCommandLedger()
+    lifecycle_frame = partial(_frame, command_ledger=ledger)
+    filtration_frame = partial(_filtration_frame, command_ledger=ledger)
+    delivery = FakeDelivery(ledger=ledger)
+    factory = FakeDeliveryFactory(delivery, driver=driver)
     evaluator = ThermalRuntimeEvaluator()
-    baseline = _frame(
+    baseline = lifecycle_frame(
         orchestrator,
         NOW,
         pool_active=False,
@@ -2043,7 +2686,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
     for seconds, active, rpm, configured, heater in probe_epochs:
         result = asyncio.run(
             driver.process_epoch(
-                _frame(
+                lifecycle_frame(
                     orchestrator,
                     NOW + timedelta(seconds=seconds),
                     pool_active=active,
@@ -2074,7 +2717,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
     for seconds in (34, 64, 124):
         result = asyncio.run(
             driver.process_epoch(
-                _frame(
+                lifecycle_frame(
                     orchestrator,
                     NOW + timedelta(seconds=seconds),
                     pool_active=True,
@@ -2095,7 +2738,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     result = asyncio.run(
         driver.process_epoch(
-            _frame(
+            lifecycle_frame(
                 orchestrator,
                 NOW + timedelta(seconds=125),
                 pool_active=True,
@@ -2116,7 +2759,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
     for seconds in (126, 127, 157):
         result = asyncio.run(
             driver.process_epoch(
-                _frame(
+                lifecycle_frame(
                     orchestrator,
                     NOW + timedelta(seconds=seconds),
                     pool_active=True,
@@ -2160,12 +2803,30 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
     # plus the coordinator scheduling margin; value equality is not staleness.
     for seconds in range(187, 578, 30):
         native_epoch = 157 + ((seconds - 157) // 90) * 90
+        asynchronous_times = (
+            {
+                "pool.active": NOW + timedelta(seconds=seconds),
+                "pump.rpm": NOW + timedelta(seconds=seconds - 80),
+                "pool.pump_circuit.configured_speed_rpm": NOW
+                + timedelta(seconds=seconds - 50),
+                "pool.raw_heater_id": NOW + timedelta(seconds=seconds),
+            }
+            if (seconds // 30) % 2
+            else {
+                "pool.active": NOW + timedelta(seconds=seconds - 80),
+                "pump.rpm": NOW + timedelta(seconds=seconds),
+                "pool.pump_circuit.configured_speed_rpm": NOW
+                + timedelta(seconds=seconds - 50),
+                "pool.raw_heater_id": NOW + timedelta(seconds=seconds),
+            }
+        )
         continued = asyncio.run(
             driver.process_epoch(
-                _frame(
+                lifecycle_frame(
                     orchestrator,
                     NOW + timedelta(seconds=seconds),
                     native_observation_at=NOW + timedelta(seconds=native_epoch),
+                    observation_times=asynchronous_times,
                     pool_active=True,
                     pump_rpm=2900,
                     configured_rpm=2900,
@@ -2184,7 +2845,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
         assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
         assert len(delivery.calls) == calls_before_termination
 
-    holding_frame = _frame(
+    holding_frame = lifecycle_frame(
         orchestrator,
         NOW + timedelta(seconds=698),
         native_observation_at=(
@@ -2230,11 +2891,13 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
     assert len(delivery.calls) == calls_before_termination
 
     if target_observation_age == 121:
+        ledger.assert_complete()
+        assert len(ledger.entries) == 5
         return
 
     terminating = asyncio.run(
         driver.process_epoch(
-            _frame(
+            lifecycle_frame(
                 orchestrator,
                 NOW + timedelta(seconds=1298),
                 pool_active=True,
@@ -2258,7 +2921,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     awaiting_native_off = asyncio.run(
         driver.process_epoch(
-            _frame(
+            lifecycle_frame(
                 orchestrator,
                 NOW + timedelta(seconds=1299),
                 pool_active=True,
@@ -2281,7 +2944,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     source_off = asyncio.run(
         driver.process_epoch(
-            _frame(
+            lifecycle_frame(
                 orchestrator,
                 NOW + timedelta(seconds=1300),
                 pool_active=True,
@@ -2305,7 +2968,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     cleanup = asyncio.run(
         driver.process_epoch(
-            _frame(
+            lifecycle_frame(
                 orchestrator,
                 NOW + timedelta(seconds=1301),
                 pool_active=True,
@@ -2329,7 +2992,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     handoff_complete = asyncio.run(
         driver.process_epoch(
-            _frame(
+            lifecycle_frame(
                 orchestrator,
                 NOW + timedelta(seconds=1302),
                 pool_active=True,
@@ -2354,7 +3017,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     owned_filtration = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1303),
                 pool_active=True,
                 pump_rpm=2600,
@@ -2368,7 +3031,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     yielded = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1380),
                 pool_active=False,
                 spa_active=True,
@@ -2391,7 +3054,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     pool_restart = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1391),
                 pool_active=False,
                 pump_rpm=0,
@@ -2407,7 +3070,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     pump_restart = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1392),
                 pool_active=True,
                 pump_rpm=3000,
@@ -2423,7 +3086,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     resumed = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1393),
                 pool_active=True,
                 pump_rpm=2600,
@@ -2437,7 +3100,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     filtration_complete = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1394),
                 pool_active=True,
                 pump_rpm=2600,
@@ -2453,7 +3116,7 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
 
     complete = asyncio.run(
         filtration_driver.process_epoch(
-            _filtration_frame(
+            filtration_frame(
                 NOW + timedelta(seconds=1395),
                 pool_active=False,
                 pump_rpm=0,
@@ -2469,6 +3132,8 @@ def test_normal_day_pool_and_spa_complete_lifecycle(
     assert [
         item.rpm for item in delivery.calls if isinstance(item, SetPumpSpeed)
     ] == [1500, 2900, 2600, 2600]
+    ledger.assert_complete()
+    assert len(ledger.entries) == 10
 
 
 @pytest.mark.parametrize(
@@ -4251,6 +4916,8 @@ def test_source_no_longer_off_preempts_cleanup_verification() -> None:
     )
     asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
     assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.pump_setpoint is not None
+    assert driver.cleanup_provenance.pump_setpoint_accepted_at is not None
     driver.circulation_ownership.mark_thermal_owned(
         driver.cleanup_provenance.lease_id,
     )
@@ -4413,6 +5080,52 @@ def test_transient_spa_takeover_preempts_pending_cleanup_verification() -> None:
     assert len(factory.delivery.calls) == calls_before
 
 
+def test_retained_owned_prime_rpm_event_cannot_poison_source_off_or_cleanup() -> None:
+    """Reproduce the retained 2900->3000 priming event seen in commissioning."""
+
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    residual = orchestrator.ownership.residual_termination
+    assert residual is not None
+    assert residual.pump_setpoint is not None
+    assert residual.pump_setpoint.intended_value == 3000
+    prime_event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2900,
+        new_value=3000,
+        observed_at=NOW + timedelta(seconds=64),
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2900,
+    )
+
+    verified = asyncio.run(
+        driver.process_epoch(
+            replace(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=66),
+                    pool_active=True,
+                    pump_rpm=3000,
+                    configured_rpm=3000,
+                    pool_heater="00000",
+                    mode=ThermalRequestedMode.OFF,
+                    filtration_remaining=timedelta(0),
+                ),
+                external_changes=ExternalChangeBatch((prime_event,)),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert verified.state is ThermalAutomaticDriverState.CONVERGED
+    assert verified.blocker != "thermal_cleanup_external_takeover"
+    assert driver.cleanup_provenance is not None
+
+
 def test_cleanup_takeover_invalidates_provenance_without_command() -> None:
     orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
     source_verified = _frame(
@@ -4469,6 +5182,68 @@ def test_cleanup_takeover_invalidates_provenance_without_command() -> None:
     assert len(factory.delivery.calls) == calls_before
 
 
+def test_cleanup_attempt_cannot_cross_provenance_generation() -> None:
+    orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
+    source_verified = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(0),
+    )
+    asyncio.run(driver.process_epoch(source_verified, delivery_factory=factory))
+    assert driver.cleanup_provenance is not None
+
+    requested = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=67),
+                pool_active=True,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                mode=ThermalRequestedMode.OFF,
+                filtration_remaining=timedelta(0),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert requested.state is ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION
+    assert driver.cleanup_attempt is not None
+    assert driver.cleanup_provenance is not None
+    assert driver.cleanup_provenance.pump_setpoint is not None
+    assert driver.cleanup_provenance.pump_setpoint_accepted_at is not None
+    calls_before = len(factory.delivery.calls)
+    driver.cleanup_provenance = replace(
+        driver.cleanup_provenance,
+        generation=driver.cleanup_provenance.generation + 1,
+    )
+
+    stale = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=68),
+                pool_active=False,
+                pump_rpm=0,
+                configured_rpm=3000,
+                mode=ThermalRequestedMode.OFF,
+                filtration_remaining=timedelta(0),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert stale.state is ThermalAutomaticDriverState.BLOCKED
+    assert stale.blocker == "thermal_cleanup_stale_provenance"
+    assert driver.cleanup_attempt is None
+    assert driver.cleanup_provenance is None
+    assert len(factory.delivery.calls) == calls_before
+
+
 def test_legitimate_cadence_body_evidence_advances_cleanup_without_new_command() -> None:
     """Pre-command cleanup uses the cadence-derived orchestration contract."""
 
@@ -4515,7 +5290,9 @@ def test_legitimate_cadence_body_evidence_advances_cleanup_without_new_command()
     assert len(factory.delivery.calls) == calls_before + 1
 
 
-@pytest.mark.parametrize("observation_age_seconds", (29, 31, 89, 119, 120))
+@pytest.mark.parametrize(
+    "observation_age_seconds", (29, 30, 31, 89, 90, 119, 120)
+)
 def test_precommand_termination_accepts_native_cadence_boundary(
     observation_age_seconds: int,
 ) -> None:

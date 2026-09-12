@@ -15,7 +15,11 @@ import json
 from types import MappingProxyType
 from typing import Mapping
 
-from .external_change import ExternalChangeBatch, ExternalChangeEvent
+from .external_change import (
+    ExternalChangeBatch,
+    ExternalChangeEvent,
+    pump_event_conflicts_with_provenance,
+)
 from .integration import PhysicalHeatMode, ThermalBody
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .thermal_execution_currentness import (
@@ -126,6 +130,7 @@ class ThermalResidualTerminationEntitlement:
     body_activation: ThermalRuntimeConceptProvenance | None = None
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
     heat_source: ThermalRuntimeConceptProvenance | None = None
+    pump_setpoint_accepted_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -146,6 +151,13 @@ class ThermalResidualTerminationEntitlement:
         if self.retained_at < self.originating_lease_established_at:
             raise ValueError("termination retention cannot precede lease establishment")
         object.__setattr__(self, "body", ThermalBody(self.body))
+        if self.pump_setpoint_accepted_at is not None:
+            _require_aware(
+                self.pump_setpoint_accepted_at,
+                "pump_setpoint_accepted_at",
+            )
+            if self.pump_setpoint_accepted_at > self.retained_at:
+                raise ValueError("residual pump accepted_at cannot follow retention")
 
     @property
     def owned_concepts(self) -> tuple[ThermalRuntimeOwnedConcept, ...]:
@@ -1672,25 +1684,15 @@ def _external_preemption_reason(
             and event.concept == "pump.rpm"
             and event.reconciliation_required
         ):
-            expected_rpm = lease.pump_setpoint.intended_value
-            try:
-                observed_rpm = float(event.new_value)
-                intended_rpm = float(expected_rpm)
-            except (TypeError, ValueError, OverflowError):
-                return "runtime_ownership_preempted:pump_external_change"
-
-            # External-change classification may have been produced against an
-            # earlier planner-level steady-state target while the runtime lease
-            # subsequently gained exact accepted/verified pump provenance.
-            #
-            # A retained event whose resulting native value is already aligned
-            # with that currently owned pump intent is not contradictory
-            # evidence and must not destroy ownership. This does not create
-            # ownership from state coincidence: the lease and its command
-            # provenance already exist independently.
-            if (
-                ThermalRuntimeOwnedConcept.PUMP_SETPOINT in lease.verified_concepts
-                and abs(observed_rpm - intended_rpm) <= pump_rpm_tolerance
+            if not pump_event_conflicts_with_provenance(
+                event,
+                intended_rpm=lease.pump_setpoint.intended_value,
+                provenance_verified=(
+                    ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+                    in lease.verified_concepts
+                ),
+                accepted_at=lease.pump_setpoint_accepted_at,
+                tolerance=pump_rpm_tolerance,
             ):
                 continue
 
@@ -1860,6 +1862,9 @@ def _residual_entitlement(
         body_activation=body_activation,
         pump_setpoint=pump_setpoint,
         heat_source=heat_source,
+        pump_setpoint_accepted_at=(
+            lease.pump_setpoint_accepted_at if pump_setpoint is not None else None
+        ),
     )
 
 

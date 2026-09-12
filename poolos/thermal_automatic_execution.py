@@ -328,8 +328,22 @@ class ThermalAutomaticExecutionDriver:
     ) -> None:
         """Synchronously reserve this epoch before another driver is scheduled."""
 
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            lease is not None
+            and lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+            and self.active_session is None
+            and not self._delivery_in_flight
+            and self.orchestrator.ownership.residual_termination is None
+            and self.cleanup_provenance is None
+        ):
+            # A terminal lease with no remaining reduction capability cannot
+            # continue excluding independent filtration in the shared registry.
+            # Release only this exact lease, never a successor's authority.
+            self.circulation_ownership.release_thermal(thermal_lease_id=lease.lease_id)
         if (
             self.requested_enabled
+            and not self._reenable_required
             and frame.physical_authority_ready
             and frame.live_policy.thermal_live_execution_enabled
             and not (
@@ -414,6 +428,31 @@ class ThermalAutomaticExecutionDriver:
         ):
             return PumpSpeedSessionPurpose.TEMPERATURE_PROBE
         return None
+
+    def external_change_owned_intent(self) -> Mapping[str, object]:
+        """Expose accepted session intent for observational change attribution.
+
+        This is not an authority grant.  It is derived only from the active
+        lease's accepted operation provenance, never from desired state or
+        matching hardware.
+        """
+
+        lease = self.orchestrator.ownership.state.lease
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            return MappingProxyType({})
+        intended: dict[str, object] = {}
+        if lease.pump_setpoint is not None:
+            intended["pump.rpm"] = lease.pump_setpoint.intended_value
+        if lease.heat_source is not None:
+            prefix = "pool" if lease.body is ThermalBody.POOL else "spa"
+            source = lease.heat_source.intended_value
+            if isinstance(source, PhysicalHeatMode):
+                intended[f"{prefix}.raw_heater_id"] = {
+                    PhysicalHeatMode.OFF: "00000",
+                    PhysicalHeatMode.GAS: "H0001",
+                    PhysicalHeatMode.SOLAR: "H0002",
+                }[source]
+        return MappingProxyType(intended)
 
     def set_enabled(
         self,
@@ -1416,21 +1455,23 @@ class ThermalAutomaticExecutionDriver:
                 circulation_assessment=assessment,
             )
 
-        if not assessment.filtration_immediate_need and provenance.pump_setpoint is not None:
-            self.cleanup_provenance = provenance.without_pump()
-            provenance = self.cleanup_provenance
-            if provenance is None:
-                return self._publish(
-                    state=ThermalAutomaticDriverState.CONVERGED,
-                    evaluated_at=frame.observed_at,
-                    blocker="thermal_cleanup_pump_provenance_relinquished",
-                    frame=frame,
-                    body=None,
-                    preflight=None,
-                    failure=None,
-                    command_delivery_performed=False,
-                    circulation_assessment=assessment,
-                )
+        if (
+            not assessment.filtration_immediate_need
+            and provenance.pump_setpoint is not None
+            and provenance.body_activation is None
+        ):
+            self.cleanup_provenance = None
+            return self._publish(
+                state=ThermalAutomaticDriverState.CONVERGED,
+                evaluated_at=frame.observed_at,
+                blocker="thermal_cleanup_pump_provenance_relinquished",
+                frame=frame,
+                body=None,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=False,
+                circulation_assessment=assessment,
+            )
 
         candidate = ThermalCirculationCleanupCandidate.from_arbitration(
             provenance=provenance,

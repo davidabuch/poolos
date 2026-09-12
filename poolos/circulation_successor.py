@@ -11,6 +11,7 @@ from typing import Mapping
 from .external_change import (
     ExternalChangeBatch,
     POOL_CIRCULATION_TAKEOVER_CONCEPTS,
+    pump_event_conflicts_with_provenance,
 )
 from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
@@ -461,11 +462,27 @@ def _external_takeover(
 ) -> bool:
     if entitlement is None:
         return False
-    return any(
-        event.concept in POOL_CIRCULATION_TAKEOVER_CONCEPTS
-        and entitlement.originating_lease_established_at <= event.observed_at <= evaluated_at
-        for event in changes.events
-    )
+    for event in changes.events:
+        if not (
+            event.concept in POOL_CIRCULATION_TAKEOVER_CONCEPTS
+            and entitlement.originating_lease_established_at
+            <= event.observed_at
+            <= evaluated_at
+        ):
+            continue
+        if (
+            event.concept == "pump.rpm"
+            and entitlement.pump_setpoint is not None
+            and not pump_event_conflicts_with_provenance(
+                event,
+                intended_rpm=entitlement.pump_setpoint.intended_value,
+                provenance_verified=True,
+                accepted_at=entitlement.pump_setpoint_accepted_at,
+            )
+        ):
+            continue
+        return True
+    return False
 
 
 def _pump_handoff_eligible(

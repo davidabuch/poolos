@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, Mapping
 
 from homeassistant.core import HomeAssistant
 
@@ -42,6 +42,7 @@ class PoolOSExternalChangeRuntime:
     thermal_runtime: PoolOSThermalRuntime
     pool_automatic_control: PoolAutomaticControlSuppression | None = None
     spa_automatic_control: SpaAutomaticControlSuppression | None = None
+    owned_intent_provider: Callable[[], Mapping[str, object]] | None = None
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
@@ -156,6 +157,11 @@ class PoolOSExternalChangeRuntime:
     def _ownership(self) -> ExternalOwnershipContext:
         intended: dict[str, Any] = {}
         blockers: list[str] = []
+        accepted_intent = (
+            {}
+            if self.owned_intent_provider is None
+            else dict(self.owned_intent_provider())
+        )
         configured_modes = (
             (
                 "pool",
@@ -181,11 +187,13 @@ class PoolOSExternalChangeRuntime:
             if concept not in self.monitor.current_concepts():
                 blockers.append(f"{prefix}_native_heater_baseline_unavailable")
                 continue
-            intended[concept] = heater_id
+            if concept not in accepted_intent:
+                intended[concept] = heater_id
 
         assessment = self.thermal_runtime.assessment
         if assessment is None:
             self._ownership_blockers = tuple(blockers)
+            intended.update(accepted_intent)
             return ExternalOwnershipContext(intended)
         pump_claims: set[int] = set()
         for body_assessment, requested_mode_resolved in (
@@ -205,11 +213,14 @@ class PoolOSExternalChangeRuntime:
             desired = body_assessment.plan.desired
             if desired.required_pump_rpm is not None:
                 pump_claims.add(desired.required_pump_rpm)
-        if len(pump_claims) == 1:
+        if "pump.rpm" in accepted_intent:
+            intended["pump.rpm"] = accepted_intent["pump.rpm"]
+        elif len(pump_claims) == 1:
             intended["pump.rpm"] = next(iter(pump_claims))
         elif len(pump_claims) > 1:
             blockers.append("conflicting_thermal_pump_ownership")
         self._ownership_blockers = tuple(blockers)
+        intended.update(accepted_intent)
         return ExternalOwnershipContext(intended)
 
 

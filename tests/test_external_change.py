@@ -12,6 +12,7 @@ from poolos.external_change import (
     ExternalOwnershipContext,
     ExternalSemanticEventType,
     ThermalRuntimeExternalChangeEvidence,
+    pump_event_conflicts_with_provenance,
 )
 from poolos.intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
@@ -280,6 +281,48 @@ def test_pump_rpm_semantic_tolerance_is_shared_by_events_and_current_drift() -> 
             "reconciliation_required" if expected_drift else "already_aligned"
         )
 
+
+@pytest.mark.parametrize(
+    ("event_offset", "observed", "verified", "conflicts"),
+    (
+        (-1, 3000, False, True),
+        (-1, 3000, True, True),
+        (-1, 2900, True, True),
+        (0, 3000, False, True),
+        (0, 2900, True, True),
+        (1, 2900, True, False),
+        (1, 2925, True, False),
+        (1, 2926, True, True),
+        (1, 2900, False, True),
+    ),
+)
+def test_pump_event_provenance_boundary_is_deterministic(
+    event_offset: int,
+    observed: int,
+    verified: bool,
+    conflicts: bool,
+) -> None:
+    accepted_at = NOW + timedelta(seconds=1)
+    event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2600,
+        new_value=observed,
+        observed_at=accepted_at + timedelta(seconds=event_offset),
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2600,
+    )
+
+    assert pump_event_conflicts_with_provenance(
+        event,
+        intended_rpm=2900,
+        provenance_verified=verified,
+        accepted_at=accepted_at,
+    ) is conflicts
 
 def test_real_external_pump_rpm_change_still_requires_reconciliation() -> None:
     monitor = ExternalNativeChangeMonitor(authority())
