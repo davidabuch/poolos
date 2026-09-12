@@ -498,6 +498,57 @@ def test_pump_ownership_requires_usable_nonblocked_thermal_plan() -> None:
     }
 
 
+def test_accepted_execution_intent_overrides_steady_state_planner_intent() -> None:
+    """Priming uses accepted execution provenance, not the later Solar target."""
+
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=SimpleNamespace(
+                pool=_body_assessment(
+                    module,
+                    active=True,
+                    disposition="ready",
+                    selected_source="solar",
+                    rpm=2900,
+                ),
+                hot_tub=_body_assessment(
+                    module,
+                    active=False,
+                    disposition="already_converged",
+                    selected_source="off",
+                    rpm=None,
+                ),
+            ),
+        ),
+        owned_intent_provider=lambda: {"pump.rpm": 3000},
+    )
+
+    assert dict(runtime._ownership().intended_values)["pump.rpm"] == 3000
+
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    runtime.process(
+        _thermal_native(now, pump_rpm=2900),
+        _transport(now),
+        1,
+    )
+    runtime.process(
+        _thermal_native(now + timedelta(seconds=1), pump_rpm=3000),
+        _transport(now + timedelta(seconds=1)),
+        1,
+    )
+
+    assert len(runtime.latest_batch.events) == 1
+    assert runtime.latest_batch.events[0].concept == "pump.rpm"
+    assert runtime.latest_batch.events[0].reconciliation_required is False
+    assert runtime.diagnostics()["active_drift_count"] == 0
+
+
 def test_conflicting_simultaneous_pump_claims_fail_closed_deterministically() -> None:
     module = _load_module()
     authority = PoolOSPhysicalCommandAuthority()

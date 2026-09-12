@@ -522,6 +522,7 @@ class ExpectedNativeConsequence:
     native_object_id: str
     expected_value: bool | int | float | str
     numeric_tolerance: float = 0.0
+    retain_matching_updates: bool = False
 
     def __post_init__(self) -> None:
         if not self.concept.strip() or not self.native_object_id.strip():
@@ -1425,6 +1426,20 @@ class PoolOSPhysicalCommandAuthority:
     def mark_dispatch_started(self, expectation_id: str) -> None:
         self._expectations[expectation_id].dispatch_started = True
 
+    def supersede_dispatched_expectations(self, request: PhysicalCommandRequest) -> None:
+        """A new write retires older consequences of that same native operation."""
+
+        self._expectations = {
+            key: item
+            for key, item in self._expectations.items()
+            if not (
+                item.dispatch_started
+                and item.request.request_id != request.request_id
+                and item.request.operation == request.operation
+                and item.request.target == request.target
+            )
+        }
+
     def cancel(self, expectation_id: str) -> bool:
         return self._expectations.pop(expectation_id, None) is not None
 
@@ -1460,7 +1475,7 @@ class PoolOSPhysicalCommandAuthority:
         value: Any,
         observed_at: datetime,
     ) -> NativeConsequenceAttribution | None:
-        """Consume the oldest dispatched expectation matching native truth."""
+        """Attribute native truth; repeated analog matches retain the original expiry."""
 
         _require_aware(observed_at)
         self.expire(now=observed_at)
@@ -1475,9 +1490,14 @@ class PoolOSPhysicalCommandAuthority:
                 continue
             if expected.native_object_id != native_object_id:
                 continue
-            if observed_at < item.reserved_at or not _matches(expected, value):
+            if observed_at < item.reserved_at:
                 continue
-            self._expectations.pop(item.expectation_id, None)
+            if not _matches(expected, value):
+                if expected.retain_matching_updates:
+                    self._expectations.pop(item.expectation_id, None)
+                continue
+            if not expected.retain_matching_updates:
+                self._expectations.pop(item.expectation_id, None)
             return NativeConsequenceAttribution(
                 expectation_id=item.expectation_id,
                 request_id=item.request.request_id,

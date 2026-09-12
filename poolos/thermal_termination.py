@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TypedDict
 
+from .external_change import pump_event_conflicts_with_provenance
 from .integration import PhysicalHeatMode, SetHeatMode, ThermalBody
 from .thermal_runtime_ownership import (
     SharedHydraulicSafetyClass,
@@ -319,6 +320,18 @@ def _external_takeover(
             event.observed_at >= entitlement.originating_lease_established_at
             and event.concept in concepts
         ):
+            if (
+                event.concept == "pump.rpm"
+                and entitlement.pump_setpoint is not None
+                and not pump_event_conflicts_with_provenance(
+                    event,
+                    intended_rpm=entitlement.pump_setpoint.intended_value,
+                    provenance_verified=True,
+                    accepted_at=entitlement.pump_setpoint_accepted_at,
+                    tolerance=ThermalTerminationPolicy.pump_rpm_tolerance,
+                )
+            ):
+                continue
             return f"thermal_termination_external_takeover:{event.concept}"
     return None
 

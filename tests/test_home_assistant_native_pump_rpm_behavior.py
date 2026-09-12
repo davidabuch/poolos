@@ -342,12 +342,14 @@ def test_automatic_hot_tub_can_deliver_exact_dynamic_spa_pmpcirc_speed(
     assert recorder.calls == [("p0102", {"SPEED": "3000"})]
     assert receipt.body_objnam == "p0102"
     assert receipt.value == 3000
+    # Actual-RPM attribution is separate from configured-speed verification.
+    # Consuming either concept must leave the other independently observable.
     assert authority.correlate(
         concept="pump.rpm",
         native_object_id="P0001",
         value=3000,
         observed_at=datetime.now(UTC),
-    ) is None
+    ) is not None
     attribution = authority.correlate(
         concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
         native_object_id="p0102",

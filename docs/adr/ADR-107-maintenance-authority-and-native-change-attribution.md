@@ -78,6 +78,17 @@ PMPCIRC is mapped to the stable
 concrete `p01xx` source identity. Configured setpoint and parent-pump physical
 speed are never treated as the same fact.
 
+Automatic thermal and filtration PMPCIRC writes also register a separate
+parent-pump actual-RPM consequence in this same bounded registry. It uses the
+existing 25-RPM tolerance and may attribute repeated matching analog updates
+until the original expectation expires. A contradictory transition retires this
+analog expectation and remains external; a subsequent write to the same native
+operation/target retires older dispatched expectations inside the command lock,
+including when the new write is a no-op. Manual RPM writes retain their separate
+configured-speed override semantics. These correlations grant no ownership:
+configured-speed and actual-RPM post-command verification are still independent,
+and both remain required before a circulation handoff.
+
 ### External/unattributed changes
 
 The native snapshot callback compares accepted chronological snapshots only.

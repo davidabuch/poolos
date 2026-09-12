@@ -234,6 +234,37 @@ def _semantically_aligned(concept: str, intended: Any, observed: Any) -> bool:
         return intended == observed
 
 
+def pump_event_conflicts_with_provenance(
+    event: ExternalChangeEvent,
+    *,
+    intended_rpm: object,
+    provenance_verified: bool,
+    accepted_at: datetime | None = None,
+    tolerance: float = _EXTERNAL_PUMP_RPM_TOLERANCE,
+) -> bool:
+    """Classify retained pump evidence against positive PoolOS provenance.
+
+    A matching native value cannot create provenance.  Once provenance exists
+    independently, however, the same value is not contradictory evidence and
+    must not be reinterpreted as takeover by a later consumer.
+    """
+
+    if event.concept != "pump.rpm":
+        return True
+    if not provenance_verified:
+        return True
+    if accepted_at is None or event.observed_at <= accepted_at:
+        return True
+    if (
+        not isinstance(intended_rpm, (int, float))
+        or isinstance(intended_rpm, bool)
+        or not isinstance(event.new_value, (int, float))
+        or isinstance(event.new_value, bool)
+    ):
+        return True
+    return abs(float(event.new_value) - float(intended_rpm)) > tolerance
+
+
 @dataclass(slots=True)
 class ExternalNativeChangeMonitor:
     """Compare chronological native snapshots against one fresh baseline."""
@@ -631,4 +662,5 @@ __all__ = [
     "ExternalOwnershipContext",
     "ExternalSemanticEventType",
     "GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS",
+    "pump_event_conflicts_with_provenance",
 ]

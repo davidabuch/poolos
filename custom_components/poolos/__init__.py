@@ -223,6 +223,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
     )
+    external_change_runtime.owned_intent_provider = (
+        thermal_automatic_runtime.driver.external_change_owned_intent
+    )
     filtration_automatic_runtime = PoolOSFiltrationAutomaticRuntime(
         hass=hass,
         coordinator=coordinator,

@@ -633,7 +633,7 @@ class ManualIntelliCenterControl:
             if automatic_thermal_context is not None
             else manual_body
         )
-        _parent_id, minimum, maximum = self._pump_circuit_rpm_limits(
+        parent_id, minimum, maximum = self._pump_circuit_rpm_limits(
             pump_circuit_objnam,
             thermal_body=thermal_body,
         )
@@ -665,6 +665,20 @@ class ManualIntelliCenterControl:
                 concept=configured_speed_concept,
                 native_object_id=pump_circuit_objnam,
                 expected_value=float(target),
+            ),
+            additional_consequences=(
+                (ExpectedNativeConsequence(
+                    concept="pump.rpm",
+                    native_object_id=parent_id,
+                    expected_value=float(target),
+                    numeric_tolerance=25.0,
+                    retain_matching_updates=True,
+                ),)
+                if request_source in {
+                    PhysicalRequestSource.AUTOMATIC_THERMAL,
+                    PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                }
+                else ()
             ),
             dispatch=lambda: self._controller.request_changes(
                 pump_circuit_objnam, {SPEED_ATTR: str(target)}
@@ -729,17 +743,28 @@ class ManualIntelliCenterControl:
         consequence: ExpectedNativeConsequence,
         dispatch: Callable[[], Awaitable[Any]],
         failure_message: str,
+        additional_consequences: tuple[ExpectedNativeConsequence, ...] = (),
     ) -> None:
         """Reserve, recheck inside the command lock, and dispatch once."""
 
         await self._require_available()
         now = datetime.now(UTC)
+        expectation_ids: list[str] = []
         try:
-            expectation_id = self._command_authority.reserve(
-                request, consequence, now=now
-            )
+            for expected in (consequence, *additional_consequences):
+                expectation_id = self._command_authority.reserve(
+                    request, expected, now=now
+                )
+                if expectation_id is not None:
+                    expectation_ids.append(expectation_id)
         except PhysicalCommandDeniedError as exc:
+            for expectation_id in expectation_ids:
+                self._command_authority.cancel(expectation_id)
             raise ManualIntelliCenterCommandNotDispatchedError(str(exc)) from exc
+        except Exception:
+            for expectation_id in expectation_ids:
+                self._command_authority.cancel(expectation_id)
+            raise
 
         dispatch_started = False
         async with self._command_lock:
@@ -748,24 +773,27 @@ class ManualIntelliCenterControl:
                 # pyintellicenter's physical dispatch coroutine.  A request
                 # queued behind the lock cannot reuse an earlier permission.
                 self._command_authority.require_allowed(request)
-                if expectation_id is not None:
+                self._command_authority.supersede_dispatched_expectations(request)
+                for expectation_id in expectation_ids:
                     self._command_authority.mark_dispatch_started(expectation_id)
                 dispatch_started = True
                 await dispatch()
             except PhysicalCommandDeniedError as exc:
-                if expectation_id is not None:
+                for expectation_id in expectation_ids:
                     self._command_authority.cancel(expectation_id)
                 raise ManualIntelliCenterCommandNotDispatchedError(str(exc)) from exc
             except ManualIntelliCenterCommandError as exc:
-                if expectation_id is not None and not dispatch_started:
-                    self._command_authority.cancel(expectation_id)
+                if not dispatch_started:
+                    for expectation_id in expectation_ids:
+                        self._command_authority.cancel(expectation_id)
                     raise
                 raise ManualIntelliCenterCommandOutcomeUnknownError(
                     failure_message
                 ) from exc
             except Exception as exc:
-                if expectation_id is not None and not dispatch_started:
-                    self._command_authority.cancel(expectation_id)
+                if not dispatch_started:
+                    for expectation_id in expectation_ids:
+                        self._command_authority.cancel(expectation_id)
                 self._last_error_code = type(exc).__name__.upper()
                 if dispatch_started:
                     raise ManualIntelliCenterCommandOutcomeUnknownError(

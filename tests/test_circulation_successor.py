@@ -81,6 +81,7 @@ def _entitlement(
         pump_setpoint=(
             _provenance(ThermalRuntimeOwnedConcept.PUMP_SETPOINT, 2900) if pump_owned else None
         ),
+        pump_setpoint_accepted_at=(NOW - timedelta(milliseconds=500) if pump_owned else None),
         heat_source=(
             _provenance(ThermalRuntimeOwnedConcept.HEAT_SOURCE, PhysicalHeatMode.SOLAR)
             if source_owned
@@ -511,6 +512,49 @@ def test_external_takeover_defeats_thermal_exclusivity(concept: str) -> None:
     assert result.external_takeover
     assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
     assert not result.body_deactivation_eligible
+
+
+def test_retained_aligned_verified_pump_event_does_not_poison_successor() -> None:
+    event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2600,
+        new_value=2900,
+        observed_at=NOW,
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2600,
+    )
+
+    result = _evaluate(evidence=_evidence(changes=ExternalChangeBatch((event,))))
+
+    assert not result.external_takeover
+    assert result.disposition is CirculationArbitrationDisposition.EXCLUSIVE_THERMAL
+    assert result.body_deactivation_eligible
+
+
+def test_earlier_external_pump_event_cannot_be_retroactively_adopted() -> None:
+    event = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type="native_value_changed",
+        native_object_id="PMP01",
+        previous_value=2900,
+        new_value=3000,
+        observed_at=NOW - timedelta(milliseconds=750),
+        external_policy="reconcile",
+        action_taken="reconciliation_required",
+        notification_recommended=True,
+        reconciliation_required=True,
+        intended_value=2900,
+    )
+
+    result = _evaluate(evidence=_evidence(changes=ExternalChangeBatch((event,))))
+
+    assert result.external_takeover
+    assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
 
 
 def test_transient_spa_takeover_defeats_later_matching_pool_topology() -> None:

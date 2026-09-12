@@ -53,7 +53,14 @@ or a changed dynamic `PMPCIRC` identity still invalidates the lease immediately.
 
 One shared Pool circulation registry arbitrates the filtration and thermal
 drivers. Thermal reserves an actionable Pool candidate synchronously before
-either asynchronous driver may deliver in that epoch. A verified filtration
+either asynchronous driver may deliver in that epoch. A thermal driver latched
+pending operator re-enable cannot reserve an epoch: the existing filtration owner
+must remain able to perform its own current work or provenance-bound cleanup.
+A terminal thermal lease with no active session, in-flight delivery, residual
+termination entitlement, or cleanup provenance releases only its matching registry
+claim during synchronous arbitration. Failed reduction work therefore cannot
+exclude a later independently authorized filtration session indefinitely.
+A verified filtration
 lease may transfer only its proven body-activation provenance to thermal; the
 2600-RPM provenance is not compatible with Solar or Gas and must be replaced by
 a freshly accepted thermal pump operation. Conversely, verified thermal cleanup
