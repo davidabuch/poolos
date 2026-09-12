@@ -16,6 +16,14 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 12, 2026 — v0.11.15 release preparation
+
+Release candidate `v0.11.15` contains the residual cleanup transfer correction
+merged by PR #179 on top of `v0.11.14`.
+
+The release changes integration/package metadata only; no additional runtime
+behavior is introduced beyond the already-reviewed PR #179 fix.
+
 ### September 12, 2026 — residual cleanup transfer correction
 
 The verified baseline for this correction is `v0.11.14`, commit `e835c85`.
