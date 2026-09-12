@@ -1718,8 +1718,8 @@ def test_retained_prime_event_is_replaced_before_solar_termination_and_cleanup(
                 delivery_factory=factory,
             )
         )
-        assert preempted.state is ThermalAutomaticDriverState.CONVERGED
-        assert preempted.blocker == "thermal_termination_no_owned_active_source"
+        assert preempted.state is ThermalAutomaticDriverState.BLOCKED
+        assert preempted.blocker == "circulation_retained_external_takeover"
         assert orchestrator.ownership.state.status is (
             ThermalRuntimeOwnershipStatus.PREEMPTED
         )

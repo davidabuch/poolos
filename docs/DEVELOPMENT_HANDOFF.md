@@ -16,6 +16,42 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 12, 2026 — residual cleanup transfer correction
+
+The verified baseline for this correction is `v0.11.14`, commit `e835c85`.
+The September 9 release/slice status below is historical.
+
+A deterministic lifecycle regression reproduced loss of verified Pool body/pump
+provenance after probe supersession: a fresh source-Off observation predating
+the residual boundary prevented cleanup capture, but termination consumed the
+residual anyway. Later Solar then established pump/source ownership without the
+original body origin. Source ages of 1, 29, and 119 seconds reproduced the loss;
+this was not a freshness-window failure.
+
+Both termination capture callers now require an explicit capture disposition.
+When circulation proof cannot yet transfer, the exact residual remains in
+`CLEANUP_WAITING`, without command authority. Each new authoritative epoch
+rechecks the existing termination and arbitration evidence. A sufficiently
+current source-Off observation permits capture; only then is the residual
+consumed. Source-only residuals, and Hot Tub residuals without the body origin
+required by the existing Hot Tub cleanup scope, have no supported circulation
+capability to transfer and retain their existing terminal disposal behavior.
+
+Waiting does not renew a lease, change `retained_at`, extend freshness, or reset
+verification deadlines. It retains one in-memory token. Missing/stale evidence
+remains a command-free block under existing policy; positive takeover/topology
+invalidation, a new accepted ownership generation, and unload/restart discard
+old authority. No new wall-clock disposal timeout is introduced. Successful
+source-Off verification ends its attempt even if cleanup capture must wait, so
+the verified command is not replayed merely to retry capture.
+
+The regression follows cleanup-first policy when Solar becomes eligible during
+the wait: verified Pool OFF/pump 0, a fresh accepted Pool activation for Solar,
+and target-satisfied source Off followed by either verified body Off/pump 0 or
+the existing 2600-RPM immediate-filtration handoff. The probe-successor predicate
+and opportunistic Hot Tub policy are unchanged. Tests do not establish physical
+commissioning or conclusively attribute the recorded run without its raw trace.
+
 As of September 9, 2026:
 
 - Current released integration: `v0.11.7`

@@ -114,6 +114,15 @@ class ThermalAutomaticDriverState(StrEnum):
     UNLOADED = "unloaded"
 
 
+class _CleanupCaptureDisposition(StrEnum):
+    """Whether residual circulation proof has a safe destination."""
+
+    CAPTURED = "captured"
+    WAITING_FOR_EVIDENCE = "waiting_for_evidence"
+    NO_CIRCULATION_CAPABILITY = "no_circulation_capability"
+    INVALIDATED = "invalidated"
+
+
 @dataclass(frozen=True, slots=True)
 class ThermalAutomaticExecutionFrame:
     """One immutable authoritative runtime epoch supplied by the adapter."""
@@ -1107,15 +1116,24 @@ class ThermalAutomaticExecutionDriver:
                 and assessment.source_action.value == "already_off"
             ):
                 circulation = self._circulation_assessment(frame)
-                self._capture_cleanup_provenance(
+                capture = self._capture_cleanup_provenance(
                     current,
                     frame=frame,
                     circulation=circulation,
                 )
+                # Source-Off has been causally verified. Retain the residual
+                # if circulation proof cannot yet transfer; do not redeliver
+                # the verified source command or renew its deadline.
+                self.termination_attempt = None
+                if capture is _CleanupCaptureDisposition.WAITING_FOR_EVIDENCE:
+                    return self._cleanup_capture_wait(frame, circulation)
+                if capture is _CleanupCaptureDisposition.INVALIDATED:
+                    assert circulation is not None
+                    self.orchestrator.ownership.invalidate_residual_termination()
+                    return self._blocked(frame, circulation.reason_code)
                 self.orchestrator.ownership.consume_residual_termination(
                     entitlement_id=attempt.entitlement_id,
                 )
-                self.termination_attempt = None
                 return self._publish(
                     state=ThermalAutomaticDriverState.CONVERGED,
                     evaluated_at=frame.observed_at,
@@ -1195,11 +1213,17 @@ class ThermalAutomaticExecutionDriver:
         if assessment.disposition is ThermalTerminationDisposition.RELINQUISH_ONLY:
             circulation = self._circulation_assessment(frame)
             entitlement = self.orchestrator.ownership.residual_termination
-            self._capture_cleanup_provenance(
+            capture = self._capture_cleanup_provenance(
                 entitlement,
                 frame=frame,
                 circulation=circulation,
             )
+            if capture is _CleanupCaptureDisposition.WAITING_FOR_EVIDENCE:
+                return self._cleanup_capture_wait(frame, circulation)
+            if capture is _CleanupCaptureDisposition.INVALIDATED:
+                assert circulation is not None
+                self.orchestrator.ownership.invalidate_residual_termination()
+                return self._blocked(frame, circulation.reason_code)
             if assessment.entitlement_id is not None:
                 self.orchestrator.ownership.consume_residual_termination(
                     entitlement_id=assessment.entitlement_id,
@@ -1665,33 +1689,72 @@ class ThermalAutomaticExecutionDriver:
             outage=frame.orchestration.outage,
         )
 
+    def _cleanup_capture_wait(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+        circulation: CirculationSuccessorAssessment | None,
+    ) -> ThermalAutomaticDriverAssessment:
+        """Wait without consuming proof or authorizing a physical operation.
+
+        Each new epoch re-enters termination's generation, topology, external,
+        and freshness checks. The retained token is not a current command grant.
+        """
+
+        return self._publish(
+            state=ThermalAutomaticDriverState.CLEANUP_WAITING,
+            evaluated_at=frame.observed_at,
+            blocker=(
+                "thermal_cleanup_arbitration_unavailable"
+                if circulation is None
+                else circulation.reason_code
+            ),
+            frame=frame,
+            body=None,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=False,
+            circulation_assessment=circulation,
+        )
+
     def _capture_cleanup_provenance(
         self,
         entitlement: ThermalResidualTerminationEntitlement | None,
         *,
         frame: ThermalAutomaticExecutionFrame,
         circulation: CirculationSuccessorAssessment | None,
-    ) -> None:
+    ) -> _CleanupCaptureDisposition:
         """Capture accepted body/pump proof only after authoritative source Off."""
 
         if entitlement is None:
-            return
+            return _CleanupCaptureDisposition.NO_CIRCULATION_CAPABILITY
+        if entitlement.body is ThermalBody.POOL and circulation is not None and (
+            circulation.external_takeover or circulation.topology_conflict
+        ):
+            # The same positive invalidations terminate an active cleanup.
+            # Do not retain a token that failed capture because of takeover.
+            return _CleanupCaptureDisposition.INVALIDATED
+        if (
+            entitlement.body_activation is None
+            and (
+                entitlement.pump_setpoint is None
+                or entitlement.body is ThermalBody.HOT_TUB
+            )
+        ):
+            # Source-only residuals have no circulation capability to transfer.
+            # The existing Hot Tub cleanup scope likewise requires body origin.
+            return _CleanupCaptureDisposition.NO_CIRCULATION_CAPABILITY
         if entitlement.body is ThermalBody.POOL and (
             circulation is None or not circulation.source_cleanup_complete
         ):
-            return
-        if (
-            entitlement.body is ThermalBody.HOT_TUB
-            and entitlement.body_activation is None
-        ):
-            return
+            return _CleanupCaptureDisposition.WAITING_FOR_EVIDENCE
         captured = ThermalCirculationCleanupProvenance.from_residual(
             entitlement,
             established_at=frame.observed_at,
         )
-        if captured is not None:
-            self.cleanup_provenance = captured
-            self._solar_nonengagement_cleanup_purpose_id = None
+        assert captured is not None
+        self.cleanup_provenance = captured
+        self._solar_nonengagement_cleanup_purpose_id = None
+        return _CleanupCaptureDisposition.CAPTURED
 
     async def _process_hot_tub_cleanup(
         self,
