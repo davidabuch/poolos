@@ -332,8 +332,10 @@ REASON_SIGNALS = (
     "not_immediately",
     "ready",
 )
-REASON_FAMILY_COUNT = 221
-REASON_FAMILY_SHA256 = "0b4e1a2b80165b97ae04e65fc01a2ccc0989706e2b6022bb0b57033eeff5695c"
+# The existing 221 families remain. Cleanup capture waiting adds only the
+# existing arbitration-unavailable reason at the new _cleanup_capture_wait site.
+REASON_FAMILY_COUNT = 222
+REASON_FAMILY_SHA256 = "90074498d43e655dd678f3dbb2459c63e769fd7593184526b93ba580c0c8551a"
 
 
 @cache
@@ -420,6 +422,8 @@ def _reason_classification(function: str, reason: str) -> ReasonClassification:
 
 
 def _reason_regression(source: str, reason: str) -> str:
+    if source.endswith("thermal_automatic_execution.py") and reason == "thermal_cleanup_arbitration_unavailable":
+        return "test_verified_gas_off_does_not_consume_residual_when_capture_is_unavailable"
     if source.endswith("circulation_successor.py"):
         return "test_external_takeover_defeats_thermal_exclusivity"
     if source.endswith("filtration_automatic_execution.py"):
