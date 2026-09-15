@@ -33,6 +33,7 @@ from .thermal_runtime import PoolOSThermalRuntime
 
 EVENT_POOLOS_EXTERNAL_CHANGE = "poolos_external_change"
 
+
 @dataclass(slots=True)
 class PoolOSExternalChangeRuntime:
     """Publish bounded semantic events; never issue reconciliation commands."""
@@ -46,6 +47,16 @@ class PoolOSExternalChangeRuntime:
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
+    _last_native_values: dict[str, object] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _last_ownership: ExternalOwnershipContext = field(
+        default_factory=ExternalOwnershipContext,
+        init=False,
+        repr=False,
+    )
     _thermal_external_evidence: ThermalRuntimeExternalChangeEvidence = field(
         default_factory=ThermalRuntimeExternalChangeEvidence,
         init=False,
@@ -77,6 +88,8 @@ class PoolOSExternalChangeRuntime:
             self.monitor.reset_baseline()
             self._thermal_external_evidence.reset()
             self.latest_batch = ExternalChangeBatch(())
+            self._last_native_values.clear()
+            self._last_ownership = ExternalOwnershipContext()
         ownership = self._ownership()
         batch = self.monitor.process(
             native,
@@ -124,6 +137,8 @@ class PoolOSExternalChangeRuntime:
         refreshed_ownership = self._ownership()
         if refreshed_ownership.intended_values != ownership.intended_values:
             self.monitor.recompute_current_ownership(refreshed_ownership)
+        self._last_native_values = dict(values)
+        self._last_ownership = refreshed_ownership
         for event in batch.events:
             self.hass.bus.async_fire(
                 EVENT_POOLOS_EXTERNAL_CHANGE,
@@ -143,7 +158,22 @@ class PoolOSExternalChangeRuntime:
     def refresh_ownership(self) -> None:
         """Recompute drift when thermal intent changes without native movement."""
 
-        self.monitor.recompute_current_ownership(self._ownership())
+        ownership = self._ownership()
+        if _pump_native_truth_matches_prior_intent_transition(
+            self._last_native_values,
+            self._last_ownership,
+            ownership,
+        ):
+            # Accepted pump execution intent may legitimately move ahead of the
+            # steady-state planner target (for example 3000-RPM Solar priming).
+            # Retiring that temporary Pump intent while native truth still
+            # reflects it is an intent handoff, not a new native transition.
+            # This exception is intentionally pump-only; requested heat-source
+            # changes must continue to recompute their normal contextual drift.
+            self.monitor.clear_active_drift()
+        else:
+            self.monitor.recompute_current_ownership(ownership)
+        self._last_ownership = ownership
 
     def diagnostics(self) -> dict[str, Any]:
         return {
@@ -199,9 +229,7 @@ class PoolOSExternalChangeRuntime:
         for body_assessment, requested_mode_resolved in (
             (assessment.pool, self.thermal_runtime.pool_requested_mode_resolved),
             (
-                assessment.hot_tub,
-                self.thermal_runtime.hot_tub_requested_mode_resolved,
-            ),
+                assessment.hot_tub, self.thermal_runtime.hot_tub_requested_mode_resolved),
         ):
             if (
                 not requested_mode_resolved
@@ -247,6 +275,41 @@ def _assessment_usable_for_ownership(body_assessment: Any) -> bool:
         return False
     blockers = set(body_assessment.technical_preflight.blocking_reasons)
     return blockers <= _ALREADY_CONVERGED_TECHNICAL_NONBLOCKERS
+
+
+def _pump_native_truth_matches_prior_intent_transition(
+    native_values: Mapping[str, object],
+    previous: ExternalOwnershipContext,
+    current: ExternalOwnershipContext,
+) -> bool:
+    """Return whether a Pump mismatch is still exactly prior accepted intent."""
+
+    concept = "pump.rpm"
+    if concept not in native_values or concept not in current.intended_values:
+        return False
+    observed = native_values[concept]
+    intended = current.intended_values[concept]
+    if _pump_intent_aligned(intended, observed):
+        return False
+    prior = previous.intended_values.get(concept)
+    if prior is None or prior == intended or not _pump_intent_aligned(prior, observed):
+        return False
+
+    # Do not let a Pump handoff suppress unrelated contextual drift. If any
+    # non-Pump owned concept is currently misaligned, normal recomputation wins.
+    for other_concept, other_intended in current.intended_values.items():
+        if other_concept == concept or other_concept not in native_values:
+            continue
+        if native_values[other_concept] != other_intended:
+            return False
+    return True
+
+
+def _pump_intent_aligned(intended: object, observed: object) -> bool:
+    try:
+        return abs(float(observed) - float(intended)) <= 25.0
+    except (TypeError, ValueError, OverflowError):
+        return intended == observed
 
 
 __all__ = ["EVENT_POOLOS_EXTERNAL_CHANGE", "PoolOSExternalChangeRuntime"]
