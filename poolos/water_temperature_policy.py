@@ -212,7 +212,18 @@ def _stable_window(
 ) -> float | None:
     ordered = tuple(sorted(samples, key=lambda item: item.observed_at))
     cutoff = evaluated_at - policy.stability_window
-    window = tuple(item for item in ordered if cutoff <= item.observed_at <= evaluated_at)
+    eligible = tuple(item for item in ordered if item.observed_at <= evaluated_at)
+    if not eligible or eligible[-1].observed_at < cutoff:
+        return None
+    anchor = next(
+        (item for item in reversed(eligible) if item.observed_at <= cutoff),
+        None,
+    )
+    if anchor is None:
+        return None
+    window = (anchor,) + tuple(
+        item for item in eligible if cutoff < item.observed_at <= evaluated_at
+    )
     if len(window) < 2 or window[-1].observed_at - window[0].observed_at < policy.stability_window:
         return None
     directions: list[int] = []
