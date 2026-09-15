@@ -109,9 +109,14 @@ def test_expensive_analysis_is_decoupled_from_observation_critical_path() -> Non
         1,
     )[0]
 
+    # Primary observation still persists significant evidence.
     assert "self.observation_recorder.record_snapshot" in observe
+
+    # Expensive derived analysis is only scheduled from the observation path.
     assert "self._async_schedule_analysis(snapshot.generated_at)" in observe
     assert "self._infer_and_retro" not in observe
+
+    # The separate serialized worker owns derived inference/retrospective work.
     assert "self._infer_and_retro" in worker
     assert "async_add_executor_job" in worker
 
