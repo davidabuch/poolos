@@ -33,6 +33,7 @@ from .thermal_runtime import PoolOSThermalRuntime
 
 EVENT_POOLOS_EXTERNAL_CHANGE = "poolos_external_change"
 
+
 @dataclass(slots=True)
 class PoolOSExternalChangeRuntime:
     """Publish bounded semantic events; never issue reconciliation commands."""
@@ -46,6 +47,16 @@ class PoolOSExternalChangeRuntime:
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
+    _last_native_values: dict[str, object] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _last_ownership: ExternalOwnershipContext = field(
+        default_factory=ExternalOwnershipContext,
+        init=False,
+        repr=False,
+    )
     _thermal_external_evidence: ThermalRuntimeExternalChangeEvidence = field(
         default_factory=ThermalRuntimeExternalChangeEvidence,
         init=False,
@@ -77,6 +88,8 @@ class PoolOSExternalChangeRuntime:
             self.monitor.reset_baseline()
             self._thermal_external_evidence.reset()
             self.latest_batch = ExternalChangeBatch(())
+            self._last_native_values.clear()
+            self._last_ownership = ExternalOwnershipContext()
         ownership = self._ownership()
         batch = self.monitor.process(
             native,
@@ -124,6 +137,8 @@ class PoolOSExternalChangeRuntime:
         refreshed_ownership = self._ownership()
         if refreshed_ownership.intended_values != ownership.intended_values:
             self.monitor.recompute_current_ownership(refreshed_ownership)
+        self._last_native_values = dict(values)
+        self._last_ownership = refreshed_ownership
         for event in batch.events:
             self.hass.bus.async_fire(
                 EVENT_POOLOS_EXTERNAL_CHANGE,
@@ -143,7 +158,22 @@ class PoolOSExternalChangeRuntime:
     def refresh_ownership(self) -> None:
         """Recompute drift when thermal intent changes without native movement."""
 
-        self.monitor.recompute_current_ownership(self._ownership())
+        ownership = self._ownership()
+        if _native_truth_matches_prior_intent_transition(
+            self._last_native_values,
+            self._last_ownership,
+            ownership,
+        ):
+            # Accepted execution intent may legitimately move ahead of the
+            # steady-state planner target (for example 3000-RPM Solar priming).
+            # Retiring that temporary intent while native truth still reflects
+            # it is an intent handoff, not a new native transition.  Preserve a
+            # clean comparison state until a subsequent authoritative snapshot
+            # provides new physical evidence.
+            self.monitor.clear_active_drift()
+        else:
+            self.monitor.recompute_current_ownership(ownership)
+        self._last_ownership = ownership
 
     def diagnostics(self) -> dict[str, Any]:
         return {
@@ -247,6 +277,40 @@ def _assessment_usable_for_ownership(body_assessment: Any) -> bool:
         return False
     blockers = set(body_assessment.technical_preflight.blocking_reasons)
     return blockers <= _ALREADY_CONVERGED_TECHNICAL_NONBLOCKERS
+
+
+def _native_truth_matches_prior_intent_transition(
+    native_values: Mapping[str, object],
+    previous: ExternalOwnershipContext,
+    current: ExternalOwnershipContext,
+) -> bool:
+    """Return whether every current mismatch is still aligned to prior intent."""
+
+    explained_transition = False
+    for concept, intended in current.intended_values.items():
+        if concept not in native_values:
+            continue
+        observed = native_values[concept]
+        if _intent_aligned(concept, intended, observed):
+            continue
+        prior = previous.intended_values.get(concept)
+        if (
+            prior is None
+            or prior == intended
+            or not _intent_aligned(concept, prior, observed)
+        ):
+            return False
+        explained_transition = True
+    return explained_transition
+
+
+def _intent_aligned(concept: str, intended: object, observed: object) -> bool:
+    if concept != "pump.rpm":
+        return intended == observed
+    try:
+        return abs(float(observed) - float(intended)) <= 25.0
+    except (TypeError, ValueError, OverflowError):
+        return intended == observed
 
 
 __all__ = ["EVENT_POOLOS_EXTERNAL_CHANGE", "PoolOSExternalChangeRuntime"]
