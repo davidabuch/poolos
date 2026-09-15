@@ -221,9 +221,10 @@ def _stable_window(
     )
     if anchor is None:
         return None
-    window = (anchor,) + tuple(
-        item for item in eligible if cutoff < item.observed_at <= evaluated_at
-    )
+    recent = tuple(item for item in eligible if cutoff < item.observed_at <= evaluated_at)
+    if not recent or recent[0].observed_at - anchor.observed_at > policy.stability_window:
+        return None
+    window = (anchor,) + recent
     if len(window) < 2 or window[-1].observed_at - window[0].observed_at < policy.stability_window:
         return None
     directions: list[int] = []
