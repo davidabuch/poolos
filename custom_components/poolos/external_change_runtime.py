@@ -159,17 +159,17 @@ class PoolOSExternalChangeRuntime:
         """Recompute drift when thermal intent changes without native movement."""
 
         ownership = self._ownership()
-        if _native_truth_matches_prior_intent_transition(
+        if _pump_native_truth_matches_prior_intent_transition(
             self._last_native_values,
             self._last_ownership,
             ownership,
         ):
-            # Accepted execution intent may legitimately move ahead of the
+            # Accepted pump execution intent may legitimately move ahead of the
             # steady-state planner target (for example 3000-RPM Solar priming).
-            # Retiring that temporary intent while native truth still reflects
-            # it is an intent handoff, not a new native transition.  Preserve a
-            # clean comparison state until a subsequent authoritative snapshot
-            # provides new physical evidence.
+            # Retiring that temporary Pump intent while native truth still
+            # reflects it is an intent handoff, not a new native transition.
+            # This exception is intentionally pump-only; requested heat-source
+            # changes must continue to recompute their normal contextual drift.
             self.monitor.clear_active_drift()
         else:
             self.monitor.recompute_current_ownership(ownership)
@@ -229,9 +229,7 @@ class PoolOSExternalChangeRuntime:
         for body_assessment, requested_mode_resolved in (
             (assessment.pool, self.thermal_runtime.pool_requested_mode_resolved),
             (
-                assessment.hot_tub,
-                self.thermal_runtime.hot_tub_requested_mode_resolved,
-            ),
+                assessment.hot_tub, self.thermal_runtime.hot_tub_requested_mode_resolved),
         ):
             if (
                 not requested_mode_resolved
@@ -279,34 +277,35 @@ def _assessment_usable_for_ownership(body_assessment: Any) -> bool:
     return blockers <= _ALREADY_CONVERGED_TECHNICAL_NONBLOCKERS
 
 
-def _native_truth_matches_prior_intent_transition(
+def _pump_native_truth_matches_prior_intent_transition(
     native_values: Mapping[str, object],
     previous: ExternalOwnershipContext,
     current: ExternalOwnershipContext,
 ) -> bool:
-    """Return whether every current mismatch is still aligned to prior intent."""
+    """Return whether a Pump mismatch is still exactly prior accepted intent."""
 
-    explained_transition = False
-    for concept, intended in current.intended_values.items():
-        if concept not in native_values:
+    concept = "pump.rpm"
+    if concept not in native_values or concept not in current.intended_values:
+        return False
+    observed = native_values[concept]
+    intended = current.intended_values[concept]
+    if _pump_intent_aligned(intended, observed):
+        return False
+    prior = previous.intended_values.get(concept)
+    if prior is None or prior == intended or not _pump_intent_aligned(prior, observed):
+        return False
+
+    # Do not let a Pump handoff suppress unrelated contextual drift. If any
+    # non-Pump owned concept is currently misaligned, normal recomputation wins.
+    for other_concept, other_intended in current.intended_values.items():
+        if other_concept == concept or other_concept not in native_values:
             continue
-        observed = native_values[concept]
-        if _intent_aligned(concept, intended, observed):
-            continue
-        prior = previous.intended_values.get(concept)
-        if (
-            prior is None
-            or prior == intended
-            or not _intent_aligned(concept, prior, observed)
-        ):
+        if native_values[other_concept] != other_intended:
             return False
-        explained_transition = True
-    return explained_transition
+    return True
 
 
-def _intent_aligned(concept: str, intended: object, observed: object) -> bool:
-    if concept != "pump.rpm":
-        return intended == observed
+def _pump_intent_aligned(intended: object, observed: object) -> bool:
     try:
         return abs(float(observed) - float(intended)) <= 25.0
     except (TypeError, ValueError, OverflowError):
