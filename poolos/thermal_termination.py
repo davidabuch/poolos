@@ -320,18 +320,22 @@ def _external_takeover(
             event.observed_at >= entitlement.originating_lease_established_at
             and event.concept in concepts
         ):
-            if (
-                event.concept == "pump.rpm"
-                and entitlement.pump_setpoint is not None
-                and not pump_event_conflicts_with_provenance(
+            if event.concept == "pump.rpm" and entitlement.pump_setpoint is not None:
+                # A pump event observed before Pump provenance existed may have
+                # been retained only because the concept was then unowned.  It
+                # cannot later become takeover evidence unless it was
+                # contemporaneously classified as a reconciliation-required
+                # change against an owned Pump intent.
+                if not event.reconciliation_required:
+                    continue
+                if not pump_event_conflicts_with_provenance(
                     event,
                     intended_rpm=entitlement.pump_setpoint.intended_value,
                     provenance_verified=True,
                     accepted_at=entitlement.pump_setpoint_accepted_at,
                     tolerance=ThermalTerminationPolicy.pump_rpm_tolerance,
-                )
-            ):
-                continue
+                ):
+                    continue
             return f"thermal_termination_external_takeover:{event.concept}"
     return None
 
