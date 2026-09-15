@@ -166,14 +166,22 @@ class WaterTemperatureTracker:
             if probe_started_at is None:
                 return self._result(evaluated_at, WaterTemperatureDisposition.UNTRUSTED, "probe_start_missing")
             elapsed = evaluated_at - probe_started_at
+            deadline = probe_started_at + self._policy.maximum_probe_duration
+            evidence_evaluated_at = min(evaluated_at, deadline)
+            evidence_elapsed = evidence_evaluated_at - probe_started_at
+            if evidence_elapsed >= self._policy.minimum_probe_duration:
+                stable = _stable_window(
+                    samples,
+                    evaluated_at=evidence_evaluated_at,
+                    policy=self._policy,
+                )
+                if stable is not None:
+                    self._accept_bulk_water(stable, evidence_evaluated_at)
+                    return self._result(evaluated_at, WaterTemperatureDisposition.TRUSTED, "probe_settled")
             if elapsed >= self._policy.maximum_probe_duration:
                 return self._result(evaluated_at, WaterTemperatureDisposition.ACQUISITION_FAILED, "probe_maximum_exceeded")
             if elapsed < self._policy.minimum_probe_duration:
                 return self._result(evaluated_at, WaterTemperatureDisposition.PROBING, "probe_minimum_duration")
-            stable = _stable_window(samples, evaluated_at=evaluated_at, policy=self._policy)
-            if stable is not None:
-                self._accept_bulk_water(stable, evaluated_at)
-                return self._result(evaluated_at, WaterTemperatureDisposition.TRUSTED, "probe_settled")
             return self._result(evaluated_at, WaterTemperatureDisposition.PROBING, "probe_not_settled")
 
         if (
