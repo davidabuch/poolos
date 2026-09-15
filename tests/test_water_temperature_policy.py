@@ -59,6 +59,23 @@ def test_probe_accepts_stable_real_cadence_that_brackets_recent_window() -> None
     assert settled.trusted_temperature_f == 84
 
 
+def test_probe_rejects_sparse_anchor_that_does_not_bound_recent_evidence() -> None:
+    tracker = WaterTemperatureTracker()
+    samples = (
+        TemperatureSample(NOW + timedelta(minutes=1), 84),
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=40), 84),
+    )
+    result = evaluate(
+        tracker,
+        at=NOW + timedelta(minutes=4, seconds=58),
+        temperature=84,
+        probe=True,
+        started=NOW,
+        samples=samples,
+    )
+    assert result.disposition is WaterTemperatureDisposition.PROBING
+
+
 def test_flush_and_oscillation_are_not_accepted() -> None:
     flush = (TemperatureSample(NOW + timedelta(minutes=1), 98), TemperatureSample(NOW + timedelta(minutes=1, seconds=20), 94), TemperatureSample(NOW + timedelta(minutes=2), 88))
     bounce = (TemperatureSample(NOW + timedelta(minutes=1), 86), TemperatureSample(NOW + timedelta(minutes=1, seconds=30), 87), TemperatureSample(NOW + timedelta(minutes=2), 86))
