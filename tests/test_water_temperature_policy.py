@@ -59,6 +59,27 @@ def test_probe_accepts_stable_real_cadence_that_brackets_recent_window() -> None
     assert settled.trusted_temperature_f == 84
 
 
+def test_probe_accepts_stability_proven_by_deadline_when_evaluation_is_late() -> None:
+    tracker = WaterTemperatureTracker()
+    samples = (
+        TemperatureSample(NOW + timedelta(minutes=3, seconds=58), 84),
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=18), 84),
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=38), 84),
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=58), 84),
+    )
+    result = evaluate(
+        tracker,
+        at=NOW + timedelta(minutes=5, seconds=2),
+        temperature=84,
+        probe=True,
+        started=NOW,
+        samples=samples,
+    )
+    assert result.disposition is WaterTemperatureDisposition.TRUSTED
+    assert result.reason_code == "probe_settled"
+    assert result.trusted_temperature_f == 84
+
+
 def test_probe_rejects_sparse_anchor_that_does_not_bound_recent_evidence() -> None:
     tracker = WaterTemperatureTracker()
     samples = (
@@ -74,6 +95,26 @@ def test_probe_rejects_sparse_anchor_that_does_not_bound_recent_evidence() -> No
         samples=samples,
     )
     assert result.disposition is WaterTemperatureDisposition.PROBING
+
+
+def test_post_deadline_samples_cannot_rescue_probe() -> None:
+    tracker = WaterTemperatureTracker()
+    samples = (
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=10), 84),
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=30), 84),
+        TemperatureSample(NOW + timedelta(minutes=4, seconds=50), 84),
+        TemperatureSample(NOW + timedelta(minutes=5, seconds=10), 84),
+    )
+    result = evaluate(
+        tracker,
+        at=NOW + timedelta(minutes=5, seconds=15),
+        temperature=84,
+        probe=True,
+        started=NOW,
+        samples=samples,
+    )
+    assert result.disposition is WaterTemperatureDisposition.ACQUISITION_FAILED
+    assert result.reason_code == "probe_maximum_exceeded"
 
 
 def test_flush_and_oscillation_are_not_accepted() -> None:
