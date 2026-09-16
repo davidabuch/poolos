@@ -1,5 +1,12 @@
 # PoolOS Control Authority Framework
 
+This is the historical Milestone 9.2 framework description. The normative
+ownership interpretation is now [ADR-110](adr/ADR-110-ownership-contract-semantics.md)
+and the [ownership specification](ownership/OWNERSHIP_ARCHITECTURE_SPEC.md).
+An exposed HA control carries its declared policy, session, manual, or Reset
+semantics; HA origin alone does not assign or deny manual intent. Safety and
+maintenance constraints continue to apply independently at final authorization.
+
 Milestone 9.2 introduces deterministic control-source resolution before commands
 reach the Execution Engine.
 

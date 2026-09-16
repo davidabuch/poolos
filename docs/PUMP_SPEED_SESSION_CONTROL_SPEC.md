@@ -10,6 +10,16 @@ Implementation is intentionally divided into slices. Not every behavior describe
 
 `AGENTS.md` remains the higher-precedence repository safety constitution.
 
+The incorporated [90-scenario ownership contract](ownership/PoolOS_Ownership_Scenario_Contract.txt)
+and [ownership architecture](ownership/OWNERSHIP_ARCHITECTURE_SPEC.md), adopted by
+[ADR-110](adr/ADR-110-ownership-contract-semantics.md), govern ownership semantics.
+"Session" in the RPM rules below means a nested pump operating purpose; a probe,
+prime, or heat-purpose transition does not inherently end the continuous BODY
+lifecycle. An unattributed configured-speed change is not proof of a manual
+override. Positive operator evidence and verified exact current desired-state
+hand-back govern manual scope. These semantics are accepted design, not a claim
+that all slices are implemented or commissioned.
+
 ---
 
 ## 1. Fundamental Separation
@@ -266,7 +276,10 @@ Saving configuration itself must not directly issue equipment commands.
 
 ## 15. Grid Outage Intended Future Behavior
 
-Grid outage ultimately becomes a one-time protective intervention for each confirmed outage entry.
+The former blanket post-intervention manual exception in this section is
+superseded by ownership scenarios 79–80 and ADR-110. Safety authority wins while
+its requirement is active. A one-time protective action may complete, but this
+does not cancel a still-active mandatory safety constraint.
 
 On outage entry PoolOS should perform the configured safety actions such as:
 
@@ -276,13 +289,10 @@ On outage entry PoolOS should perform the configured safety actions such as:
 - turn High Speed OFF;
 - reduce Pool circulation to configured outage RPM if circulation is required.
 
-After that initial protective action completes, deliberate user control is respected.
-
-A user may later increase RPM or manually use the Hot Tub during the same outage.
-
-PoolOS must not continuously fight that deliberate post-kill user choice merely because outage remains active.
-
-Grid restoration begins a new normal session.
+After a protective action completes, deliberate user control is respected only
+where it does not violate a current mandatory safety requirement. On safety
+clear, retain still-relevant positive operator intent and reevaluate current
+policy and observations; do not restore pre-outage commands.
 
 This redesign is deferred to the dedicated Grid Outage slice.
 

@@ -4,6 +4,12 @@
 
 Accepted
 
+Partially superseded by [ADR-110](ADR-110-ownership-contract-semantics.md) for
+unattributed drift, domain-scoped manual authority, prospective adoption and
+recovery. The historical implementation below retains its accounting, TOU,
+exclusive circulation and typed handoff rationale. A relevant native change is
+not by itself proof of positive operator intervention.
+
 ## Context
 
 ADR-106 deliberately keeps filtration accounting and scheduling command-free.

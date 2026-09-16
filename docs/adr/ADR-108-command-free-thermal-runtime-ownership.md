@@ -2,6 +2,12 @@
 
 ## Status
 
+Partially superseded by [ADR-110](ADR-110-ownership-contract-semantics.md) for
+origin/adoption, mismatch attribution, domain authority, body-purpose continuity
+and recovery. The historical implementation below does not define compliance
+with the accepted 90-scenario contract. Command-free modeling, exact receipts,
+typed transfer, chronology, safety checks and generation isolation remain valid.
+
 Accepted as a command-free prerequisite for future event-driven thermal
 orchestration. It grants no physical authority.
 

@@ -16,6 +16,30 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 16, 2026 — ownership contract Stage 1
+
+Stage 1 freezes all 90 accepted ownership scenarios against reviewed main
+`9307e6d882cfa847e4be97f4e1e755174e34b5ac` (v0.11.23). Earlier slice and release
+status below is historical, not the current development priority.
+
+- Normative source: [accepted contract](ownership/PoolOS_Ownership_Scenario_Contract.txt), preserved byte-for-byte.
+- Canonical terminology and behavior: [ownership architecture](ownership/OWNERSHIP_ARCHITECTURE_SPEC.md).
+- Decision and scoped historical supersession: [ADR-110](adr/ADR-110-ownership-contract-semantics.md).
+- All 90 implementation mappings: [scenario traceability](ownership/scenario_traceability.json).
+- Evidence limits, future test revisions and implementation stages: [Stage 1 mapping guide](ownership/STAGE_1_TRACEABILITY.md).
+
+Mismatch, command failure and missing evidence are not proof of operator intent.
+BODY/PUMP/THERMAL authority, historical origin, execution health and exact command
+permission are separate. Unsafe commands remain blocked. Typed continuity,
+prospective adoption and bounded recovery must preserve legitimate autonomy
+without manufacturing receipts or reviving obsolete execution generations.
+
+This stage changes documentation only. Existing production behavior and test
+expectations remain unchanged, including known conflicts recorded in the matrix.
+Implementation, new recovery/adoption/Reset authority and commissioning need
+separate authorization. The next work is the staged ownership implementation in
+the mapping guide, not the historical "Slice 1" baseline work below.
+
 ### September 12, 2026 — v0.11.15 release preparation
 
 Release candidate `v0.11.15` contains the residual cleanup transfer correction
