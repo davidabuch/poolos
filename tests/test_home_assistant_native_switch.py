@@ -233,6 +233,9 @@ def test_commissioned_execution_switches_restore_desired_on_without_ownership() 
             def set_enabled(self, enabled: bool) -> None:
                 self.enabled = enabled
 
+            def arm_restart_recovery_adoption(self) -> None:
+                pass
+
             def authority_configuration_changed(self) -> None:
                 self.authority_refreshes += 1
 

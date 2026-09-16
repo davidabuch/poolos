@@ -78,17 +78,25 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             raise ValueError("Pool PMPCIRC identity is unresolved")
         ownership_lease_id = None
         body_activation_receipt_id = None
+        body_adoption_id = None
         if cleanup:
             lease = self.ownership.filtration_lease
             if (
                 lease is None
                 or lease.session_id != session_id
                 or not lease.verified
-                or lease.body_activation is None
+                or (
+                    lease.body_activation is None
+                    and lease.body_adoption is None
+                )
             ):
                 raise ValueError("filtration cleanup ownership is not current")
             ownership_lease_id = lease.lease_id
-            body_activation_receipt_id = lease.body_activation.receipt_id
+            if lease.body_activation is not None:
+                body_activation_receipt_id = lease.body_activation.receipt_id
+            else:
+                assert lease.body_adoption is not None
+                body_adoption_id = lease.body_adoption.adoption_id
         pump_session_id = None
         effective_pump_rpm = None
         if self.pump_speed_session is not None:
@@ -110,6 +118,7 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             cleanup=cleanup,
             ownership_lease_id=ownership_lease_id,
             body_activation_receipt_id=body_activation_receipt_id,
+            body_adoption_id=body_adoption_id,
             pump_session_id=pump_session_id,
             effective_pump_rpm=effective_pump_rpm,
         )
@@ -149,6 +158,11 @@ class PoolOSFiltrationAutomaticRuntime:
     @property
     def enabled(self) -> bool:
         return self._desired_enabled
+
+    def arm_restart_recovery_adoption(self) -> None:
+        """Arm one fresh post-restart/reload prospective adoption boundary."""
+
+        self.driver.arm_restart_recovery_adoption()
 
     def set_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled)

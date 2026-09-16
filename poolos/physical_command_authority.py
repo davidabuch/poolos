@@ -390,6 +390,7 @@ class AutomaticFiltrationDispatchContext:
     pump_circuit_id: str
     ownership_lease_id: str | None = None
     body_activation_receipt_id: str | None = None
+    body_adoption_id: str | None = None
     purpose: AutomaticFiltrationDispatchPurpose = (
         AutomaticFiltrationDispatchPurpose.NORMAL
     )
@@ -422,11 +423,18 @@ class AutomaticFiltrationDispatchContext:
             AutomaticFiltrationDispatchPurpose(self.purpose),
         )
         if self.purpose is AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP:
+            command_provenance = bool(
+                self.body_activation_receipt_id
+                and self.body_activation_receipt_id.strip()
+            )
+            adoption_provenance = bool(
+                self.body_adoption_id
+                and self.body_adoption_id.strip()
+            )
             if not (
                 self.ownership_lease_id
                 and self.ownership_lease_id.strip()
-                and self.body_activation_receipt_id
-                and self.body_activation_receipt_id.strip()
+                and command_provenance != adoption_provenance
             ):
                 raise ValueError(
                     "filtration cleanup requires exact body ownership provenance"
@@ -434,8 +442,11 @@ class AutomaticFiltrationDispatchContext:
         elif (
             self.ownership_lease_id is not None
             or self.body_activation_receipt_id is not None
+            or self.body_adoption_id is not None
         ):
-            raise ValueError("normal filtration context cannot carry cleanup provenance")
+            raise ValueError(
+                "normal filtration context cannot carry cleanup provenance"
+            )
         allowed = (
             self.operation == "body_active"
             and self.target == "B1101"
@@ -984,6 +995,7 @@ class PoolOSPhysicalCommandAuthority:
         cleanup: bool = False,
         ownership_lease_id: str | None = None,
         body_activation_receipt_id: str | None = None,
+        body_adoption_id: str | None = None,
         pump_session_id: str | None = None,
         effective_pump_rpm: int | None = None,
     ) -> AutomaticFiltrationDispatchContext:
@@ -1010,6 +1022,7 @@ class PoolOSPhysicalCommandAuthority:
             pump_circuit_id=pump_circuit_id,
             ownership_lease_id=ownership_lease_id,
             body_activation_receipt_id=body_activation_receipt_id,
+            body_adoption_id=body_adoption_id,
             purpose=(
                 AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP
                 if cleanup
