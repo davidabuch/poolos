@@ -1,0 +1,3490 @@
+{
+  "schema_version": 1,
+  "reviewed_main": "9307e6d882cfa847e4be97f4e1e755174e34b5ac",
+  "normative_contract": "docs/ownership/PoolOS_Ownership_Scenario_Contract.txt",
+  "contract_sha256": "0759872ed4ecdfb24eb762a7e59d1b2c27c0c6ae3c84c92cd9c02cf04099b1bd",
+  "scope": "Stage 1 audit mapping; no production or test semantics changed; SATISFIED denotes audited baseline behavior only, not new contract certification or commissioning.",
+  "status_vocabulary": [
+    "PARTIALLY SATISFIED",
+    "ARCHITECTURAL MISMATCH",
+    "MISSING IMPLEMENTATION",
+    "SATISFIED",
+    "UNCLEAR — requires deterministic test or additional tracing",
+    "MISSING PERSISTENCE/GENERATION SAFETY",
+    "MISSING RECOVERY/LIVENESS",
+    "MISSING OBSERVABILITY"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": 1,
+      "title": "Normal filtration start from everything OFF.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=PoolOS. PoolOS turns Pool ON,\nestablishes filtration RPM, earns credit, and owns completion/shutdown.",
+      "required_semantic_mechanisms": [
+        "Canonical immediate obligation and exclusive circulation handoff",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Accepted body/pump and completion exist; first-class Thermal Off authority and pump-zero completion are not fully represented.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-001",
+          "behavior": "Cold OFF filtration owns each required domain, earns observed credit and verifies body Off plus pump zero.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 2,
+      "title": "Normal Solar opportunity from everything OFF.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=PoolOS. PoolOS owns activation,\nacquisition/probe/prime, source engagement, Solar operation, termination, and\nsuccessor/shutdown.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Source selection versus engagement and useful heating",
+        "Domain-scoped speed sessions and fixed convergence"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/pump_speed_session.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Owned cold start exists; drift and purpose transitions can terminate aggregate authority.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-002",
+          "behavior": "Complete autonomous Solar startup through transients, heating and cleanup with no manual reset.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 3,
+      "title": "Solar preparation uses 1500 RPM for trustworthy water-temperature acquisition.",
+      "expected_contract_behavior": "all relevant ownership remains PoolOS. Probe is an internal preparation\nstate, not a new session or ownership transition.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_pool_circulation_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Probe execution-purpose supersession can end the lease; residual transfer mitigates cleanup but is not continuous body ownership.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-003",
+          "behavior": "Probe completion with unauthorized-then-authorized successor preserves body lifecycle without reviving obsolete execution.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_residual_cleanup_transfer.py::test_async_source_observation_preserves_body_through_later_solar"
+      ]
+    },
+    {
+      "scenario_id": 4,
+      "title": "PoolOS commands Pool ON and IntelliCenter temporarily produces startup/priming RPM such as 3000 or 3450.",
+      "expected_contract_behavior": "relevant ownership remains PoolOS. A controller-generated consequence\nof PoolOS activation is not operator takeover merely because RPM differs from the\nsteady-state target. Attribute it and converge normally.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Accepted settling and prime attribution exist; unmodeled native RPM contradictions can preempt.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-004",
+          "behavior": "Inject 3000 and 3450 activation consequences at multiple callback orderings without positive intent; retain origin and converge.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_runtime_ownership.py::test_owned_prime_actual_rpm_transition_does_not_self_preempt"
+      ]
+    },
+    {
+      "scenario_id": 5,
+      "title": "Solar becomes physically active.",
+      "expected_contract_behavior": "Body/Pump/Thermal=PoolOS. Pump converges to Solar operating requirement\n(currently 2900 +/- tolerance). 1500 is not a valid steady Solar RPM.",
+      "required_semantic_mechanisms": [
+        "Source selection versus engagement and useful heating",
+        "Domain-scoped speed sessions and fixed convergence"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "2900 is currently prepared before selection, while actual-purpose tracking distinguishes active heating.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-005",
+          "behavior": "Assert Solar operating RPM only after physical engagement and convergence without losing any required domain.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 6,
+      "title": "PoolOS-owned Solar reaches Pool target and filtration does not need to run now.",
+      "expected_contract_behavior": "PoolOS owns termination: Solar OFF -> Pool OFF -> pump 0. The active\nownership lease/session ends after verified shutdown because there is no active\ncontrol task. This is INACTIVE/UNOWNED, not External; PoolOS remains the default\nautonomous controller for future opportunities.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Source and body cleanup exist; body-Off verification alone can complete while actual RPM remains nonzero.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-006",
+          "behavior": "Target satisfied with deferred debt verifies source Off, body Off and pump zero before inactive outcome.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 7,
+      "title": "PoolOS-owned Solar reaches target but filtration independently requires circulation now.",
+      "expected_contract_behavior": "PoolOS retains Body/Pump. Solar thermal execution ends; Pool remains ON\nand pump transitions to filtration RPM. Internal successor, not external/new body\nownership.",
+      "required_semantic_mechanisms": [
+        "Canonical immediate obligation and exclusive circulation handoff",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Explicit thermal-to-filtration transfer retains body and obtains a verified new pump operation.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-007",
+          "behavior": "Assert same body origin and exclusive command ledger through immediate filtration successor.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_automatic_execution.py::test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body"
+      ]
+    },
+    {
+      "scenario_id": 8,
+      "title": "PoolOS-owned filtration is running when valid Solar opportunity develops.",
+      "expected_contract_behavior": "Body/Pump/Thermal=PoolOS. Transition Filtration -> Solar within same\ncontinuous body session. Purpose change must not erase body provenance.",
+      "required_semantic_mechanisms": [
+        "Canonical immediate obligation and exclusive circulation handoff",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Verified filtration body proof transfers explicitly to thermal without hardware adoption.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-008",
+          "behavior": "Assert body identity continuity and new pump/source receipts during normal filtration-to-Solar transfer.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_automatic_execution.py::test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adoption"
+      ]
+    },
+    {
+      "scenario_id": 9,
+      "title": "PoolOS-owned Solar loses usable Solar conditions while filtration still requires immediate circulation.",
+      "expected_contract_behavior": "Solar ends; Body/Pump remain PoolOS-owned and transition to filtration.\nNo unnecessary Pool OFF/ON cycle.",
+      "required_semantic_mechanisms": [
+        "Source selection versus engagement and useful heating",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Normal source termination and immediate filtration handoff are implemented.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-009",
+          "behavior": "Run environmental Solar end through source Off and filtration normalization without body cycling.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_filtration_automatic_execution.py::test_complete_off_filtration_thermal_filtration_off_ownership_lifecycle"
+      ]
+    },
+    {
+      "scenario_id": 10,
+      "title": "Solar unavailable and no current reason for circulation.",
+      "expected_contract_behavior": "PoolOS terminates session to Pool OFF/pump 0. Active lease ends only\nbecause there is no active task; ownership does not become External. PoolOS remains\ndefault controller for future sessions.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Normal owned cleanup exists but terminal labels and pump-zero endpoint need the canonical lifecycle model.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-010",
+          "behavior": "No remaining policy reason ends as inactive, not External, with verified source/body Off and pump zero.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 11,
+      "title": "PoolOS-required pump RPM differs modestly from actual without evidence of human action (e.g. target 2600, actual 2550).",
+      "expected_contract_behavior": "PoolOS retains Pump ownership, attempts correction/convergence to 2600,\nand only after bounded failure reports a control/convergence fault. Mismatch alone\nis not external takeover.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Owned actual RPM outside 25 tolerance can preempt even with no operator event.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-011",
+          "behavior": "2600 desired and 2550 actual retains PUMP origin, performs bounded correction then stable or control fault.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_runtime_ownership.py::test_owned_pump_and_source_fail_closed_on_relevant_evidence"
+      ]
+    },
+    {
+      "scenario_id": 12,
+      "title": "During PoolOS-owned Solar, operator deliberately changes pump RPM at ICP/OCP.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=External, Thermal=PoolOS. External Pump ownership is\nscoped to the current operating session/purpose unless handed back sooner and\nexpires at the next legitimate session boundary.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Verified pump-session override can preserve body/source; native mismatch lacks positive-origin typing.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-012",
+          "behavior": "Positive ICP/OCP pump request changes only PUMP authority until its exact defined expiry.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 13,
+      "title": "Operator manually returns Pump RPM to exactly PoolOS's current required RPM.",
+      "expected_contract_behavior": "immediate implicit hand-back. PoolOS may reclaim Pump ownership during\nthe existing session after verifying the returned state.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Baseline return can clear override, but not general exact current requirement with typed hand-back authority.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-013",
+          "behavior": "Attributable exact required-RPM hand-back verifies and reclaims PUMP without new body session.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 14,
+      "title": "PoolOS Solar; operator changes source Solar -> Gas at ICP/OCP.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=External for the current session.\nPoolOS does not fight Gas and continues managing body/pump.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Source mismatch preempts aggregate thermal lease rather than a scoped THERMAL override.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-014",
+          "behavior": "Positive Solar-to-Gas command leaves BODY and PUMP governed by PoolOS and prevents source fighting.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 15,
+      "title": "Same as 14; Pool reaches target.",
+      "expected_contract_behavior": "PoolOS still owns body/session completion and ends the session. Thermal\noverride expires with the session.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Body-only residual may remain after source takeover but cleanup is blocked by active source/retained event.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-015",
+          "behavior": "Target satisfied during manual Gas uses explicit safe completion scope and expires override on body shutdown.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 16,
+      "title": "PoolOS Solar; operator deliberately turns Pool OFF at ICP/OCP.",
+      "expected_contract_behavior": "cancel the current Pool session. PoolOS must not immediately restart the\nsame Solar opportunity.",
+      "required_semantic_mechanisms": [
+        "Body-scoped semantic opportunity cancellation and reacquisition"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_automatic_control_suppression.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pool_automatic_control_suppression.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Body-specific manual OFF suppression prevents immediate restart and respects accepted pending work boundaries.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-016",
+          "behavior": "Positive Pool OFF cancels exactly the current body opportunity and fences pending commands.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_automatic_execution.py::test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry"
+      ]
+    },
+    {
+      "scenario_id": 17,
+      "title": "After 16, periodic reevaluation occurs and same Solar opportunity remains.",
+      "expected_contract_behavior": "no reacquisition. Periodic reevaluation is not a new session boundary.",
+      "required_semantic_mechanisms": [
+        "Body-scoped semantic opportunity cancellation and reacquisition"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_automatic_control_suppression.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pool_automatic_control_suppression.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Repeated evaluation remains suppressed for the canceled current session.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-017",
+          "behavior": "Repeated snapshots and changing plan IDs cannot restart the same canceled Solar opportunity.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_pool_automatic_control_suppression.py::test_positive_human_off_latches_until_explicit_command_free_resume"
+      ]
+    },
+    {
+      "scenario_id": 18,
+      "title": "After 16/17, a genuinely new independent need occurs later (e.g. 22:01 TOU filtration with debt).",
+      "expected_contract_behavior": "PoolOS may create a new generation and reacquire Body/Pump/Thermal as\nneeded. Prior manual OFF is not permanent exile.",
+      "required_semantic_mechanisms": [
+        "Body-scoped semantic opportunity cancellation and reacquisition",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_automatic_control_suppression.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pool_automatic_control_suppression.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Transient suppression uses operational-day expiry rather than each independent TOU opportunity.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-018",
+          "behavior": "Noon Pool OFF blocks same Solar but permits genuinely new 22:01 filtration need without Resume.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_pool_automatic_control_suppression.py::test_pool_manual_off_restraint_is_current_until_next_operational_day"
+      ]
+    },
+    {
+      "scenario_id": 19,
+      "title": "Everything OFF; operator manually turns Pool ON at ICP/OCP (e.g. 07:00).",
+      "expected_contract_behavior": "Body initially External/manual. PoolOS does not claim it originated the\nactivation. Qualifying runtime may still earn filtration credit. Pump/Thermal are\ndetermined independently.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Prospective domain adoption without a historical command receipt",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Preexisting circulation is unowned and earns credit; actor-positive initial BODY label is absent.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-019",
+          "behavior": "Positive manual Pool ON creates External BODY only, leaves other domains independent and credits actual qualifying flow.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 20,
+      "title": "Following 19, a new independent PoolOS Solar opportunity becomes valid (e.g. 09:15).",
+      "expected_contract_behavior": "explicit prospective adoption is allowed. PoolOS creates a new\ngeneration, takes full Body/Pump/Thermal ownership as appropriate, and owns\ntermination/successor behavior from adoption forward.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "General thermal adoption is absent; restart filtration adoption is narrower.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-020",
+          "behavior": "New independent Solar opportunity prospectively adopts active Pool and owns eventual completion.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 21,
+      "title": "PoolOS Pool/Solar; operator changes Solar -> Gas at ICP/OCP.",
+      "expected_contract_behavior": "Body/Pump remain PoolOS, Thermal External for current session. If\noperator instead selects Solar Preferred at ICP/OCP, treat that recognized gesture\nas a persistent PoolOS policy change to Solar Preferred until explicitly changed.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Durable policy/target synchronization separate from session override"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Source preemption is aggregate and native SOLARPREF is a configuration conflict.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-021",
+          "behavior": "Split positive Gas session override from positive Solar Preferred durable policy gesture.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 22,
+      "title": "During session-scoped manual Gas override, operator changes Gas -> exactly the thermal state PoolOS currently wants.",
+      "expected_contract_behavior": "immediate implicit Thermal hand-back to PoolOS.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No general typed exact-source hand-back mechanism.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-022",
+          "behavior": "Positive return to current desired source verifies and restores only THERMAL authority.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 23,
+      "title": "Operator selected Gas during PoolOS Solar; Solar environmental conditions later become unavailable while Gas remains selected.",
+      "expected_contract_behavior": "Thermal remains External for current session. Environmental change does\nnot undo operator thermal intent. Body/Pump remain PoolOS.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No durable session-scoped Thermal operator record independent of policy eligibility.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-023",
+          "behavior": "Keep manual Gas authority through changing Solar conditions while BODY/PUMP continue normally.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 24,
+      "title": "Manual Gas override; Pool reaches target.",
+      "expected_contract_behavior": "PoolOS ends the PoolOS-owned body session. Thermal override expires with\nthat session.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Source takeover can block body-only residual cleanup despite retained original body origin.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-024",
+          "behavior": "Complete owned body at target under manual Gas using reviewed reduction and end its override.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 25,
+      "title": "After 24 everything OFF; later new filtration-only session becomes necessary.",
+      "expected_contract_behavior": "new PoolOS session; Body/Pump/Thermal return to PoolOS under current\npersistent policy. Previous session Gas override does not contaminate it.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Durable policy/target synchronization separate from session override",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Fresh accepted sessions exist but source/reenable residue may block autonomous recovery.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-025",
+          "behavior": "After manual Gas session ends, next independent filtration starts under durable policy with no old override.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 26,
+      "title": "PoolOS Solar; operator selects Heat Mode Off at ICP/OCP but leaves Pool ON.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=External for current session. Stop\nheating but continue independently required circulation. For extended/winter\nSolar prohibition, operator must use persistent PoolOS HA policy (e.g. Solar\nDisabled), which survives sessions until changed.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Native source Off can preempt aggregate lease; no scoped Thermal lifetime.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-026",
+          "behavior": "Positive heat Off changes only THERMAL while required circulation continues; persistent Solar Disabled stays separate.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 27,
+      "title": "Same as 26, but no independent reason remains to circulate.",
+      "expected_contract_behavior": "PoolOS owns completion and shuts Pool/pump OFF. Thermal override did not\ntransfer Body ownership.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Thermal-only intervention can poison circulation completion via retained evidence.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-027",
+          "behavior": "Manual heat Off plus no immediate purpose completes PoolOS body to pump zero without adopting source from equality.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 28,
+      "title": "PoolOS filtration with source Off; operator manually selects Solar at ICP/OCP while Solar can activate.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=External. Respect source request. Pump\nchanges to Solar requirement only when Solar is physically active.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Source selection versus engagement and useful heating",
+        "Domain-scoped speed sessions and fixed convergence"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/pump_speed_session.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Source drift can preempt whole filtration lease; active-source pump rules are only partial integration.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-028",
+          "behavior": "Manual Solar on owned filtration scopes THERMAL, waits for actual activation then changes pump requirement.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 29,
+      "title": "Operator selects Solar at ICP/OCP while roof conditions are not favorable.",
+      "expected_contract_behavior": "selection is a suggestion/request to Pentair, not an override of native\nSolar eligibility. Thermal is session-scoped External, but pump remains at its\ncurrent appropriate non-Solar requirement. Do NOT set Solar RPM until Solar is\nactually active.",
+      "required_semantic_mechanisms": [
+        "Source selection versus engagement and useful heating",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Actual-purpose model separates selected/inactive, but source override evidence and lifetime are incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-029",
+          "behavior": "Manual Solar selection with cold roof retains non-Solar RPM and records only scoped THERMAL override.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 30,
+      "title": "Operator returns session-scoped manual source selection to exactly PoolOS's current desired thermal state.",
+      "expected_contract_behavior": "immediate implicit Thermal hand-back.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No general exact desired-source hand-back token.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-030",
+          "behavior": "Positive manual source return verifies against current desired state and restores THERMAL only.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 31,
+      "title": "PoolOS filtration at 2600; Solar becomes appropriate while Pool already running.",
+      "expected_contract_behavior": "Body/Pump/Thermal=PoolOS. Same body session. Transition into Solar; wait\nfor actual Solar activation, then establish Solar RPM.",
+      "required_semantic_mechanisms": [
+        "Source selection versus engagement and useful heating",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_pool_circulation_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Body handoff works; Solar RPM is established before actual Solar activation.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-031",
+          "behavior": "Filtration-to-Solar keeps body origin, uses justified preparation flow, then establishes Solar RPM on activity.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 32,
+      "title": "PoolOS Solar at 2900; Solar conditions disappear; filtration debt remains and filtration is permitted now.",
+      "expected_contract_behavior": "Body/Pump/Thermal remain PoolOS. Solar deactivates, then pump transitions\nto filtration RPM. Internal successor.",
+      "required_semantic_mechanisms": [
+        "Canonical immediate obligation and exclusive circulation handoff",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Normal verified source-Off and thermal-to-filtration handoff exist.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-032",
+          "behavior": "Solar ends with immediate debt; retain body origin, replace pump provenance and continue filtration.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_filtration_automatic_execution.py::test_complete_off_filtration_thermal_filtration_off_ownership_lifecycle"
+      ]
+    },
+    {
+      "scenario_id": 33,
+      "title": "Same as 32, except filtration is TOU-deferred.",
+      "expected_contract_behavior": "PoolOS terminates current Solar session to Pool OFF/pump0. Debt remains.\nLater TOU filtration is a new PoolOS session/generation.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "TOU deferral is respected; full physical pump-zero termination and later session need combined proof.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-033",
+          "behavior": "Solar end with deferred debt verifies shutdown; later TOU starts a new generation without erased debt.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 34,
+      "title": "PoolOS filtration; operator manually changes RPM; later Solar becomes appropriate.",
+      "expected_contract_behavior": "before Solar, Body=PoolOS, Pump=External, Thermal=PoolOS. The new Solar\noperating-purpose session is a legitimate Pump-ownership boundary; PoolOS may\nreacquire Pump and run Solar normally.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Body continuity with nested immutable execution generations",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Pump purpose transitions clear overrides, but native intent versus boundary ordering needs composed proof.",
+      "implementation_status": "UNCLEAR — requires deterministic test or additional tracing",
+      "required_future_regressions": [
+        {
+          "id": "OWN-034",
+          "behavior": "Positive manual filtration RPM persists until actual new Solar purpose; re-acquire then, with simultaneous operator race control.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_pump_speed_session.py::test_true_purpose_body_and_off_boundaries_clear_override"
+      ]
+    },
+    {
+      "scenario_id": 35,
+      "title": "Same as 34, but Solar never becomes appropriate and filtration continues to completion.",
+      "expected_contract_behavior": "manual Pump ownership persists for current filtration session unless\nhanded back by exact required RPM. At debt zero, PoolOS still owns Body completion\nand may turn Pool OFF.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Pump-session updates can preserve body; retained change evidence can still affect completion.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-035",
+          "behavior": "Manual filtration RPM persists to debt zero while original BODY completes safely with pump-zero verification.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 36,
+      "title": "PoolOS Solar; operator changes pump RPM manually; Solar later becomes inactive and filtration must continue.",
+      "expected_contract_behavior": "Solar -> Filtration is a legitimate Pump session/purpose boundary.\nPoolOS may reacquire Pump and establish filtration RPM.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Canonical immediate obligation and exclusive circulation handoff",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Purpose override machinery exists but aggregate takeover can eliminate safe thermal handoff first.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-036",
+          "behavior": "Solar pump override expires at legitimate filtration boundary while BODY survives and new pump grant verifies.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 37,
+      "title": "PoolOS Solar; operator changes source Solar -> Gas; later Solar conditions fall, Gas remains selected, Pool below target.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=External. Gas continues for current\nsession; PoolOS manages pump and body completion.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Source selection versus engagement and useful heating",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No independent source override keeps Gas in force while body lifecycle continues.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-037",
+          "behavior": "Manual Gas stays scoped through lost Solar eligibility and below-target operation; body completion remains possible.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 38,
+      "title": "During 37, operator changes Gas -> Solar Preferred through PoolOS HA.",
+      "expected_contract_behavior": "persistent PoolOS policy change, not merely hand-back. Thermal ownership\nreturns to PoolOS; Solar Preferred persists across future sessions/restarts until\nchanged.",
+      "required_semantic_mechanisms": [
+        "Durable policy/target synchronization separate from session override",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "HA policy persists, but typed THERMAL return from an active manual override is absent.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-038",
+          "behavior": "HA Solar Preferred ends applicable Thermal override and survives later sessions and restart.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 39,
+      "title": "PoolOS Pool session; operator turns Hot Tub ON at ICP/OCP.",
+      "expected_contract_behavior": "Pool body session yields to Hot Tub request. Hot Tub body request is\ninitially External because operator initiated it. PoolOS quickly adopts execution\nof the Hot Tub session, manages Pump, and manages Thermal unless source was\nexplicitly overridden.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Prospective domain adoption without a historical command receipt",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Pool yields to Spa; externally active Spa can gain pump/source receipts but no body adoption.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-039",
+          "behavior": "Positive Spa ON ends Pool continuity and creates a fresh adopted user Spa session with scoped source intent.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 40,
+      "title": "Following 39, operator turns Hot Tub OFF; Pool filtration debt remains.",
+      "expected_contract_behavior": "Hot Tub manual session ends. PoolOS reevaluates current policy and may\nstart/resume an independently justified Pool session, or remain OFF. Do not blindly\nrestore stale pre-Hot-Tub commands.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Clean Spa takeover/yield permits a later independent Pool filtration start.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-040",
+          "behavior": "Spa OFF causes fresh Pool policy evaluation with no stale pre-Spa command replay.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_filtration_automatic_execution.py::test_verified_filtration_yields_to_spa_and_can_restart_fresh"
+      ]
+    },
+    {
+      "scenario_id": 41,
+      "title": "Everything OFF; operator turns Hot Tub ON at ICP/OCP with no source change.",
+      "expected_contract_behavior": "Body request External -> prospectively adopted by PoolOS; Pump=PoolOS;\nThermal=PoolOS. PoolOS executes the requested Hot Tub session.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Prospective domain adoption without a historical command receipt"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "User Spa request is treated as external body, not prospectively adopted execution.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-041",
+          "behavior": "Explicit Spa ON with no source override adopts requested session and manages Pump/Thermal with user lifetime.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 42,
+      "title": "Operator turns Hot Tub ON and explicitly selects Gas at ICP/OCP.",
+      "expected_contract_behavior": "Body adopted by PoolOS, Pump=PoolOS, Thermal=External for session.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Prospective domain adoption without a historical command receipt",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Spa body adoption and independent Thermal override record are missing.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-042",
+          "behavior": "Simultaneous Spa ON and explicit Gas yields adopted BODY, PoolOS PUMP and External THERMAL.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 43,
+      "title": "PoolOS-managed Hot Tub; operator changes Gas -> Solar at ICP/OCP.",
+      "expected_contract_behavior": "Thermal=External for current session. Solar selected != Solar active;\nPump does not switch to Solar RPM until Solar is physically active.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Source selection versus engagement and useful heating",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Spa purpose reads actual source activity; Thermal manual evidence/lifetime incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-043",
+          "behavior": "Positive Gas-to-Solar request scopes THERMAL and leaves pump at proper non-Solar requirement until active.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 44,
+      "title": "Solar selected for Hot Tub but roof conditions inadequate; IntelliCenter never activates Solar.",
+      "expected_contract_behavior": "not command failure or Body/Pump ownership loss. Thermal remains\nsession-scoped External; Pump remains appropriate non-Solar Hot Tub RPM. Wait for\nactual activation/lifecycle outcome.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Selected/inactive distinction exists but full adopted user session is absent.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-044",
+          "behavior": "Unengaged manual Spa Solar is not command failure or body/pump loss and uses non-Solar requirement.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 45,
+      "title": "Following 43/44, roof becomes adequate and Solar becomes physically active.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=PoolOS, Thermal=External. Now PoolOS applies proper\nHot Tub/Solar pump requirement.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Source selection versus engagement and useful heating",
+        "Domain-scoped speed sessions and fixed convergence"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Actual Solar requirement exists; full scoped ownership composition is missing.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-045",
+          "behavior": "Later Spa Solar engagement updates PUMP while adopted BODY and manual THERMAL remain unchanged.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 46,
+      "title": "Operator manually changes Hot Tub pump RPM during PoolOS execution.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=External, Thermal unchanged. Override expires at next\nlegitimate session/purpose boundary or sooner by exact-setpoint hand-back.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Body-bound manual RPM is implemented; positive native evidence and adoption incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-046",
+          "behavior": "Positive Spa RPM override changes only PUMP and expires at exact hand-back or real purpose/session boundary.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 47,
+      "title": "Hot Tub with manual Gas thermal override; operator returns source to exactly what PoolOS currently wants.",
+      "expected_contract_behavior": "immediate implicit Thermal hand-back.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "General exact-source hand-back absent for Spa too.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-047",
+          "behavior": "Positive Spa Gas return to current desired source reclaims THERMAL after verification only.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 48,
+      "title": "PoolOS-managed Hot Tub reaches requested target while operator still wants Hot Tub ON.",
+      "expected_contract_behavior": "Hot Tub remains ON. Heating demand ending is not Hot Tub session ending.\nPoolOS thermostatically maintains/reevaluates until Hot Tub OFF or another valid\nsession-ending event.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Prospective domain adoption without a historical command receipt"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "User Spa maintenance policy keeps body ON at target but body adoption is not represented.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-048",
+          "behavior": "Adopted user Spa stays ON at target and thermostatically reevaluates until valid session end.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 49,
+      "title": "Operator turns Hot Tub OFF at ICP/OCP while PoolOS manages it.",
+      "expected_contract_behavior": "explicit termination of the CURRENT Hot Tub session only. PoolOS ends it\nand must not restart that same session merely because conditions remain favorable.\nThis does not prohibit future autonomous Hot Tub sessions; a genuinely new\nopportunity, especially on a later operational day, may establish fresh ownership.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Body-scoped semantic opportunity cancellation and reacquisition"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_automatic_control_suppression.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_pool_automatic_control_suppression.py",
+        "tests/test_home_assistant_external_change_runtime.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Manual Spa OFF suppression exists but independent future opportunity identity is incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-049",
+          "behavior": "Cancel current Spa session, prevent refresh restart, permit genuinely new later opportunity.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 50,
+      "title": "After 49, Pool filtration debt remains and policy permits filtration now.",
+      "expected_contract_behavior": "new PoolOS Pool session may begin immediately. Hot Tub OFF means end Hot\nTub, not keep all equipment OFF.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "Body-scoped semantic opportunity cancellation and reacquisition",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pool_automatic_control_suppression.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_pool_automatic_control_suppression.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Suppression is body-scoped and clean Spa yield permits independent Pool work.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-050",
+          "behavior": "After explicit Spa OFF, immediate eligible Pool filtration may start without global suppression.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_filtration_automatic_execution.py::test_verified_filtration_yields_to_spa_and_can_restart_fresh"
+      ]
+    },
+    {
+      "scenario_id": 51,
+      "title": "HA restarts while everything is OFF.",
+      "expected_contract_behavior": "no active lease. Normal autonomous evaluation resumes. PoolOS does not\nneed to own OFF; future valid opportunity creates fresh ownership.",
+      "required_semantic_mechanisms": [
+        "New recovery generation, fresh evidence and bounded progress",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Restart clears volatile ownership; no receipt inferred from OFF.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-051",
+          "behavior": "Restart OFF has no active lease and starts only a freshly justified authorized session.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_runtime_ownership.py::test_restart_manager_never_reconstructs_ownership_from_state_or_history"
+      ]
+    },
+    {
+      "scenario_id": 52,
+      "title": "HA restarts during a clearly PoolOS-originated filtration session, volatile provenance lost, physical Pool ON at 2600.",
+      "expected_contract_behavior": "do not fabricate historical provenance. If current filtration policy\nindependently justifies circulation, prospectively adopt existing Pool session into\na fresh generation and establish Body/Pump ownership without OFF/ON cycling.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "One-shot restart filtration adoption exists and verifies accepted pump operation before completion.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-052",
+          "behavior": "Restart with immediate filtration adopts prospectively without body cycle, verifies pump and owns final shutdown.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_filtration_restart_prospective_adoption.py::test_restart_with_current_filtration_need_adopts_body_then_owns_shutdown"
+      ]
+    },
+    {
+      "scenario_id": 53,
+      "title": "HA restarts during PoolOS Solar; physical Pool ON, Solar active, pump ~2900, Pool below target, current policy/conditions still independently justify Solar.",
+      "expected_contract_behavior": "prospectively adopt into fresh generation and regain Body/Pump/Thermal\nownership after fresh evidence. Do not require needless shutdown to manufacture\nprovenance.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Thermal restart adoption beyond narrow filtration path is absent.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-053",
+          "behavior": "Restart active useful Solar creates a fresh prospective BODY/PUMP/THERMAL grant without OFF/ON.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 54,
+      "title": "Same physical state as 53, but Solar no longer independently qualifies after restart.",
+      "expected_contract_behavior": "do not adopt merely because equipment is ON. If another current purpose\n(e.g. filtration) independently qualifies, adopt for that purpose and transition.\nIf nothing qualifies, identify session as External/Unowned rather than fabricating\nauthority solely to shut it down. Reset PoolOS Control is the deterministic\noperator recovery path if ownership is inappropriate/ambiguous.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "New recovery generation, fresh evidence and bounded progress",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No equality adoption; filtration recovery partial, general recovery/Reset absent.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-054",
+          "behavior": "Identical active Solar state with no Solar reason adopts only another valid purpose or remains unowned with recovery.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 55,
+      "title": "HA restarts while Pool/Hot Tub is running because operator manually started it; physical state happens to match PoolOS desired state.",
+      "expected_contract_behavior": "equality is insufficient. Do not infer PoolOS ownership. Remain\nExternal/Unowned until a new independent PoolOS reason permits explicit adoption.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "Matching preexisting state cannot create command origin or arbitrary ownership.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-055",
+          "behavior": "Restart matching manual session does not fabricate receipts or adopt absent independent purpose.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_runtime_ownership.py::test_preexisting_or_matching_native_state_does_not_create_ownership"
+      ]
+    },
+    {
+      "scenario_id": 56,
+      "title": "Following 55, new independent Solar opportunity becomes valid.",
+      "expected_contract_behavior": "explicit prospective adoption allowed; create fresh generation and take\nBody/Pump/Thermal ownership for Solar from that point forward.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No general new-opportunity thermal adoption.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-056",
+          "behavior": "After unowned restart, new independent Solar reason permits prospective acquisition with exact fresh scope.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 57,
+      "title": "HA restarts while an ICP/OCP session-scoped manual override was active.",
+      "expected_contract_behavior": "if positive durable evidence identifies the override, preserve it for\nremainder of applicable session. Restart must not erase known operator intent. If\nno durable evidence exists, do not guess from physical source state alone; expose\nambiguity/recovery state.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Volatile pump override is cleared on connection/restart; positive durable override schema absent.",
+      "implementation_status": "MISSING PERSISTENCE/GENERATION SAFETY",
+      "required_future_regressions": [
+        {
+          "id": "OWN-057",
+          "behavior": "Persist known scoped intent across restart; missing durable evidence produces ambiguity, never inferred manual intent.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 58,
+      "title": "HA restarts after persistent PoolOS thermal policy change (including ICP/OCP Solar Preferred synchronized into PoolOS policy).",
+      "expected_contract_behavior": "persistent policy survives unchanged. PoolOS resumes ownership decisions\nunder that durable policy.",
+      "required_semantic_mechanisms": [
+        "Durable policy/target synchronization separate from session override",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "HA policy restores; native Solar Preferred durable gesture remains unsupported.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-058",
+          "behavior": "HA and positively recognized ICP/OCP policy survive restart unchanged with no session-authority replay.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 59,
+      "title": "PoolOS integration/config entry reloads during active session while equipment continues running.",
+      "expected_contract_behavior": "analogous to restart. Do not blindly recreate old authority from physical\nstate, but allow prospective adoption once fresh observations and an independent\ncurrent PoolOS purpose justify it.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_automatic_execution.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Reload resets old state; only narrow filtration adoption is available.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-059",
+          "behavior": "Reload active sessions fences old operations and permits fresh independently justified adoption for each domain.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 60,
+      "title": "After restart/reload, observations are stale, unavailable, contradictory, or incomplete.",
+      "expected_contract_behavior": "no speculative adoption or operational commands. Enter explicit recovery\n/ awaiting-evidence state, obtain fresh authoritative observations, then ADOPT,\nrecognize EXTERNAL, or start a new session. Unknown must be temporary and observable.",
+      "required_semantic_mechanisms": [
+        "New recovery generation, fresh evidence and bounded progress",
+        "Prospective domain adoption without a historical command receipt"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/pool_circulation_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Fail-closed freshness gates exist but complete active observable recovery/adoption path is missing.",
+      "implementation_status": "MISSING RECOVERY/LIVENESS",
+      "required_future_regressions": [
+        {
+          "id": "OWN-060",
+          "behavior": "Stale restart emits no operational command, then fresh evidence reaches adopt, known External, or new session deterministically.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 61,
+      "title": "HA/PoolOS offline for several hours; restart finds Pool OFF, Spa OFF, pump0.",
+      "expected_contract_behavior": "stale session intent discarded; no active lease; reevaluate current\npolicy from scratch; durable configuration retained.",
+      "required_semantic_mechanisms": [
+        "New recovery generation, fresh evidence and bounded progress",
+        "Durable policy/target synchronization separate from session override"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py"
+      ],
+      "current_test_evidence_scope": "Audited baseline mechanism with named behavioral evidence; does not certify other scenarios, the full 90-scenario architecture, or physical commissioning. A dedicated contract regression remains required.",
+      "current_behavior_and_gap": "New runtime is unowned and durable policy restoration is separate.",
+      "implementation_status": "SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-061",
+          "behavior": "Hours-off restart with bodies OFF discards old session intent while retaining policy/accounting.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_pool_circulation_ownership.py::test_restart_unload_reconstructs_nothing"
+      ]
+    },
+    {
+      "scenario_id": 62,
+      "title": "HA/PoolOS offline for several hours; restart finds Spa physically ON.",
+      "expected_contract_behavior": "do not assume hours-old Spa intent remains valid. Treat as stale/ambiguous\nand enter recovery. Long-downtime Spa intent must expire rather than being blindly\ncontinued; safe shutdown/recovery is preferred absent explicit current evidence.",
+      "required_semantic_mechanisms": [
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_automatic_execution.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Active Spa can be interpreted as external user session without proof of current long-downtime intent.",
+      "implementation_status": "MISSING PERSISTENCE/GENERATION SAFETY",
+      "required_future_regressions": [
+        {
+          "id": "OWN-062",
+          "behavior": "Hours-later Spa ON enters explicit stale-intent recovery, not automatic continuation of old user session.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 63,
+      "title": "HA/PoolOS offline for hours; restart finds Pool ON at arbitrary RPM with no trustworthy provenance.",
+      "expected_contract_behavior": "no fabricated history. If current PoolOS policy independently justifies\noperation, prospectively adopt. Otherwise leave External/Unowned unless Reset is\ninvoked.",
+      "required_semantic_mechanisms": [
+        "Prospective domain adoption without a historical command receipt",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pool_circulation_ownership.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_automatic_execution.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "No historical fabrication, narrow filtration adoption only and no Reset.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-063",
+          "behavior": "Unknown active Pool after long downtime adopts only current independent reason; otherwise unowned plus Reset recovery.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 64,
+      "title": "Reset PoolOS Control pressed while everything already OFF.",
+      "expected_contract_behavior": "invalidate stale/session ownership, preserve durable policy/accounting,\nverify safe baseline without unnecessary cycling, obtain fresh observations, then\nreevaluate.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py"
+      ],
+      "current_test_areas": [],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "Only health/annotation buttons exist, no Reset PoolOS Control lifecycle.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-064",
+          "behavior": "Reset already OFF creates new epoch, verifies baseline without cycling and reevaluates durable policy.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 65,
+      "title": "Reset pressed during manually initiated Pool session.",
+      "expected_contract_behavior": "Reset wins; clear session-scoped external ownership, drive Pool OFF/pump0,\nverify baseline, then start a fresh PoolOS session only if current policy requires.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "Prospective domain adoption without a historical command receipt"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "No explicit reset reduction authority over manual Pool session.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-065",
+          "behavior": "Reset manual Pool invalidates scoped external authority, safely verifies OFF/pump zero then evaluates fresh purpose.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 66,
+      "title": "Reset pressed during manually initiated Hot Tub session.",
+      "expected_contract_behavior": "Reset wins; Hot Tub OFF, Pool OFF as necessary, pump0; clear session\nownership; fresh reevaluation; do not restore old Hot Tub session automatically.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "User Hot Tub request, adoption and maintain-until-OFF lifetime"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/spa_thermal_policy.py",
+        "poolos/thermal_runtime_assessment.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_spa_thermal_policy.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "No reset lifecycle for manual Hot Tub.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-066",
+          "behavior": "Reset manual Spa establishes source/body/pump safe baseline and does not restore old Spa intent.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 67,
+      "title": "Reset pressed during healthy PoolOS-owned Solar session.",
+      "expected_contract_behavior": "Reset remains authoritative. Terminate current session cleanly, establish\nsafe OFF baseline, then immediately reevaluate. If Solar still warranted, start a\nnew Solar session with fresh ownership.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "Source selection versus engagement and useful heating"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "No reset generation and clean restart of healthy Solar.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-067",
+          "behavior": "Reset owned Solar completes verified shutdown, then starts fresh Solar only if current policy still qualifies.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 68,
+      "title": "Reset pressed while filtration debt remains.",
+      "expected_contract_behavior": "do not erase debt. Reset clears authority/session ambiguity, not\naccounting. Debt participates normally in fresh reevaluation.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "Canonical immediate obligation and exclusive circulation handoff"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_circulation_successor.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "Accounting is separate but no reset preservation transaction exists.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-068",
+          "behavior": "Reset retains exact debt/credit history and fresh filtration scheduling consumes it normally.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 69,
+      "title": "Reset pressed while persistent policy is Solar Preferred, Solar Disabled, etc.",
+      "expected_contract_behavior": "do not alter persistent policy. Reset clears session authority only.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "Durable policy/target synchronization separate from session override"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "Policy storage exists but no reset lifecycle to prove preservation.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-069",
+          "behavior": "Reset under each persistent thermal policy leaves targets/mode/baselines unchanged.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 70,
+      "title": "Reset pressed while observations are stale/missing/unavailable.",
+      "expected_contract_behavior": "drive toward safest verifiable shutdown boundary, then\nWAITING_FOR_FRESH_EVIDENCE. No new operational session until fresh evidence supports\nit.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "No reset awaiting-evidence state or reviewed reduction scope.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-070",
+          "behavior": "Reset with missing evidence performs only independently safe authorized reductions and waits without speculative activation.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 71,
+      "title": "PoolOS commands filtration 2600; actual settles at 2550; no operator evidence.",
+      "expected_contract_behavior": "Body/Pump remain PoolOS. Attempt reconciliation to 2600. Bounded failure\nmay create convergence fault, never false manual takeover.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "2550 against 2600 can be classified pump external change rather than control drift.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-071",
+          "behavior": "Modest persistent filtration error produces bounded correction/fault while BODY/PUMP origin survives without External label.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_runtime_ownership.py::test_matching_configured_setpoint_cannot_hide_actual_rpm_change"
+      ]
+    },
+    {
+      "scenario_id": 72,
+      "title": "PoolOS commands new RPM and pump passes through transient values such as 1500 -> 3450 -> 2900 during startup/source transition.",
+      "expected_contract_behavior": "PoolOS retains Pump ownership. Known/attributable transition consequences\nreceive bounded stabilization window.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Some accepted settling exists; general native consequence envelopes are incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-072",
+          "behavior": "Inject 1500 -> 3450 -> 2900 and configured/actual callback permutations within a fixed operation-bound episode.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 73,
+      "title": "PoolOS Solar stable at 2900; actual changes to 3200 with positive evidence of ICP/OCP manual RPM command.",
+      "expected_contract_behavior": "Pump=External, Body/Thermal remain PoolOS. Manual Pump override follows\nsession-scope/hand-back rules.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Manual configured-session override exists but raw native transition alone supplies no positive actor proof.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-073",
+          "behavior": "With positive ICP/OCP RPM evidence, change only PUMP to External and preserve BODY/THERMAL.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 74,
+      "title": "Same unexplained 2900 -> 3200 drift, but no positive operator evidence.",
+      "expected_contract_behavior": "do not surrender Pump ownership immediately. Reconcile and record\nunexplained drift; repeated failure may degrade/fault, but unknown cause != external\nowner.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Same 2900 -> 3200 without events can still preempt whole lease.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-074",
+          "behavior": "Remove only operator evidence from scenario 73; retain provenance and enter bounded unexplained-drift reconciliation.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_runtime_ownership.py::test_true_external_pump_change_still_preempts_after_owned_prime_model"
+      ]
+    },
+    {
+      "scenario_id": 75,
+      "title": "PoolOS commands Pool ON; body activation accepted, but pump never starts or required verification never arrives.",
+      "expected_contract_behavior": "pending Body authority may remain while appropriate; do not manufacture\nPump ownership. Retry boundedly; on failure expose specific execution fault and\nrecover safely without permanently poisoning future autonomy.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "Domain-scoped speed sessions and fixed convergence",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/pump_speed_session.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Pending concepts stay separate; verification timeout can latch manual reenable and lose recovery.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-075",
+          "behavior": "Accepted body with pump never starting faults boundedly, invents no pump proof and permits later legitimate recovery.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 76,
+      "title": "PoolOS owns Body/Pump and requests Solar, but Solar never becomes active because Pentair/environmental conditions do not permit it.",
+      "expected_contract_behavior": "not delivery failure merely because Solar inactive. Requested/selected\nand active are distinct. Preserve valid ownership and lifecycle. Solar RPM only\nwhen Solar active.",
+      "required_semantic_mechanisms": [
+        "Source selection versus engagement and useful heating",
+        "Domain-scoped speed sessions and fixed convergence"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_live_execution.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_operating_purpose.py",
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_operating_purpose.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "H0002 non-engagement is distinguished but Solar RPM is required before actual engagement.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-076",
+          "behavior": "Verified source selection with never-active Solar keeps proper preparation RPM and terminates or continues by policy, not delivery-failure label.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_automatic_execution.py::test_unengaged_solar_cold_start_is_bounded_and_not_immediately_retried"
+      ]
+    },
+    {
+      "scenario_id": 77,
+      "title": "PoolOS command followed by contradictory/unavailable observations (e.g. Pool ON, pump0, Solar active).",
+      "expected_contract_behavior": "explicit DEGRADED/AWAITING_EVIDENCE state. Do not invent ownership from\ncontradiction. Preserve positively established ownership where safe, refresh and\nactively recover rather than relinquishing indefinitely.",
+      "required_semantic_mechanisms": [
+        "Body lifecycle, concept provenance and verified completion",
+        "New recovery generation, fresh evidence and bounded progress",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Contradictory evidence can terminally preempt aggregate lease.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-077",
+          "behavior": "Contradictory body/pump/Solar evidence denies unsafe work, preserves valid origin and actively recovers without an External label.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 78,
+      "title": "PoolOS command genuinely fails after bounded retries.",
+      "expected_contract_behavior": "COMMAND/DELIVERY FAILURE, not external_takeover. Safely terminate/recover\naffected execution. Failure creates no external owner and does not permanently\nblock future legitimate sessions.",
+      "required_semantic_mechanisms": [
+        "New recovery generation, fresh evidence and bounded progress",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Rejected/timeout commands fail closed but may require manual reenable instead of bounded autonomous recovery.",
+      "implementation_status": "MISSING RECOVERY/LIVENESS",
+      "required_future_regressions": [
+        {
+          "id": "OWN-078",
+          "behavior": "Exhausted delivery attempts create control fault, no manual owner, and a named legitimate later recovery boundary.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_filtration_automatic_execution.py::test_rejected_delivery_establishes_no_ownership_and_requires_reenable"
+      ]
+    },
+    {
+      "scenario_id": 79,
+      "title": "Grid outage/emergency/safety policy activates during PoolOS-owned Pool/Hot Tub.",
+      "expected_contract_behavior": "safety authority outranks normal ownership. Apply required safety actions.\nThis is internal safety preemption, not manual ownership. On clear, reevaluate\ncurrent reality/policy rather than blindly restoring stale pre-outage commands.",
+      "required_semantic_mechanisms": [
+        "Canonical Safety authority, operator intent retention and no stale restore",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/grid_outage_physical_safety.py",
+        "poolos/physical_command_authority.py",
+        "custom_components/poolos/grid_outage_runtime.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_grid_outage_physical_safety.py",
+        "tests/test_home_assistant_grid_outage_runtime.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Canonical outage/reduction path exists; domain Safety ownership and clean recovery need unified model.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-079",
+          "behavior": "Safety entry preempts normal commands as Safety, then clears into current-policy evaluation without replay.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 80,
+      "title": "During safety/outage state, operator makes manual equipment change; safety later clears.",
+      "expected_contract_behavior": "safety wins while active. After clear, preserve still-relevant positive\noperator intent where determinable, then reevaluate. Do not blindly restore old\nPoolOS session or blindly erase legitimate manual choice.",
+      "required_semantic_mechanisms": [
+        "Canonical Safety authority, operator intent retention and no stale restore",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/grid_outage_physical_safety.py",
+        "poolos/physical_command_authority.py",
+        "custom_components/poolos/grid_outage_runtime.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_grid_outage_physical_safety.py",
+        "tests/test_home_assistant_grid_outage_runtime.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Unmatched native change can block remaining outage actions as external takeover.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-080",
+          "behavior": "Positive manual request during active safety cannot defeat mandatory action; retain still-valid intent on safety clear.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 81,
+      "title": "PoolOS owns Pool/Solar; operator simultaneously changes pump RPM and heat source at ICP/OCP.",
+      "expected_contract_behavior": "Body=PoolOS, Pump=External, Thermal=External. Do not escalate two\nconcept-specific changes into whole-session external ownership. Each override has\nits own expiry/hand-back.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Aggregate source/pump preemption cannot express two independent external domains.",
+      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "required_future_regressions": [
+        {
+          "id": "OWN-081",
+          "behavior": "Same-frame positive RPM and source requests yield External PUMP/THERMAL, retaining PoolOS BODY completion.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 82,
+      "title": "PoolOS owns session; operator changes Pool target through PoolOS HA entity/UI.",
+      "expected_contract_behavior": "persistent policy/configuration change, not ownership takeover. PoolOS\nremains owner and immediately reevaluates. If new target is already satisfied,\nperform normal termination/successor lifecycle.",
+      "required_semantic_mechanisms": [
+        "Durable policy/target synchronization separate from session override",
+        "Body continuity with nested immutable execution generations",
+        "Body lifecycle, concept provenance and verified completion"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/thermal_runtime_ownership.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/thermal_termination.py",
+        "poolos/thermal_circulation_cleanup.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_thermal_termination.py",
+        "tests/test_residual_cleanup_transfer.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Native targets reevaluate; target participates in purpose identity and can supersede lifecycle.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-082",
+          "behavior": "Raise/lower target via HA while owned; keep body origin, replace obsolete execution, terminate normally if satisfied.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 83,
+      "title": "Operator changes Pool target at ICP/OCP.",
+      "expected_contract_behavior": "synchronize target into PoolOS as durable operator policy. PoolOS remains\ncontroller and uses new target across future sessions until changed again.",
+      "required_semantic_mechanisms": [
+        "Durable policy/target synchronization separate from session override",
+        "Body continuity with nested immutable execution generations"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py",
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_automatic_execution.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Native target publication/policy use exists; lifecycle continuity under target identity changes remains partial.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-083",
+          "behavior": "ICP/OCP target synchronizes durably and changes ongoing policy without operator takeover or lost body origin.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 84,
+      "title": "Operator controls PoolOS through deliberately exposed HomeKit control.",
+      "expected_contract_behavior": "semantics follow the PoolOS control represented, not merely HomeKit\norigin. Persistent policy control is persistent; Reset invokes Reset semantics;\nsession controls follow their defined scope.",
+      "required_semantic_mechanisms": [
+        "Durable policy/target synchronization separate from session override",
+        "Explicit Reset generation and reviewed safe reduction",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/select.py",
+        "custom_components/poolos/manual_thermal.py",
+        "custom_components/poolos/climate.py",
+        "poolos/thermal_runtime_assessment.py",
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_native_heat_mode_select.py",
+        "tests/test_native_target_temperature_lifecycle.py",
+        "tests/test_thermal_runtime_assessment.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "HA controls carry semantics; Reset and explicit session/intent model incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-084",
+          "behavior": "Exercise exposed policy, session and Reset controls through same service path as HomeKit and verify distinct scope.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 85,
+      "title": "Operator issues direct physical/ICP command nearly simultaneously with a conflicting PoolOS command.",
+      "expected_contract_behavior": "positive operator intent wins the affected concept. PoolOS detects race,\nstops fighting that concept, and records manual takeover. Unaffected domains remain\nPoolOS-owned.",
+      "required_semantic_mechanisms": [
+        "Positive operator evidence distinct from unmatched telemetry",
+        "Domain-scoped speed sessions and fixed convergence"
+      ],
+      "relevant_production_areas": [
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/pump_speed_session.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py"
+      ],
+      "current_test_areas": [
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Final gateway/currentness fencing exists; native positive-intent arbitration incomplete.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-085",
+          "behavior": "Two conflicting same-window requests with positive operator proof stop only affected PoolOS domain and fence late effects.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 86,
+      "title": "PoolOS transitions Filtration -> Solar while operator manually changes RPM.",
+      "expected_contract_behavior": "if manual intent positively identified, Pump=External despite transition\nwindow. Transition tolerance protects controller-generated variability, not real\noperator intervention.",
+      "required_semantic_mechanisms": [
+        "Body continuity with nested immutable execution generations",
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Purpose-boundary reset can race configured override classification; composed positive-origin test needed.",
+      "implementation_status": "UNCLEAR — requires deterministic test or additional tracing",
+      "required_future_regressions": [
+        {
+          "id": "OWN-086",
+          "behavior": "Permute manual RPM intent and filtration-to-Solar boundary; positive current operator intent wins PUMP in both orders.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 87,
+      "title": "Reset PoolOS Control pressed while PoolOS commands are pending/in flight.",
+      "expected_contract_behavior": "Reset creates new authority epoch/generation. Old pending commands and\nlate consequences cannot reacquire/corrupt new ownership. Safe baseline -> fresh\nevidence -> reevaluation.",
+      "required_semantic_mechanisms": [
+        "Explicit Reset generation and reviewed safe reduction",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/button.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/physical_command_authority.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py",
+        "tests/test_systemic_autonomy_closure_guard.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests only; not a dedicated proof of this complete scenario. Reset has no existing behavioral test.",
+      "current_behavior_and_gap": "No reset epoch fencing across queued/in-flight commands.",
+      "implementation_status": "MISSING IMPLEMENTATION",
+      "required_future_regressions": [
+        {
+          "id": "OWN-087",
+          "behavior": "Reset before dispatch, during delivery and before late callback prevents old command/evidence from affecting new authority.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 88,
+      "title": "Old/delayed Pentair event arrives after transition to new purpose/generation.",
+      "expected_contract_behavior": "chronology/provenance rejects it as authority for new generation. Old\nconsequence cannot steal ownership; conflicting delayed event is not automatically\nmanual intervention.",
+      "required_semantic_mechanisms": [
+        "Body continuity with nested immutable execution generations",
+        "Positive operator evidence distinct from unmatched telemetry",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/thermal_execution_currentness.py",
+        "poolos/thermal_runtime_orchestration.py",
+        "poolos/pool_circulation_ownership.py",
+        "poolos/circulation_successor.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_pool_circulation_ownership.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Generation/acceptance chronology is strong but contradictory delayed events may be called takeover.",
+      "implementation_status": "PARTIALLY SATISFIED",
+      "required_future_regressions": [
+        {
+          "id": "OWN-088",
+          "behavior": "Old callbacks cannot grant or steal new authority; fresh safety contradictions block permission without invented manual origin.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    },
+    {
+      "scenario_id": 89,
+      "title": "PoolOS has valid ownership but command cannot converge; operator manually places affected concept at exactly PoolOS's currently required state.",
+      "expected_contract_behavior": "operator-assisted convergence and implicit hand-back, not takeover.\nPoolOS verifies state, regains/retains concept ownership, and continues rather than\nremaining stuck in failure/re-enable state.",
+      "required_semantic_mechanisms": [
+        "Domain-scoped speed sessions and fixed convergence",
+        "Positive operator evidence distinct from unmatched telemetry",
+        "New recovery generation, fresh evidence and bounded progress"
+      ],
+      "relevant_production_areas": [
+        "poolos/pump_speed_session.py",
+        "poolos/thermal_runtime_ownership.py",
+        "custom_components/poolos/pump_speed_session.py",
+        "poolos/physical_command_authority.py",
+        "poolos/external_change.py",
+        "custom_components/poolos/external_change_runtime.py",
+        "custom_components/poolos/manual_thermal.py",
+        "poolos/thermal_automatic_execution.py",
+        "poolos/filtration_automatic_execution.py",
+        "custom_components/poolos/__init__.py"
+      ],
+      "current_test_areas": [
+        "tests/test_pump_speed_session.py",
+        "tests/test_home_assistant_pump_speed_session.py",
+        "tests/test_thermal_runtime_ownership.py",
+        "tests/test_external_change.py",
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_systemic_autonomy_closure_guard.py",
+        "tests/test_thermal_automatic_execution.py",
+        "tests/test_filtration_automatic_execution.py",
+        "tests/test_filtration_restart_prospective_adoption.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Baseline request hand-back is partial; general operator-assisted convergence cannot clear all faults safely.",
+      "implementation_status": "MISSING RECOVERY/LIVENESS",
+      "required_future_regressions": [
+        {
+          "id": "OWN-089",
+          "behavior": "Positive exact-current-state operator assistance verifies hand-back and exits fault without equality-based resurrection.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": [
+        "tests/test_pump_speed_session.py::test_explicit_baseline_request_hands_back_governance_even_if_delivery_fails"
+      ]
+    },
+    {
+      "scenario_id": 90,
+      "title": "Any active PoolOS session, external override, adoption, recovery, failure, or reset is occurring.",
+      "expected_contract_behavior": "ownership is directly observable in Home Assistant. At minimum expose:\n- Body owner\n- Pump owner\n- Thermal owner\n- active generation/session\n- active body and purpose\n- ownership/adoption reason\n- manual override scope\n- override expiration/reacquisition condition\n- desired state\n- actual state\n- pending verification/convergence state\n- last accepted action/command\n- last verified authoritative consequence\n- last ownership transition and reason\n- health/failure reason\n- whether Reset/recovery is active",
+      "required_semantic_mechanisms": [
+        "Canonical bounded domain ownership and recovery publication"
+      ],
+      "relevant_production_areas": [
+        "custom_components/poolos/sensor.py",
+        "custom_components/poolos/binary_sensor.py",
+        "custom_components/poolos/__init__.py",
+        "poolos/thermal_runtime_ownership.py"
+      ],
+      "current_test_areas": [
+        "tests/test_home_assistant_control_center.py",
+        "tests/test_sensor_contract.py",
+        "tests/test_pump_speed_session.py"
+      ],
+      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
+      "current_behavior_and_gap": "Rich nested diagnostics exist but no complete direct per-domain owner/origin/recovery surface.",
+      "implementation_status": "MISSING OBSERVABILITY",
+      "required_future_regressions": [
+        {
+          "id": "OWN-090",
+          "behavior": "Assert canonical bounded HA ownership fields for pending, stable, override, adoption, fault, recovery and Reset with no actuation.",
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+        }
+      ],
+      "specific_baseline_test_nodes": []
+    }
+  ]
+}

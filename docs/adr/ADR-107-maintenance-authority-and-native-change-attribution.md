@@ -2,6 +2,13 @@
 
 ## Status
 
+Partially superseded by [ADR-110](ADR-110-ownership-contract-semantics.md):
+unattributed contradictions are not positive operator evidence, and positively
+recognized native Solar Preferred has durable policy semantics. The sections
+below preserve the historical foundation and current implementation description;
+ADR-110 governs the accepted replacement behavior. No new correction is enabled
+by that documentation decision.
+
 Accepted for command-boundary and command-free diagnostic foundations. Broad
 automatic reconciliation remains disabled.
 
@@ -82,8 +89,9 @@ Automatic thermal and filtration PMPCIRC writes also register a separate
 parent-pump actual-RPM consequence in this same bounded registry. It uses the
 existing 25-RPM tolerance and may attribute repeated matching analog updates
 until the original expectation expires. A contradictory transition retires this
-analog expectation and remains external; a subsequent write to the same native
-operation/target retires older dispatched expectations inside the command lock,
+analog expectation and remains unattributed (not proven operator-owned); a
+subsequent write to the same native operation/target retires older dispatched
+expectations inside the command lock,
 including when the new write is a no-op. Manual RPM writes retain their separate
 configured-speed override semantics. These correlations grant no ownership:
 configured-speed and actual-RPM post-command verification are still independent,

@@ -1,0 +1,761 @@
+PoolOS Ownership Scenario Contract
+==================================
+Project: davidabuch/poolos
+Date: 2026-09-14
+Purpose: Durable behavioral contract for PoolOS ownership, manual intervention,
+reacquisition, restart/recovery, command attribution, and end-to-end autonomy.
+Status: Accepted scenario contract from owner review. This is a behavioral design
+artifact to be translated into repository specification, architecture, tests, and
+commissioning criteria. It does not replace repository governance.
+
+PRECEDENCE
+----------
+1. AGENTS.md
+2. docs/DEVELOPMENT_HANDOFF.md
+3. relevant approved repository specifications / ADRs
+4. current repository, source, and test truth
+5. this scenario contract until incorporated into repository governance
+
+GOVERNING OWNERSHIP PRINCIPLE
+-----------------------------
+PoolOS is the default autonomous controller and actively seeks legitimate
+opportunities to regain ownership. It yields only to positive evidence of
+intentional operator control, yields only the affected control domain whenever
+possible, respects that intervention for its defined scope, and reacquires
+control at the next legitimate session or policy boundary. A periodic
+reevaluation is not, by itself, a new session boundary.
+
+OWNERSHIP DOMAINS
+-----------------
+Ownership must be modeled independently for at least:
+- BODY: Pool / Hot Tub activation and session lifecycle.
+- PUMP: pump-speed requirement and convergence.
+- THERMAL: heat-source selection and thermal execution.
+
+A change in one domain must not manufacture ownership changes in unrelated
+domains.
+
+CORE INVARIANTS
+---------------
+1. PoolOS ownership is evidence/provenance based, not inferred merely from a
+   matching physical state.
+2. PoolOS may prospectively ADOPT an already-running body when a new,
+   independent PoolOS policy/session reason becomes valid. Adoption creates new
+   prospective provenance; it does not fabricate historical provenance.
+3. Internal purpose transitions (for example Filtration -> Solar -> Filtration)
+   must preserve appropriate ownership across one continuous physical body
+   session.
+4. Explicit manual takeover is concept-specific whenever possible.
+5. ICP/OCP operational changes are normally session-scoped. They do not exile
+   PoolOS indefinitely.
+6. A new legitimate session/policy boundary can permit PoolOS reacquisition.
+   Periodic reevaluation of the same session cannot.
+7. Manual return of a Pump or Thermal concept to PoolOS's exact currently
+   desired state is implicit hand-back of that concept.
+8. State mismatch is not, by itself, evidence of an external owner.
+9. Command failure is not external takeover. Ownership, command delivery, and
+   physical convergence are distinct concepts.
+10. Startup, priming, source transitions, and commanded RPM changes require a
+    bounded stabilization/convergence model. Attributable transient RPMs do not
+    constitute manual takeover.
+11. PoolOS should correct modest RPM mismatch toward its required setpoint
+    rather than immediately relinquishing ownership.
+12. Solar SELECTED is not Solar ACTIVE. Solar RPM is required only when Solar is
+    physically active.
+13. Persistent PoolOS policy/configuration is different from session ownership.
+14. PoolOS HA policy changes are durable until explicitly changed again.
+15. ICP/OCP Solar Preferred is a recognized durable-intent gesture and must
+    synchronize PoolOS's persistent policy to Solar Preferred until explicitly
+    changed again.
+16. ICP/OCP target-temperature changes are persistent operator policy and should
+    synchronize the corresponding PoolOS target.
+17. Manual Body OFF cancels the current relevant session, not all future
+    autonomy.
+18. Unknown evidence must produce an active recovery path, not permanent loss
+    of autonomy.
+19. Safety authority outranks normal ownership but does not manufacture manual
+    ownership.
+20. Ownership must be directly observable in Home Assistant.
+
+PERSISTENT POLICY VS SESSION INTENT
+-----------------------------------
+PoolOS HA configuration:
+- Persistent policy intent.
+- Survives sessions, restart, and reload until explicitly changed.
+
+ICP/OCP source selection:
+- Gas / Solar / Off: normally session-scoped Thermal operational intent.
+- Solar Preferred: special durable-intent gesture. Synchronize PoolOS's
+  persistent policy to Solar Preferred and retain it until explicitly changed.
+
+ICP/OCP target temperature:
+- Persistent target-policy change. Synchronize into PoolOS's corresponding
+  durable target.
+
+ICP/OCP Body ON/OFF:
+- Session/body intent, with the reacquisition rules below.
+
+RESET POOLOS CONTROL - FIRST-CLASS RECOVERY PRIMITIVE
+-----------------------------------------------------
+Expose a stateless Home Assistant button/action (later suitable for HomeKit),
+conceptually named "Reset PoolOS Control".
+
+Purpose:
+- Give the operator a deterministic recovery path when ownership is unknown,
+  stale, inappropriate, or affected by a bug/edge case.
+
+Required semantics:
+1. Establish a new authority epoch/generation.
+2. Invalidate stale/session-scoped ownership and old pending command authority.
+3. Preserve durable configuration and policy, including targets, Solar policy,
+   filtration policy/accounting, TOU rules, pump baselines, and safety settings.
+4. Drive toward a verified safe physical baseline: Hot Tub OFF, Pool OFF, pump
+   0, with heat/source state made safe as required.
+5. Do not blindly trust late consequences from the pre-reset generation.
+6. Obtain fresh authoritative observations.
+7. Reevaluate what PoolOS should be doing NOW.
+8. Create fresh PoolOS ownership only from the new generation/current policy.
+9. If observations are stale/unavailable, enter an explicit
+   WAITING_FOR_FRESH_EVIDENCE recovery state before issuing new operational
+   commands beyond the safe shutdown boundary.
+10. Reset clears session authority, not durable policy or legitimate accounting.
+
+Long downtime must not cause PoolOS to assume that an hours- or days-old Hot
+Tub session is still intended. Stale session intent must expire or enter
+recovery rather than being blindly resurrected.
+
+======================================================================
+SCENARIO MATRIX - ACCEPTED BEHAVIOR
+======================================================================
+
+1. Normal filtration start from everything OFF.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=PoolOS. PoolOS turns Pool ON,
+establishes filtration RPM, earns credit, and owns completion/shutdown.
+
+2. Normal Solar opportunity from everything OFF.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=PoolOS. PoolOS owns activation,
+acquisition/probe/prime, source engagement, Solar operation, termination, and
+successor/shutdown.
+
+3. Solar preparation uses 1500 RPM for trustworthy water-temperature acquisition.
+Expected: all relevant ownership remains PoolOS. Probe is an internal preparation
+state, not a new session or ownership transition.
+
+4. PoolOS commands Pool ON and IntelliCenter temporarily produces startup/priming
+RPM such as 3000 or 3450.
+Expected: relevant ownership remains PoolOS. A controller-generated consequence
+of PoolOS activation is not operator takeover merely because RPM differs from the
+steady-state target. Attribute it and converge normally.
+
+5. Solar becomes physically active.
+Expected: Body/Pump/Thermal=PoolOS. Pump converges to Solar operating requirement
+(currently 2900 +/- tolerance). 1500 is not a valid steady Solar RPM.
+
+6. PoolOS-owned Solar reaches Pool target and filtration does not need to run now.
+Expected: PoolOS owns termination: Solar OFF -> Pool OFF -> pump 0. The active
+ownership lease/session ends after verified shutdown because there is no active
+control task. This is INACTIVE/UNOWNED, not External; PoolOS remains the default
+autonomous controller for future opportunities.
+
+7. PoolOS-owned Solar reaches target but filtration independently requires
+circulation now.
+Expected: PoolOS retains Body/Pump. Solar thermal execution ends; Pool remains ON
+and pump transitions to filtration RPM. Internal successor, not external/new body
+ownership.
+
+8. PoolOS-owned filtration is running when valid Solar opportunity develops.
+Expected: Body/Pump/Thermal=PoolOS. Transition Filtration -> Solar within same
+continuous body session. Purpose change must not erase body provenance.
+
+9. PoolOS-owned Solar loses usable Solar conditions while filtration still
+requires immediate circulation.
+Expected: Solar ends; Body/Pump remain PoolOS-owned and transition to filtration.
+No unnecessary Pool OFF/ON cycle.
+
+10. Solar unavailable and no current reason for circulation.
+Expected: PoolOS terminates session to Pool OFF/pump 0. Active lease ends only
+because there is no active task; ownership does not become External. PoolOS remains
+default controller for future sessions.
+
+11. PoolOS-required pump RPM differs modestly from actual without evidence of
+human action (e.g. target 2600, actual 2550).
+Expected: PoolOS retains Pump ownership, attempts correction/convergence to 2600,
+and only after bounded failure reports a control/convergence fault. Mismatch alone
+is not external takeover.
+
+12. During PoolOS-owned Solar, operator deliberately changes pump RPM at ICP/OCP.
+Expected: Body=PoolOS, Pump=External, Thermal=PoolOS. External Pump ownership is
+scoped to the current operating session/purpose unless handed back sooner and
+expires at the next legitimate session boundary.
+
+13. Operator manually returns Pump RPM to exactly PoolOS's current required RPM.
+Expected: immediate implicit hand-back. PoolOS may reclaim Pump ownership during
+the existing session after verifying the returned state.
+
+14. PoolOS Solar; operator changes source Solar -> Gas at ICP/OCP.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=External for the current session.
+PoolOS does not fight Gas and continues managing body/pump.
+
+15. Same as 14; Pool reaches target.
+Expected: PoolOS still owns body/session completion and ends the session. Thermal
+override expires with the session.
+
+16. PoolOS Solar; operator deliberately turns Pool OFF at ICP/OCP.
+Expected: cancel the current Pool session. PoolOS must not immediately restart the
+same Solar opportunity.
+
+17. After 16, periodic reevaluation occurs and same Solar opportunity remains.
+Expected: no reacquisition. Periodic reevaluation is not a new session boundary.
+
+18. After 16/17, a genuinely new independent need occurs later (e.g. 22:01 TOU
+filtration with debt).
+Expected: PoolOS may create a new generation and reacquire Body/Pump/Thermal as
+needed. Prior manual OFF is not permanent exile.
+
+19. Everything OFF; operator manually turns Pool ON at ICP/OCP (e.g. 07:00).
+Expected: Body initially External/manual. PoolOS does not claim it originated the
+activation. Qualifying runtime may still earn filtration credit. Pump/Thermal are
+determined independently.
+
+20. Following 19, a new independent PoolOS Solar opportunity becomes valid (e.g.
+09:15).
+Expected: explicit prospective adoption is allowed. PoolOS creates a new
+generation, takes full Body/Pump/Thermal ownership as appropriate, and owns
+termination/successor behavior from adoption forward.
+
+21. PoolOS Pool/Solar; operator changes Solar -> Gas at ICP/OCP.
+Expected: Body/Pump remain PoolOS, Thermal External for current session. If
+operator instead selects Solar Preferred at ICP/OCP, treat that recognized gesture
+as a persistent PoolOS policy change to Solar Preferred until explicitly changed.
+
+22. During session-scoped manual Gas override, operator changes Gas -> exactly the
+thermal state PoolOS currently wants.
+Expected: immediate implicit Thermal hand-back to PoolOS.
+
+23. Operator selected Gas during PoolOS Solar; Solar environmental conditions later
+become unavailable while Gas remains selected.
+Expected: Thermal remains External for current session. Environmental change does
+not undo operator thermal intent. Body/Pump remain PoolOS.
+
+24. Manual Gas override; Pool reaches target.
+Expected: PoolOS ends the PoolOS-owned body session. Thermal override expires with
+that session.
+
+25. After 24 everything OFF; later new filtration-only session becomes necessary.
+Expected: new PoolOS session; Body/Pump/Thermal return to PoolOS under current
+persistent policy. Previous session Gas override does not contaminate it.
+
+26. PoolOS Solar; operator selects Heat Mode Off at ICP/OCP but leaves Pool ON.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=External for current session. Stop
+heating but continue independently required circulation. For extended/winter
+Solar prohibition, operator must use persistent PoolOS HA policy (e.g. Solar
+Disabled), which survives sessions until changed.
+
+27. Same as 26, but no independent reason remains to circulate.
+Expected: PoolOS owns completion and shuts Pool/pump OFF. Thermal override did not
+transfer Body ownership.
+
+28. PoolOS filtration with source Off; operator manually selects Solar at ICP/OCP
+while Solar can activate.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=External. Respect source request. Pump
+changes to Solar requirement only when Solar is physically active.
+
+29. Operator selects Solar at ICP/OCP while roof conditions are not favorable.
+Expected: selection is a suggestion/request to Pentair, not an override of native
+Solar eligibility. Thermal is session-scoped External, but pump remains at its
+current appropriate non-Solar requirement. Do NOT set Solar RPM until Solar is
+actually active.
+
+30. Operator returns session-scoped manual source selection to exactly PoolOS's
+current desired thermal state.
+Expected: immediate implicit Thermal hand-back.
+
+31. PoolOS filtration at 2600; Solar becomes appropriate while Pool already running.
+Expected: Body/Pump/Thermal=PoolOS. Same body session. Transition into Solar; wait
+for actual Solar activation, then establish Solar RPM.
+
+32. PoolOS Solar at 2900; Solar conditions disappear; filtration debt remains and
+filtration is permitted now.
+Expected: Body/Pump/Thermal remain PoolOS. Solar deactivates, then pump transitions
+to filtration RPM. Internal successor.
+
+33. Same as 32, except filtration is TOU-deferred.
+Expected: PoolOS terminates current Solar session to Pool OFF/pump0. Debt remains.
+Later TOU filtration is a new PoolOS session/generation.
+
+34. PoolOS filtration; operator manually changes RPM; later Solar becomes appropriate.
+Expected: before Solar, Body=PoolOS, Pump=External, Thermal=PoolOS. The new Solar
+operating-purpose session is a legitimate Pump-ownership boundary; PoolOS may
+reacquire Pump and run Solar normally.
+
+35. Same as 34, but Solar never becomes appropriate and filtration continues to
+completion.
+Expected: manual Pump ownership persists for current filtration session unless
+handed back by exact required RPM. At debt zero, PoolOS still owns Body completion
+and may turn Pool OFF.
+
+36. PoolOS Solar; operator changes pump RPM manually; Solar later becomes inactive
+and filtration must continue.
+Expected: Solar -> Filtration is a legitimate Pump session/purpose boundary.
+PoolOS may reacquire Pump and establish filtration RPM.
+
+37. PoolOS Solar; operator changes source Solar -> Gas; later Solar conditions fall,
+Gas remains selected, Pool below target.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=External. Gas continues for current
+session; PoolOS manages pump and body completion.
+
+38. During 37, operator changes Gas -> Solar Preferred through PoolOS HA.
+Expected: persistent PoolOS policy change, not merely hand-back. Thermal ownership
+returns to PoolOS; Solar Preferred persists across future sessions/restarts until
+changed.
+
+39. PoolOS Pool session; operator turns Hot Tub ON at ICP/OCP.
+Expected: Pool body session yields to Hot Tub request. Hot Tub body request is
+initially External because operator initiated it. PoolOS quickly adopts execution
+of the Hot Tub session, manages Pump, and manages Thermal unless source was
+explicitly overridden.
+
+40. Following 39, operator turns Hot Tub OFF; Pool filtration debt remains.
+Expected: Hot Tub manual session ends. PoolOS reevaluates current policy and may
+start/resume an independently justified Pool session, or remain OFF. Do not blindly
+restore stale pre-Hot-Tub commands.
+
+41. Everything OFF; operator turns Hot Tub ON at ICP/OCP with no source change.
+Expected: Body request External -> prospectively adopted by PoolOS; Pump=PoolOS;
+Thermal=PoolOS. PoolOS executes the requested Hot Tub session.
+
+42. Operator turns Hot Tub ON and explicitly selects Gas at ICP/OCP.
+Expected: Body adopted by PoolOS, Pump=PoolOS, Thermal=External for session.
+
+43. PoolOS-managed Hot Tub; operator changes Gas -> Solar at ICP/OCP.
+Expected: Thermal=External for current session. Solar selected != Solar active;
+Pump does not switch to Solar RPM until Solar is physically active.
+
+44. Solar selected for Hot Tub but roof conditions inadequate; IntelliCenter never
+activates Solar.
+Expected: not command failure or Body/Pump ownership loss. Thermal remains
+session-scoped External; Pump remains appropriate non-Solar Hot Tub RPM. Wait for
+actual activation/lifecycle outcome.
+
+45. Following 43/44, roof becomes adequate and Solar becomes physically active.
+Expected: Body=PoolOS, Pump=PoolOS, Thermal=External. Now PoolOS applies proper
+Hot Tub/Solar pump requirement.
+
+46. Operator manually changes Hot Tub pump RPM during PoolOS execution.
+Expected: Body=PoolOS, Pump=External, Thermal unchanged. Override expires at next
+legitimate session/purpose boundary or sooner by exact-setpoint hand-back.
+
+47. Hot Tub with manual Gas thermal override; operator returns source to exactly
+what PoolOS currently wants.
+Expected: immediate implicit Thermal hand-back.
+
+48. PoolOS-managed Hot Tub reaches requested target while operator still wants Hot
+Tub ON.
+Expected: Hot Tub remains ON. Heating demand ending is not Hot Tub session ending.
+PoolOS thermostatically maintains/reevaluates until Hot Tub OFF or another valid
+session-ending event.
+
+49. Operator turns Hot Tub OFF at ICP/OCP while PoolOS manages it.
+Expected: explicit termination of the CURRENT Hot Tub session only. PoolOS ends it
+and must not restart that same session merely because conditions remain favorable.
+This does not prohibit future autonomous Hot Tub sessions; a genuinely new
+opportunity, especially on a later operational day, may establish fresh ownership.
+
+50. After 49, Pool filtration debt remains and policy permits filtration now.
+Expected: new PoolOS Pool session may begin immediately. Hot Tub OFF means end Hot
+Tub, not keep all equipment OFF.
+
+51. HA restarts while everything is OFF.
+Expected: no active lease. Normal autonomous evaluation resumes. PoolOS does not
+need to own OFF; future valid opportunity creates fresh ownership.
+
+52. HA restarts during a clearly PoolOS-originated filtration session, volatile
+provenance lost, physical Pool ON at 2600.
+Expected: do not fabricate historical provenance. If current filtration policy
+independently justifies circulation, prospectively adopt existing Pool session into
+a fresh generation and establish Body/Pump ownership without OFF/ON cycling.
+
+53. HA restarts during PoolOS Solar; physical Pool ON, Solar active, pump ~2900,
+Pool below target, current policy/conditions still independently justify Solar.
+Expected: prospectively adopt into fresh generation and regain Body/Pump/Thermal
+ownership after fresh evidence. Do not require needless shutdown to manufacture
+provenance.
+
+54. Same physical state as 53, but Solar no longer independently qualifies after
+restart.
+Expected: do not adopt merely because equipment is ON. If another current purpose
+(e.g. filtration) independently qualifies, adopt for that purpose and transition.
+If nothing qualifies, identify session as External/Unowned rather than fabricating
+authority solely to shut it down. Reset PoolOS Control is the deterministic
+operator recovery path if ownership is inappropriate/ambiguous.
+
+55. HA restarts while Pool/Hot Tub is running because operator manually started it;
+physical state happens to match PoolOS desired state.
+Expected: equality is insufficient. Do not infer PoolOS ownership. Remain
+External/Unowned until a new independent PoolOS reason permits explicit adoption.
+
+56. Following 55, new independent Solar opportunity becomes valid.
+Expected: explicit prospective adoption allowed; create fresh generation and take
+Body/Pump/Thermal ownership for Solar from that point forward.
+
+57. HA restarts while an ICP/OCP session-scoped manual override was active.
+Expected: if positive durable evidence identifies the override, preserve it for
+remainder of applicable session. Restart must not erase known operator intent. If
+no durable evidence exists, do not guess from physical source state alone; expose
+ambiguity/recovery state.
+
+58. HA restarts after persistent PoolOS thermal policy change (including ICP/OCP
+Solar Preferred synchronized into PoolOS policy).
+Expected: persistent policy survives unchanged. PoolOS resumes ownership decisions
+under that durable policy.
+
+59. PoolOS integration/config entry reloads during active session while equipment
+continues running.
+Expected: analogous to restart. Do not blindly recreate old authority from physical
+state, but allow prospective adoption once fresh observations and an independent
+current PoolOS purpose justify it.
+
+60. After restart/reload, observations are stale, unavailable, contradictory, or
+incomplete.
+Expected: no speculative adoption or operational commands. Enter explicit recovery
+/ awaiting-evidence state, obtain fresh authoritative observations, then ADOPT,
+recognize EXTERNAL, or start a new session. Unknown must be temporary and observable.
+
+61. HA/PoolOS offline for several hours; restart finds Pool OFF, Spa OFF, pump0.
+Expected: stale session intent discarded; no active lease; reevaluate current
+policy from scratch; durable configuration retained.
+
+62. HA/PoolOS offline for several hours; restart finds Spa physically ON.
+Expected: do not assume hours-old Spa intent remains valid. Treat as stale/ambiguous
+and enter recovery. Long-downtime Spa intent must expire rather than being blindly
+continued; safe shutdown/recovery is preferred absent explicit current evidence.
+
+63. HA/PoolOS offline for hours; restart finds Pool ON at arbitrary RPM with no
+trustworthy provenance.
+Expected: no fabricated history. If current PoolOS policy independently justifies
+operation, prospectively adopt. Otherwise leave External/Unowned unless Reset is
+invoked.
+
+64. Reset PoolOS Control pressed while everything already OFF.
+Expected: invalidate stale/session ownership, preserve durable policy/accounting,
+verify safe baseline without unnecessary cycling, obtain fresh observations, then
+reevaluate.
+
+65. Reset pressed during manually initiated Pool session.
+Expected: Reset wins; clear session-scoped external ownership, drive Pool OFF/pump0,
+verify baseline, then start a fresh PoolOS session only if current policy requires.
+
+66. Reset pressed during manually initiated Hot Tub session.
+Expected: Reset wins; Hot Tub OFF, Pool OFF as necessary, pump0; clear session
+ownership; fresh reevaluation; do not restore old Hot Tub session automatically.
+
+67. Reset pressed during healthy PoolOS-owned Solar session.
+Expected: Reset remains authoritative. Terminate current session cleanly, establish
+safe OFF baseline, then immediately reevaluate. If Solar still warranted, start a
+new Solar session with fresh ownership.
+
+68. Reset pressed while filtration debt remains.
+Expected: do not erase debt. Reset clears authority/session ambiguity, not
+accounting. Debt participates normally in fresh reevaluation.
+
+69. Reset pressed while persistent policy is Solar Preferred, Solar Disabled, etc.
+Expected: do not alter persistent policy. Reset clears session authority only.
+
+70. Reset pressed while observations are stale/missing/unavailable.
+Expected: drive toward safest verifiable shutdown boundary, then
+WAITING_FOR_FRESH_EVIDENCE. No new operational session until fresh evidence supports
+it.
+
+71. PoolOS commands filtration 2600; actual settles at 2550; no operator evidence.
+Expected: Body/Pump remain PoolOS. Attempt reconciliation to 2600. Bounded failure
+may create convergence fault, never false manual takeover.
+
+72. PoolOS commands new RPM and pump passes through transient values such as
+1500 -> 3450 -> 2900 during startup/source transition.
+Expected: PoolOS retains Pump ownership. Known/attributable transition consequences
+receive bounded stabilization window.
+
+73. PoolOS Solar stable at 2900; actual changes to 3200 with positive evidence of
+ICP/OCP manual RPM command.
+Expected: Pump=External, Body/Thermal remain PoolOS. Manual Pump override follows
+session-scope/hand-back rules.
+
+74. Same unexplained 2900 -> 3200 drift, but no positive operator evidence.
+Expected: do not surrender Pump ownership immediately. Reconcile and record
+unexplained drift; repeated failure may degrade/fault, but unknown cause != external
+owner.
+
+75. PoolOS commands Pool ON; body activation accepted, but pump never starts or
+required verification never arrives.
+Expected: pending Body authority may remain while appropriate; do not manufacture
+Pump ownership. Retry boundedly; on failure expose specific execution fault and
+recover safely without permanently poisoning future autonomy.
+
+76. PoolOS owns Body/Pump and requests Solar, but Solar never becomes active because
+Pentair/environmental conditions do not permit it.
+Expected: not delivery failure merely because Solar inactive. Requested/selected
+and active are distinct. Preserve valid ownership and lifecycle. Solar RPM only
+when Solar active.
+
+77. PoolOS command followed by contradictory/unavailable observations (e.g. Pool ON,
+pump0, Solar active).
+Expected: explicit DEGRADED/AWAITING_EVIDENCE state. Do not invent ownership from
+contradiction. Preserve positively established ownership where safe, refresh and
+actively recover rather than relinquishing indefinitely.
+
+78. PoolOS command genuinely fails after bounded retries.
+Expected: COMMAND/DELIVERY FAILURE, not external_takeover. Safely terminate/recover
+affected execution. Failure creates no external owner and does not permanently
+block future legitimate sessions.
+
+79. Grid outage/emergency/safety policy activates during PoolOS-owned Pool/Hot Tub.
+Expected: safety authority outranks normal ownership. Apply required safety actions.
+This is internal safety preemption, not manual ownership. On clear, reevaluate
+current reality/policy rather than blindly restoring stale pre-outage commands.
+
+80. During safety/outage state, operator makes manual equipment change; safety later
+clears.
+Expected: safety wins while active. After clear, preserve still-relevant positive
+operator intent where determinable, then reevaluate. Do not blindly restore old
+PoolOS session or blindly erase legitimate manual choice.
+
+81. PoolOS owns Pool/Solar; operator simultaneously changes pump RPM and heat source
+at ICP/OCP.
+Expected: Body=PoolOS, Pump=External, Thermal=External. Do not escalate two
+concept-specific changes into whole-session external ownership. Each override has
+its own expiry/hand-back.
+
+82. PoolOS owns session; operator changes Pool target through PoolOS HA entity/UI.
+Expected: persistent policy/configuration change, not ownership takeover. PoolOS
+remains owner and immediately reevaluates. If new target is already satisfied,
+perform normal termination/successor lifecycle.
+
+83. Operator changes Pool target at ICP/OCP.
+Expected: synchronize target into PoolOS as durable operator policy. PoolOS remains
+controller and uses new target across future sessions until changed again.
+
+84. Operator controls PoolOS through deliberately exposed HomeKit control.
+Expected: semantics follow the PoolOS control represented, not merely HomeKit
+origin. Persistent policy control is persistent; Reset invokes Reset semantics;
+session controls follow their defined scope.
+
+85. Operator issues direct physical/ICP command nearly simultaneously with a
+conflicting PoolOS command.
+Expected: positive operator intent wins the affected concept. PoolOS detects race,
+stops fighting that concept, and records manual takeover. Unaffected domains remain
+PoolOS-owned.
+
+86. PoolOS transitions Filtration -> Solar while operator manually changes RPM.
+Expected: if manual intent positively identified, Pump=External despite transition
+window. Transition tolerance protects controller-generated variability, not real
+operator intervention.
+
+87. Reset PoolOS Control pressed while PoolOS commands are pending/in flight.
+Expected: Reset creates new authority epoch/generation. Old pending commands and
+late consequences cannot reacquire/corrupt new ownership. Safe baseline -> fresh
+evidence -> reevaluation.
+
+88. Old/delayed Pentair event arrives after transition to new purpose/generation.
+Expected: chronology/provenance rejects it as authority for new generation. Old
+consequence cannot steal ownership; conflicting delayed event is not automatically
+manual intervention.
+
+89. PoolOS has valid ownership but command cannot converge; operator manually places
+affected concept at exactly PoolOS's currently required state.
+Expected: operator-assisted convergence and implicit hand-back, not takeover.
+PoolOS verifies state, regains/retains concept ownership, and continues rather than
+remaining stuck in failure/re-enable state.
+
+90. Any active PoolOS session, external override, adoption, recovery, failure, or
+reset is occurring.
+Expected: ownership is directly observable in Home Assistant. At minimum expose:
+- Body owner
+- Pump owner
+- Thermal owner
+- active generation/session
+- active body and purpose
+- ownership/adoption reason
+- manual override scope
+- override expiration/reacquisition condition
+- desired state
+- actual state
+- pending verification/convergence state
+- last accepted action/command
+- last verified authoritative consequence
+- last ownership transition and reason
+- health/failure reason
+- whether Reset/recovery is active
+
+======================================================================
+DERIVED ARCHITECTURAL REQUIREMENTS
+======================================================================
+
+A. OWNERSHIP LEASE / GENERATION MODEL
+-------------------------------------
+The implementation should support a first-class ownership record conceptually
+containing at least:
+- lease_id / generation
+- body
+- purpose
+- started_at / adopted_at
+- accepted command IDs / provenance
+- owned concepts (Body, Pump, Thermal)
+- expected consequences
+- verified consequences
+- pending consequences
+- successor entitlement
+- termination entitlement
+- manual override records per concept
+- status
+- ended_at / end_reason
+
+Historical provenance and prospective adoption must be distinguishable.
+
+B. OWNERSHIP LIFECYCLE
+----------------------
+A useful conceptual lifecycle is:
+UNOWNED/INACTIVE
+ -> PoolOS accepted command OR explicit prospective adoption
+PENDING_OWNERSHIP
+ -> authoritative consequence verified
+OWNED
+ -> internal handoff/purpose transition
+TRANSFER_PENDING
+ -> successor verifies
+OWNED_BY_SUCCESSOR / OWNED(new purpose)
+ -> completion, manual takeover, safety preemption, reset, or failure
+TERMINATING / RECOVERING
+ -> authoritative final verification
+UNOWNED/INACTIVE
+
+Manual concept ownership must be independently representable without forcing the
+whole session into External ownership.
+
+C. SESSION BOUNDARIES AND REACQUISITION
+---------------------------------------
+Legitimate reacquisition boundaries include, depending on domain:
+- a genuinely new independent PoolOS purpose (e.g. Solar opportunity arising
+  during a manually started Pool session)
+- TOU filtration start after earlier manual Pool OFF
+- Filtration <-> Solar purpose transition for session-scoped Pump override
+- end of Hot Tub session followed by independent Pool purpose
+- new operational day / genuinely new Hot Tub opportunity after prior Hot Tub OFF
+- fresh post-restart/reload prospective adoption when current policy independently
+  justifies operation
+- explicit Reset PoolOS Control
+
+Not a legitimate boundary by itself:
+- coordinator refresh
+- periodic reevaluation
+- matching physical state
+- evaluation/plan ID churn without semantic purpose change
+- unexplained state mismatch
+
+D. MANUAL HAND-BACK
+-------------------
+For Pump and Thermal, deliberate manual restoration to PoolOS's exact current
+required state is affirmative implicit hand-back. PoolOS should verify the state
+and reclaim that concept without requiring the physical body session to end.
+
+E. RPM ATTRIBUTION AND CONVERGENCE
+----------------------------------
+PoolOS must distinguish:
+1. expected/attributable transient consequence;
+2. unexplained drift without operator evidence;
+3. positively identified manual intervention.
+
+Transition windows must be bounded and semantic, not merely "ignore mismatch for
+N seconds." They should consider command origin, chronology, generation,
+expected consequence, actual active source/body, and convergence target.
+
+A modest steady-state error (e.g. 2550 vs 2600) should trigger correction before
+faulting. Faulting must not create External ownership.
+
+F. THERMAL REQUEST VS PHYSICAL ACTIVATION
+-----------------------------------------
+Heat-source selection/request and physical source activation are distinct.
+In particular:
+- Solar selected/requested does not guarantee Solar active.
+- Pentair may withhold Solar activation because native conditions are not met.
+- PoolOS must not require Solar RPM until Solar is physically active.
+- Absence of physical Solar activation after a valid selection is not, by itself,
+  command delivery failure or ownership loss.
+
+G. HOT TUB SESSION SEMANTICS
+----------------------------
+A manually requested Hot Tub session differs from autonomous Pool heating:
+- operator Body request may be adopted by PoolOS for execution;
+- reaching Hot Tub target ends heating demand, not the Hot Tub session;
+- Hot Tub OFF is the primary explicit end of a user-requested Hot Tub session;
+- Hot Tub OFF cancels the current session only, not future autonomous opportunities.
+
+H. RESTART / RELOAD / LONG-DOWNTIME SEMANTICS
+---------------------------------------------
+Restart/reload must not require either dangerous historical fabrication or
+permanent helplessness.
+- Do not fabricate old command provenance.
+- Allow explicit prospective adoption when a current independent PoolOS reason
+  exists.
+- Preserve known durable manual overrides if positively identifiable.
+- Preserve persistent policy/configuration.
+- Expire or recover stale long-downtime session intent, especially Hot Tub.
+- Unknown must lead to evidence refresh/recovery, not indefinite unowned state.
+
+I. SAFETY
+---------
+Safety/outage authority outranks normal ownership. Safety preemption is not
+manual takeover. After safety clears, reevaluate current state/policy and any
+still-relevant positive operator intent rather than restoring stale commands.
+
+J. OBSERVABILITY / COMMISSIONING
+--------------------------------
+Ownership is product architecture, not merely internal implementation detail.
+Home Assistant must expose enough state that commissioning can directly answer:
+- Who owns Body right now, and why?
+- Who owns Pump right now, and why?
+- Who owns Thermal right now, and why?
+- Is a manual override active? What domain? What ends it?
+- Is this historical ownership, prospective adoption, pending ownership, or
+  successor transfer?
+- What does PoolOS currently want?
+- What does the equipment actually report?
+- What command is pending?
+- What consequence was last verified?
+- Is PoolOS converging, degraded, recovering, or failed?
+- What event allows reacquisition?
+
+Commissioning should be scored against this contract using:
+Baseline -> stimulus -> observe -> wait if required -> observe again -> compare
+expected ownership and physical outcome.
+
+======================================================================
+IMPLEMENTATION / DEVELOPMENT GATE
+======================================================================
+
+This contract is intended to freeze behavior BEFORE another ownership patch.
+Recommended development sequence:
+
+1. Incorporate accepted semantics into repository-owned specification/ADR.
+2. Inventory current ownership implementation against all 90 scenarios.
+3. Classify each scenario: already satisfied / architectural mismatch / missing
+   observability / missing persistence / missing recovery.
+4. Design one coherent ownership architecture rather than adding scenario-specific
+   exceptions.
+5. Implement deterministic scenario tests for every behavior that can be tested
+   without physical hardware.
+6. Add explicit HA observability entities required by Scenario 90.
+7. Validate full repository quality gates.
+8. Deploy through normal PoolOS release/HACS workflow.
+9. Physically commission representative scenario families end-to-end.
+10. Treat deviations as contract failures: reproduce -> identify invariant ->
+    design fix -> test -> deploy -> observe -> verify.
+
+The immediate autonomy milestone should include at minimum a simple normal-day
+end-to-end lifecycle:
+OFF -> PoolOS starts required operation -> owns Body/Pump/Thermal -> handles
+startup/transient RPM -> performs filtration/Solar as policy requires -> handles
+internal successor transitions -> reaches completion -> shuts down or hands off
+correctly -> remains capable of starting the next legitimate session without
+manual repair.
+
+END OF CONTRACT

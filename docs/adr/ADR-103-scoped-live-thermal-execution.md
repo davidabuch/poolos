@@ -2,6 +2,14 @@
 
 Status: accepted
 
+Ownership interpretation, Solar operating-RPM sequencing, manual cancellation
+scope and prospective body adoption are partially superseded by
+[ADR-110](ADR-110-ownership-contract-semantics.md). The historical execution
+description below remains useful evidence of existing behavior, not permission
+to weaken safety gates or claim the accepted scenarios are already implemented.
+Exact currentness, post-command verification and commissioned operation bounds
+remain required.
+
 ## Context
 
 ADR-102 created command-disabled coupled Pool/Hot Tub plans containing only

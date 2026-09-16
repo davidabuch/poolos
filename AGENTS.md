@@ -306,11 +306,27 @@ Observed state alone is not ownership.
 
 ### 8.2 Runtime lifecycle ownership
 
-Runtime ownership represents whether PoolOS remains entitled to continue controlling equipment or concepts that PoolOS genuinely caused across compatible execution or plan boundaries.
+Runtime ownership represents whether PoolOS remains entitled to continue controlling
+concepts it genuinely provisioned or explicitly adopted prospectively, across
+compatible execution or plan boundaries.
 
-Runtime ownership must originate from accepted PoolOS provenance or an explicit valid ownership handoff.
+Runtime ownership must originate from accepted PoolOS provenance, an explicit valid
+ownership handoff, or an explicit prospective adoption under the approved ownership
+contract. Adoption creates a new origin from an independent current policy or
+operator-session reason; it never fabricates a historical command receipt.
 
 It must never originate from state coincidence.
+
+The normative ownership behavior is recorded in
+`docs/ownership/PoolOS_Ownership_Scenario_Contract.txt` and interpreted by
+`docs/ownership/OWNERSHIP_ARCHITECTURE_SPEC.md` (ADR-110). All 90 scenarios are
+normative. Historical implementation descriptions and tests do not override
+these accepted semantics. Their adoption does not itself enable unimplemented
+or uncommissioned physical authority.
+
+Keep historical origin, current concept-specific authority, execution health,
+and permission for an exact current command separate. Temporarily unavailable
+command permission does not automatically erase historical provenance.
 
 ### 8.3 Observed state cannot manufacture ownership
 
@@ -323,7 +339,8 @@ pump.rpm == expected_rpm
 heat_source == expected_source
 ```
 
-They may confirm, contradict, or revoke existing ownership.
+They may confirm consequences, contradict expectations, or deny unsafe command
+permission. Mismatch alone does not establish External/operator ownership.
 
 They cannot create it.
 
@@ -382,9 +399,13 @@ Cross-body ownership transfer must not occur unless a separately reviewed archit
 
 ## 11. Ownership preemption
 
-Manual or external intervention affecting an owned concept must fail closed.
+Positively evidenced manual or external operator intervention must revoke the
+affected autonomous command permission, without unnecessarily changing unrelated
+BODY, PUMP, or THERMAL authority. Positive operator intent, expected native
+consequences, unexplained drift, safety intervention, old-generation evidence,
+command failure, and internal lifecycle transitions are different classifications.
 
-Relevant events may include:
+Events requiring assessment include:
 
 - owned body unexpectedly becoming inactive;
 - other body becoming active;
@@ -397,11 +418,17 @@ Relevant events may include:
 - maintenance or controller authority changes;
 - confirmed safety events supported by canonical evidence.
 
-Preemption must revoke the affected authority rather than silently reconciling ownership from the new observed state.
+The list above is not a list of proofs of manual intent. Stale or contradictory
+hydraulics still block unsafe commands; they do not fabricate an External owner.
+Unexplained drift retains valid origin and enters bounded reconciliation or a
+control fault. Positive manual intervention overrides the affected domain even
+during convergence. Safety remains superior to normal and manual authority.
 
 A preempted ownership state must not silently become owned again.
 
-Fresh provenance or an explicit valid handoff is required.
+A legitimate typed hand-back, prospective adoption, independent-purpose or
+recovery boundary, or fresh accepted provenance is required. Matching state,
+refreshes, and evaluation identity churn are insufficient.
 
 ---
 
@@ -499,7 +526,12 @@ Unless a separately reviewed persistence contract explicitly proves safe ownersh
 new runtime -> unowned
 ```
 
-Equipment already running after restart must be treated as pre-existing/external for ownership purposes until fresh PoolOS provenance establishes otherwise.
+Equipment already running after restart is pre-existing with unknown origin
+unless positive evidence identifies that origin. Unknown is not proof of an
+External/operator owner. A separately reviewed prospective adoption may establish
+new authority from fresh evidence and an independent current reason; it does not
+restore old execution authority. Recovery must be observable and active, without
+speculative commands while evidence is unusable.
 
 Do not blindly replay incomplete operations after restart.
 
