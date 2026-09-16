@@ -1165,11 +1165,17 @@ class ThermalRuntimeEvaluator:
                 gas_allowed=requested_mode
                 in {ThermalRequestedMode.GAS, ThermalRequestedMode.SOLAR_PREFERRED},
             )
+            solar_active_usable = "solar.active" not in {
+                *evidence.missing_native_concepts,
+                *evidence.stale_native_concepts,
+            }
             source_input = ThermalSourceInput(
                 evaluated_at=evidence.evaluated_at,
                 pool_active=values.get("pool.active") is True,
                 spa_active=values.get("spa.active") is True,
-                solar_active=values.get("solar.active") is True,
+                solar_active=(
+                    values.get("solar.active") is True and solar_active_usable
+                ),
                 trusted_pool_temperature_f=(
                     water_temperature.trusted_temperature_f
                     if (
@@ -1213,6 +1219,7 @@ class ThermalRuntimeEvaluator:
                 self.pool_selector.evaluate(source_input),
                 evidence_usable=evidence_usable,
                 blockers=blockers,
+                baselines=self.baselines,
             )
             pool_active = _bool_or_none(values.get("pool.active"))
             spa_active = _bool_or_none(values.get("spa.active"))
@@ -1309,7 +1316,11 @@ class ThermalRuntimeEvaluator:
                 )
                 if desired.selected_source is PhysicalHeatMode.OFF
                 else (
-                    "solar_heating"
+                    (
+                        "solar_heating"
+                        if solar_active_usable and values.get("solar.active") is True
+                        else "ordinary_circulation"
+                    )
                     if desired.selected_source is PhysicalHeatMode.SOLAR
                     else "gas_heating"
                 )

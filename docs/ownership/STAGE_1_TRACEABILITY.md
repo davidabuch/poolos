@@ -1,5 +1,9 @@
 # Ownership contract implementation traceability
 
+> Stage 1 is the historical audit baseline. The first implemented subset is
+> recorded in [Stage 2 lifecycle reconciliation](STAGE_2_LIFECYCLE_RECONCILIATION.md)
+> and in the `stage_2_review` section of the machine-readable matrix below.
+
 ## Baseline and artifact contract
 
 Stage 1 reviewed main `9307e6d882cfa847e4be97f4e1e755174e34b5ac`, the v0.11.23

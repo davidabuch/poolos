@@ -29,10 +29,12 @@ class ProofLevel(StrEnum):
 
 class EventClassification(StrEnum):
     AUTHORITATIVE = "authoritative"
+    EXPECTED_NATIVE_TRANSITION = "expected_native_transition"
+    UNEXPLAINED_DRIFT = "unexplained_drift"
+    POSITIVE_OPERATOR_INTERVENTION = "positive_operator_intervention"
     SUPERSEDED = "superseded"
     RETIRED = "retired"
     IRRELEVANT = "irrelevant"
-    TRUE_EXTERNAL_TAKEOVER = "true_external_takeover"
 
 
 class ReasonClassification(StrEnum):
@@ -98,14 +100,14 @@ PHASE_PROOFS = (
     ClosureProof("L_thermal_filtration_owner", "poolos/pool_circulation_ownership.py", "accept_thermal_to_filtration", "test_normal_day_pool_and_spa_complete_lifecycle", ProofLevel.LIFECYCLE, "typed handoff transfers circulation ownership"),
     ClosureProof("M_filtration_cleanup", "poolos/filtration_automatic_execution.py", "process_epoch", "test_normal_day_pool_and_spa_complete_lifecycle", ProofLevel.LIFECYCLE, "filtration completion uses provenance-bound body Off"),
     ClosureProof("N_manual_resume", "poolos/thermal_automatic_execution.py", "set_enabled", "test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted", ProofLevel.PRODUCTION_COMPOSITION, "manual Off consumes old authority and resume cannot adopt equality"),
-    ClosureProof("O_authority_epoch", "poolos/thermal_runtime_ownership.py", "handoff", "test_old_event_cannot_preempt_successor_lease_after_prior_preemption", ProofLevel.COMPONENT, "old event cannot poison a new lease generation"),
+    ClosureProof("O_authority_epoch", "poolos/thermal_runtime_ownership.py", "handoff", "test_old_event_cannot_preempt_typed_successor_after_prior_drift", ProofLevel.COMPONENT, "old event cannot poison a new lease generation"),
     ClosureProof("P_transport_generation", "custom_components/poolos/external_change_runtime.py", "process", "test_runtime_publishes_one_stable_bounded_ha_event_after_baseline", ProofLevel.PRODUCTION_COMPOSITION, "new discovery generation resets retained native baseline"),
     ClosureProof("Q_restart_runtime", "poolos/thermal_runtime_ownership.py", "ThermalRuntimeOwnershipManager", "test_restart_cannot_handoff_an_old_runtime_lease", ProofLevel.COMPONENT, "restart begins unowned and cannot reconstruct provenance"),
 )
 
 
 GENERATION_PROOFS = (
-    ClosureProof("runtime_ownership", "poolos/thermal_runtime_ownership.py", "handoff", "test_old_event_cannot_preempt_successor_lease_after_prior_preemption", ProofLevel.COMPONENT, "historical evidence cannot poison or create a lease"),
+    ClosureProof("runtime_ownership", "poolos/thermal_runtime_ownership.py", "handoff", "test_old_event_cannot_preempt_typed_successor_after_prior_drift", ProofLevel.COMPONENT, "historical evidence cannot poison or create a lease"),
     ClosureProof("execution_session", "poolos/thermal_runtime_ownership.py", "promote", "test_session_provenance_promotion_rejects_different_session", ProofLevel.COMPONENT, "old command provenance cannot verify a new session"),
     ClosureProof("pump_speed_session", "poolos/thermal_runtime_ownership.py", "evaluate", "test_probe_replacement_handoff_rejects_stale_generation", ProofLevel.COMPONENT, "stale pump phase cannot cross a typed handoff"),
     ClosureProof("autonomous_resume", "poolos/thermal_automatic_execution.py", "set_enabled", "test_preempted_thermal_session_allows_genuinely_fresh_successor_session", ProofLevel.PRODUCTION_COMPOSITION, "resume requires a fresh authority epoch"),
@@ -136,12 +138,13 @@ CONTROL_PATH_PROOFS = PHASE_PROOFS + GENERATION_PROOFS + LIVENESS_PROOFS
 
 EVENT_EPOCH_PROOFS = (
     EventEpochProof("matching_historical_without_provenance", EventClassification.IRRELEVANT, "poolos/thermal_runtime_ownership.py", "establish", "test_preexisting_or_matching_native_state_does_not_create_ownership", "equality cannot create authority"),
-    EventEpochProof("matching_post_acceptance_unverified", EventClassification.TRUE_EXTERNAL_TAKEOVER, "poolos/thermal_runtime_ownership.py", "_external_preemption_reason", "test_unverified_matching_pump_event_still_preempts", "only verified provenance may explain a retained event"),
-    EventEpochProof("pre_acceptance", EventClassification.TRUE_EXTERNAL_TAKEOVER, "poolos/thermal_termination.py", "_external_takeover", "test_earlier_external_pump_event_cannot_be_retroactively_adopted", "an earlier event cannot become a later command consequence"),
-    EventEpochProof("exact_acceptance", EventClassification.TRUE_EXTERNAL_TAKEOVER, "poolos/external_change.py", "pump_event_conflicts_with_provenance", "test_pump_event_provenance_boundary_is_deterministic", "causality is strict, not inclusive"),
+    EventEpochProof("matching_post_acceptance_unverified", EventClassification.EXPECTED_NATIVE_TRANSITION, "poolos/thermal_runtime_ownership.py", "_observe_domains", "test_unverified_matching_pump_event_requires_separate_operator_evidence", "matching telemetry does not verify a receipt or fabricate operator origin"),
+    EventEpochProof("pre_acceptance", EventClassification.UNEXPLAINED_DRIFT, "poolos/thermal_termination.py", "_external_takeover", "test_earlier_unattributed_pump_event_cannot_invalidate_cleanup", "an earlier event cannot become a later command consequence or operator origin"),
+    EventEpochProof("exact_acceptance", EventClassification.UNEXPLAINED_DRIFT, "poolos/external_change.py", "pump_event_conflicts_with_provenance", "test_pump_event_provenance_boundary_is_deterministic", "strict causality denies command attribution without fabricating an operator"),
     EventEpochProof("matching_post_verification", EventClassification.AUTHORITATIVE, "poolos/thermal_runtime_ownership.py", "_external_preemption_reason", "test_owned_prime_actual_rpm_transition_does_not_self_preempt", "verified accepted intent explains its later consequence"),
-    EventEpochProof("contradictory_post_verification", EventClassification.TRUE_EXTERNAL_TAKEOVER, "poolos/thermal_runtime_ownership.py", "_external_preemption_reason", "test_true_external_pump_change_still_preempts_after_owned_prime_model", "fresh contradiction revokes continued authority"),
-    EventEpochProof("duplicate_terminal_event", EventClassification.RETIRED, "poolos/thermal_runtime_ownership.py", "evaluate", "test_duplicate_postlease_event_cannot_mutate_terminal_ownership_twice", "terminal ownership cannot be mutated repeatedly"),
+    EventEpochProof("contradictory_post_verification", EventClassification.UNEXPLAINED_DRIFT, "poolos/thermal_runtime_ownership.py", "_observe_domains", "test_same_contradiction_yields_only_with_positive_domain_intent", "fresh contradiction without operator evidence starts bounded reconciliation"),
+    EventEpochProof("positive_operator_post_verification", EventClassification.POSITIVE_OPERATOR_INTERVENTION, "poolos/thermal_runtime_ownership.py", "_observe_domains", "test_same_contradiction_yields_only_with_positive_domain_intent", "trusted operator evidence yields only the affected domain"),
+    EventEpochProof("duplicate_terminal_event", EventClassification.RETIRED, "poolos/thermal_runtime_ownership.py", "evaluate", "test_duplicate_postlease_drift_cannot_restart_reconciliation_episode", "duplicate evidence cannot restart or extend reconciliation"),
     EventEpochProof("newer_same_concept", EventClassification.SUPERSEDED, "poolos/external_change.py", "update", "test_later_same_concept_transition_replaces_older_takeover", "latest same-concept native truth replaces retained evidence"),
     EventEpochProof("delayed_older_same_concept", EventClassification.RETIRED, "poolos/external_change.py", "update", "test_initial_duplicate_regressive_and_reset_snapshots_are_baselines", "temporally regressive truth cannot replace current truth"),
     EventEpochProof("transport_generation_reset", EventClassification.RETIRED, "custom_components/poolos/external_change_runtime.py", "process", "test_runtime_publishes_one_stable_bounded_ha_event_after_baseline", "discovery generation establishes a new native baseline"),
@@ -187,7 +190,7 @@ def _phase_event_disposition(
             return "SEMANTICALLY_IRRELEVANT: no retained-event consumer at boundary"
         return {
             "matching_historical_event": EventClassification.IRRELEVANT,
-            "contradictory_historical_event": EventClassification.TRUE_EXTERNAL_TAKEOVER,
+            "contradictory_historical_event": EventClassification.UNEXPLAINED_DRIFT,
             "duplicate_event": EventClassification.RETIRED,
             "delayed_event": EventClassification.RETIRED,
             "newer_same_concept_event": EventClassification.SUPERSEDED,
@@ -195,30 +198,30 @@ def _phase_event_disposition(
     if phase not in _COMMAND_ACCEPTANCE_PHASES:
         return "UNREACHABLE: boundary performs no physical command acceptance"
     return {
-        "pre_acceptance_event": EventClassification.TRUE_EXTERNAL_TAKEOVER,
-        "exact_acceptance_event": EventClassification.TRUE_EXTERNAL_TAKEOVER,
+        "pre_acceptance_event": EventClassification.UNEXPLAINED_DRIFT,
+        "exact_acceptance_event": EventClassification.UNEXPLAINED_DRIFT,
         "post_acceptance_pre_verification_event": (
-            EventClassification.TRUE_EXTERNAL_TAKEOVER
+            EventClassification.EXPECTED_NATIVE_TRANSITION
         ),
         "post_verification_event": EventClassification.AUTHORITATIVE,
     }[dimension]
 
 
 GENERATION_CASE_PROOFS = (
-    GenerationCaseProof("runtime_ownership", "matching", EventClassification.IRRELEVANT, "test_old_event_cannot_preempt_successor_lease_after_prior_preemption", "old equality neither creates nor poisons ownership"),
-    GenerationCaseProof("runtime_ownership", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_true_external_pump_change_still_preempts_after_owned_prime_model", "current contradiction preempts; obsolete contradiction is ignored"),
+    GenerationCaseProof("runtime_ownership", "matching", EventClassification.IRRELEVANT, "test_old_event_cannot_preempt_typed_successor_after_prior_drift", "old equality neither creates nor poisons ownership"),
+    GenerationCaseProof("runtime_ownership", "contradictory", EventClassification.UNEXPLAINED_DRIFT, "test_same_contradiction_yields_only_with_positive_domain_intent", "unattributed contradiction reconciles; exact operator evidence yields its domain"),
     GenerationCaseProof("execution_session", "matching", EventClassification.IRRELEVANT, "test_session_provenance_promotion_rejects_different_session", "old accepted operation cannot verify another session"),
-    GenerationCaseProof("execution_session", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_incompatible_current_thermal_identity_supersedes_ownership", "current incompatible session identity revokes authority"),
+    GenerationCaseProof("execution_session", "contradictory", EventClassification.SUPERSEDED, "test_incompatible_current_thermal_identity_supersedes_ownership", "current incompatible session identity supersedes obsolete execution"),
     GenerationCaseProof("pump_speed_session", "matching", EventClassification.IRRELEVANT, "test_probe_replacement_handoff_rejects_stale_generation", "old pump phase cannot cross handoff"),
-    GenerationCaseProof("pump_speed_session", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_matching_configured_setpoint_cannot_hide_actual_rpm_change", "current actual RPM contradiction remains authoritative"),
+    GenerationCaseProof("pump_speed_session", "contradictory", EventClassification.UNEXPLAINED_DRIFT, "test_matching_configured_setpoint_cannot_hide_actual_rpm_change", "current actual RPM contradiction remains visible and bounded"),
     GenerationCaseProof("autonomous_resume", "matching", EventClassification.IRRELEVANT, "test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted", "resume cannot reuse matching pre-resume hardware"),
-    GenerationCaseProof("autonomous_resume", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_preempted_thermal_session_allows_genuinely_fresh_successor_session", "fresh successor is a new authority epoch"),
+    GenerationCaseProof("autonomous_resume", "contradictory", EventClassification.SUPERSEDED, "test_preempted_thermal_session_allows_genuinely_fresh_successor_session", "fresh successor is a new authority epoch"),
     GenerationCaseProof("termination_entitlement", "matching", EventClassification.IRRELEVANT, "test_cleanup_attempt_cannot_cross_provenance_generation", "old entitlement cannot authorize cleanup"),
-    GenerationCaseProof("termination_entitlement", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_external_source_takeover_explicitly_invalidates_termination_attempt", "current takeover invalidates termination"),
+    GenerationCaseProof("termination_entitlement", "contradictory", EventClassification.UNEXPLAINED_DRIFT, "test_unattributed_source_drift_does_not_invalidate_termination_attempt", "unattributed contradiction cannot erase termination responsibility"),
     GenerationCaseProof("transport_discovery", "matching", EventClassification.RETIRED, "test_runtime_publishes_one_stable_bounded_ha_event_after_baseline", "new discovery baseline retires old transport evidence"),
-    GenerationCaseProof("transport_discovery", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_maintenance_and_reconnect_clear_current_drift", "new-generation drift is evaluated only after a new baseline"),
+    GenerationCaseProof("transport_discovery", "contradictory", EventClassification.UNEXPLAINED_DRIFT, "test_maintenance_and_reconnect_clear_current_drift", "new-generation drift is evaluated only after a new baseline"),
     GenerationCaseProof("restart_runtime", "matching", EventClassification.IRRELEVANT, "test_restart_with_matching_pool_state_reconstructs_no_cleanup_authority", "restart begins unowned despite equality"),
-    GenerationCaseProof("restart_runtime", "contradictory", EventClassification.TRUE_EXTERNAL_TAKEOVER, "test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted", "old origin cannot control a later external session"),
+    GenerationCaseProof("restart_runtime", "contradictory", EventClassification.IRRELEVANT, "test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted", "old origin cannot control or classify a later unowned session"),
 )
 
 
@@ -243,7 +246,7 @@ LIVENESS_DIMENSION_PROOFS = (
     LivenessDimensionProof("observing_solar_engagement", "repeated_reevaluation", "test_unengaged_solar_cold_start_is_bounded_and_not_immediately_retried", "reevaluation cannot extend deadline"),
     LivenessDimensionProof("terminating", "normal_progress", "test_owned_gas_source_is_deselected_then_verified_without_stopping_pool", "source Off is delivered"),
     LivenessDimensionProof("awaiting_termination_verification", "normal_progress", "test_accepted_termination_delivery_needs_a_later_authoritative_epoch", "later native source Off verifies"),
-    LivenessDimensionProof("awaiting_termination_verification", "contradictory_event", "test_native_solar_takeover_cannot_verify_gas_source_off_delivery", "contradiction cannot verify"),
+    LivenessDimensionProof("awaiting_termination_verification", "contradictory_event", "test_native_solar_drift_cannot_verify_gas_source_off_delivery", "contradiction cannot verify"),
     LivenessDimensionProof("awaiting_termination_verification", "unrelated_duplicate", "test_same_timestamp_command_callback_cannot_verify_termination", "duplicate chronology does not advance"),
     LivenessDimensionProof("cleanup_waiting", "recovery", "test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body", "fresh successor evidence selects action"),
     LivenessDimensionProof("awaiting_cleanup_verification", "normal_progress", "test_pump_cleanup_requires_later_configured_and_actual_native_truth", "independent callbacks jointly verify"),
@@ -258,7 +261,7 @@ LIVENESS_DIMENSION_PROOFS = (
 
 INTERLEAVING_PROOFS = (
     ("manual_off_pending", "test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry"),
-    ("rpm_change_pending", "test_unverified_matching_pump_event_still_preempts"),
+    ("rpm_change_pending", "test_unverified_matching_pump_event_requires_separate_operator_evidence"),
     ("timeout_late_callback", "test_pump_mismatch_at_deadline_times_out"),
     ("supersession_late_consequence", "test_delivered_step_cannot_verify_after_thermal_plan_is_superseded"),
     ("restart_pending", "test_restart_cannot_handoff_an_old_runtime_lease"),
@@ -266,13 +269,13 @@ INTERLEAVING_PROOFS = (
     ("filtration_changes_during_termination", "test_latest_filtration_state_can_become_immediate_during_thermal"),
     ("solar_loss_during_preparation", "test_true_requested_mode_supersession_terminates_without_next_delivery"),
     ("spa_cleanup_takeover", "test_transient_spa_takeover_preempts_pending_cleanup_verification"),
-    ("source_independent_change", "test_external_source_takeover_explicitly_invalidates_termination_attempt"),
+    ("source_independent_change", "test_unattributed_source_drift_does_not_invalidate_termination_attempt"),
     ("configured_before_actual", "test_pump_cleanup_requires_later_configured_and_actual_native_truth"),
     ("actual_before_configured", "test_pump_cleanup_requires_later_configured_and_actual_native_truth"),
     ("old_discovery_callback", "test_initial_duplicate_regressive_and_reset_snapshots_are_baselines"),
-    ("historical_event_new_owner", "test_old_event_cannot_preempt_successor_lease_after_prior_preemption"),
-    ("terminal_owner_pending_provenance", "test_duplicate_postlease_event_cannot_mutate_terminal_ownership_twice"),
-    ("cleanup_takeover", "test_cleanup_takeover_invalidates_provenance_without_command"),
+    ("historical_event_new_owner", "test_old_event_cannot_preempt_typed_successor_after_prior_drift"),
+    ("terminal_owner_pending_provenance", "test_duplicate_postlease_drift_cannot_restart_reconciliation_episode"),
+    ("cleanup_takeover", "test_unattributed_cleanup_pump_drift_retains_provenance_without_command"),
     ("spontaneous_source_off", "test_source_off_is_required_but_does_not_create_body_origin"),
     ("late_superseded_success", "test_delivered_step_cannot_verify_after_thermal_plan_is_superseded"),
     ("identity_churn_equality", "test_duplicate_evidence_timestamp_is_idempotent_confirmation"),
@@ -332,10 +335,10 @@ REASON_SIGNALS = (
     "not_immediately",
     "ready",
 )
-# The existing 221 families remain. Cleanup capture waiting adds only the
-# existing arbitration-unavailable reason at the new _cleanup_capture_wait site.
-REASON_FAMILY_COUNT = 222
-REASON_FAMILY_SHA256 = "90074498d43e655dd678f3dbb2459c63e769fd7593184526b93ba580c0c8551a"
+# Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
+# reconciliation reasons. Keep the resulting production reason surface frozen.
+REASON_FAMILY_COUNT = 211
+REASON_FAMILY_SHA256 = "38b45be39456323a5844f86b9c80e830cb9984ffc17606a1cb94068f33cfd6c1"
 
 
 @cache
@@ -425,7 +428,7 @@ def _reason_regression(source: str, reason: str) -> str:
     if source.endswith("thermal_automatic_execution.py") and reason == "thermal_cleanup_arbitration_unavailable":
         return "test_verified_gas_off_does_not_consume_residual_when_capture_is_unavailable"
     if source.endswith("circulation_successor.py"):
-        return "test_external_takeover_defeats_thermal_exclusivity"
+        return "test_positive_operator_takeover_defeats_affected_thermal_exclusivity"
     if source.endswith("filtration_automatic_execution.py"):
         return "test_off_to_filtration_owned_to_off_is_closed_loop_and_provenance_based"
     if source.endswith("thermal_live_execution.py"):
@@ -609,3 +612,30 @@ def test_reason_family_guard_covers_every_authority_domain() -> None:
         ReasonClassification.MANUAL_EXTERNAL_TAKEOVER,
         ReasonClassification.DIAGNOSTIC_ONLY,
     }
+
+
+def test_stage_2_scenario_updates_are_unique_and_bound_to_regressions() -> None:
+    payload = json.loads(
+        (ROOT / "docs/ownership/scenario_traceability.json").read_text()
+    )
+    scenarios = payload["scenarios"]
+    assert {item["scenario_id"] for item in scenarios} == set(range(1, 91))
+    updates = payload["stage_2_review"]["scenario_updates"]
+    updated_ids = [item["scenario_id"] for item in updates]
+    assert len(updated_ids) == len(set(updated_ids))
+    assert set(updated_ids) <= set(range(1, 91))
+    assert payload["stage_2_review"]["baseline"] == (
+        "629b84e7517669e9dd5b98285ec1357a0b9086f4"
+    )
+    defined = _defined_tests()
+    for item in updates:
+        assert item["implementation_status"] in payload["status_vocabulary"]
+        assert item["mechanism"].strip()
+        assert item["regressions"]
+        for node in item["regressions"]:
+            path, separator, test_name = node.partition("::")
+            assert separator == "::"
+            assert (ROOT / path).is_file()
+            assert test_name in defined
+        if item["implementation_status"] != "SATISFIED":
+            assert item["remaining_gap"].strip()

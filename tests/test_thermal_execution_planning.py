@@ -93,9 +93,9 @@ def test_pool_policy_adapts_source_rpm_reason_and_evidence_without_authority() -
 
     assert desired.body is ThermalBody.POOL
     assert desired.selected_source is PhysicalHeatMode.SOLAR
-    assert desired.required_pump_rpm == 2900
+    assert desired.required_pump_rpm == 2600
     assert desired.reason_code == "solar_preferred_physical_solar"
-    assert desired.rpm_reason_code == "operating_baseline:pool_solar:2900_rpm"
+    assert desired.rpm_reason_code == "operating_baseline:solar_preparation:2600_rpm"
     assert desired.evidence["collector_differential_f"] == 14.0
     assert desired.criteria
     assert desired.authority == "none"

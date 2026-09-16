@@ -440,10 +440,12 @@ def test_async_source_observation_preserves_body_through_later_solar(
         (129, 3000, "00000", False),
         (159, 3000, "00000", False),
         (189, 3000, "00000", False),
-        (190, 2900, "00000", False),
-        (191, 2900, "H0002", False),
-        (192, 2900, "H0002", True),
-        (222, 2900, "H0002", True),
+        (190, 2600, "00000", False),
+        (191, 2600, "H0002", False),
+        (192, 2600, "H0002", True),
+        (193, 2900, "H0002", True),
+        (224, 2900, "H0002", True),
+        (254, 2900, "H0002", True),
     ):
         current = frame(
             seconds,
@@ -472,7 +474,7 @@ def test_async_source_observation_preserves_body_through_later_solar(
 
     # Normal target hysteresis expires with fresh observations. Observe each
     # real accepted source/cleanup operation before advancing its dependent step.
-    for seconds in range(252, 883, 30):
+    for seconds in range(284, 915, 30):
         result = asyncio.run(
             driver.process_epoch(
                 frame(
@@ -563,9 +565,18 @@ def test_retained_capture_wait_rechecks_takeover_before_any_cleanup(takeover):
     )
     asyncio.run(driver.process_epoch(changed, delivery_factory=factory))
     assert orchestrator.ownership.residual_termination is None
-    assert driver.cleanup_provenance is None
-    asyncio.run(driver.process_epoch(frame(125), delivery_factory=factory))
-    assert len(delivery.calls) == 2
+    if takeover == "pump":
+        # Unattributed Pump drift cannot fabricate operator ownership or erase
+        # the independently verified Body completion responsibility.
+        assert driver.cleanup_provenance is not None
+        asyncio.run(driver.process_epoch(frame(125), delivery_factory=factory))
+        assert isinstance(delivery.calls[-1], SetBodyActive)
+        assert delivery.calls[-1].active is False
+        assert len(delivery.calls) == 3
+    else:
+        assert driver.cleanup_provenance is None
+        asyncio.run(driver.process_epoch(frame(125), delivery_factory=factory))
+        assert len(delivery.calls) == 2
 
 
 def test_retained_probe_cleanup_transfers_to_immediate_filtration():

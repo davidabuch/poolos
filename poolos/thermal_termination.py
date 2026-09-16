@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TypedDict
 
-from .external_change import pump_event_conflicts_with_provenance
+from .ownership_evidence import OwnershipDomain
 from .integration import PhysicalHeatMode, SetHeatMode, ThermalBody
 from .thermal_runtime_ownership import (
     SharedHydraulicSafetyClass,
@@ -163,18 +163,9 @@ class ThermalTerminationPolicy:
                     "thermal_termination_pump_evidence_unusable",
                     **common,
                 )
-            intended_rpm = pump.intended_value
-            assert isinstance(intended_rpm, int) and not isinstance(intended_rpm, bool)
-            if (
-                abs(evidence.pump_rpm - intended_rpm) > self.pump_rpm_tolerance
-                or abs(evidence.configured_pump_speed_rpm - intended_rpm)
-                > self.pump_rpm_tolerance
-            ):
-                return _assessment(
-                    ThermalTerminationDisposition.INVALIDATED,
-                    "thermal_termination_pump_external_takeover",
-                    **common,
-                )
+            # RPM disagreement cannot revoke separately proven THERMAL/BODY
+            # responsibility. This path authorizes only source Off, never a
+            # pump correction; topology and authoritative evidence remain gates.
         source = entitlement.heat_source
         if source is None:
             return _assessment(
@@ -211,10 +202,18 @@ class ThermalTerminationPolicy:
                 source_action=ThermalTerminationSourceAction.ALREADY_OFF,
                 **common,
             )
-        if evidence.effective_heat_source is not source.intended_value:
+        if any(event.operator_applies(
+            generation=entitlement.body_session_generation or entitlement.generation,
+            session_id=entitlement.body_session_id or entitlement.lease_id,
+            domain=OwnershipDomain.THERMAL,
+            equipment_id=("pool.raw_heater_id" if entitlement.body is ThermalBody.POOL
+                          else "spa.raw_heater_id"),
+            established_at=entitlement.originating_lease_established_at,
+            evaluated_at=evidence.evaluated_at,
+        ) for event in evidence.external_changes.events):
             return _assessment(
-                ThermalTerminationDisposition.INVALIDATED,
-                "thermal_termination_source_external_takeover",
+                ThermalTerminationDisposition.BLOCKED,
+                "thermal_termination_operator_thermal_override",
                 **common,
             )
         if desired_source is not PhysicalHeatMode.OFF:
@@ -319,23 +318,14 @@ def _external_takeover(
         if (
             event.observed_at >= entitlement.originating_lease_established_at
             and event.concept in concepts
+            and event.operator_applies(
+                generation=entitlement.body_session_generation or entitlement.generation,
+                session_id=entitlement.body_session_id or entitlement.lease_id,
+                domain=OwnershipDomain.BODY, equipment_id=entitlement.body.value,
+                established_at=entitlement.originating_lease_established_at,
+                evaluated_at=evidence.evaluated_at,
+            )
         ):
-            if event.concept == "pump.rpm" and entitlement.pump_setpoint is not None:
-                # A pump event observed before Pump provenance existed may have
-                # been retained only because the concept was then unowned.  It
-                # cannot later become takeover evidence unless it was
-                # contemporaneously classified as a reconciliation-required
-                # change against an owned Pump intent.
-                if not event.reconciliation_required:
-                    continue
-                if not pump_event_conflicts_with_provenance(
-                    event,
-                    intended_rpm=entitlement.pump_setpoint.intended_value,
-                    provenance_verified=True,
-                    accepted_at=entitlement.pump_setpoint_accepted_at,
-                    tolerance=ThermalTerminationPolicy.pump_rpm_tolerance,
-                ):
-                    continue
             return f"thermal_termination_external_takeover:{event.concept}"
     return None
 

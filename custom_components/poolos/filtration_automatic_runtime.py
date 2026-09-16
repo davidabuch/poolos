@@ -15,6 +15,7 @@ from poolos.filtration_automatic_execution import (
     FiltrationAutomaticExecutionFrame,
 )
 from poolos.external_change import ExternalChangeBatch
+from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
 from poolos.physical_command_authority import (
@@ -188,6 +189,13 @@ class PoolOSFiltrationAutomaticRuntime:
         authority_reason = self.authority.base_authority_reason
         thermal = self.thermal_runtime.assessment
         filtration = self.filtration_runtime.assessment
+        eligible = None
+        if (filtration is not None and filtration.evaluated_at == snapshot.generated_at
+                and filtration.independent_disposition is not FiltrationDisposition.EVIDENCE_UNAVAILABLE):
+            eligible = filtration.independent_disposition is FiltrationDisposition.RUN_NOW
+        self.pool_automatic_control.observe_opportunity(
+            "filtration", eligible=eligible, observed_at=snapshot.generated_at,
+        )
         pump_session_state = None
         session_rpm = None
         if filtration is not None and self.pump_speed_session is not None:
@@ -239,7 +247,7 @@ class PoolOSFiltrationAutomaticRuntime:
             thermal_owned=self.ownership.owner.value == "thermal",
             external_changes=external_changes,
             pool_automatic_control_suppressed=(
-                self.pool_automatic_control.state.suppressed
+                self.pool_automatic_control.blocks_opportunity("filtration")
             ),
             pump_session_id=(
                 pump_session_state.session_id if session_rpm is not None else None

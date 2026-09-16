@@ -342,7 +342,7 @@ def test_solar_qualification_reuses_policy_and_exposes_why() -> None:
     diagnostics = dict(qualified.pool.diagnostics())
     assert diagnostics["requested_mode"] == "Solar"
     assert diagnostics["planned_source"] == "solar"
-    assert diagnostics["planned_rpm"] == 2900
+    assert diagnostics["planned_rpm"] == 2600
     assert diagnostics["source_reason_code"] == "solar_only_selected"
     assert diagnostics["rpm_reason_code"]
     assert diagnostics["plan_id"]
@@ -492,11 +492,8 @@ def test_live_solar_and_gas_plans_retain_thermal_rpm_and_ordering() -> None:
     ).pool.plan
 
     assert solar.desired.selected_source is PhysicalHeatMode.SOLAR
-    assert solar.desired.required_pump_rpm == 2900
-    assert [type(operation) for operation in solar.operations] == [
-        SetPumpSpeed,
-        SetHeatMode,
-    ]
+    assert solar.desired.required_pump_rpm == 2600
+    assert [type(operation) for operation in solar.operations] == [SetHeatMode]
     assert gas.desired.selected_source is PhysicalHeatMode.GAS
     assert gas.desired.required_pump_rpm == 3000
     assert [type(operation) for operation in gas.operations] == [
@@ -1044,7 +1041,7 @@ def test_successful_pool_temperature_is_retained_for_current_operational_day() -
     assert result.pool.water_temperature is not None
     assert result.pool.water_temperature.disposition.value == "retained"
     assert result.pool.plan.desired.evidence["pool_temperature_f"] == 84.0
-    assert result.pool.plan.desired.required_pump_rpm == 2900
+    assert result.pool.plan.desired.required_pump_rpm == 2600
 
 
 def _probe_values(

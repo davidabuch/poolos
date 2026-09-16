@@ -49,7 +49,10 @@ from .pool_circulation_ownership import (
 from .operating_baselines import PumpOperatingBaselines
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .spa_thermal_policy import SpaSessionKind
-from .thermal_execution_currentness import ThermalExecutionPurposeKind
+from .thermal_execution_currentness import (
+    ThermalExecutionProgress,
+    ThermalExecutionPurposeKind,
+)
 from .thermal_execution_planning import ThermalPlanDisposition
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
@@ -86,6 +89,7 @@ from .thermal_runtime_ownership import (
     ThermalRuntimeOwnedConcept,
     ThermalRuntimeOwnershipDisposition,
     ThermalRuntimeOwnershipStatus,
+    compatible_thermal_body_successor,
 )
 from .thermal_termination import (
     ThermalTerminationAssessment,
@@ -139,6 +143,7 @@ class ThermalAutomaticExecutionFrame:
     external_changes: ExternalChangeBatch = ExternalChangeBatch(())
     pool_automatic_control_suppressed: bool = False
     spa_automatic_control_suppressed: bool = False
+    pool_opportunity_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.epoch_identity.strip():
@@ -330,6 +335,12 @@ class ThermalAutomaticExecutionDriver:
         default=None, init=False, repr=False
     )
     _reenable_required: bool = field(default=False, init=False, repr=False)
+    _failed_pool_opportunity_id: str | None = field(default=None, init=False, repr=False)
+
+    def _independent_fault_successor(self, frame: ThermalAutomaticExecutionFrame) -> bool:
+        return bool(self._failed_pool_opportunity_id is not None
+                    and frame.pool_opportunity_id is not None
+                    and frame.pool_opportunity_id != self._failed_pool_opportunity_id)
 
     def reserve_circulation_candidate(
         self,
@@ -352,7 +363,7 @@ class ThermalAutomaticExecutionDriver:
             self.circulation_ownership.release_thermal(thermal_lease_id=lease.lease_id)
         if (
             self.requested_enabled
-            and not self._reenable_required
+            and (not self._reenable_required or self._independent_fault_successor(frame))
             and frame.physical_authority_ready
             and frame.live_policy.thermal_live_execution_enabled
             and not (
@@ -479,6 +490,7 @@ class ThermalAutomaticExecutionDriver:
         self.requested_enabled = enabled
         if not enabled:
             self._reenable_required = False
+            self._failed_pool_opportunity_id = None
         self._enabled_after_epoch_identity = (
             current_epoch_identity if enabled else None
         )
@@ -597,8 +609,6 @@ class ThermalAutomaticExecutionDriver:
         self._accept_epoch(frame)
         if not self.requested_enabled:
             return self.note_disabled_epoch(frame)
-        if self._reenable_required:
-            return self._blocked(frame, "automatic_thermal_reenable_required")
         if frame.epoch_identity == self._enabled_after_epoch_identity:
             return self._blocked(
                 frame,
@@ -654,6 +664,13 @@ class ThermalAutomaticExecutionDriver:
         if cleanup_result is not None:
             return cleanup_result
 
+        if self._reenable_required and self._independent_fault_successor(frame):
+            self._reenable_required = False
+            self._failed_pool_opportunity_id = None
+        if self._reenable_required:
+            # A failed normal execution cannot replay. Its independently
+            # authorized residual reduction must still be allowed to finish.
+            return self._blocked(frame, "automatic_thermal_reenable_required")
         body = self._session_body(frame)
         if self.active_session is not None:
             if frame.orchestration.lifecycle not in {
@@ -679,6 +696,52 @@ class ThermalAutomaticExecutionDriver:
                     evaluated_at=frame.observed_at,
                 )
                 self.active_session = verified
+                lease = self.orchestrator.ownership.state.lease
+                if (
+                    verified.status is ThermalLiveExecutionStatus.SUPERSEDED
+                    and lease is not None
+                    and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                    and lease.originating_currentness is not None
+                    and lease.execution_progress is not None
+                    and ThermalRuntimeOwnedConcept.BODY_ACTIVATION
+                    in lease.verified_concepts
+                ):
+                    # The exact accepted consequences are historical proof,
+                    # not permission for the obsolete execution to continue.
+                    # Once BODY activation is causally verified, retire that
+                    # execution and request a separate typed handoff. Remaining
+                    # Pump/Thermal work must be freshly accepted by the successor.
+                    self.active_session = None
+                    preflight = self.engine.authorization_engine.structural_preflight(
+                        body.plan, policy=frame.live_policy,
+                    )
+                    failure = self._begin_probe_successor_handoff(
+                        frame, body=body, preflight=preflight,
+                    )
+                    if failure is None and self.active_session is None:
+                        observing = self.solar_engagement_attempt is not None
+                        return self._publish(
+                            state=(
+                                ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+                                if observing
+                                else ThermalAutomaticDriverState.CONVERGED
+                            ),
+                            evaluated_at=frame.observed_at,
+                            blocker=(
+                                "automatic_thermal_solar_engagement_observation_pending"
+                                if observing
+                                else None
+                            ),
+                            frame=frame,
+                            body=body,
+                            preflight=preflight,
+                            failure=None,
+                            command_delivery_performed=False,
+                        )
+                    return self._blocked(
+                        frame, failure or "automatic_thermal_typed_successor_ready",
+                        body=body, preflight=preflight,
+                    )
                 if verified.status in {
                     ThermalLiveExecutionStatus.BLOCKED,
                     ThermalLiveExecutionStatus.FAILED,
@@ -853,6 +916,26 @@ class ThermalAutomaticExecutionDriver:
                         body=body,
                         preflight=preflight,
                     )
+                if self.active_session is None:
+                    observing = self.solar_engagement_attempt is not None
+                    return self._publish(
+                        state=(
+                            ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+                            if observing
+                            else ThermalAutomaticDriverState.CONVERGED
+                        ),
+                        evaluated_at=frame.observed_at,
+                        blocker=(
+                            "automatic_thermal_solar_engagement_observation_pending"
+                            if observing
+                            else None
+                        ),
+                        frame=frame,
+                        body=body,
+                        preflight=preflight,
+                        failure=None,
+                        command_delivery_performed=False,
+                    )
             elif (
                 frame.orchestration.lifecycle
                 is not ThermalOrchestrationLifecycle.CANDIDATE_READY
@@ -926,7 +1009,7 @@ class ThermalAutomaticExecutionDriver:
                     )
                     and body.body_active is not True
                     and not _probe_source_precondition_then_activation(body)
-                    and not _filtration_source_off_precondition(body)
+                    and not filtration_source_off_precondition(body)
                 ):
                     return self._blocked(
                         frame,
@@ -950,11 +1033,29 @@ class ThermalAutomaticExecutionDriver:
                     )
                     if self._filtration_handoff is not None:
                         provenance = self._filtration_handoff.body_activation
+                        pump = self._filtration_handoff.pump_setpoint
                         seeded = replace(
                             self.active_session.ownership,
                             body_activation_operation_id=provenance.operation_id,
                             body_activation_receipt_id=provenance.receipt_id,
                             body_activation_correlation_id=provenance.correlation_id,
+                            pump_operation_id=(
+                                None if pump is None else pump.operation_id
+                            ),
+                            pump_receipt_id=(
+                                None if pump is None else pump.receipt_id
+                            ),
+                            pump_correlation_id=(
+                                None if pump is None else pump.correlation_id
+                            ),
+                            commanded_pump_rpm=(
+                                None
+                                if pump is None
+                                else int(pump.intended_value)
+                            ),
+                            pump_accepted_at=(
+                                self._filtration_handoff.pump_setpoint_accepted_at
+                            ),
                         )
                         self.active_session = replace(
                             self.active_session,
@@ -974,6 +1075,18 @@ class ThermalAutomaticExecutionDriver:
                     )
 
         assert self.active_session is not None and body is not None
+        sequence = self.active_session.coordination.current_step_sequence
+        if sequence is not None:
+            operation = self.active_session.execution_plan.steps[sequence - 1].operation
+            if isinstance(operation, (SetBodyActive, SetPumpSpeed, SetHeatMode)):
+                domain_blocker = self.orchestrator.ownership.domain_command_blocker(operation)
+                if domain_blocker is not None:
+                    return self._blocked(frame, domain_blocker)
+                correction_blocker = self.orchestrator.ownership.reserve_domain_correction(
+                    operation, at=frame.observed_at,
+                )
+                if correction_blocker is not None:
+                    return self._blocked(frame, correction_blocker)
         safety = body.live_safety_evidence
         if safety is None:
             return self._terminate_for_frame(
@@ -1044,6 +1157,7 @@ class ThermalAutomaticExecutionDriver:
                     self.circulation_ownership.complete_filtration_to_thermal(
                         token_id=self._filtration_handoff.token_id,
                         thermal_lease_id=lease.lease_id,
+                        recipient=self.orchestrator.ownership,
                     )
                     self._filtration_handoff = None
                 else:
@@ -1377,6 +1491,10 @@ class ThermalAutomaticExecutionDriver:
                 action = attempt.candidate.action
                 self.cleanup_attempt = None
                 if action is ThermalCirculationCleanupAction.BODY_DEACTIVATION:
+                    self.orchestrator.ownership.finish_circulation_responsibility(
+                        lease_id=provenance.lease_id, generation=provenance.generation,
+                        completed_at=frame.observed_at,
+                    )
                     self.cleanup_provenance = None
                     self.circulation_ownership.release_thermal()
                     return self._publish(
@@ -1398,6 +1516,8 @@ class ThermalAutomaticExecutionDriver:
                         pool_pump_circuit_id=operation.equipment_id,
                         accepted_at=frame.observed_at,
                         body_activation=provenance.body_activation,
+                        body_session_id=provenance.body_session_id,
+                        body_session_generation=provenance.body_session_generation,
                         pump_setpoint=ThermalRuntimeConceptProvenance(
                             concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
                             operation_id=operation.operation_id,
@@ -1408,6 +1528,10 @@ class ThermalAutomaticExecutionDriver:
                     )
                 else:
                     self.circulation_ownership.release_thermal()
+                self.orchestrator.ownership.finish_circulation_responsibility(
+                    lease_id=provenance.lease_id, generation=provenance.generation,
+                    completed_at=frame.observed_at,
+                )
                 self.cleanup_provenance = None
                 return self._publish(
                     state=ThermalAutomaticDriverState.CONVERGED,
@@ -2017,6 +2141,8 @@ class ThermalAutomaticExecutionDriver:
                 and item.safety_class is not SharedHydraulicSafetyClass.NON_CONFLICTING
             ):
                 return "failed:thermal_cleanup_shared_hydraulic_takeover"
+        if assessment.topology_interruption is not None:
+            return "failed:thermal_cleanup_hydraulic_continuity_interrupted"
         if assessment.external_takeover:
             return "failed:thermal_cleanup_external_takeover"
         action = attempt.candidate.action
@@ -2032,7 +2158,16 @@ class ThermalAutomaticExecutionDriver:
                 and evidence.pool_activity_observed_at > attempt.delivered_at
                 and evidence.pool_active is False
             ):
-                return "verified"
+                if (
+                    type(evidence.pump_rpm) is int
+                    and evidence.pump_rpm == 0
+                    and evidence.pump_observation_fresh
+                    and evidence.pump_observation_usable
+                    and evidence.pump_observed_at is not None
+                    and evidence.pump_observed_at > attempt.delivered_at
+                ):
+                    return "verified"
+                return "pending"
             if not assessment.body_deactivation_eligible:
                 return "failed:thermal_cleanup_circulation_successor_changed"
             return "pending"
@@ -2290,37 +2425,57 @@ class ThermalAutomaticExecutionDriver:
             or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
             or lease.originating_currentness is None
             or lease.originating_currentness.purpose.kind
-            is not ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+            not in {ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+                    ThermalExecutionPurposeKind.THERMAL_CONTROL}
             or body.body is not ThermalBody.POOL
         ):
             return "automatic_thermal_owned_successor_requires_explicit_handoff"
-        if not preflight.eligible:
+        converged_successor = (
+            body.plan.disposition is ThermalPlanDisposition.ALREADY_CONVERGED
+        )
+        if not preflight.eligible and not converged_successor:
             return "automatic_thermal_plan_preflight_failed:" + ",".join(
                 preflight.blocking_reasons
             )
         safety = body.live_safety_evidence
         if safety is None:
             return "automatic_thermal_live_safety_evidence_unavailable"
-        try:
-            successor = self.engine.begin(
-                body.plan,
-                policy=frame.live_policy,
-                evidence=safety,
-            )
-        except ValueError as exc:
-            return f"automatic_thermal_session_begin_failed:{_bounded(str(exc))}"
+        successor = None
+        if not converged_successor:
+            try:
+                successor = self.engine.begin(
+                    body.plan,
+                    policy=frame.live_policy,
+                    evidence=safety,
+                )
+            except ValueError as exc:
+                return f"automatic_thermal_session_begin_failed:{_bounded(str(exc))}"
+        successor_context = (
+            body.live_execution_context
+            if successor is None
+            else successor.originating_context
+        )
+        successor_progress = (
+            ThermalExecutionProgress()
+            if successor is None
+            else successor.execution_progress
+        )
         request = ThermalRuntimeHandoffRequest(
             explicit=True,
             predecessor_lease_id=lease.lease_id,
             predecessor_generation=lease.generation,
-            successor_context=successor.originating_context,
-            successor_execution_plan_id=successor.execution_plan.plan_id,
+            successor_context=successor_context,
+            successor_execution_plan_id=(
+                body.plan.plan_id
+                if successor is None
+                else successor.execution_plan.plan_id
+            ),
             successor_body=body.body,
             successor_requested_mode=body.requested_mode.value,
             successor_requires_body_active=True,
             successor_required_pump_rpm=body.plan.desired.required_pump_rpm,
             successor_heat_source=body.plan.desired.selected_source,
-            successor_progress=successor.execution_progress,
+            successor_progress=successor_progress,
             replace_pump_setpoint=(
                 lease.pump_setpoint is not None
                 and lease.pump_setpoint.intended_value
@@ -2345,6 +2500,25 @@ class ThermalAutomaticExecutionDriver:
         if decision.disposition is not ThermalRuntimeOwnershipDisposition.HANDED_OFF:
             return decision.reason_code
         self.active_session = successor
+        if successor is None:
+            current = self.orchestrator.ownership.state.lease
+            purpose = body.execution_currentness.purpose
+            if (
+                current is not None
+                and purpose.selected_source is PhysicalHeatMode.SOLAR
+                and purpose.body is ThermalBody.POOL
+            ):
+                self.solar_engagement_attempt = SolarEngagementAttempt(
+                    execution_purpose_id=purpose.purpose_id,
+                    ownership_lease_id=current.lease_id,
+                    ownership_generation=current.generation,
+                    started_at=frame.observed_at,
+                    deadline=(
+                        frame.observed_at
+                        + self.solar_engagement_policy.observation_timeout
+                    ),
+                    engaged_since=frame.observed_at,
+                )
         self._probe_acquisition = None
         return None
 
@@ -2436,6 +2610,59 @@ class ThermalAutomaticExecutionDriver:
             return None
         lease = self.orchestrator.ownership.state.lease
         body = None if frame.thermal is None else frame.thermal.pool
+        observation = next(
+            (
+                item
+                for item in frame.observations
+                if item.observation_id == "solar.active"
+            ),
+            None,
+        )
+        solar_active = _live_boolean_observation(
+            observation,
+            evaluated_at=frame.observed_at,
+        )
+        if (
+            solar_active is None
+            and frame.observed_at < attempt.deadline
+            and lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.lease_id == attempt.ownership_lease_id
+            and lease.generation == attempt.ownership_generation
+            and body is not None
+        ):
+            if attempt.engaged_since is not None:
+                self.solar_engagement_attempt = replace(attempt, engaged_since=None)
+            return self._publish(
+                state=ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
+                evaluated_at=frame.observed_at,
+                blocker="automatic_thermal_solar_engagement_evidence_unusable_pending",
+                frame=frame,
+                body=body,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=False,
+            )
+        if (
+            solar_active is True
+            and lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.lease_id == attempt.ownership_lease_id
+            and lease.generation == attempt.ownership_generation
+            and lease.originating_currentness is not None
+            and body is not None
+            and lease.originating_currentness.purpose.purpose_id
+            != body.execution_currentness.purpose.purpose_id
+            and compatible_thermal_body_successor(
+                lease.originating_currentness,
+                body.execution_currentness,
+            )
+        ):
+            # Physical engagement legitimately advances Solar preparation to
+            # Solar operation. Let the obsolete execution verify and enter the
+            # normal typed successor handoff; it cannot continue delivering.
+            self.solar_engagement_attempt = None
+            return None
         if (
             lease is None
             or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
@@ -2452,33 +2679,6 @@ class ThermalAutomaticExecutionDriver:
             return self._terminate_for_frame(
                 frame,
                 "automatic_thermal_solar_engagement_currentness_lost",
-            )
-        observation = next(
-            (
-                item
-                for item in frame.observations
-                if item.observation_id == "solar.active"
-            ),
-            None,
-        )
-        solar_active = _live_boolean_observation(
-            observation,
-            evaluated_at=frame.observed_at,
-        )
-        if solar_active is None and frame.observed_at < attempt.deadline:
-            if attempt.engaged_since is not None:
-                self.solar_engagement_attempt = replace(attempt, engaged_since=None)
-            return self._publish(
-                state=ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
-                evaluated_at=frame.observed_at,
-                blocker=(
-                    "automatic_thermal_solar_engagement_evidence_unusable_pending"
-                ),
-                frame=frame,
-                body=body,
-                preflight=None,
-                failure=None,
-                command_delivery_performed=False,
             )
         if solar_active is True:
             engaged_since = attempt.engaged_since or frame.observed_at
@@ -2562,6 +2762,9 @@ class ThermalAutomaticExecutionDriver:
     ) -> ThermalAutomaticDriverAssessment:
         if _terminal_execution_failure_requires_reenable(reason):
             self._reenable_required = True
+            self._failed_pool_opportunity_id = (
+                frame.pool_opportunity_id if _restrained_body(self, frame) is ThermalBody.POOL else None
+            )
         state = (
             ThermalAutomaticDriverState.SUPERSEDED
             if "supersed" in reason
@@ -2654,6 +2857,11 @@ class ThermalAutomaticExecutionDriver:
         if circulation is None and frame is not None:
             circulation = self._circulation_assessment(frame)
         ownership_summary: dict[str, object] = {
+            "body_session_id": None if lease is None else lease.body_session_id,
+            "body_session_generation": None if lease is None else lease.body_session_generation,
+            "domains": {} if lease is None else {
+                state.domain.value: state.diagnostics() for state in lease.domain_states
+            },
             "body": None if lease is None else lease.body.value,
             "owns_body_activation": bool(lease and lease.owns_body_activation),
             "owns_pump_setpoint": bool(lease and lease.owns_pump_setpoint),
@@ -2755,6 +2963,8 @@ class ThermalAutomaticExecutionDriver:
             ),
             "reason_code": self.orchestrator.ownership.state.reason_code,
             "automatic_thermal_reenable_required": self._reenable_required,
+            "failed_pool_opportunity_id": self._failed_pool_opportunity_id,
+            "pool_opportunity_id": None if frame is None else frame.pool_opportunity_id,
             "residual_termination_entitlement_id": (
                 None if residual is None else residual.entitlement_id
             ),
@@ -2947,7 +3157,7 @@ def _restrained_body(
     return frame.orchestration.candidate_body
 
 
-def _filtration_source_off_precondition(body: object) -> bool:
+def filtration_source_off_precondition(body: object) -> bool:
     """Permit only an inactive-Pool source-Off precondition for imminent filtration.
 
     IntelliCenter may retain Solar as the configured Pool heat source while the

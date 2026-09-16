@@ -42,6 +42,8 @@ class ThermalCirculationCleanupProvenance:
     body_activation: ThermalRuntimeConceptProvenance | None
     pump_setpoint: ThermalRuntimeConceptProvenance | None
     pump_setpoint_accepted_at: datetime | None = None
+    body_session_id: str | None = None
+    body_session_generation: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -107,6 +109,8 @@ class ThermalCirculationCleanupProvenance:
             body_activation=entitlement.body_activation,
             pump_setpoint=entitlement.pump_setpoint,
             pump_setpoint_accepted_at=entitlement.pump_setpoint_accepted_at,
+            body_session_id=entitlement.body_session_id,
+            body_session_generation=entitlement.body_session_generation,
         )
 
     def arbitration_entitlement(self) -> ThermalResidualTerminationEntitlement:
@@ -125,6 +129,8 @@ class ThermalCirculationCleanupProvenance:
             pump_setpoint=self.pump_setpoint,
             heat_source=None,
             pump_setpoint_accepted_at=self.pump_setpoint_accepted_at,
+            body_session_id=self.body_session_id,
+            body_session_generation=self.body_session_generation,
         )
 
     def without_pump(self) -> ThermalCirculationCleanupProvenance | None:

@@ -29,7 +29,6 @@ from .observations import (
     PoolObservation,
 )
 from .thermal_live_execution import ThermalLiveExecutionContext
-from .thermal_execution_currentness import ThermalExecutionPurposeKind
 from .thermal_runtime_assessment import (
     ThermalBodyRuntimeAssessment,
     ThermalRuntimeAssessment,
@@ -43,6 +42,7 @@ from .thermal_runtime_ownership import (
     ThermalRuntimeOwnershipManager,
     ThermalRuntimeOwnershipStatus,
     shared_hydraulic_safety_class,
+    compatible_thermal_body_successor,
 )
 from .pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvidence
 from .operating_baselines import PumpOperatingBaselines
@@ -610,20 +610,22 @@ def _probe_successor_handoff_pending(
     lease: ThermalRuntimeOwnershipLease,
     body: ThermalBodyRuntimeAssessment,
 ) -> bool:
-    """Identify only a same-mode Pool probe-to-thermal successor boundary."""
+    """Identify a bounded compatible successor before it becomes actionable.
+
+    Actual authorization belongs to the successor's delivery gateway. Requiring
+    it here discarded the predecessor BODY session during the normal interval
+    between probe completion and Solar eligibility.
+    """
 
     predecessor = lease.originating_currentness
     successor = getattr(body, "execution_currentness", None)
     return bool(
         predecessor is not None
         and successor is not None
-        and predecessor.purpose.kind
-        is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
-        and successor.purpose.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and compatible_thermal_body_successor(predecessor, successor)
         and lease.body is ThermalBody.POOL
         and body.body is ThermalBody.POOL
         and predecessor.purpose.requested_mode == successor.purpose.requested_mode
-        and body.actual_authorization.authorized
     )
 
 

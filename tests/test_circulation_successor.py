@@ -30,6 +30,10 @@ from poolos.grid_outage_confirmation import (
     GridOutageDisposition,
 )
 from poolos.integration import PhysicalHeatMode, ThermalBody
+from poolos.ownership_evidence import (
+    OwnershipDomain,
+    PositiveOperatorEvidence,
+)
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
 from poolos.thermal_live_execution import ThermalLiveExecutionContext
 from poolos.thermal_runtime_ownership import (
@@ -491,10 +495,19 @@ def test_future_and_pre_entitlement_observation_timestamps_fail_closed() -> None
 
 
 @pytest.mark.parametrize(
-    "concept",
-    ["pool.active", "pump.rpm", "pool.raw_heater_id", "waterfall.active"],
+    ("concept", "domain", "equipment_id"),
+    [
+        ("pool.active", OwnershipDomain.BODY, "pool"),
+        ("pump.rpm", OwnershipDomain.PUMP, "pump.rpm"),
+        ("pool.raw_heater_id", OwnershipDomain.THERMAL, "pool.raw_heater_id"),
+    ],
 )
-def test_external_takeover_defeats_thermal_exclusivity(concept: str) -> None:
+def test_positive_operator_takeover_defeats_affected_thermal_exclusivity(
+    concept: str,
+    domain: OwnershipDomain,
+    equipment_id: str,
+) -> None:
+    entitlement = _entitlement()
     event = ExternalChangeEvent(
         concept=concept,
         semantic_event_type="native_value_changed",
@@ -506,12 +519,28 @@ def test_external_takeover_defeats_thermal_exclusivity(concept: str) -> None:
         action_taken="observe",
         notification_recommended=True,
         reconciliation_required=True,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id=f"operator:{concept}",
+            authority_generation=(entitlement.body_session_generation or entitlement.generation),
+            body_session_id=(entitlement.body_session_id or entitlement.lease_id),
+            domain=domain,
+            equipment_id=equipment_id,
+            requested_at=AT,
+        ),
     )
-    result = _evaluate(evidence=_evidence(changes=ExternalChangeBatch((event,))))
+    result = _evaluate(
+        entitlement=entitlement,
+        evidence=_evidence(changes=ExternalChangeBatch((event,))),
+    )
 
-    assert result.external_takeover
-    assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
-    assert not result.body_deactivation_eligible
+    if domain is OwnershipDomain.BODY:
+        assert result.external_takeover
+        assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
+        assert not result.body_deactivation_eligible
+    else:
+        assert not result.external_takeover
+        assert result.disposition is CirculationArbitrationDisposition.EXCLUSIVE_THERMAL
+        assert result.body_deactivation_eligible
 
 
 def test_retained_aligned_verified_pump_event_does_not_poison_successor() -> None:
@@ -536,7 +565,7 @@ def test_retained_aligned_verified_pump_event_does_not_poison_successor() -> Non
     assert result.body_deactivation_eligible
 
 
-def test_earlier_external_pump_event_cannot_be_retroactively_adopted() -> None:
+def test_earlier_unattributed_pump_event_does_not_invalidate_successor() -> None:
     event = ExternalChangeEvent(
         concept="pump.rpm",
         semantic_event_type="native_value_changed",
@@ -553,11 +582,12 @@ def test_earlier_external_pump_event_cannot_be_retroactively_adopted() -> None:
 
     result = _evaluate(evidence=_evidence(changes=ExternalChangeBatch((event,))))
 
-    assert result.external_takeover
-    assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
+    assert not result.external_takeover
+    assert result.disposition is CirculationArbitrationDisposition.EXCLUSIVE_THERMAL
+    assert result.body_deactivation_eligible
 
 
-def test_transient_spa_takeover_defeats_later_matching_pool_topology() -> None:
+def test_transient_unattributed_spa_event_does_not_override_current_topology() -> None:
     event = ExternalChangeEvent(
         concept="spa.active",
         semantic_event_type="native_value_changed",
@@ -578,8 +608,9 @@ def test_transient_spa_takeover_defeats_later_matching_pool_topology() -> None:
         )
     )
 
-    assert result.external_takeover
-    assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
+    assert not result.external_takeover
+    assert result.disposition is CirculationArbitrationDisposition.BLOCKED
+    assert result.topology_interruption == "spa.active"
     assert not result.body_deactivation_eligible
 
 

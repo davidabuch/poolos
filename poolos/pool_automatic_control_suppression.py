@@ -7,7 +7,7 @@ It never represents equipment ownership and Resume never issues a command.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo
@@ -123,6 +123,22 @@ class PoolAutomaticControlSuppressionState:
             raise ValueError("inactive suppression cannot retain latch provenance")
 
 
+@dataclass(frozen=True, slots=True)
+class PoolSemanticOpportunity:
+    """One policy reason's bounded cancellation state, without command authority."""
+
+    family: str
+    sequence: int = 0
+    eligible: bool | None = None
+    observed_at: datetime | None = None
+    canceled: bool = False
+    canceled_opportunity_id: str | None = None
+
+    @property
+    def opportunity_id(self) -> str | None:
+        return None if self.sequence == 0 else f"pool:{self.family}:{self.sequence}"
+
+
 @dataclass(slots=True)
 class PoolAutomaticControlSuppression:
     """One bounded, explicit, command-free Pool automation restraint."""
@@ -135,6 +151,63 @@ class PoolAutomaticControlSuppression:
         init=False,
         repr=False,
     )
+
+    _opportunities: dict[str, PoolSemanticOpportunity] = field(
+        default_factory=dict, init=False, repr=False,
+    )
+
+    def observe_opportunity(
+        self, family: str, *, eligible: bool | None, observed_at: datetime,
+    ) -> str | None:
+        """Consume independent policy evidence, not authorization or plan IDs.
+
+        Unknown evidence leaves the prior eligibility intact. A canceled reason
+        can expire only through a later authoritative False -> True boundary.
+        This does not restore an execution or create equipment ownership.
+        """
+        if family not in {"thermal", "filtration"}:
+            raise ValueError("unsupported Pool opportunity family")
+        _require_aware(observed_at)
+        prior = self._opportunities.get(family, PoolSemanticOpportunity(
+            family, canceled=self.state.suppressed,
+        ))
+        if (self.state.suppressed_at is not None
+                and observed_at <= self.state.suppressed_at):
+            return prior.opportunity_id
+        if prior.observed_at is not None and observed_at <= prior.observed_at:
+            return prior.opportunity_id
+        current = replace(prior, observed_at=observed_at)
+        if eligible is not None:
+            current = replace(current, eligible=eligible)
+            if eligible and prior.eligible is not True:
+                current = replace(current, sequence=prior.sequence + 1)
+            if not eligible:
+                current = replace(current, canceled=False)
+        self._opportunities[family] = current
+        return current.opportunity_id
+
+    def opportunity_id(self, family: str) -> str | None:
+        if family not in {"thermal", "filtration"}:
+            raise ValueError("unsupported Pool opportunity family")
+        opportunity = self._opportunities.get(family)
+        return None if opportunity is None else opportunity.opportunity_id
+
+    def blocks_opportunity(self, family: str) -> bool:
+        if family not in {"thermal", "filtration"}:
+            raise ValueError("unsupported Pool opportunity family")
+        if not self.state.suppressed:
+            return False
+        if self.state.source not in _TRANSIENT_POOL_SOURCES:
+            return True
+        opportunity = self._opportunities.get(family)
+        return (opportunity is None or opportunity.canceled
+                or opportunity.eligible is not True)
+
+    @property
+    def globally_suppressed(self) -> bool:
+        """Persistent restraint; transient cancellation is checked per purpose."""
+        return (self.state.suppressed
+                and self.state.source not in _TRANSIENT_POOL_SOURCES)
 
     def suppress(
         self,
@@ -163,6 +236,11 @@ class PoolAutomaticControlSuppression:
             reason=reason,
             generation=self.state.generation + 1,
         )
+        self._opportunities = {
+            family: replace(opportunity, canceled=opportunity.eligible is not False,
+                            canceled_opportunity_id=opportunity.opportunity_id)
+            for family, opportunity in self._opportunities.items()
+        }
         self._publish()
         return self.state
 
@@ -207,6 +285,14 @@ class PoolAutomaticControlSuppression:
                 "pool_manual_off_suppression_reason": self.state.reason,
                 "pool_manual_off_suppression_generation": self.state.generation,
                 "pool_manual_off_resume_required": self.state.suppressed,
+                "pool_semantic_opportunities": {
+                    family: {
+                        "opportunity_id": item.opportunity_id,
+                        "eligible": item.eligible,
+                        "canceled_opportunity_id": item.canceled_opportunity_id,
+                        "blocked": self.blocks_opportunity(family),
+                    } for family, item in self._opportunities.items()
+                },
                 "authority": "none",
                 "command_delivery_performed": False,
             }

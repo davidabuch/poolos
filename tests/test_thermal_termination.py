@@ -177,7 +177,7 @@ def test_already_off_needs_no_command() -> None:
     assert result.operation is None
 
 
-def test_external_source_takeover_invalidates_stale_cleanup() -> None:
+def test_unattributed_source_change_does_not_invalidate_stale_cleanup() -> None:
     event = ExternalChangeEvent(
         concept="pool.raw_heater_id",
         semantic_event_type="native_value_changed",
@@ -196,8 +196,8 @@ def test_external_source_takeover_invalidates_stale_cleanup() -> None:
         desired_source=PhysicalHeatMode.OFF,
     )
 
-    assert result.disposition is ThermalTerminationDisposition.INVALIDATED
-    assert result.operation is None
+    assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
+    assert result.operation is not None
 
 
 def test_hydraulic_takeover_and_unusable_evidence_fail_closed() -> None:
@@ -222,16 +222,15 @@ def test_hydraulic_takeover_and_unusable_evidence_fail_closed() -> None:
     assert stale.operation is None
 
 
-def test_external_pump_takeover_invalidates_source_cleanup_too() -> None:
+def test_unattributed_pump_drift_does_not_invalidate_source_cleanup() -> None:
     result = ThermalTerminationPolicy().evaluate(
         _entitlement(),
         _evidence(pump_rpm=2600, configured_rpm=2600),
         desired_source=PhysicalHeatMode.OFF,
     )
 
-    assert result.disposition is ThermalTerminationDisposition.INVALIDATED
-    assert result.reason_code == "thermal_termination_pump_external_takeover"
-    assert result.operation is None
+    assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
+    assert result.operation is not None
 
 
 def test_retained_aligned_verified_pump_event_does_not_poison_termination() -> None:
@@ -261,7 +260,7 @@ def test_retained_aligned_verified_pump_event_does_not_poison_termination() -> N
     assert result.operation is not None
 
 
-def test_earlier_external_pump_event_cannot_be_retroactively_adopted() -> None:
+def test_earlier_unattributed_pump_event_cannot_invalidate_cleanup() -> None:
     event = ExternalChangeEvent(
         concept="pump.rpm",
         semantic_event_type="native_value_changed",
@@ -282,7 +281,8 @@ def test_earlier_external_pump_event_cannot_be_retroactively_adopted() -> None:
         desired_source=PhysicalHeatMode.OFF,
     )
 
-    assert result.disposition is ThermalTerminationDisposition.INVALIDATED
+    assert result.disposition is ThermalTerminationDisposition.SOURCE_OFF_READY
+    assert result.operation is not None
 
 
 def test_cleanup_projection_preserves_pump_acceptance_epoch_until_pump_is_removed() -> None:

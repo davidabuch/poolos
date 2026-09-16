@@ -249,7 +249,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
 
     def synchronize_pool_automatic_restraint(_state: object) -> None:
         physical_command_authority.set_pool_automatic_control_suppressed(
-            pool_automatic_control.state.suppressed
+            pool_automatic_control.globally_suppressed
         )
         thermal_automatic_runtime.driver.restrictive_authority_changed(
             changed_at=datetime.now(UTC)
@@ -298,7 +298,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             lifecycle_blocker=lifecycle_blocker,
             external_preemption_reason=(
                 thermal_runtime_orchestrator.ownership.current_external_preemption_reason(
-                    external_change_runtime.latest_batch
+                    external_change_runtime.latest_batch,
+                    evaluated_at=snapshot.generated_at,
                 )
             ),
             baselines=pump_baselines,

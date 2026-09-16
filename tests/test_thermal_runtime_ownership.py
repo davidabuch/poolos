@@ -12,6 +12,13 @@ from poolos.external_change import (
     ExternalSemanticEventType,
 )
 from poolos.integration import PhysicalHeatMode, ThermalBody
+from poolos.ownership_evidence import (
+    OwnershipAuthority,
+    OwnershipDomain,
+    OwnershipEvidenceKind,
+    OwnershipHealth,
+    PositiveOperatorEvidence,
+)
 from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
@@ -377,7 +384,7 @@ def test_prelease_external_event_cannot_preempt_new_lease() -> None:
 
 
 @pytest.mark.parametrize("offset", [timedelta(0), timedelta(microseconds=1)])
-def test_external_event_at_or_after_lease_start_still_preempts(
+def test_unattributed_event_at_or_after_lease_start_enters_reconciliation(
     offset: timedelta,
 ) -> None:
     manager = ThermalRuntimeOwnershipManager()
@@ -397,10 +404,16 @@ def test_external_event_at_or_after_lease_start_still_preempts(
         evidence(at=NOW + timedelta(seconds=1), changes=batch)
     )
 
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    pump = lease.domain_state(OwnershipDomain.PUMP)
+    assert pump.authority is OwnershipAuthority.POOLOS
+    assert pump.health is OwnershipHealth.RECONCILING
+    assert pump.evidence_kind is OwnershipEvidenceKind.UNEXPLAINED_DRIFT
 
 
-def test_duplicate_postlease_event_cannot_mutate_terminal_ownership_twice() -> None:
+def test_duplicate_postlease_drift_cannot_restart_reconciliation_episode() -> None:
     manager = ThermalRuntimeOwnershipManager()
     establish(manager, execution_ownership(pump_rpm=2900))
     event = external_event("pump.rpm", 2900, 2800, observed_at=NOW)
@@ -411,12 +424,18 @@ def test_duplicate_postlease_event_cannot_mutate_terminal_ownership_twice() -> N
         evidence(at=NOW + timedelta(seconds=2), changes=batch)
     )
 
-    assert first.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
-    assert duplicate.disposition is ThermalRuntimeOwnershipDisposition.DENIED
-    assert manager.state.status is ThermalRuntimeOwnershipStatus.PREEMPTED
+    assert first.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert duplicate.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    first_lease = first.current_state.lease
+    duplicate_lease = duplicate.current_state.lease
+    assert first_lease is not None and duplicate_lease is not None
+    assert duplicate_lease.domain_state(OwnershipDomain.PUMP).episode == (
+        first_lease.domain_state(OwnershipDomain.PUMP).episode
+    )
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
 
 
-def test_old_event_cannot_preempt_successor_lease_after_prior_preemption() -> None:
+def test_old_event_cannot_preempt_typed_successor_after_prior_drift() -> None:
     manager = ThermalRuntimeOwnershipManager()
     establish(manager, execution_ownership(pump_rpm=2900))
     event = external_event(
@@ -432,19 +451,15 @@ def test_old_event_cannot_preempt_successor_lease_after_prior_preemption() -> No
             changes=ExternalChangeBatch((event,)),
         )
     )
-    successor = execution_ownership(
-        pump_rpm=2900,
-        evaluation_id="evaluation-2",
-        plan_id="plan-2",
-        execution_plan_id="execution-plan-2",
+    decision = manager.handoff(
+        handoff_request(manager),
+        evidence(
+            at=NOW + timedelta(seconds=2),
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+        ),
     )
-    decision = manager.establish(
-        successor,
-        established_at=NOW + timedelta(seconds=2),
-        requested_mode="Solar",
-        current_context=ThermalLiveExecutionContext("evaluation-2", "plan-2"),
-    )
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.HANDED_OFF
 
     retained = manager.evaluate(
         evidence(
@@ -577,7 +592,7 @@ def test_hydraulic_loss_or_takeover_preempts_runtime_ownership(
         ({"heat_source": PhysicalHeatMode.GAS}, "runtime_ownership_preempted:source_external_change"),
     ),
 )
-def test_owned_pump_and_source_fail_closed_on_relevant_evidence(
+def test_owned_pump_and_source_retain_provenance_but_fail_closed_on_evidence(
     kwargs: dict[str, object],
     reason: str,
 ) -> None:
@@ -591,11 +606,21 @@ def test_owned_pump_and_source_fail_closed_on_relevant_evidence(
         evidence(at=NOW + timedelta(seconds=1), **kwargs)
     )
 
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
-    assert decision.reason_code == reason
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    domain = (
+        OwnershipDomain.PUMP
+        if reason.startswith("runtime_ownership_preempted:pump")
+        else OwnershipDomain.THERMAL
+    )
+    state = lease.domain_state(domain)
+    assert state.authority is OwnershipAuthority.POOLOS
+    assert state.health is OwnershipHealth.RECONCILING
+    assert state.command_blocker is not None
 
 
-def test_expected_pump_change_does_not_hide_unrelated_source_preemption() -> None:
+def test_expected_pump_change_does_not_hide_unrelated_source_drift() -> None:
     manager = ThermalRuntimeOwnershipManager()
     establish(
         manager,
@@ -614,7 +639,12 @@ def test_expected_pump_change_does_not_hide_unrelated_source_preemption() -> Non
         )
     )
 
-    assert decision.reason_code == "runtime_ownership_preempted:source_external_change"
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    source = lease.domain_state(OwnershipDomain.THERMAL)
+    assert source.authority is OwnershipAuthority.POOLOS
+    assert source.evidence_kind is OwnershipEvidenceKind.UNEXPLAINED_DRIFT
 
 
 def test_expected_source_change_does_not_hide_unrelated_body_preemption() -> None:
@@ -908,30 +938,36 @@ def verified_full_manager() -> ThermalRuntimeOwnershipManager:
 
 
 
-def test_unverified_matching_pump_event_still_preempts() -> None:
-    """Accepted pump intent alone cannot suppress external takeover evidence."""
+@pytest.mark.parametrize("positive_operator", [False, True])
+def test_unverified_matching_pump_event_requires_separate_operator_evidence(
+    positive_operator: bool,
+) -> None:
+    """Matching telemetry neither verifies this receipt nor proves operator origin."""
+    from poolos.ownership_evidence import (
+        OwnershipAuthority, OwnershipDomain, PositiveOperatorEvidence,
+    )
 
     manager = ThermalRuntimeOwnershipManager()
     establish(manager, execution_ownership(pump_rpm=2900))
-
     lease = manager.state.lease
     assert lease is not None
     assert ThermalRuntimeOwnedConcept.PUMP_SETPOINT not in lease.verified_concepts
-
     changed_at = NOW + timedelta(seconds=1)
-    matching_event = external_event(
-        "pump.rpm",
-        2600,
-        2900,
-        reconciliation_required=True,
-        observed_at=changed_at,
+    event = external_event("pump.rpm", 2600, 2900, observed_at=changed_at)
+    if positive_operator:
+        event = replace(event, positive_operator_evidence=PositiveOperatorEvidence(
+            "explicit-pump-request", lease.body_session_generation,
+            lease.body_session_id, OwnershipDomain.PUMP, "pump.rpm", changed_at,
+        ))
+    manager.evaluate(evidence(at=changed_at, changes=ExternalChangeBatch((event,))))
+    current = manager.state.lease
+    assert current is not None
+    assert current.pump_setpoint == lease.pump_setpoint
+    assert current.domain_state(OwnershipDomain.PUMP).authority is (
+        OwnershipAuthority.OPERATOR if positive_operator else OwnershipAuthority.POOLOS
     )
-
-    reason = manager.current_external_preemption_reason(
-        ExternalChangeBatch((matching_event,))
-    )
-
-    assert reason == "runtime_ownership_preempted:pump_external_change"
+    assert ThermalRuntimeOwnedConcept.PUMP_SETPOINT not in current.verified_concepts
+    assert current.body_activation is None and current.heat_source is None
 
 
 def test_owned_prime_actual_rpm_transition_does_not_self_preempt() -> None:
@@ -1061,7 +1097,7 @@ def test_owned_prime_actual_rpm_transition_does_not_self_preempt() -> None:
 
 
 def test_true_external_pump_change_still_preempts_after_owned_prime_model() -> None:
-    """A real steady-state RPM takeover must remain fail-closed."""
+    """A positively attributed steady-state request yields only Pump."""
 
     manager = ThermalRuntimeOwnershipManager()
     establish(
@@ -1072,6 +1108,8 @@ def test_true_external_pump_change_still_preempts_after_owned_prime_model() -> N
             source=PhysicalHeatMode.SOLAR,
         ),
     )
+    lease = manager.state.lease
+    assert lease is not None
 
     changed_at = NOW + timedelta(seconds=1)
     external = external_event(
@@ -1081,6 +1119,10 @@ def test_true_external_pump_change_still_preempts_after_owned_prime_model() -> N
         reconciliation_required=True,
         observed_at=changed_at,
     )
+    external = replace(external, positive_operator_evidence=PositiveOperatorEvidence(
+        "explicit-pump-request", lease.body_session_generation,
+        lease.body_session_id, OwnershipDomain.PUMP, "pump.rpm", changed_at,
+    ))
 
     decision = manager.evaluate(
         evidence(
@@ -1091,8 +1133,12 @@ def test_true_external_pump_change_still_preempts_after_owned_prime_model() -> N
         )
     )
 
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
-    assert decision.reason_code == "runtime_ownership_preempted:pump_external_change"
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    current = manager.state.lease
+    assert current is not None
+    assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.OPERATOR
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
 
 def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     manager = full_manager()
@@ -1997,7 +2043,7 @@ def test_delayed_post_acceptance_body_proof_survives_pending_refreshes() -> None
 
 
 @pytest.mark.parametrize("concept", ("body", "pump", "source"))
-def test_explicit_external_intervention_preempts_pending_command_settling(
+def test_explicit_operator_intervention_yields_only_affected_pending_domain(
     concept: str,
 ) -> None:
     if concept == "body":
@@ -2069,6 +2115,22 @@ def test_explicit_external_intervention_preempts_pending_command_settling(
             accepted_operation_id=operation.operation_id,
         ),
     )
+    lease = manager.state.lease
+    assert lease is not None
+    domain = {
+        "body": OwnershipDomain.BODY,
+        "pump": OwnershipDomain.PUMP,
+        "source": OwnershipDomain.THERMAL,
+    }[concept]
+    equipment = {
+        "body": lease.body.value,
+        "pump": "pump.rpm",
+        "source": "pool.raw_heater_id",
+    }[concept]
+    event = replace(event, positive_operator_evidence=PositiveOperatorEvidence(
+        f"explicit-{concept}-request", lease.body_session_generation,
+        lease.body_session_id, domain, equipment, NOW + timedelta(seconds=1),
+    ))
 
     decision = manager.evaluate(
         evidence(
@@ -2080,7 +2142,14 @@ def test_explicit_external_intervention_preempts_pending_command_settling(
         )
     )
 
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+    if concept == "body":
+        assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
+    else:
+        assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+        current = manager.state.lease
+        assert current is not None
+        assert current.domain_state(domain).authority is OwnershipAuthority.OPERATOR
+        assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.NONE
     assert manager.residual_termination is None
 
 
@@ -2441,7 +2510,7 @@ def test_stale_body_continuity_cannot_retain_body_cleanup_entitlement() -> None:
     assert manager.residual_termination is None
 
 
-def test_terminal_diagnostic_selects_event_that_caused_preemption() -> None:
+def test_unattributed_drift_records_domain_evidence_without_terminal_transition() -> None:
     manager = ThermalRuntimeOwnershipManager()
     establish(manager, execution_ownership(pump_rpm=2900))
     earlier_nonterminal = external_event(
@@ -2467,10 +2536,14 @@ def test_terminal_diagnostic_selects_event_that_caused_preemption() -> None:
         )
     )
 
-    diagnostic = manager.last_terminal_transition
-    assert diagnostic is not None
-    assert diagnostic.external_event_id == causal.event_id
-    assert diagnostic.external_event_observed_at == causal.observed_at
+    assert manager.last_terminal_transition is None
+    lease = manager.state.lease
+    assert lease is not None
+    pump = lease.domain_state(OwnershipDomain.PUMP)
+    assert pump.authority is OwnershipAuthority.POOLOS
+    assert pump.evidence_kind is OwnershipEvidenceKind.UNEXPLAINED_DRIFT
+    assert pump.observed_value == 2600
+    assert pump.command_blocker == "ownership_evidence_unusable"
 
 
 def test_shared_hydraulic_diagnostic_is_body_scoped_even_if_concept_mentions_pump() -> None:
@@ -2706,7 +2779,8 @@ def test_preempted_external_body_session_cannot_reestablish_automatically() -> N
         evidence(
             body=ThermalBody.HOT_TUB,
             at=NOW + timedelta(seconds=1),
-            pump_rpm=2900,
+            spa_active=False,
+            pump_rpm=2600,
             configured_pump_rpm=2600,
             heat_source=PhysicalHeatMode.OFF,
         )
@@ -2835,10 +2909,13 @@ def test_matching_actual_rpm_cannot_hide_external_configured_setpoint_change() -
         )
     )
 
-    assert decision.reason_code == "runtime_ownership_preempted:pump_setpoint_external_change"
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.RECONCILING
 
 
-def test_verified_body_origin_survives_source_takeover_as_body_only_cleanup() -> None:
+def test_verified_body_origin_survives_unattributed_source_drift() -> None:
     manager = verified_full_manager()
     lease = manager.state.lease
     assert lease is not None
@@ -2861,19 +2938,13 @@ def test_verified_body_origin_survives_source_takeover_as_body_only_cleanup() ->
         )
     )
 
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.PREEMPTED
-    assert decision.reason_code == "runtime_ownership_preempted:source_external_change"
-    residual = manager.residual_termination
-    assert residual is not None
-    assert residual.body_activation is not None
-    assert residual.pump_setpoint is None
-    assert residual.heat_source is None
-    diagnostic = manager.last_terminal_transition
-    assert diagnostic is not None
-    assert diagnostic.affected_concept is ThermalRuntimeOwnedConcept.HEAT_SOURCE
-    assert diagnostic.expected_value == "solar"
-    assert diagnostic.observed_value == "gas"
-    assert diagnostic.external_event_id == event.event_id
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    current = manager.state.lease
+    assert current is not None
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.THERMAL).health is OwnershipHealth.RECONCILING
+    assert manager.residual_termination is None
+    assert manager.last_terminal_transition is None
 
 
 def test_matching_configured_setpoint_cannot_hide_actual_rpm_change() -> None:
@@ -2888,7 +2959,10 @@ def test_matching_configured_setpoint_cannot_hide_actual_rpm_change() -> None:
         )
     )
 
-    assert decision.reason_code == "runtime_ownership_preempted:pump_external_change"
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.RECONCILING
 
 
 def test_duplicate_evidence_timestamp_is_idempotent_confirmation() -> None:
