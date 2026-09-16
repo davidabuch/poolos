@@ -844,6 +844,141 @@ def test_cold_start_delivers_at_most_one_command_per_authoritative_epoch() -> No
     ]
 
 
+def test_filtration_cold_start_neutralizes_armed_solar_before_circulation() -> None:
+    """Filtration may not start with IntelliCenter Solar still armed."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    armed = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        pump_rpm=0,
+        pool_heater="H0002",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+        filtration_disposition=FiltrationDisposition.RUN_NOW,
+        evaluator=evaluator,
+        driver=driver,
+    )
+
+    assert armed.thermal is not None
+    assert (
+        armed.thermal.pool.filtration_immediate_circulation_required
+        is True
+    )
+    assert armed.thermal.pool.body_active is False
+    assert (
+        armed.thermal.pool.plan.desired.selected_source
+        is PhysicalHeatMode.OFF
+    )
+    assert armed.thermal.pool.plan.desired.required_pump_rpm is None
+    assert len(armed.thermal.pool.plan.operations) == 1
+    assert isinstance(armed.thermal.pool.plan.operations[0], SetHeatMode)
+    assert (
+        armed.thermal.pool.plan.operations[0].mode
+        is PhysicalHeatMode.OFF
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(armed, delivery_factory=factory)
+    )
+
+    assert result.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert result.command_delivery_performed
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetHeatMode)
+    assert delivery.calls[0].equipment_id == ThermalBody.POOL.value
+    assert delivery.calls[0].mode is PhysicalHeatMode.OFF
+    assert not any(
+        isinstance(operation, SetBodyActive)
+        for operation in delivery.calls
+    )
+    assert not any(
+        isinstance(operation, SetPumpSpeed)
+        for operation in delivery.calls
+    )
+
+
+def test_filtration_source_neutralization_never_rewrites_preexisting_active_pool() -> None:
+    """A manually/external active Pool remains outside PoolOS acquisition."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    externally_started = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        mode=ThermalRequestedMode.OFF,
+        filtration_remaining=timedelta(hours=2),
+        filtration_disposition=FiltrationDisposition.RUN_NOW,
+        evaluator=evaluator,
+        driver=driver,
+    )
+
+    assert externally_started.thermal is not None
+    assert (
+        externally_started.thermal.pool.filtration_immediate_circulation_required
+        is True
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(
+            externally_started,
+            delivery_factory=factory,
+        )
+    )
+
+    assert result.state is ThermalAutomaticDriverState.BLOCKED
+    assert result.blocker == "automatic_thermal_preexisting_body_unowned"
+    assert delivery.calls == []
+
+
 def test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -2483,6 +2618,196 @@ def test_probe_plan_can_begin_with_exact_pool_body_activation() -> None:
     )
     assert len(delivery.calls) == 1
     assert isinstance(delivery.calls[0], SetBodyActive)
+
+
+def test_owned_solar_session_survives_native_solar_active_drop() -> None:
+    """IC Solar Active may drop while H0002 remains selected without takeover."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=1500,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=110.0,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    # Establish the normal PoolOS-owned probe.
+    for seconds, active, rpm, configured in (
+        (1, False, 0, 1500),
+        (2, True, 0, 1500),
+        (3, True, 1500, 1500),
+    ):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=active,
+                    pump_rpm=rpm,
+                    configured_rpm=configured,
+                    pool_heater="00000",
+                    mode=ThermalRequestedMode.SOLAR,
+                    missing=("pool.temperature",),
+                    solar_temperature=110.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert result.blocker is None, (
+            seconds,
+            result.state,
+            result.blocker,
+        )
+
+    # Allow the probe to settle and transition to the Solar RPM.
+    for seconds in (33, 63, 123):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=1500,
+                    configured_rpm=1500,
+                    pool_heater="00000",
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=110.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2900
+
+    # Verify 2900, then let PoolOS explicitly select Solar/H0002.
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=124),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=110.0,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert delivery.calls[-1].mode is PhysicalHeatMode.SOLAR
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=125),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=110.0,
+                evaluator=evaluator,
+                driver=driver,
+                verification_timeout=timedelta(seconds=300),
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert result.state is ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+
+    # IC engages Solar and satisfies the confirmation hold.
+    for seconds in (126, 156):
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    solar_active=True,
+                    mode=ThermalRequestedMode.SOLAR,
+                    solar_temperature=110.0,
+                    evaluator=evaluator,
+                    driver=driver,
+                    verification_timeout=timedelta(seconds=300),
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.owns_heat_source is True
+    assert lease.heat_source is not None
+    assert lease.heat_source.intended_value is PhysicalHeatMode.SOLAR
+
+    commands_before_drop = len(delivery.calls)
+
+    # A cloud/native IC decision disengages Solar, but H0002 remains selected.
+    dropped = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=157),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=110.0,
+                evaluator=evaluator,
+                driver=driver,
+                verification_timeout=timedelta(seconds=300),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert dropped.state is not ThermalAutomaticDriverState.PREEMPTED
+    assert dropped.state is not ThermalAutomaticDriverState.TERMINATING
+    assert "external_takeover" not in (dropped.blocker or "")
+    assert len(delivery.calls) == commands_before_drop
+
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.owns_heat_source is True
+    assert lease.heat_source is not None
+    assert lease.heat_source.intended_value is PhysicalHeatMode.SOLAR
 
 
 @pytest.mark.parametrize(

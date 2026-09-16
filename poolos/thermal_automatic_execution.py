@@ -926,6 +926,7 @@ class ThermalAutomaticExecutionDriver:
                     )
                     and body.body_active is not True
                     and not _probe_source_precondition_then_activation(body)
+                    and not _filtration_source_off_precondition(body)
                 ):
                     return self._blocked(
                         frame,
@@ -2944,6 +2945,58 @@ def _restrained_body(
     if lease is not None:
         return lease.body
     return frame.orchestration.candidate_body
+
+
+def _filtration_source_off_precondition(body: object) -> bool:
+    """Permit only an inactive-Pool source-Off precondition for imminent filtration.
+
+    IntelliCenter may retain Solar as the configured Pool heat source while the
+    body is inactive.  Starting PoolOS-owned filtration in that state would let
+    IntelliCenter independently engage Solar as soon as its native differential
+    permits.  Before PoolOS initiates that circulation, allow the thermal
+    executor to establish and verify the canonical source-Off precondition.
+
+    This is deliberately not a generic idle-time normalization:
+    - the Pool must still be inactive;
+    - filtration must be immediately required;
+    - PoolOS thermal policy must independently want source Off;
+    - no thermal pump RPM may be requested; and
+    - the exact plan must contain only SetHeatMode(Off).
+
+    A pre-existing/manual active Pool therefore remains external and is never
+    rewritten by this path.
+    """
+
+    if getattr(body, "body", None) is not ThermalBody.POOL:
+        return False
+    if getattr(body, "body_active", None) is not False:
+        return False
+
+    plan = getattr(body, "plan", None)
+    if plan is None:
+        return False
+
+    desired = getattr(plan, "desired", None)
+    if desired is None:
+        return False
+
+    if desired.selected_source is not PhysicalHeatMode.OFF:
+        return False
+    if desired.required_pump_rpm is not None:
+        return False
+    if (
+        getattr(body, "filtration_immediate_circulation_required", None)
+        is not True
+    ):
+        return False
+
+    operations = plan.operations
+    return bool(
+        len(operations) == 1
+        and isinstance(operations[0], SetHeatMode)
+        and operations[0].equipment_id == ThermalBody.POOL.value
+        and operations[0].mode is PhysicalHeatMode.OFF
+    )
 
 
 def _probe_source_precondition_then_activation(
