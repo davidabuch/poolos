@@ -97,11 +97,39 @@ def test_effective_policy_defaults_and_strict_configuration_validation() -> None
         configured_values()
     ) == NON_DEFAULT_BASELINES
 
-    for invalid in (True, -1, 0, 449, 3451, 2650.0, "2650"):
+    for invalid in (True, -1, 0, 449, 3451, 2650.5, "2650"):
         configured = configured_values()
         configured[CONST.CONF_PUMP_FILTRATION_RPM] = invalid
         with pytest.raises(ValueError):
             PUMP_BASELINES.effective_pump_operating_baselines(configured)
+
+
+def test_home_assistant_number_selector_integral_floats_are_normalized() -> None:
+    """HA number selectors persist integral RPM choices as floats."""
+
+    configured = {
+        key: float(value)
+        for key, value in configured_values().items()
+    }
+
+    baselines = PUMP_BASELINES.effective_pump_operating_baselines(configured)
+
+    assert baselines == NON_DEFAULT_BASELINES
+    assert all(
+        isinstance(value, int) and not isinstance(value, bool)
+        for value in baselines.as_dict().values()
+    )
+
+
+def test_home_assistant_number_selector_fractional_rpm_remains_invalid() -> None:
+    configured = {
+        key: float(value)
+        for key, value in configured_values().items()
+    }
+    configured[CONST.CONF_PUMP_TEMPERATURE_PROBE_RPM] = 1550.5
+
+    with pytest.raises(ValueError):
+        PUMP_BASELINES.effective_pump_operating_baselines(configured)
 
 
 def test_policy_fingerprint_is_deterministic_and_value_specific() -> None:

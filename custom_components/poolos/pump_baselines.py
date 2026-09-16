@@ -39,10 +39,20 @@ def effective_pump_operating_baselines(
 
     defaults = PumpOperatingBaselines()
     values = {
-        field_name: configured.get(config_key, getattr(defaults, field_name))
+        field_name: _normalize_configured_rpm(
+            configured.get(config_key, getattr(defaults, field_name))
+        )
         for field_name, config_key in _CONFIG_FIELDS.items()
     }
     return PumpOperatingBaselines(**values)
+
+
+def _normalize_configured_rpm(value: Any) -> Any:
+    """Normalize Home Assistant number-selector output at the adapter boundary."""
+
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 @dataclass(frozen=True, slots=True)
