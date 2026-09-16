@@ -75,6 +75,7 @@ def _frame(
     rpm: int,
     configured: int,
     satisfied: bool = False,
+    thermal: bool = False,
 ) -> FiltrationAutomaticExecutionFrame:
     return FiltrationAutomaticExecutionFrame(
         epoch_identity=f"epoch:{at.isoformat()}",
@@ -97,7 +98,7 @@ def _frame(
         physical_authority_ready=True,
         physical_authority_blocker=None,
         grid_on=True,
-        thermal_candidate_ready=False,
+        thermal_candidate_ready=thermal,
         thermal_owned=False,
         external_changes=ExternalChangeBatch(()),
     )
@@ -139,6 +140,7 @@ class _Factory:
 def _restarted_enabled_driver():
     delivery = _Delivery([])
     driver = FiltrationAutomaticExecutionDriver(PoolCirculationOwnershipRegistry())
+    driver.arm_restart_recovery_adoption()
     driver.set_enabled(
         True,
         changed_at=NOW - timedelta(seconds=1),
@@ -258,3 +260,82 @@ def test_matching_preexisting_pool_is_not_adopted_after_recovery_boundary() -> N
     assert later.blocker == "automatic_filtration_preexisting_body_unowned"
     assert not delivery.operations
     assert driver.ownership.owner is PoolCirculationOwner.NONE
+
+
+def test_restart_adoption_refreshes_body_provenance_before_thermal_handoff() -> None:
+    """Adopted filtration upgrades to real Body command provenance before handoff."""
+
+    driver, delivery, factory = _restarted_enabled_driver()
+
+    adopting = asyncio.run(
+        driver.process_epoch(
+            _frame(NOW, pool=True, rpm=2600, configured=2600),
+            delivery_factory=factory,
+        )
+    )
+    assert adopting.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetPumpSpeed)
+
+    owned = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert owned.state is FiltrationAutomaticDriverState.OWNED
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.body_adoption is not None
+
+    thermal_frame = _frame(
+        NOW + timedelta(seconds=2),
+        pool=True,
+        rpm=2600,
+        configured=2600,
+        thermal=True,
+    )
+    driver.ownership.begin_epoch(thermal_frame.epoch_identity)
+    assert not driver.ownership.reserve_thermal(thermal_frame.epoch_identity)
+    refreshing = asyncio.run(
+        driver.process_epoch(thermal_frame, delivery_factory=factory)
+    )
+    assert refreshing.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is True
+
+    refreshed = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                thermal=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert refreshed.state is FiltrationAutomaticDriverState.OWNED
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is not None
+    assert lease.body_adoption is None
+    assert len(delivery.operations) == 2
+
+    successor_at = NOW + timedelta(seconds=4)
+    successor_epoch = f"epoch:{successor_at.isoformat()}"
+    driver.ownership.begin_epoch(successor_epoch)
+    assert driver.ownership.reserve_thermal(successor_epoch)
+    handoff = driver.ownership.begin_filtration_to_thermal(
+        thermal_purpose_id="solar-heating-successor",
+        established_at=successor_at,
+    )
+    assert handoff is not None
+    assert handoff.body_activation == lease.body_activation
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_TO_THERMAL

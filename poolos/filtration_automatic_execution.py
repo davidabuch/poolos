@@ -174,11 +174,23 @@ class FiltrationAutomaticExecutionDriver:
     _last_correlation_id: str | None = field(default=None, init=False, repr=False)
     _last_failure_reason: str | None = field(default=None, init=False, repr=False)
     _requires_reenable: bool = field(default=False, init=False, repr=False)
+    _restart_recovery_adoption_armed: bool = field(
+        default=False,
+        init=False,
+        repr=False,
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
 
     @property
     def last_epoch_identity(self) -> str | None:
         return self._last_epoch
+
+    def arm_restart_recovery_adoption(self) -> None:
+        """Allow one prospective adoption after restored automatic authority."""
+
+        if self.ownership.filtration_lease is not None:
+            raise ValueError("restart adoption requires empty filtration ownership")
+        self._restart_recovery_adoption_armed = True
 
     def process_disabled_epoch(
         self,
@@ -209,6 +221,8 @@ class FiltrationAutomaticExecutionDriver:
             self._enabled_after_epoch = current_epoch_identity
             self._requires_reenable = False
             self._last_failure_reason = None
+        if not enabled:
+            self._restart_recovery_adoption_armed = False
         self.requested_enabled = enabled
         self._publish(
             FiltrationAutomaticDriverState.DISABLED if not enabled else FiltrationAutomaticDriverState.BLOCKED,
@@ -349,6 +363,13 @@ class FiltrationAutomaticExecutionDriver:
                 )
             ),
         )
+        restart_recovery_adoption = bool(
+            self._restart_recovery_adoption_armed and blocker is None
+        )
+        if restart_recovery_adoption:
+            # Consume only on the first fully usable recovery decision frame.
+            # Incomplete startup evidence leaves recovery armed.
+            self._restart_recovery_adoption_armed = False
         if lease is not None and lease.verified and _transient_evidence_loss(blocker):
             self.ownership.suspend_filtration(session_id=lease.session_id)
             return self._publish(
@@ -372,6 +393,21 @@ class FiltrationAutomaticExecutionDriver:
         if self.attempt is not None:
             return await self._verify_attempt(frame, delivery_factory)
         if lease is not None and frame.thermal_candidate_ready:
+            if lease.body_activation is None and lease.body_adoption is not None:
+                self.session_id = lease.session_id
+                return await self._deliver(
+                    frame,
+                    delivery_factory,
+                    FiltrationExecutionStep.BODY_ON,
+                    SetBodyActive(
+                        equipment_id=ThermalBody.POOL.value,
+                        active=True,
+                        metadata={
+                            "reason_code": "automatic_filtration_body_provenance_refresh"
+                        },
+                    ),
+                    cleanup=False,
+                )
             return self._publish(
                 FiltrationAutomaticDriverState.HANDOFF_PENDING,
                 at=frame.observed_at,
@@ -410,7 +446,26 @@ class FiltrationAutomaticExecutionDriver:
             if not self.requested_enabled:
                 return self._blocked(frame, "automatic_filtration_driver_disabled")
             if pool.value is True:
-                return self._blocked(frame, "automatic_filtration_preexisting_body_unowned")
+                if not restart_recovery_adoption:
+                    return self._blocked(
+                        frame,
+                        "automatic_filtration_preexisting_body_unowned",
+                    )
+                if frame.thermal_candidate_ready:
+                    return self._blocked(
+                        frame,
+                        "automatic_filtration_thermal_successor_pending",
+                    )
+                assert frame.pool_pump_circuit_id is not None
+                self.session_id = _session_id(frame)
+                self.ownership.adopt_filtration_body(
+                    session_id=self.session_id,
+                    pool_pump_circuit_id=frame.pool_pump_circuit_id,
+                    adopted_at=frame.observed_at,
+                    epoch_identity=frame.epoch_identity,
+                    reason_code="restart_recovery_current_filtration_purpose",
+                )
+                return await self._deliver_pump(frame, delivery_factory)
             self.session_id = _session_id(frame)
             return await self._deliver(
                 frame,
@@ -425,9 +480,12 @@ class FiltrationAutomaticExecutionDriver:
             )
         self.session_id = lease.session_id
         if not immediate or not self.requested_enabled:
-            if lease.body_activation is None:
+            if lease.body_activation is None and lease.body_adoption is None:
                 self.ownership.release_filtration(session_id=lease.session_id)
-                return self._blocked(frame, "automatic_filtration_body_provenance_unavailable")
+                return self._blocked(
+                    frame,
+                    "automatic_filtration_body_provenance_unavailable",
+                )
             return await self._deliver(
                 frame,
                 delivery_factory,
@@ -631,6 +689,15 @@ class FiltrationAutomaticExecutionDriver:
                     session_id=self.session_id,
                     confirmed_at=frame.observed_at,
                 )
+                lease = self.ownership.filtration_lease
+                if lease is not None and lease.verified:
+                    return self._publish(
+                        FiltrationAutomaticDriverState.OWNED,
+                        at=frame.observed_at,
+                        blocker=None,
+                        frame=frame,
+                        command=False,
+                    )
                 return await self._deliver_pump(frame, delivery_factory)
             assert self.session_id is not None
             self.ownership.confirm_filtration(
@@ -901,6 +968,7 @@ class FiltrationAutomaticExecutionDriver:
         self.requested_enabled = False
         self.session_id = None
         self.attempt = None
+        self._restart_recovery_adoption_armed = False
         self.ownership.unload()
         self._publish(
             FiltrationAutomaticDriverState.UNLOADED,
@@ -963,6 +1031,19 @@ class FiltrationAutomaticExecutionDriver:
                 "last_failure_reason": assessment.last_failure_reason,
                 "fresh_authoritative_epoch_required": True,
                 "ownership_persisted": False,
+                "body_ownership_origin": (
+                    "none"
+                    if self.ownership.filtration_lease is None
+                    else (
+                        "prospective_adoption"
+                        if self.ownership.filtration_lease.body_adoption is not None
+                        else (
+                            "accepted_command"
+                            if self.ownership.filtration_lease.body_activation is not None
+                            else "none"
+                        )
+                    )
+                ),
             }
         )
 
@@ -980,7 +1061,16 @@ class FiltrationAutomaticExecutionDriver:
         concepts = tuple(
             concept
             for concept, present in (
-                ("body_activation", bool(lease and lease.body_activation)),
+                (
+                    "body_activation",
+                    bool(
+                        lease
+                        and (
+                            lease.body_activation is not None
+                            or lease.body_adoption is not None
+                        )
+                    ),
+                ),
                 ("pump_setpoint", bool(lease and lease.pump_setpoint)),
             )
             if present

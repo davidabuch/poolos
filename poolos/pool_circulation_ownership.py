@@ -30,6 +30,22 @@ class PoolCirculationOwner(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class FiltrationBodyAdoption:
+    """Prospective Body provenance created at a legitimate recovery boundary."""
+
+    adoption_id: str
+    epoch_identity: str
+    reason_code: str
+    adopted_at: datetime
+
+    def __post_init__(self) -> None:
+        for name in ("adoption_id", "epoch_identity", "reason_code"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        _require_aware(self.adopted_at)
+
+
+@dataclass(frozen=True, slots=True)
 class FiltrationCirculationLease:
     """Accepted, session-scoped filtration command provenance."""
 
@@ -40,6 +56,7 @@ class FiltrationCirculationLease:
     established_at: datetime
     last_confirmed_at: datetime
     body_activation: ThermalRuntimeConceptProvenance | None = None
+    body_adoption: FiltrationBodyAdoption | None = None
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
     pump_established_at: datetime | None = None
     pump_session_id: str | None = None
@@ -58,8 +75,18 @@ class FiltrationCirculationLease:
         _require_aware(self.last_confirmed_at)
         if self.last_confirmed_at < self.established_at:
             raise ValueError("filtration confirmation cannot predate establishment")
-        if self.body_verified and self.body_activation is None:
-            raise ValueError("verified filtration body requires delivery provenance")
+        if self.body_activation is not None and self.body_adoption is not None:
+            raise ValueError(
+                "filtration body command provenance and adoption are exclusive"
+            )
+        if (
+            self.body_verified
+            and self.body_activation is None
+            and self.body_adoption is None
+        ):
+            raise ValueError(
+                "verified filtration body requires command or adoption provenance"
+            )
         if self.pump_established_at is not None:
             _require_aware(self.pump_established_at)
             if self.pump_setpoint is None:
@@ -77,7 +104,10 @@ class FiltrationCirculationLease:
             raise ValueError("filtration pump provenance and session binding are exclusive")
         if self.verified and (
             not self.body_verified
-            or self.body_activation is None
+            or (
+                self.body_activation is None
+                and self.body_adoption is None
+            )
             or (
                 self.pump_setpoint is None
                 and self.pump_session_effective_rpm is None
@@ -138,6 +168,13 @@ class PoolCirculationOwnershipRegistry:
             self._thermal_reserved_epoch = epoch_identity
             return True
         if self.owner is PoolCirculationOwner.FILTRATION:
+            lease = self.filtration_lease
+            if (
+                lease is not None
+                and lease.body_activation is None
+                and lease.body_adoption is not None
+            ):
+                return False
             self._thermal_reserved_epoch = epoch_identity
             return True
         return False
@@ -161,6 +198,56 @@ class PoolCirculationOwnershipRegistry:
             PoolCirculationOwner.FILTRATION_ACQUIRING,
             PoolCirculationOwner.FILTRATION,
         } and (lease is None or lease.session_id == session_id)
+
+    def adopt_filtration_body(
+        self,
+        *,
+        session_id: str,
+        pool_pump_circuit_id: str,
+        adopted_at: datetime,
+        epoch_identity: str,
+        reason_code: str,
+    ) -> FiltrationCirculationLease:
+        """Create fresh prospective Body provenance without historical fabrication."""
+
+        _require_aware(adopted_at)
+        if not session_id.strip():
+            raise ValueError("filtration adoption session identity must not be empty")
+        if not epoch_identity.strip() or not reason_code.strip():
+            raise ValueError("filtration adoption context must not be empty")
+        if not is_pmpcirc_native_id(pool_pump_circuit_id):
+            raise ValueError("filtration adoption requires a concrete Pool PMPCIRC")
+        if (
+            self.owner is not PoolCirculationOwner.NONE
+            or self.filtration_lease is not None
+        ):
+            raise ValueError("filtration adoption requires unowned circulation")
+
+        self._generation += 1
+        adoption = FiltrationBodyAdoption(
+            adoption_id=_adoption_id(
+                self._generation,
+                session_id,
+                epoch_identity,
+                adopted_at,
+            ),
+            epoch_identity=epoch_identity,
+            reason_code=reason_code,
+            adopted_at=adopted_at,
+        )
+        lease = FiltrationCirculationLease(
+            lease_id=_lease_id(self._generation, session_id, adopted_at),
+            generation=self._generation,
+            session_id=session_id,
+            pool_pump_circuit_id=pool_pump_circuit_id,
+            established_at=adopted_at,
+            last_confirmed_at=adopted_at,
+            body_adoption=adoption,
+            body_verified=True,
+        )
+        self.filtration_lease = lease
+        self.owner = PoolCirculationOwner.FILTRATION_ACQUIRING
+        return lease
 
     def record_filtration_delivery(
         self,
@@ -202,6 +289,7 @@ class PoolCirculationOwnershipRegistry:
             lease = replace(
                 lease,
                 body_activation=provenance,
+                body_adoption=None,
                 last_confirmed_at=accepted_at,
             )
         elif provenance.concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT:
@@ -243,13 +331,18 @@ class PoolCirculationOwnershipRegistry:
             body_verified=True,
             last_confirmed_at=confirmed_at,
         )
+        if self.filtration_lease.verified:
+            self.owner = PoolCirculationOwner.FILTRATION
 
     def confirm_filtration(self, *, session_id: str, confirmed_at: datetime) -> None:
         _require_aware(confirmed_at)
         lease = self.filtration_lease
         if lease is None or lease.session_id != session_id:
             raise ValueError("filtration confirmation requires the current lease")
-        if lease.body_activation is None or lease.pump_setpoint is None:
+        if (
+            lease.body_activation is None
+            and lease.body_adoption is None
+        ) or lease.pump_setpoint is None:
             raise ValueError("filtration confirmation requires body and pump provenance")
         if not lease.body_verified:
             raise ValueError("filtration confirmation requires verified body activation")
@@ -488,6 +581,16 @@ def _lease_id(generation: int, session_id: str, at: datetime) -> str:
     return "filtration-circulation-" + sha256(payload.encode()).hexdigest()[:24]
 
 
+def _adoption_id(
+    generation: int,
+    session_id: str,
+    epoch_identity: str,
+    at: datetime,
+) -> str:
+    payload = f"{generation}|{session_id}|{epoch_identity}|{at.isoformat()}"
+    return "filtration-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
+
+
 def _handoff_id(
     lease: FiltrationCirculationLease,
     purpose_id: str,
@@ -503,6 +606,7 @@ def _require_aware(value: datetime) -> None:
 
 
 __all__ = [
+    "FiltrationBodyAdoption",
     "FiltrationCirculationLease",
     "FiltrationToThermalHandoff",
     "PoolCirculationOwner",

@@ -370,6 +370,7 @@ class PoolOSFiltrationAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
         await super().async_added_to_hass()
         previous = await self.async_get_last_state()
         if previous is not None and previous.state == "on":
+            self._runtime.filtration_automatic_runtime.arm_restart_recovery_adoption()
             self._runtime.filtration_automatic_runtime.set_enabled(True)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
