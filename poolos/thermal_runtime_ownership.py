@@ -1653,7 +1653,24 @@ class ThermalRuntimeOwnershipManager:
         ):
             return prefix + "successor_evaluation_not_current"
         if evidence.current_context.plan_id != request.successor_context.plan_id:
-            return prefix + "successor_plan_not_current"
+            requested_currentness = request.successor_context.execution_currentness
+            observed_currentness = evidence.current_context.execution_currentness
+            if requested_currentness is None or observed_currentness is None:
+                return prefix + "successor_plan_not_current"
+
+            compatibility = assess_execution_compatibility(
+                requested_currentness,
+                observed_currentness,
+                progress=(
+                    request.successor_progress
+                    or ThermalExecutionProgress()
+                ),
+            )
+            if (
+                compatibility.reason_code
+                != "thermal_execution_convergence_not_attributed"
+            ):
+                return prefix + "successor_plan_not_current"
         if evidence.requested_mode != request.successor_requested_mode:
             return prefix + "successor_requested_mode_not_current"
         if (
