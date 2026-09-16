@@ -918,12 +918,26 @@ class ThermalLiveAuthorizationEngine:
                 for item in assessment.step_specifications
             )
         )
+        pool_filtration_source_precondition = (
+            isinstance(operation, SetHeatMode)
+            and target is ThermalBody.POOL
+            and operation.mode is PhysicalHeatMode.OFF
+            and assessment.desired.selected_source is PhysicalHeatMode.OFF
+            and assessment.desired.required_pump_rpm is None
+            and assessment.desired.evidence.get(
+                "filtration_immediate_circulation_required"
+            )
+            is True
+            and len(assessment.operations) == 1
+            and assessment.operations[0].operation_id == operation.operation_id
+        )
         if activation_step:
             if target_active is True:
                 reasons.append("target_body_already_active_requires_reevaluation")
         elif target_active is False and not (
             opportunistic_spa_source_precondition
             or pool_probe_source_precondition
+            or pool_filtration_source_precondition
         ):
             reasons.append("target_body_inactive")
 

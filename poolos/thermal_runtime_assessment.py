@@ -418,6 +418,7 @@ class ThermalBodyRuntimeAssessment:
     pump_session_purpose: PumpSpeedSessionPurpose | None = None
     pump_session_effective_rpm: int | None = None
     pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE
+    filtration_immediate_circulation_required: bool | None = None
     pool_temperature_probe_diagnostics: Mapping[str, object] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -929,6 +930,16 @@ class ThermalRuntimeEvaluator:
             water_temperature=water_temperature,
             spa_temperature=spa_temperature,
         )
+        if body is ThermalBody.POOL:
+            desired = replace(
+                desired,
+                evidence={
+                    **dict(desired.evidence),
+                    "filtration_immediate_circulation_required": (
+                        evidence.filtration_immediate_circulation_required
+                    ),
+                },
+            )
         if desired.required_pump_rpm is not None:
             if (
                 configured_speed_concept
@@ -1100,6 +1111,11 @@ class ThermalRuntimeEvaluator:
                 evidence.pump_session_override_state
                 if session_rpm is not None
                 else PumpSpeedOverrideState.NONE
+            ),
+            filtration_immediate_circulation_required=(
+                evidence.filtration_immediate_circulation_required
+                if body is ThermalBody.POOL
+                else None
             ),
             pool_temperature_probe_diagnostics=(
                 self.pool_temperature_probe.diagnostics(
