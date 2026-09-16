@@ -381,6 +381,8 @@ class ThermalExecutionPlanBuilder:
         self,
         desired: ThermalDesiredState,
         current: ThermalCurrentState,
+        *,
+        force_pump_command: bool = False,
     ) -> ThermalExecutionPlanAssessment:
         if current.body is not desired.body:
             return self._non_ready(desired, current, ("thermal_body_mismatch",))
@@ -421,10 +423,16 @@ class ThermalExecutionPlanBuilder:
 
         source_changed = current.selected_source is not desired.selected_source
         desired_rpm = desired.required_pump_rpm
-        rpm_changed = desired_rpm is not None and not _rpm_converged(
-            current.pump_rpm,
-            desired_rpm,
-            tolerance=self.pump_rpm_tolerance,
+        rpm_physically_converged = (
+            desired_rpm is not None
+            and _rpm_converged(
+                current.pump_rpm,
+                desired_rpm,
+                tolerance=self.pump_rpm_tolerance,
+            )
+        )
+        rpm_changed = desired_rpm is not None and (
+            force_pump_command or not rpm_physically_converged
         )
         ordering: list[str] = []
 
@@ -693,7 +701,10 @@ class ThermalExecutionPlanBuilder:
                 (body_start_required, "target_body_activation_required"),
                 (priming.priming_required, "cold_start_priming_required"),
                 (source_changed, "selected_heat_source_changed"),
-                (rpm_changed, "thermal_pump_baseline_changed"),
+                (
+                    rpm_changed,
+                    "thermal_pump_baseline_changed",
+                ),
             )
             if changed
         )

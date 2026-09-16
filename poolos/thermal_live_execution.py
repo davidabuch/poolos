@@ -799,7 +799,11 @@ class ThermalLiveAuthorizationEngine:
                 evidence.execution_currentness,
                 progress=execution_progress or ThermalExecutionProgress(),
             )
-            if not currentness.continuation_allowed:
+            if (
+                not currentness.continuation_allowed
+                and currentness.reason_code
+                != "thermal_execution_convergence_not_attributed"
+            ):
                 reasons.append(currentness.reason_code)
         age = evidence.evaluated_at - assessment.desired.evaluated_at
         if age < timedelta(0):
@@ -1187,12 +1191,23 @@ class ThermalLiveExecutionEngine:
             evidence.execution_currentness is not None
             and evidence.execution_currentness != originating_currentness
         ):
-            raise ValueError("thermal live execution currentness does not match plan")
+            compatibility = assess_execution_compatibility(
+                originating_currentness,
+                evidence.execution_currentness,
+            )
+            if (
+                compatibility.reason_code
+                != "thermal_execution_convergence_not_attributed"
+            ):
+                raise ValueError(
+                    "thermal live execution currentness does not match plan"
+                )
         authorization = self.authorization_engine.authorize(
             assessment,
             step_index=0,
             policy=policy,
             evidence=evidence,
+            originating_currentness=originating_currentness,
         )
         if not authorization.authorized:
             raise ValueError(
@@ -1271,7 +1286,15 @@ class ThermalLiveExecutionEngine:
             session,
             current_context=evidence.current_context,
         )
-        if not currentness.continuation_allowed:
+        provenance_establishing_delivery = (
+            not currentness.continuation_allowed
+            and currentness.reason_code
+            == "thermal_execution_convergence_not_attributed"
+        )
+        if (
+            not currentness.continuation_allowed
+            and not provenance_establishing_delivery
+        ):
             return self._terminal(
                 session,
                 ThermalLiveExecutionStatus.SUPERSEDED,

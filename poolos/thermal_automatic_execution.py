@@ -47,13 +47,17 @@ from .pool_circulation_ownership import (
     PoolCirculationOwnershipRegistry,
 )
 from .operating_baselines import PumpOperatingBaselines
+from .pump_priming_policy import PumpPrimingPolicy
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .spa_thermal_policy import SpaSessionKind
 from .thermal_execution_currentness import (
     ThermalExecutionProgress,
     ThermalExecutionPurposeKind,
 )
-from .thermal_execution_planning import ThermalPlanDisposition
+from .thermal_execution_planning import (
+    ThermalExecutionPlanBuilder,
+    ThermalPlanDisposition,
+)
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
     ThermalLiveCommissioningScope,
@@ -2433,18 +2437,67 @@ class ThermalAutomaticExecutionDriver:
         converged_successor = (
             body.plan.disposition is ThermalPlanDisposition.ALREADY_CONVERGED
         )
-        if not preflight.eligible and not converged_successor:
-            return "automatic_thermal_plan_preflight_failed:" + ",".join(
-                preflight.blocking_reasons
-            )
         safety = body.live_safety_evidence
         if safety is None:
             return "automatic_thermal_live_safety_evidence_unavailable"
+
+        replace_pump_setpoint = (
+            lease.pump_setpoint is not None
+            and lease.pump_setpoint.intended_value
+            != body.plan.desired.required_pump_rpm
+        )
+        replace_heat_source = (
+            lease.heat_source is not None
+            and lease.heat_source.intended_value
+            is not body.plan.desired.selected_source
+        )
+
+        successor_plan = body.plan
+
+        # A compatible purpose transition may arrive after native IntelliCenter
+        # has already reached the successor RPM. Physical equality cannot create
+        # new Pump provenance. If the handoff must replace the predecessor Pump
+        # setpoint, create one normal idempotent SetPumpSpeed operation so the
+        # successor can establish fresh accepted-command provenance.
+        if (
+            converged_successor
+            and replace_pump_setpoint
+            and body.body is ThermalBody.POOL
+            and body.plan.desired.required_pump_rpm is not None
+        ):
+            if safety.pool_pump_circuit_id is None:
+                return "automatic_thermal_live_safety_evidence_unavailable"
+
+            successor_plan = ThermalExecutionPlanBuilder(
+                pump_equipment_id=safety.pool_pump_circuit_id,
+                configured_speed_concept=safety.configured_pump_speed_concept,
+                priming_policy=PumpPrimingPolicy(baselines=self.baselines),
+            ).build(
+                body.plan.desired,
+                body.plan.current,
+                force_pump_command=True,
+            )
+
+            preflight = self.engine.authorization_engine.structural_preflight(
+                successor_plan,
+                policy=frame.live_policy,
+            )
+            if not preflight.eligible:
+                return "automatic_thermal_plan_preflight_failed:" + ",".join(
+                    preflight.blocking_reasons
+                )
+            converged_successor = False
+
+        elif not preflight.eligible and not converged_successor:
+            return "automatic_thermal_plan_preflight_failed:" + ",".join(
+                preflight.blocking_reasons
+            )
+
         successor = None
         if not converged_successor:
             try:
                 successor = self.engine.begin(
-                    body.plan,
+                    successor_plan,
                     policy=frame.live_policy,
                     evidence=safety,
                 )
@@ -2466,7 +2519,7 @@ class ThermalAutomaticExecutionDriver:
             predecessor_generation=lease.generation,
             successor_context=successor_context,
             successor_execution_plan_id=(
-                body.plan.plan_id
+                successor_plan.plan_id
                 if successor is None
                 else successor.execution_plan.plan_id
             ),
@@ -2476,16 +2529,8 @@ class ThermalAutomaticExecutionDriver:
             successor_required_pump_rpm=body.plan.desired.required_pump_rpm,
             successor_heat_source=body.plan.desired.selected_source,
             successor_progress=successor_progress,
-            replace_pump_setpoint=(
-                lease.pump_setpoint is not None
-                and lease.pump_setpoint.intended_value
-                != body.plan.desired.required_pump_rpm
-            ),
-            replace_heat_source=(
-                lease.heat_source is not None
-                and lease.heat_source.intended_value
-                is not body.plan.desired.selected_source
-            ),
+            replace_pump_setpoint=replace_pump_setpoint,
+            replace_heat_source=replace_heat_source,
         )
         decision = self.orchestrator.ownership.handoff(
             request,

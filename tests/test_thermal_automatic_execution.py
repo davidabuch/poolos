@@ -1586,6 +1586,7 @@ def test_quiescent_solar_cold_start_verifies_h0002_before_engagement() -> None:
     assert driver.cleanup_attempt is None
     assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
 
+    calls_before_native_engagement = len(delivery.calls)
     first_engaged = asyncio.run(
         driver.process_epoch(
             _frame(
@@ -1604,9 +1605,40 @@ def test_quiescent_solar_cold_start_verifies_h0002_before_engagement() -> None:
             delivery_factory=factory,
         )
     )
-    assert first_engaged.state is ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT, first_engaged.blocker
+
+    # Native IntelliCenter reached the successor RPM first. Equality does not
+    # establish successor Pump provenance; PoolOS deliberately submits the
+    # idempotent successor command through the normal live execution path.
+    assert first_engaged.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert first_engaged.command_delivery_performed is True
+    assert len(delivery.calls) == calls_before_native_engagement + 1
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2900
+
+    provenance_verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=71),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(0),
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert (
+        provenance_verified.state
+        is ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+    )
     assert driver.solar_engagement_attempt is not None
-    assert driver.solar_engagement_attempt.engaged_since == NOW + timedelta(seconds=70)
+    assert driver.solar_engagement_attempt.engaged_since is None
 
     interrupted = asyncio.run(
         driver.process_epoch(
