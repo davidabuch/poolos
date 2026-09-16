@@ -27,6 +27,7 @@ from .observations import (
     ObservationSourceKind,
     PoolObservation,
 )
+from .physical_command_authority import PhysicalRequestSource
 from .pool_circulation_ownership import (
     FiltrationCirculationLease,
     PoolCirculationOwner,
@@ -884,6 +885,30 @@ class FiltrationAutomaticExecutionDriver:
     ) -> bool:
         if lease is None:
             return False
+
+        attempt = self.attempt
+        body_off_attempt = bool(
+            attempt is not None
+            and attempt.step is FiltrationExecutionStep.BODY_OFF
+            and isinstance(attempt.operation, SetBodyActive)
+            and attempt.operation.active is False
+        )
+        correlated_body_off = bool(
+            body_off_attempt
+            and any(
+                attribution.request_source
+                is PhysicalRequestSource.AUTOMATIC_FILTRATION
+                and attribution.operation == "body_active"
+                and attribution.target == "B1101"
+                for attribution in frame.external_changes.correlated_consequences
+            )
+        )
+        body_off_delivered_at = (
+            attempt.delivered_at
+            if body_off_attempt and attempt is not None
+            else None
+        )
+
         for event in frame.external_changes.events:
             if (
                 event.concept not in POOL_CIRCULATION_TAKEOVER_CONCEPTS
@@ -891,6 +916,26 @@ class FiltrationAutomaticExecutionDriver:
                 or event.observed_at > frame.observed_at
             ):
                 continue
+
+            if (
+                correlated_body_off
+                and body_off_delivered_at is not None
+                and event.observed_at > body_off_delivered_at
+                and (
+                    (
+                        event.concept == "pool.active"
+                        and event.new_value is False
+                    )
+                    or (
+                        event.concept == "pump.rpm"
+                        and isinstance(event.new_value, (int, float))
+                        and not isinstance(event.new_value, bool)
+                        and float(event.new_value) == 0.0
+                    )
+                )
+            ):
+                continue
+
             if (
                 event.concept == POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
                 and frame.pump_session_id is not None
