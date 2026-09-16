@@ -14,6 +14,7 @@ from poolos.filtration_automatic_execution import (
     FiltrationAutomaticDriverState,
     FiltrationAutomaticExecutionDriver,
     FiltrationAutomaticExecutionFrame,
+    FiltrationExecutionStep,
 )
 from poolos.filtration_policy import (
     FiltrationAccountingTracker,
@@ -24,6 +25,10 @@ from poolos.hal import CommandReceipt, CommandStatus
 from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed
 from poolos.intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
+from poolos.physical_command_authority import (
+    NativeConsequenceAttribution,
+    PhysicalRequestSource,
+)
 from poolos.pool_circulation_ownership import (
     PoolCirculationOwner,
     PoolCirculationOwnershipRegistry,
@@ -324,6 +329,167 @@ def test_live_incident_suspends_until_satisfied_then_completes_owned_shutdown() 
     assert driver.ownership.owner is PoolCirculationOwner.NONE
     assert driver.ownership.filtration_lease is None
     assert len(delivery.operations) == commands_before + 1
+
+
+
+def test_correlated_owned_shutdown_is_verified_not_external_takeover() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    commands_before = len(delivery.operations)
+
+    cleanup = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert cleanup.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert cleanup.command_delivery_performed
+    assert driver.attempt is not None
+    assert driver.attempt.step is FiltrationExecutionStep.BODY_OFF
+
+    observed_at = NOW + timedelta(seconds=4)
+    pool_off = ExternalChangeEvent(
+        concept="pool.active",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="B1101",
+        previous_value=True,
+        new_value=False,
+        observed_at=observed_at,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+    pump_off = ExternalChangeEvent(
+        concept="pump.rpm",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="PMP01",
+        previous_value=2600,
+        new_value=0,
+        observed_at=observed_at,
+        external_policy=ExternalChangePolicy.RECONCILE,
+        action_taken="reconcile_native_value",
+        notification_recommended=True,
+        reconciliation_required=True,
+    )
+    correlation = NativeConsequenceAttribution(
+        expectation_id="expect-filtration-body-off",
+        request_id="request-filtration-body-off",
+        request_source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        operation="body_active",
+        target="B1101",
+    )
+
+    stopped = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                observed_at,
+                pool=False,
+                rpm=0,
+                configured=2600,
+                satisfied=True,
+                changes=ExternalChangeBatch(
+                    (pool_off, pump_off),
+                    (correlation,),
+                ),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert stopped.blocker == "automatic_filtration_pool_off_verified"
+    assert stopped.state is FiltrationAutomaticDriverState.BLOCKED
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert driver.ownership.filtration_lease is None
+    assert driver.attempt is None
+    assert len(delivery.operations) == commands_before + 1
+
+    later = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=5),
+                pool=False,
+                rpm=0,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert later.blocker == "automatic_filtration_not_immediately_required"
+    assert later.blocker != "automatic_filtration_reenable_required"
+
+
+def test_uncorrelated_shutdown_still_preempts_owned_filtration() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+
+    cleanup = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert cleanup.command_delivery_performed
+    assert driver.attempt is not None
+    assert driver.attempt.step is FiltrationExecutionStep.BODY_OFF
+
+    observed_at = NOW + timedelta(seconds=4)
+    pool_off = ExternalChangeEvent(
+        concept="pool.active",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="B1101",
+        previous_value=True,
+        new_value=False,
+        observed_at=observed_at,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=True,
+        reconciliation_required=False,
+    )
+
+    preempted = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                observed_at,
+                pool=False,
+                rpm=0,
+                configured=2600,
+                satisfied=True,
+                changes=ExternalChangeBatch((pool_off,)),
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert preempted.state is FiltrationAutomaticDriverState.PREEMPTED
+    assert preempted.blocker == "automatic_filtration_external_takeover"
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+
+    later = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=5),
+                pool=False,
+                rpm=0,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert later.blocker == "automatic_filtration_reenable_required"
 
 
 def test_suspended_filtration_recovers_running_without_redundant_commands() -> None:
