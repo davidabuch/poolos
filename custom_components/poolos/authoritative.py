@@ -150,6 +150,7 @@ def _external_observations(
     *,
     options: Mapping[str, Any],
     states: Mapping[str, HomeAssistantState],
+    read_at: datetime,
 ) -> tuple[
     tuple[PoolObservation, ...],
     tuple[str, ...],
@@ -188,6 +189,23 @@ def _external_observations(
                         source_id=f"home_assistant:{grid_entity}",
                         value_map=value_map,
                     ),
+                )
+                # The configured grid source is a persistent, event-driven
+                # Home Assistant state. An unchanged state does not become
+                # unknown merely because its last state-change/report timestamp
+                # is old: this authoritative snapshot is a fresh read of HA's
+                # current state.
+                observation = PoolObservation(
+                    observation_id=observation.observation_id,
+                    value=observation.value,
+                    unit=observation.unit,
+                    truth_level=observation.truth_level,
+                    observed_at=read_at,
+                    source_kind=observation.source_kind,
+                    source_id=observation.source_id,
+                    quality=observation.quality,
+                    confidence=observation.confidence,
+                    evidence=observation.evidence,
                 )
                 observations.append(observation)
                 if observation.quality is ObservationQuality.INVALID:
@@ -247,6 +265,7 @@ def build_authoritative_snapshot(
     external, external_missing, external_unavailable, mapped_entities = _external_observations(
         options=options,
         states=states,
+        read_at=generated_at,
     )
 
     native_observations: tuple[PoolObservation, ...] = ()

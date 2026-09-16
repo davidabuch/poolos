@@ -7,6 +7,11 @@ import sys
 from types import ModuleType
 from typing import Any
 
+from poolos.grid_outage_confirmation import (
+    GridOutageConfirmationTracker,
+    GridOutageDisposition,
+    GridOutageEvidenceStatus,
+)
 from poolos.homeassistant.observations import HomeAssistantState
 from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
@@ -209,13 +214,14 @@ def _ha_state(
     state: str,
     *,
     attributes: dict[str, object] | None = None,
+    reported_at: datetime = NOW,
 ) -> HomeAssistantState:
     return HomeAssistantState(
         entity_id=entity_id,
         state=state,
-        last_changed=NOW,
-        last_updated=NOW,
-        last_reported=NOW,
+        last_changed=reported_at,
+        last_updated=reported_at,
+        last_reported=reported_at,
         attributes=attributes or {},
     )
 
@@ -283,6 +289,36 @@ def test_behavior_grid_truth_is_still_supplied_by_home_assistant() -> None:
     assert observations["grid.available"].value is True
     assert observations["grid.outage_active"].value is False
     assert observations["grid.available"].source_id == f"home_assistant:{GRID_ENTITY}"
+
+
+def test_behavior_unchanged_stateful_grid_remains_authoritative_when_read_now() -> None:
+    old_report = NOW - timedelta(hours=1)
+    snapshot = build_authoritative_snapshot(
+        native_snapshot=_native_snapshot(),
+        options=_grid_options(),
+        states={
+            GRID_ENTITY: _ha_state(
+                GRID_ENTITY,
+                "on",
+                reported_at=old_report,
+            )
+        },
+        now=NOW,
+    )
+
+    observations = _observations_by_concept(snapshot)
+    grid_outage = observations["grid.outage_active"]
+
+    assert grid_outage.value is False
+    assert grid_outage.observed_at == NOW
+
+    assessment = GridOutageConfirmationTracker().evaluate(
+        grid_outage,
+        evaluated_at=NOW,
+    )
+
+    assert assessment.evidence_status is GridOutageEvidenceStatus.USABLE
+    assert assessment.disposition is GridOutageDisposition.ON_GRID
 
 
 def test_behavior_missing_native_has_no_legacy_pentair_fallback() -> None:
