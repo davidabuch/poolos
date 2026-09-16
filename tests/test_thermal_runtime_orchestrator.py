@@ -16,6 +16,11 @@ from poolos.external_change import (
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.integration import PhysicalHeatMode, ThermalBody
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
+from poolos.ownership_evidence import (
+    OwnershipAuthority,
+    OwnershipDomain,
+    OwnershipHealth,
+)
 from poolos.thermal_live_execution import (
     ThermalLiveExecutionContext,
     ThermalLiveExecutionOwnership,
@@ -293,21 +298,23 @@ def test_owned_solar_accepts_asynchronous_per_concept_native_refreshes() -> None
 
 
 @pytest.mark.parametrize(
-    ("concept", "reason"),
+    ("concept", "reason", "retained_domain"),
     (
-        ("pool.active", "runtime_ownership_preempted:pool_activity_stale"),
-        ("spa.active", "runtime_ownership_preempted:spa_activity_stale"),
-        ("pump.rpm", "runtime_ownership_preempted:pump_evidence_stale"),
+        ("pool.active", "runtime_ownership_preempted:pool_activity_stale", None),
+        ("spa.active", "runtime_ownership_preempted:spa_activity_stale", None),
+        ("pump.rpm", "runtime_ownership_preempted:pump_evidence_stale", OwnershipDomain.PUMP),
         (
             "pool.pump_circuit.configured_speed_rpm",
             "runtime_ownership_preempted:pump_setpoint_evidence_stale",
+            OwnershipDomain.PUMP,
         ),
-        ("pool.raw_heater_id", "runtime_ownership_preempted:source_evidence_stale"),
+        ("pool.raw_heater_id", "runtime_ownership_preempted:source_evidence_stale", OwnershipDomain.THERMAL),
     ),
 )
 def test_owned_native_state_beyond_source_cadence_margin_still_fails_closed(
     concept: str,
     reason: str,
+    retained_domain: OwnershipDomain | None,
 ) -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     _establish_pool_full_ownership(orchestrator, at=NOW)
@@ -326,8 +333,16 @@ def test_owned_native_state_beyond_source_cadence_margin_still_fails_closed(
         observations=observations,
     )
 
-    assert result.lifecycle is ThermalOrchestrationLifecycle.PREEMPTED
-    assert result.blocking_reason == reason
+    if retained_domain is None:
+        assert result.lifecycle is ThermalOrchestrationLifecycle.PREEMPTED
+        assert result.blocking_reason == reason
+    else:
+        assert result.lifecycle is ThermalOrchestrationLifecycle.OWNED
+        lease = result.ownership_decision.current_state.lease
+        assert lease is not None
+        assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+        assert lease.domain_state(retained_domain).health is OwnershipHealth.RECONCILING
+        assert lease.domain_state(retained_domain).command_blocker == "ownership_evidence_unusable"
 
 
 def test_target_inactive_with_other_body_inactive_remains_cold_start_candidate() -> None:
@@ -822,7 +837,20 @@ def test_unusable_live_evidence_cannot_retain_runtime_ownership(
 
     result = _refresh(orchestrator, later, observations=observations)
 
-    assert result.ownership_status is ThermalRuntimeOwnershipStatus.PREEMPTED
+    affected_domain = {
+        "pump.rpm": OwnershipDomain.PUMP,
+        "pool.pump_circuit.configured_speed_rpm": OwnershipDomain.PUMP,
+        "pool.raw_heater_id": OwnershipDomain.THERMAL,
+    }.get(concept)
+    if affected_domain is None:
+        assert result.ownership_status is ThermalRuntimeOwnershipStatus.PREEMPTED
+    else:
+        assert result.ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+        lease = result.ownership_decision.current_state.lease
+        assert lease is not None
+        assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+        assert lease.domain_state(affected_domain).health is OwnershipHealth.RECONCILING
+        assert lease.domain_state(affected_domain).command_blocker == "ownership_evidence_unusable"
     assert result.command_delivery_performed is False
 
 
@@ -956,7 +984,7 @@ def test_stale_latest_batch_cannot_preempt_new_orchestrator_lease() -> None:
     assert second.ownership_status is ThermalRuntimeOwnershipStatus.OWNED
 
 
-def test_postlease_external_batch_still_preempts_orchestrator_lease() -> None:
+def test_postlease_unattributed_batch_cannot_poison_matching_current_truth() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     _establish_pool_pump_ownership(orchestrator, at=NOW)
     later = NOW + timedelta(seconds=1)
@@ -984,8 +1012,13 @@ def test_postlease_external_batch_still_preempts_orchestrator_lease() -> None:
         external_changes=batch,
     )
 
-    assert result.ownership_status is ThermalRuntimeOwnershipStatus.PREEMPTED
-    assert result.lifecycle is ThermalOrchestrationLifecycle.PREEMPTED
+    assert result.ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+    assert result.lifecycle is ThermalOrchestrationLifecycle.OWNED
+    lease = result.ownership_decision.current_state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.NONE
+    assert lease.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.STABLE
 
 
 def test_new_plan_supersedes_existing_runtime_ownership() -> None:
@@ -1008,16 +1041,17 @@ def test_new_plan_supersedes_existing_runtime_ownership() -> None:
 
 
 @pytest.mark.parametrize(
-    "observations",
+    ("observations", "preempted"),
     [
-        _observations(NOW, pool_active=False),
-        _observations(NOW, pool_active=False, spa_active=True),
-        _observations(NOW, pump_rpm=2600),
-        _observations(NOW, configured_rpm=2600),
+        (_observations(NOW, pool_active=False), True),
+        (_observations(NOW, pool_active=False, spa_active=True), True),
+        (_observations(NOW, pump_rpm=2600), False),
+        (_observations(NOW, configured_rpm=2600), False),
     ],
 )
 def test_current_native_divergence_preempts_owned_lifecycle(
     observations: tuple[PoolObservation, ...],
+    preempted: bool,
 ) -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     _establish_pool_pump_ownership(orchestrator, at=NOW)
@@ -1029,7 +1063,16 @@ def test_current_native_divergence_preempts_owned_lifecycle(
 
     result = _refresh(orchestrator, later, observations=shifted)
 
-    assert result.ownership_status is ThermalRuntimeOwnershipStatus.PREEMPTED
+    assert result.ownership_status is (
+        ThermalRuntimeOwnershipStatus.PREEMPTED
+        if preempted else ThermalRuntimeOwnershipStatus.OWNED
+    )
+    if not preempted:
+        lease = result.ownership_decision.current_state.lease
+        assert lease is not None
+        assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.NONE
+        assert lease.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+        assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.RECONCILING
     assert result.command_delivery_performed is False
 
 

@@ -13,6 +13,7 @@ from poolos.physical_command_authority import (
     AutomaticThermalDispatchPurpose,
     PhysicalAuthorityReason,
     PhysicalRequestSource,
+    PhysicalCommandRequest,
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.circulation_successor import FiltrationSuccessorEvidence
@@ -24,7 +25,8 @@ from poolos.integration import (
     ThermalBody,
 )
 from poolos.external_change import ExternalChangeBatch
-from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain, PositiveOperatorEvidence
+from poolos.pool_circulation_ownership import PoolCirculationOwner, PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pump_speed_session import PumpSpeedSessionRuntime
 from poolos.pool_automatic_control_suppression import (
@@ -35,6 +37,7 @@ from poolos.thermal_automatic_execution import (
     ThermalAutomaticDeliveryFactory,
     ThermalAutomaticExecutionDriver,
     ThermalAutomaticExecutionFrame,
+    filtration_source_off_precondition,
 )
 from poolos.thermal_circulation_cleanup import (
     ThermalCirculationCleanupAction,
@@ -274,6 +277,130 @@ class PoolOSThermalAutomaticRuntime:
         )
         self._sync_authority_configuration()
 
+        self.authority.ownership_permission_reader = self._domain_command_permitted
+        self.authority.operator_request_listener = self._record_operator_request
+
+    def _request_domain(self, request: PhysicalCommandRequest) -> OwnershipDomain | None:
+        filtration = self.circulation_ownership.filtration_lease
+        if filtration is not None and self.circulation_ownership.owner in {
+            PoolCirculationOwner.FILTRATION, PoolCirculationOwner.FILTRATION_ACQUIRING,
+            PoolCirculationOwner.FILTRATION_SUSPENDED,
+            PoolCirculationOwner.FILTRATION_TO_THERMAL,
+        }:
+            if request.operation == "pump_circuit_speed" and request.target == filtration.pool_pump_circuit_id:
+                return OwnershipDomain.PUMP
+            if request.target == "B1101":
+                return {"body_active": OwnershipDomain.BODY,
+                        "body_heat_source": OwnershipDomain.THERMAL}.get(request.operation)
+            return None
+        lease = self.orchestrator.ownership.state.lease
+        if lease is None:
+            return None
+        body_id = "B1101" if lease.body is ThermalBody.POOL else "B1202"
+        if request.operation == "pump_circuit_speed":
+            pump_session = (
+                None
+                if self.pump_speed_session is None
+                else self.pump_speed_session.session.snapshot
+            )
+            if (
+                pump_session is not None
+                and pump_session.active
+                and pump_session.body is not None
+                and pump_session.body.value == lease.body.value
+                and pump_session.pump_circuit_id == request.target
+            ):
+                return OwnershipDomain.PUMP
+            currentness = lease.originating_currentness
+            pump_ids = set() if currentness is None else {
+                operation.equipment_id for operation in currentness.residual_plan.operations
+                if operation.operation_type == "SetPumpSpeed"
+            }
+            return OwnershipDomain.PUMP if pump_ids == {request.target} else None
+        if request.target != body_id:
+            return None
+        return {"body_active": OwnershipDomain.BODY,
+                "body_heat_source": OwnershipDomain.THERMAL}.get(request.operation)
+
+    def _domain_command_permitted(self, request: PhysicalCommandRequest) -> bool:
+        context = request.automatic_thermal_context
+        if request.source is PhysicalRequestSource.AUTOMATIC_FILTRATION:
+            if self.pool_automatic_control.blocks_opportunity("filtration"):
+                return False
+        elif request.source is PhysicalRequestSource.AUTOMATIC_THERMAL:
+            if context is not None and context.body == "pool":
+                frame = self._latest_frame
+                filtration_precondition = bool(
+                    frame is not None and frame.thermal is not None
+                    and filtration_source_off_precondition(frame.thermal.pool)
+                    and request.operation == "body_heat_source"
+                    and request.target == "B1101" and request.requested_value == "00000"
+                )
+                family = "filtration" if filtration_precondition else "thermal"
+                if self.pool_automatic_control.blocks_opportunity(family):
+                    return False
+        elif (request.source is PhysicalRequestSource.RECONCILIATION
+              and self.pool_automatic_control.state.suppressed):
+            # A generic reconciliation request has no independent-purpose proof.
+            return False
+        domain = self._request_domain(request)
+        lease = self.orchestrator.ownership.state.lease
+        if lease is not None and domain is OwnershipDomain.BODY and request.requested_value is False:
+            source = lease.domain_state(OwnershipDomain.THERMAL)
+            if source.authority is OwnershipAuthority.OPERATOR:
+                operator = source.positive_operator_evidence
+                frame = self._latest_frame
+                concept = "pool.raw_heater_id" if lease.body is ThermalBody.POOL else "spa.raw_heater_id"
+                observation = next((item for item in frame.observations
+                                    if item.observation_id == concept), None) if frame else None
+                if (operator is None or observation is None
+                    or observation.observed_at is None
+                    or observation.observed_at <= operator.requested_at
+                    or observation.value != "00000"):
+                    return False
+        if lease is not None and domain is OwnershipDomain.THERMAL and request.requested_value != "00000":
+            pump = lease.domain_state(OwnershipDomain.PUMP)
+            if pump.authority is OwnershipAuthority.OPERATOR:
+                # Energizing a source needs newly reviewed flow evidence; an
+                # operator speed request cannot inherit an older pump proof.
+                # Source Off remains eligible through its independent gate.
+                return False
+        if domain is not None and self.circulation_ownership.filtration_lease is not None:
+            return self.circulation_ownership.domain_permission_blocker(domain) is None
+        context = request.automatic_thermal_context
+        reduction = bool(context is not None and context.purpose in {
+            AutomaticThermalDispatchPurpose.TERMINATION,
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        })
+        return domain is None or self.orchestrator.ownership.domain_permission_blocker(
+            domain, completion_reduction=reduction,
+        ) is None
+
+    def _record_operator_request(self, request: PhysicalCommandRequest, at: datetime) -> None:
+        domain = self._request_domain(request)
+        filtration = self.circulation_ownership.filtration_lease
+        if domain is not None and filtration is not None:
+            self.circulation_ownership.record_operator_intent(PositiveOperatorEvidence(
+                request.request_id,
+                filtration.body_session_generation or filtration.generation,
+                filtration.body_session_id or filtration.session_id,
+                domain, request.target, at,
+            ), evaluated_at=at)
+            return
+        lease = self.orchestrator.ownership.state.lease
+        if domain is None or lease is None:
+            return
+        assert lease.body_session_id is not None and lease.body_session_generation is not None
+        equipment = (
+            lease.body.value if domain is OwnershipDomain.BODY else "pump.rpm"
+            if domain is OwnershipDomain.PUMP else
+            f"{'pool' if lease.body is ThermalBody.POOL else 'spa'}.raw_heater_id"
+        )
+        self.orchestrator.ownership.record_operator_intent(PositiveOperatorEvidence(
+            request.request_id, lease.body_session_generation, lease.body_session_id,
+            domain, equipment, at,
+        ), evaluated_at=at)
+
     @property
     def enabled(self) -> bool:
         return self._desired_enabled
@@ -313,6 +440,15 @@ class PoolOSThermalAutomaticRuntime:
 
         if self._unloaded:
             return
+        eligible = None
+        if (thermal is not None and thermal.generated_at == snapshot.generated_at
+                and not thermal.pool.evidence_blockers):
+            purpose = thermal.pool.execution_currentness.purpose
+            eligible = (purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+                        or purpose.selected_source is not PhysicalHeatMode.OFF)
+        self.pool_automatic_control.observe_opportunity(
+            "thermal", eligible=eligible, observed_at=snapshot.generated_at,
+        )
         reason = self.authority.base_authority_reason
         ready = reason is PhysicalAuthorityReason.ALLOWED
         pump_session = (
@@ -365,8 +501,15 @@ class PoolOSThermalAutomaticRuntime:
                 )
             ),
             external_changes=external_changes,
+            pool_opportunity_id=self.pool_automatic_control.opportunity_id(
+                "filtration" if thermal is not None
+                and filtration_source_off_precondition(thermal.pool) else "thermal"
+            ),
             pool_automatic_control_suppressed=(
-                self.pool_automatic_control.state.suppressed
+                self.pool_automatic_control.blocks_opportunity(
+                    "filtration" if thermal is not None
+                    and filtration_source_off_precondition(thermal.pool) else "thermal"
+                )
             ),
             spa_automatic_control_suppressed=(
                 self.spa_automatic_control.state.suppressed
@@ -409,6 +552,8 @@ class PoolOSThermalAutomaticRuntime:
         if self._unloaded:
             return
         self._unloaded = True
+        self.authority.ownership_permission_reader = None
+        self.authority.operator_request_listener = None
         now = datetime.now(UTC)
         self.authority.unload_automatic_thermal_driver()
         self.driver.unload(unloaded_at=now)

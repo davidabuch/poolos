@@ -25,6 +25,7 @@ from poolos.hal import CommandReceipt, CommandStatus
 from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed
 from poolos.intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
+from poolos.ownership_evidence import OwnershipDomain, OwnershipHealth
 from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
@@ -257,7 +258,11 @@ def test_verified_filtration_transient_pool_evidence_loss_retains_cleanup_proven
     assert suspended.blocker == "automatic_filtration_pool_activity_unusable"
     assert not suspended.command_delivery_performed
     assert len(delivery.operations) == commands_before
-    assert driver.ownership.filtration_lease == lease
+    retained = driver.ownership.filtration_lease
+    assert retained is not None
+    assert retained.lease_id == lease.lease_id
+    assert retained.body_activation == lease.body_activation
+    assert retained.pump_setpoint == lease.pump_setpoint
     assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
 
 
@@ -293,7 +298,10 @@ def test_live_incident_suspends_until_satisfied_then_completes_owned_shutdown() 
         )
     )
     assert still_suspended.state is FiltrationAutomaticDriverState.SUSPENDED
-    assert driver.ownership.filtration_lease == lease
+    retained = driver.ownership.filtration_lease
+    assert retained is not None
+    assert retained.lease_id == lease.lease_id
+    assert retained.body_activation == lease.body_activation
     assert len(delivery.operations) == commands_before
 
     cleanup = asyncio.run(
@@ -473,8 +481,8 @@ def test_uncorrelated_shutdown_still_preempts_owned_filtration() -> None:
         )
     )
 
-    assert preempted.state is FiltrationAutomaticDriverState.PREEMPTED
-    assert preempted.blocker == "automatic_filtration_external_takeover"
+    assert preempted.state is FiltrationAutomaticDriverState.BLOCKED
+    assert preempted.blocker == "automatic_filtration_pool_off_verified"
     assert driver.ownership.owner is PoolCirculationOwner.NONE
 
     later = asyncio.run(
@@ -489,7 +497,7 @@ def test_uncorrelated_shutdown_still_preempts_owned_filtration() -> None:
             delivery_factory=factory,
         )
     )
-    assert later.blocker == "automatic_filtration_reenable_required"
+    assert later.blocker == "automatic_filtration_not_immediately_required"
 
 
 def test_suspended_filtration_recovers_running_without_redundant_commands() -> None:
@@ -800,7 +808,10 @@ def test_operator_disable_and_repeated_unusable_epochs_retain_one_bounded_lease(
             )
         )
         assert suspended.state is FiltrationAutomaticDriverState.SUSPENDED
-        assert driver.ownership.filtration_lease == lease
+        retained = driver.ownership.filtration_lease
+        assert retained is not None
+        assert retained.lease_id == lease.lease_id
+        assert retained.body_activation == lease.body_activation
         assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
     driver.set_enabled(
         False,
@@ -820,7 +831,10 @@ def test_operator_disable_and_repeated_unusable_epochs_retain_one_bounded_lease(
         )
     )
     assert still_suspended.state is FiltrationAutomaticDriverState.SUSPENDED
-    assert driver.ownership.filtration_lease == lease
+    retained = driver.ownership.filtration_lease
+    assert retained is not None
+    assert retained.lease_id == lease.lease_id
+    assert retained.body_activation == lease.body_activation
     assert len(delivery.operations) == commands_before
 
     cleanup = asyncio.run(
@@ -1149,8 +1163,10 @@ def test_verification_timeout_fails_closed_without_fabricated_ownership() -> Non
     )
     assert timed_out.state is FiltrationAutomaticDriverState.FAILED
     assert timed_out.blocker == "automatic_filtration_verification_timed_out"
-    assert driver.ownership.owner is PoolCirculationOwner.NONE
-    assert driver.ownership.filtration_lease is None
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_ACQUIRING
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.body_activation is not None
+    assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.FAULTED
     assert len(delivery.operations) == 2
 
 
@@ -1184,7 +1200,7 @@ def test_manual_pool_off_and_dynamic_pump_identity_change_preempt_without_restar
     assert len(other_delivery.operations) == 1
 
 
-def test_external_change_after_lease_preempts_but_prelease_event_does_not() -> None:
+def test_unattributed_change_before_or_after_lease_does_not_fabricate_takeover() -> None:
     driver, delivery, factory = _enabled_driver()
     asyncio.run(driver.process_epoch(_frame(NOW, pool=False, rpm=0, configured=2600), delivery_factory=factory))
     prelease = ExternalChangeEvent(
@@ -1225,8 +1241,8 @@ def test_external_change_after_lease_preempts_but_prelease_event_does_not() -> N
             delivery_factory=factory,
         )
     )
-    assert preempted.state is FiltrationAutomaticDriverState.PREEMPTED
-    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert preempted.state is FiltrationAutomaticDriverState.OWNED
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
 
 
 def test_verified_session_rpm_override_relinquishes_only_pump_provenance() -> None:
@@ -1407,7 +1423,7 @@ def test_normal_startup_prime_and_aligned_actual_rpm_do_not_self_preempt() -> No
     assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
 
 
-def test_material_actual_rpm_change_after_pump_provenance_preempts() -> None:
+def test_material_actual_rpm_change_after_pump_provenance_reconciles() -> None:
     driver, delivery, factory = _enabled_driver()
     asyncio.run(driver.process_epoch(_frame(NOW, pool=False, rpm=0, configured=2600), delivery_factory=factory))
     asyncio.run(driver.process_epoch(_frame(NOW + timedelta(seconds=1), pool=True, rpm=3000, configured=2600), delivery_factory=factory))
@@ -1435,8 +1451,11 @@ def test_material_actual_rpm_change_after_pump_provenance_preempts() -> None:
             delivery_factory=factory,
         )
     )
-    assert result.state is FiltrationAutomaticDriverState.PREEMPTED
-    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert result.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_ACQUIRING
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.CONVERGING
 
 
 def test_disable_owned_session_uses_fresh_provenance_bound_body_cleanup() -> None:

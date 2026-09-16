@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 import math
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .operating_baselines import PumpOperatingBaselines
@@ -69,6 +69,7 @@ class PhysicalAuthorityReason(StrEnum):
     GRID_OUTAGE_OPERATION_UNAUTHORIZED = "grid_outage_operation_unauthorized"
     GRID_OUTAGE_DRIVER_UNLOADED = "grid_outage_driver_unloaded"
     MANUAL_PUMP_SESSION_STALE = "manual_pump_session_stale"
+    OWNERSHIP_DOMAIN_COMMAND_DENIED = "ownership_domain_command_denied"
 
 
 class GridOutageDispatchPurpose(StrEnum):
@@ -669,6 +670,18 @@ class PoolOSPhysicalCommandAuthority:
         if self.expectation_limit <= 0:
             raise ValueError("expectation_limit must be positive")
 
+    ownership_permission_reader: Callable[[PhysicalCommandRequest], bool] | None = field(
+        default=None, repr=False,
+    )
+    operator_request_listener: Callable[[PhysicalCommandRequest, datetime], None] | None = field(
+        default=None, repr=False,
+    )
+
+    def note_operator_request(self, request: PhysicalCommandRequest, *, at: datetime) -> None:
+        """Report explicit requests only; native observations never call this."""
+        if request.source is PhysicalRequestSource.MANUAL and self.operator_request_listener is not None:
+            self.operator_request_listener(request, at)
+
     @property
     def maintenance_resolved(self) -> bool:
         return self._maintenance_mode is not None
@@ -1224,6 +1237,15 @@ class PoolOSPhysicalCommandAuthority:
             and request.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
         ):
             reason = self._grid_outage_reason(request)
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source in {PhysicalRequestSource.AUTOMATIC_THERMAL,
+                                   PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                                   PhysicalRequestSource.RECONCILIATION}
+            and self.ownership_permission_reader is not None
+            and not self.ownership_permission_reader(request)
+        ):
+            reason = PhysicalAuthorityReason.OWNERSHIP_DOMAIN_COMMAND_DENIED
         return PhysicalAuthorityDecision(
             allowed=reason is PhysicalAuthorityReason.ALLOWED,
             reason=reason,

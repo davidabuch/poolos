@@ -16,6 +16,25 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 16, 2026 — ownership contract Stage 2 implementation candidate
+
+Stage 2 is implemented on `feat/ownership-lifecycle-reconciliation`, based on
+merged Stage-1 main `629b84e7517669e9dd5b98285ec1357a0b9086f4`. See the
+[Stage 2 implementation record](ownership/STAGE_2_LIFECYCLE_RECONCILIATION.md).
+
+The candidate adds typed ownership evidence, domain-specific BODY/PUMP/THERMAL
+authority and health, fixed bounded reconciliation, exact positive operator
+request binding, continuous BODY identity across Filtration/Solar handoffs,
+Solar preparation-versus-active RPM semantics, pump-zero shutdown verification,
+and semantic-opportunity cancellation. Unattributed mismatch and command failure
+no longer fabricate External ownership or silently abandon BODY completion.
+
+The deterministic normal-day regression closes OFF -> Filtration -> Solar ->
+Filtration -> Pool OFF/pump 0 and proves a later independent opportunity can
+acquire a fresh generation. This is software validation only. Reset, broad
+restart adoption, durable overrides, full Hot Tub adoption/recovery and all
+remaining 90-scenario work remain outside this candidate.
+
 ### September 16, 2026 — ownership contract Stage 1
 
 Stage 1 freezes all 90 accepted ownership scenarios against reviewed main
@@ -34,11 +53,9 @@ permission are separate. Unsafe commands remain blocked. Typed continuity,
 prospective adoption and bounded recovery must preserve legitimate autonomy
 without manufacturing receipts or reviving obsolete execution generations.
 
-This stage changes documentation only. Existing production behavior and test
-expectations remain unchanged, including known conflicts recorded in the matrix.
-Implementation, new recovery/adoption/Reset authority and commissioning need
-separate authorization. The next work is the staged ownership implementation in
-the mapping guide, not the historical "Slice 1" baseline work below.
+Stage 1 changed documentation only. The separately authorized Stage 2 candidate
+above implements a bounded subset; remaining recovery/adoption/Reset authority
+and commissioning still need separate review.
 
 ### September 12, 2026 — v0.11.15 release preparation
 

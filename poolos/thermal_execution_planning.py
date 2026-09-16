@@ -29,6 +29,7 @@ from .intellicenter_readonly import (
     is_pmpcirc_native_id,
 )
 from .pump_priming_policy import PumpPrimingPolicy
+from .operating_baselines import PumpOperatingBaselines
 from .spa_thermal_policy import SpaHeatingMode, SpaPolicyAssessment, SpaPolicyInput
 from .thermal_source_policy import (
     PoolHeatingMode,
@@ -187,6 +188,7 @@ def desired_pool_state(
     *,
     evidence_usable: bool = True,
     blockers: tuple[str, ...] = (),
+    baselines: PumpOperatingBaselines = PumpOperatingBaselines(),
 ) -> ThermalDesiredState:
     """Preserve one existing pool-policy result as coupled desired state."""
 
@@ -228,7 +230,7 @@ def desired_pool_state(
         "gas_allowed" if observation.permissions.gas_allowed else "gas_vetoed",
         "solar_allowed" if observation.permissions.solar_allowed else "solar_vetoed",
     )
-    evidence = {
+    evidence: dict[str, Any] = {
         "pool_temperature_f": observation.trusted_pool_temperature_f,
         "pool_target_f": observation.pool_target_f,
         "collector_temperature_f": observation.collector_temperature_f,
@@ -249,14 +251,20 @@ def desired_pool_state(
         "forecast_gate_applied": assessment.forecast_gate_applied,
         "forecast_gate_passed": assessment.forecast_gate_passed,
     }
+    preparing_solar = selected_source is PhysicalHeatMode.SOLAR and observation.solar_active is not True
+    required_rpm = baselines.filtration_rpm if preparing_solar else assessment.recommended_pump_rpm
+    evidence["active_operating_purpose"] = (
+        "ordinary_circulation" if preparing_solar else
+        "solar_heating" if selected_source is PhysicalHeatMode.SOLAR else "gas_heating"
+    )
     return ThermalDesiredState(
         evaluated_at=assessment.evaluated_at,
         body=ThermalBody.POOL,
         requested_mode=observation.heating_mode.value,
         selected_source=selected_source,
-        required_pump_rpm=assessment.recommended_pump_rpm,
+        required_pump_rpm=required_rpm,
         reason_code=assessment.reason_code,
-        rpm_reason_code=_rpm_reason(assessment.mode.value, assessment.recommended_pump_rpm),
+        rpm_reason_code=_rpm_reason("solar_preparation" if preparing_solar else assessment.mode.value, required_rpm),
         rationale=rationale,
         criteria=criteria,
         evidence=evidence,

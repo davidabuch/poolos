@@ -11,8 +11,8 @@ from typing import Mapping
 from .external_change import (
     ExternalChangeBatch,
     POOL_CIRCULATION_TAKEOVER_CONCEPTS,
-    pump_event_conflicts_with_provenance,
 )
+from .ownership_evidence import OwnershipDomain
 from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
 from .integration import PhysicalHeatMode, ThermalBody
@@ -165,6 +165,7 @@ class CirculationSuccessorAssessment:
     pump_handoff_eligible: bool
     physical_handoff_ready: bool
     critical_evidence_current: bool
+    topology_interruption: str | None = None
     command_delivery_enabled: bool = False
 
     def __post_init__(self) -> None:
@@ -214,6 +215,7 @@ class CirculationSuccessorAssessment:
                 "circulation_shared_hydraulic_blocker": self.shared_hydraulic_blocker,
                 "circulation_shared_hydraulic_evidence_current": self.shared_hydraulic_evidence_current,
                 "circulation_external_takeover": self.external_takeover,
+                "circulation_topology_interruption": self.topology_interruption,
                 "circulation_topology_conflict": self.topology_conflict,
                 "circulation_keep_body_active": self.keep_body_active,
                 "body_deactivation_eligible": self.body_deactivation_eligible,
@@ -266,6 +268,11 @@ class CirculationSuccessorArbitrator:
                 "circulation_pool_topology_not_exclusive",
                 facts,
                 successor=CirculationSuccessorKind.SPA_OR_TOPOLOGY,
+            )
+        if facts.topology_interruption is not None:
+            return _blocked(
+                at, "circulation_hydraulic_continuity_interrupted:" + facts.topology_interruption,
+                facts, successor=CirculationSuccessorKind.SPA_OR_TOPOLOGY,
             )
         if not facts.shared_hydraulic_evidence_current:
             return _blocked(at, "circulation_shared_hydraulic_evidence_not_current", facts)
@@ -355,6 +362,7 @@ class _Facts:
     shared_hydraulic_evidence_current: bool
     external_takeover: bool
     topology_conflict: bool
+    topology_interruption: str | None
 
 
 def _facts(
@@ -452,7 +460,28 @@ def _facts(
             entitlement, evidence.external_changes, evidence.evaluated_at
         ),
         topology_conflict=(evidence.pool_active is not True or evidence.spa_active is not False),
+        topology_interruption=_topology_interruption(entitlement, evidence),
     )
+
+
+def _topology_interruption(
+    entitlement: ThermalResidualTerminationEntitlement | None,
+    evidence: ThermalRuntimeOwnershipEvidence,
+) -> str | None:
+    """A recorded hydraulic interruption denies continuity, without actor attribution."""
+    if entitlement is None:
+        return None
+    for event in evidence.external_changes.events:
+        if not (entitlement.originating_lease_established_at
+                <= event.observed_at <= evidence.evaluated_at):
+            continue
+        if event.new_value is True and (
+            event.concept == "spa.active"
+            or SHARED_HYDRAULIC_SAFETY_BY_CONCEPT.get(event.concept)
+            is SharedHydraulicSafetyClass.CONFLICTING
+        ):
+            return event.concept
+    return None
 
 
 def _external_takeover(
@@ -470,18 +499,14 @@ def _external_takeover(
             <= evaluated_at
         ):
             continue
-        if (
-            event.concept == "pump.rpm"
-            and entitlement.pump_setpoint is not None
-            and not pump_event_conflicts_with_provenance(
-                event,
-                intended_rpm=entitlement.pump_setpoint.intended_value,
-                provenance_verified=True,
-                accepted_at=entitlement.pump_setpoint_accepted_at,
-            )
+        if event.operator_applies(
+            generation=entitlement.body_session_generation or entitlement.generation,
+            session_id=entitlement.body_session_id or entitlement.lease_id,
+            domain=OwnershipDomain.BODY, equipment_id=entitlement.body.value,
+            established_at=entitlement.originating_lease_established_at,
+            evaluated_at=evaluated_at,
         ):
-            continue
-        return True
+            return True
     return False
 
 
@@ -491,6 +516,14 @@ def _pump_handoff_eligible(
     filtration: FiltrationSuccessorEvidence,
 ) -> bool:
     pump = entitlement.pump_setpoint
+    if any(event.operator_applies(
+        generation=entitlement.body_session_generation or entitlement.generation,
+        session_id=entitlement.body_session_id or entitlement.lease_id,
+        domain=OwnershipDomain.PUMP, equipment_id="pump.rpm",
+        established_at=entitlement.originating_lease_established_at,
+        evaluated_at=evidence.evaluated_at,
+    ) for event in evidence.external_changes.events):
+        return False
     if filtration.successor_target_rpm is None:
         return False
     if pump is None and entitlement.body_activation is None:
@@ -611,6 +644,7 @@ def _result(
         shared_hydraulic_evidence_current=facts.shared_hydraulic_evidence_current,
         external_takeover=facts.external_takeover,
         topology_conflict=facts.topology_conflict,
+        topology_interruption=facts.topology_interruption,
         keep_body_active=keep_body_active,
         body_deactivation_eligible=body_deactivation_eligible,
         pump_handoff_eligible=pump_handoff_eligible,

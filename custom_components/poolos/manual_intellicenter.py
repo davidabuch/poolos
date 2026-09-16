@@ -747,6 +747,7 @@ class ManualIntelliCenterControl:
     ) -> None:
         """Reserve, recheck inside the command lock, and dispatch once."""
 
+        self._command_authority.note_operator_request(request, at=datetime.now(UTC))
         await self._require_available()
         now = datetime.now(UTC)
         expectation_ids: list[str] = []

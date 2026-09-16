@@ -13,14 +13,24 @@ from enum import StrEnum
 from hashlib import sha256
 import json
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:
+    from .pool_circulation_ownership import FiltrationToThermalHandoff
 
 from .external_change import (
     ExternalChangeBatch,
     ExternalChangeEvent,
-    pump_event_conflicts_with_provenance,
 )
-from .integration import PhysicalHeatMode, ThermalBody
+from .integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed, ThermalBody
+from .ownership_evidence import (
+    DomainOwnershipState,
+    OwnershipAuthority,
+    OwnershipDomain,
+    OwnershipHealth,
+    OwnershipEvidenceKind,
+    PositiveOperatorEvidence,
+)
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .thermal_execution_currentness import (
     ThermalExecutionCompatibilityDisposition,
@@ -131,6 +141,8 @@ class ThermalResidualTerminationEntitlement:
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
     heat_source: ThermalRuntimeConceptProvenance | None = None
     pump_setpoint_accepted_at: datetime | None = None
+    body_session_id: str | None = None
+    body_session_generation: int | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -225,6 +237,15 @@ class ThermalRuntimeOwnershipLease:
     heat_source_accepted_at: datetime | None = None
     pump_session_id: str | None = None
     pump_session_effective_rpm: int | None = None
+    domain_states: tuple[DomainOwnershipState, ...] = ()
+    body_session_id: str | None = None
+    body_session_generation: int | None = None
+
+    def domain_state(self, domain: OwnershipDomain) -> DomainOwnershipState:
+        return next(
+            (state for state in self.domain_states if state.domain is domain),
+            DomainOwnershipState(domain),
+        )
 
     def __post_init__(self) -> None:
         for name in (
@@ -307,18 +328,39 @@ class ThermalRuntimeOwnershipLease:
             raise ValueError("pump session relinquishment binding must be paired")
         if self.pump_session_id is not None and self.pump_setpoint is not None:
             raise ValueError("owned and relinquished pump concepts are exclusive")
+        states = {state.domain: state for state in self.domain_states}
+        for domain, origin in (
+            (OwnershipDomain.BODY, self.body_activation),
+            (OwnershipDomain.PUMP, self.pump_setpoint),
+            (OwnershipDomain.THERMAL, self.heat_source),
+        ):
+            if origin is None and domain in states and states[domain].authority is OwnershipAuthority.POOLOS:
+                del states[domain]
+            if origin is not None and domain not in states:
+                states[domain] = DomainOwnershipState(
+                    domain, authority=OwnershipAuthority.POOLOS,
+                    health=OwnershipHealth.PENDING, command_blocker=None,
+                )
+        object.__setattr__(self, "domain_states", tuple(states.values()))
+        if self.body_session_id is None:
+            object.__setattr__(self, "body_session_id", self.lease_id)
+        if self.body_session_generation is None:
+            object.__setattr__(self, "body_session_generation", self.generation)
 
     @property
     def owns_body_activation(self) -> bool:
-        return self.body_activation is not None
+        return (self.body_activation is not None
+                and self.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS)
 
     @property
     def owns_pump_setpoint(self) -> bool:
-        return self.pump_setpoint is not None
+        return (self.pump_setpoint is not None
+                and self.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS)
 
     @property
     def owns_heat_source(self) -> bool:
-        return self.heat_source is not None
+        return (self.heat_source is not None
+                and self.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -712,6 +754,9 @@ class ThermalRuntimeOwnershipManager:
                 evidence.evaluated_at,
             )
         if lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            for event in evidence.external_changes.events:
+                if event.positive_operator_evidence is not None:
+                    self.record_operator_intent(event.positive_operator_evidence, evaluated_at=evidence.evaluated_at)
             return self._decision(
                 ThermalRuntimeOwnershipDisposition.DENIED,
                 "runtime_ownership_terminal",
@@ -719,6 +764,7 @@ class ThermalRuntimeOwnershipManager:
                 evidence.evaluated_at,
             )
         lease = self._confirm_accepted_consequence(lease, evidence)
+        lease = self._observe_domains(lease, evidence)
         override_transition = _pump_session_override_transition(lease, evidence)
         if override_transition is PumpSpeedOverrideState.PENDING:
             reason = self._continuation_failure_reason(
@@ -800,6 +846,80 @@ class ThermalRuntimeOwnershipManager:
             previous,
             evidence.evaluated_at,
         )
+
+    def _observe_domains(
+        self,
+        lease: ThermalRuntimeOwnershipLease,
+        evidence: ThermalRuntimeOwnershipEvidence,
+    ) -> ThermalRuntimeOwnershipLease:
+        """Assess existing domain origins without turning drift into an owner."""
+        if evidence.evaluated_at < lease.last_confirmed_at:
+            return lease
+        progress = lease.execution_progress
+        role = (None if progress is None or progress.accepted_current is None
+                else progress.accepted_current.role)
+        prefix = "pool" if lease.body is ThermalBody.POOL else "spa"
+        states = []
+        assert lease.body_session_id is not None
+        assert lease.body_session_generation is not None
+        for state in lease.domain_states:
+            actual: bool | int | str | None
+            if state.domain is OwnershipDomain.BODY:
+                origin = lease.body_activation
+                actual = evidence.pool_active if prefix == "pool" else evidence.spa_active
+                observed_at = (evidence.pool_activity_observed_at if prefix == "pool"
+                               else evidence.spa_activity_observed_at)
+                usable = (evidence.pool_activity_fresh and evidence.pool_activity_usable
+                          if prefix == "pool" else
+                          evidence.spa_activity_fresh and evidence.spa_activity_usable)
+                matches = actual is True
+                expected = role == "body_activation"
+                equipment = lease.body.value
+            elif state.domain is OwnershipDomain.PUMP:
+                origin = lease.pump_setpoint
+                actual = evidence.pump_rpm
+                observed_at = evidence.pump_observed_at
+                usable = (evidence.pump_observation_fresh and evidence.pump_observation_usable
+                          and evidence.configured_pump_speed_observation_fresh
+                          and evidence.configured_pump_speed_observation_usable)
+                matches = bool(
+                    origin is not None and type(origin.intended_value) is int
+                    and type(evidence.pump_rpm) is int
+                    and type(evidence.configured_pump_speed_rpm) is int
+                    and abs(evidence.pump_rpm - origin.intended_value) <= self.pump_rpm_tolerance
+                    and abs(evidence.configured_pump_speed_rpm - origin.intended_value) <= self.pump_rpm_tolerance
+                )
+                expected = role in {"priming", "pool_temperature_probe", "thermal_pump_target"}
+                equipment = "pump.rpm"
+            else:
+                origin = lease.heat_source
+                actual = evidence.effective_heat_source
+                observed_at = evidence.heat_source_observed_at
+                usable = evidence.heat_source_observation_fresh and evidence.heat_source_observation_usable
+                matches = origin is not None and evidence.effective_heat_source is origin.intended_value
+                expected = role == "heat_source"
+                equipment = f"{prefix}.raw_heater_id"
+            if origin is None:
+                states.append(state)
+                continue
+            operator = next((
+                event.positive_operator_evidence
+                for event in reversed(evidence.external_changes.events)
+                if event.positive_operator_evidence is not None
+                and event.positive_operator_evidence.domain is state.domain
+                and lease.established_at <= event.positive_operator_evidence.requested_at
+                <= evidence.evaluated_at
+            ), None)
+            states.append(state.observe(
+                at=evidence.evaluated_at, observed_at=observed_at, usable=usable,
+                matches=matches, expected_transition=expected,
+                generation=lease.body_session_generation, session_id=lease.body_session_id,
+                equipment_id=equipment, policy_identity=lease.requested_mode,
+                origin_id=origin.receipt_id, intended_value=origin.intended_value,
+                operator=operator,
+                observed_value=actual,
+            ))
+        return replace(lease, domain_states=tuple(states))
 
     def _confirm_accepted_consequence(
         self,
@@ -911,6 +1031,8 @@ class ThermalRuntimeOwnershipManager:
     def current_external_preemption_reason(
         self,
         batch: ExternalChangeBatch,
+        *,
+        evaluated_at: datetime,
     ) -> str | None:
         """Assess current-lease external takeover without mutating ownership."""
 
@@ -920,8 +1042,106 @@ class ThermalRuntimeOwnershipManager:
         return _external_preemption_reason(
             lease,
             batch,
-            pump_rpm_tolerance=self.pump_rpm_tolerance,
+            evaluated_at=evaluated_at,
         )
+
+    def domain_command_blocker(
+        self, operation: SetBodyActive | SetPumpSpeed | SetHeatMode,
+    ) -> str | None:
+        """Additional denial only; existing exact execution authorization still applies."""
+        lease = self._state.lease
+        if lease is None:
+            return None
+        domain = (OwnershipDomain.BODY if isinstance(operation, SetBodyActive)
+                  else OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed)
+                  else OwnershipDomain.THERMAL)
+        return self.domain_permission_blocker(domain)
+
+    def domain_permission_blocker(
+        self, domain: OwnershipDomain, *, completion_reduction: bool = False,
+    ) -> str | None:
+        lease = self._state.lease
+        if lease is None:
+            return None
+        denial = lease.domain_state(domain).permission_denial(
+            completion_reduction=completion_reduction,
+        )
+        return None if denial is None else "runtime_ownership_domain_command_denied:" + denial
+
+    def reserve_domain_correction(
+        self, operation: SetBodyActive | SetPumpSpeed | SetHeatMode, *, at: datetime,
+    ) -> str | None:
+        """Debit one bounded attempt before invoking the existing delivery engine."""
+        lease = self._state.lease
+        if lease is None:
+            return None
+        domain = (OwnershipDomain.BODY if isinstance(operation, SetBodyActive)
+                  else OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed)
+                  else OwnershipDomain.THERMAL)
+        state = lease.domain_state(domain)
+        episode = state.episode
+        if episode is None or episode.verified_at is not None:
+            return None
+        try:
+            updated = replace(state, episode=episode.reserve_correction(operation.operation_id, at=at))
+            blocker = None
+        except ValueError:
+            blocker = "runtime_ownership_domain_command_denied:correction_budget_exhausted"
+            updated = replace(state, health=OwnershipHealth.FAULTED,
+                              evidence_kind=OwnershipEvidenceKind.COMMAND_OR_CONTROL_FAILURE,
+                              command_blocker=blocker)
+        lease = replace(lease, domain_states=tuple(
+            updated if item.domain is domain else item for item in lease.domain_states
+        ))
+        self._state = replace(self._state, lease=lease)
+        return blocker
+
+    def record_operator_intent(
+        self, evidence: PositiveOperatorEvidence, *, evaluated_at: datetime,
+    ) -> bool:
+        """Yield one current domain synchronously on a trusted explicit request."""
+        lease = self._state.lease
+        if lease is None:
+            return False
+        expected_equipment = {
+            OwnershipDomain.BODY: lease.body.value,
+            OwnershipDomain.PUMP: "pump.rpm",
+            OwnershipDomain.THERMAL: (
+                "pool.raw_heater_id" if lease.body is ThermalBody.POOL else "spa.raw_heater_id"
+            ),
+        }[evidence.domain]
+        if not evidence.applies(
+            generation=lease.body_session_generation or lease.generation,
+            session_id=lease.body_session_id or lease.lease_id,
+            domain=evidence.domain, equipment_id=expected_equipment,
+            established_at=lease.established_at, evaluated_at=evaluated_at,
+        ):
+            return False
+        prior = lease.domain_state(evidence.domain)
+        if prior.positive_operator_evidence is not None:
+            if prior.positive_operator_evidence == evidence:
+                return True
+            if evidence.requested_at <= prior.positive_operator_evidence.requested_at:
+                return False
+        yielded = replace(
+            prior, authority=OwnershipAuthority.OPERATOR,
+            evidence_kind=OwnershipEvidenceKind.POSITIVE_OPERATOR_INTERVENTION,
+            positive_operator_evidence=evidence,
+            command_blocker="ownership_operator_domain_override",
+        )
+        states = {state.domain: state for state in lease.domain_states}
+        states[evidence.domain] = yielded
+        updated = replace(lease, domain_states=tuple(states.values()))
+        self._state = replace(self._state, lease=updated)
+        residual = self._residual_termination
+        if residual is not None and residual.lease_id == lease.lease_id:
+            # A queued reduction must rebind to the new exact token; it cannot
+            # retain command authority from before this operator intervention.
+            self._residual_termination = _residual_entitlement(
+                updated, at=evidence.requested_at,
+                reason="runtime_ownership_operator_domain_yield:" + evidence.domain.value,
+            )
+        return True
 
     def promote_session_provenance(
         self,
@@ -1069,6 +1289,67 @@ class ThermalRuntimeOwnershipManager:
             promoted_at,
         )
 
+    def finish_circulation_responsibility(
+        self, *, lease_id: str, generation: int, completed_at: datetime,
+    ) -> bool:
+        """Retire authority after verified cleanup or an explicit successor transfer.
+
+        Historical accepted receipts remain available. Only the exact terminal
+        generation whose residual has already transferred can be retired.
+        The caller supplies the reviewed cleanup/transfer outcome, not equality.
+        """
+        _require_aware(completed_at, "completion")
+        lease = self._state.lease
+        if (lease is None or lease.lease_id != lease_id or lease.generation != generation
+                or lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                or self._residual_termination is not None
+                or completed_at < lease.last_confirmed_at):
+            return False
+        states = tuple(replace(
+            state, authority=OwnershipAuthority.NONE,
+            evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+            command_blocker="ownership_lifecycle_responsibility_transferred_or_completed",
+        ) for state in lease.domain_states)
+        self._state = replace(self._state, lease=replace(lease, domain_states=states))
+        return True
+
+    def receive_verified_filtration_body_transfer(
+        self, transfer: FiltrationToThermalHandoff, *, thermal_lease_id: str,
+    ) -> None:
+        """Carry donor verification through the registry's exact typed transfer.
+
+        The registry must validate its still-current donor and token before
+        calling this method. Physical equality is deliberately not an input.
+        A copied receipt alone cannot invoke this path through establishment.
+        """
+        lease = self._state.lease
+        if (lease is None or lease.lease_id != thermal_lease_id
+                or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+                or lease.body is not ThermalBody.POOL
+                or lease.body_activation != transfer.body_activation
+                or lease.domain_state(OwnershipDomain.BODY).authority is not OwnershipAuthority.POOLOS
+                or lease.originating_currentness is None
+                or lease.originating_currentness.purpose.purpose_id != transfer.thermal_purpose_id
+                or transfer.established_at > lease.last_confirmed_at):
+            raise ValueError("thermal body transfer recipient is not current")
+        verified = tuple(dict.fromkeys((
+            *lease.verified_concepts,
+            ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+            *(
+                (ThermalRuntimeOwnedConcept.PUMP_SETPOINT,)
+                if transfer.pump_setpoint is not None
+                else ()
+            ),
+        )))
+        self._state = replace(self._state, lease=replace(
+            lease,
+            pump_setpoint=transfer.pump_setpoint,
+            pump_setpoint_accepted_at=transfer.pump_setpoint_accepted_at,
+            verified_concepts=verified,
+            body_session_id=transfer.body_session_id,
+            body_session_generation=transfer.body_session_generation,
+        ))
+
     def handoff(
         self,
         request: ThermalRuntimeHandoffRequest,
@@ -1174,6 +1455,8 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 evidence.evaluated_at,
             )
+        lease = self._confirm_accepted_consequence(lease, evidence)
+        lease = self._observe_domains(lease, evidence)
         failure = self._continuation_failure_reason(
             lease,
             evidence,
@@ -1335,46 +1618,12 @@ class ThermalRuntimeOwnershipManager:
         shared = _shared_hydraulic_failure_reason(evidence)
         if shared is not None:
             return shared
-        pump_consequence_pending = accepted_role in {
-            "priming",
-            "pool_temperature_probe",
-            "thermal_pump_target",
-        }
-        if check_pump and lease.pump_setpoint is not None and not pump_consequence_pending:
-            if evidence.configured_pump_speed_rpm is None:
-                return "runtime_ownership_preempted:pump_setpoint_evidence_missing"
-            if not evidence.configured_pump_speed_observation_fresh:
-                return "runtime_ownership_preempted:pump_setpoint_evidence_stale"
-            if not evidence.configured_pump_speed_observation_usable:
-                return "runtime_ownership_preempted:pump_setpoint_evidence_unusable"
-            if evidence.pump_rpm is None:
-                return "runtime_ownership_preempted:pump_evidence_missing"
-            if not evidence.pump_observation_fresh:
-                return "runtime_ownership_preempted:pump_evidence_stale"
-            if not evidence.pump_observation_usable:
-                return "runtime_ownership_preempted:pump_evidence_unusable"
-            expected_rpm = lease.pump_setpoint.intended_value
-            assert isinstance(expected_rpm, int) and not isinstance(expected_rpm, bool)
-            if (
-                abs(evidence.configured_pump_speed_rpm - expected_rpm)
-                > self.pump_rpm_tolerance
-            ):
-                return "runtime_ownership_preempted:pump_setpoint_external_change"
-            if abs(evidence.pump_rpm - expected_rpm) > self.pump_rpm_tolerance:
-                return "runtime_ownership_preempted:pump_external_change"
-        if lease.heat_source is not None and accepted_role != "heat_source":
-            if evidence.effective_heat_source is None:
-                return "runtime_ownership_preempted:source_evidence_missing"
-            if not evidence.heat_source_observation_fresh:
-                return "runtime_ownership_preempted:source_evidence_stale"
-            if not evidence.heat_source_observation_usable:
-                return "runtime_ownership_preempted:source_evidence_unusable"
-            if evidence.effective_heat_source is not lease.heat_source.intended_value:
-                return "runtime_ownership_preempted:source_external_change"
+        # Pump/source disagreement affects domain health and exact command
+        # permission. It cannot establish an operator or terminate BODY origin.
         external = _external_preemption_reason(
             lease,
             evidence.external_changes,
-            pump_rpm_tolerance=self.pump_rpm_tolerance,
+            evaluated_at=evidence.evaluated_at,
         )
         if external is not None:
             return external
@@ -1440,17 +1689,10 @@ class ThermalRuntimeOwnershipManager:
             if (
                 predecessor is None
                 or successor is None
-                or predecessor.purpose.kind
-                is not ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
-                or successor.purpose.kind
-                is not ThermalExecutionPurposeKind.THERMAL_CONTROL
-                or lease.body is not ThermalBody.POOL
-                or request.successor_body is not ThermalBody.POOL
-                or predecessor.purpose.requested_mode
-                != successor.purpose.requested_mode
+                or not compatible_thermal_body_successor(predecessor, successor)
                 or not request.successor_requires_body_active
             ):
-                return prefix + "replacement_not_probe_successor"
+                return prefix + "replacement_not_compatible_body_successor"
         return None
 
     def _terminate(
@@ -1525,6 +1767,28 @@ class ThermalRuntimeOwnershipManager:
             current_state=self._state,
             evaluated_at=at,
         )
+
+
+def compatible_thermal_body_successor(
+    predecessor: ThermalExecutionCurrentness,
+    successor: ThermalExecutionCurrentness,
+) -> bool:
+    """Potential typed Pool successor, never permission for an old execution."""
+    before, after = predecessor.purpose, successor.purpose
+    before_pumps = {op.equipment_id for op in predecessor.residual_plan.operations
+                    if op.operation_type == "SetPumpSpeed"}
+    after_pumps = {op.equipment_id for op in successor.residual_plan.operations
+                   if op.operation_type == "SetPumpSpeed"}
+    return (
+        before.body is ThermalBody.POOL and after.body is ThermalBody.POOL
+        and before.kind in {ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+                            ThermalExecutionPurposeKind.THERMAL_CONTROL}
+        and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and after.selected_source is not PhysicalHeatMode.OFF
+        and before.requested_mode == after.requested_mode
+        and before.target_temperature_f == after.target_temperature_f
+        and (not before_pumps or not after_pumps or before_pumps == after_pumps)
+    )
 
 
 def _activation_provenance(
@@ -1667,7 +1931,7 @@ def _external_preemption_reason(
     lease: ThermalRuntimeOwnershipLease,
     batch: ExternalChangeBatch,
     *,
-    pump_rpm_tolerance: int,
+    evaluated_at: datetime,
 ) -> str | None:
     target_prefix = "pool" if lease.body is ThermalBody.POOL else "spa"
     target_body_concept = f"{target_prefix}.active"
@@ -1675,34 +1939,28 @@ def _external_preemption_reason(
         # An event predating this lease belongs to an earlier ownership epoch.
         # Equality remains fail-closed because ordering within one timestamp
         # cannot prove that the event preceded accepted lease establishment.
-        if event.observed_at < lease.established_at:
+        if not lease.established_at <= event.observed_at <= evaluated_at:
             continue
-        if lease.body_activation is not None and event.concept == target_body_concept:
+        if (lease.body_activation is not None
+                and event.concept == target_body_concept and event.new_value is False):
+            return "runtime_ownership_preempted:body_session_interrupted"
+        operator = event.positive_operator_evidence
+        if operator is None or (
+            operator.authority_generation != lease.body_session_generation
+            or operator.body_session_id != lease.body_session_id
+            or operator.requested_at < lease.established_at
+            or operator.requested_at > event.observed_at
+        ):
+            continue
+        if (
+            lease.body_activation is not None
+            and event.concept == target_body_concept
+            and operator.domain is OwnershipDomain.BODY
+            and operator.equipment_id == lease.body.value
+        ):
             return "runtime_ownership_preempted:body_external_change"
-        if (
-            lease.pump_setpoint is not None
-            and event.concept == "pump.rpm"
-            and event.reconciliation_required
-        ):
-            if not pump_event_conflicts_with_provenance(
-                event,
-                intended_rpm=lease.pump_setpoint.intended_value,
-                provenance_verified=(
-                    ThermalRuntimeOwnedConcept.PUMP_SETPOINT
-                    in lease.verified_concepts
-                ),
-                accepted_at=lease.pump_setpoint_accepted_at,
-                tolerance=pump_rpm_tolerance,
-            ):
-                continue
-
-            return "runtime_ownership_preempted:pump_external_change"
-        if (
-            lease.heat_source is not None
-            and event.concept == f"{target_prefix}.raw_heater_id"
-            and event.reconciliation_required
-        ):
-            return "runtime_ownership_preempted:source_external_change"
+        # PUMP and THERMAL intervention is represented on its own domain. It
+        # cannot terminally preempt the aggregate BODY lifecycle.
     return None
 
 
@@ -1857,6 +2115,8 @@ def _residual_entitlement(
         body=lease.body,
         originating_execution_plan_id=lease.execution_plan_id,
         originating_lease_established_at=lease.established_at,
+        body_session_id=lease.body_session_id,
+        body_session_generation=lease.body_session_generation,
         retained_at=at,
         reason_code=reason,
         body_activation=body_activation,
@@ -2270,6 +2530,13 @@ def _verified_provenance(
         ThermalRuntimeOwnedConcept.PUMP_SETPOINT: lease.pump_setpoint,
         ThermalRuntimeOwnedConcept.HEAT_SOURCE: lease.heat_source,
     }[concept]
+    domain = {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION: OwnershipDomain.BODY,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT: OwnershipDomain.PUMP,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE: OwnershipDomain.THERMAL,
+    }[concept]
+    if lease.domain_state(domain).authority is not OwnershipAuthority.POOLOS:
+        return None
     if provenance is None or concept not in lease.verified_concepts:
         return None
     return provenance

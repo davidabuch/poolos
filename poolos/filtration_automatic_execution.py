@@ -7,7 +7,7 @@ Pool operation per authoritative observation epoch.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
@@ -28,6 +28,7 @@ from .observations import (
     PoolObservation,
 )
 from .physical_command_authority import PhysicalRequestSource
+from .ownership_evidence import OwnershipDomain, OwnershipHealth, OwnershipEvidenceKind
 from .pool_circulation_ownership import (
     FiltrationCirculationLease,
     PoolCirculationOwner,
@@ -321,6 +322,9 @@ class FiltrationAutomaticExecutionDriver:
                 confirmed_at=frame.observed_at,
             )
             lease = self.ownership.filtration_lease
+        if lease is not None:
+            self._observe_filtration_domains(frame, lease)
+            lease = self.ownership.filtration_lease
         if self._externally_preempted(frame, lease):
             if lease is not None:
                 self.ownership.release_filtration(session_id=lease.session_id)
@@ -499,6 +503,12 @@ class FiltrationAutomaticExecutionDriver:
                 cleanup=True,
             )
         if lease.verified:
+            pump_state = lease.domain_state(OwnershipDomain.PUMP)
+            permission = self.ownership.domain_permission_blocker(OwnershipDomain.PUMP)
+            if permission is not None:
+                return self._blocked(frame, permission)
+            if pump_state.health is OwnershipHealth.RECONCILING:
+                return await self._deliver_pump(frame, delivery_factory)
             return self._publish(
                 FiltrationAutomaticDriverState.OWNED,
                 at=frame.observed_at,
@@ -654,7 +664,14 @@ class FiltrationAutomaticExecutionDriver:
             verified = pool.value is True and _later(pool.observed_at, attempt.delivered_at)
         elif attempt.step is FiltrationExecutionStep.BODY_OFF:
             pool = _live_state(by_id.get("pool.active"), frame.observed_at)
-            verified = pool.value is False and _later(pool.observed_at, attempt.delivered_at)
+            actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+            verified = (
+                pool.value is False
+                and _later(pool.observed_at, attempt.delivered_at)
+                and type(actual.value) in {int, float}
+                and actual.value == 0
+                and _later(actual.observed_at, attempt.delivered_at)
+            )
         else:
             configured = _live_state(
                 by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
@@ -716,6 +733,8 @@ class FiltrationAutomaticExecutionDriver:
             return self._fail(
                 frame,
                 "automatic_filtration_verification_timed_out",
+                failed_domain=(OwnershipDomain.PUMP if attempt.step is FiltrationExecutionStep.PUMP_SETPOINT
+                               else OwnershipDomain.BODY),
             )
         return self._publish(
             FiltrationAutomaticDriverState.AWAITING_REOBSERVATION,
@@ -755,6 +774,25 @@ class FiltrationAutomaticExecutionDriver:
         cleanup: bool,
     ) -> FiltrationAutomaticAssessment:
         assert self.session_id is not None
+        domain = OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed) else OwnershipDomain.BODY
+        blocker = self.ownership.domain_permission_blocker(domain)
+        if blocker is not None:
+            return self._blocked(frame, blocker)
+        lease = self.ownership.filtration_lease
+        if lease is not None:
+            state = lease.domain_state(domain)
+            if state.episode is not None and state.episode.verified_at is None:
+                try:
+                    episode = state.episode.reserve_correction(operation.operation_id, at=frame.observed_at)
+                except ValueError:
+                    self.ownership.update_filtration_domain(replace(
+                        state, health=OwnershipHealth.FAULTED,
+                        evidence_kind=OwnershipEvidenceKind.COMMAND_OR_CONTROL_FAILURE,
+                        command_blocker="automatic_filtration_correction_budget_exhausted",
+                    ), session_id=lease.session_id)
+                    return self._blocked(frame, "automatic_filtration_correction_budget_exhausted")
+                self.ownership.update_filtration_domain(replace(state, episode=episode),
+                                                        session_id=lease.session_id)
         if not self.ownership.filtration_may_deliver(
             epoch_identity=frame.epoch_identity,
             session_id=self.session_id,
@@ -768,16 +806,16 @@ class FiltrationAutomaticExecutionDriver:
                 cleanup=cleanup,
             )
         except (RuntimeError, ValueError) as exc:
-            return self._fail(frame, f"automatic_filtration_delivery_binding_failed:{_bounded(str(exc))}")
+            return self._fail(frame, f"automatic_filtration_delivery_binding_failed:{_bounded(str(exc))}", failed_domain=domain)
         if not delivery.available:
             return self._blocked(frame, "automatic_filtration_delivery_unavailable")
         correlation_id = f"automatic-filtration:{self.session_id}:{operation.operation_id}"
         try:
             receipt = await delivery.deliver(operation, correlation_id=correlation_id)
         except Exception as exc:
-            return self._fail(frame, f"automatic_filtration_delivery_exception:{type(exc).__name__}")
+            return self._fail(frame, f"automatic_filtration_delivery_exception:{type(exc).__name__}", failed_domain=domain)
         if not receipt.accepted:
-            return self._fail(frame, f"automatic_filtration_delivery_{receipt.status.value}")
+            return self._fail(frame, f"automatic_filtration_delivery_{receipt.status.value}", failed_domain=domain)
         if step is not FiltrationExecutionStep.BODY_OFF:
             assert frame.pool_pump_circuit_id is not None
             concept = (
@@ -914,6 +952,12 @@ class FiltrationAutomaticExecutionDriver:
                 event.concept not in POOL_CIRCULATION_TAKEOVER_CONCEPTS
                 or event.observed_at < lease.established_at
                 or event.observed_at > frame.observed_at
+                or not event.operator_applies(
+                    generation=lease.generation, session_id=lease.body_session_id or lease.session_id,
+                    domain=OwnershipDomain.BODY, equipment_id="B1101",
+                    established_at=lease.established_at,
+                    evaluated_at=frame.observed_at,
+                )
             ):
                 continue
 
@@ -965,6 +1009,39 @@ class FiltrationAutomaticExecutionDriver:
             return True
         return False
 
+    def _observe_filtration_domains(
+        self, frame: FiltrationAutomaticExecutionFrame, lease: FiltrationCirculationLease,
+    ) -> None:
+        for event in frame.external_changes.events:
+            if event.positive_operator_evidence is not None and event.observed_at <= frame.observed_at:
+                self.ownership.record_operator_intent(
+                    event.positive_operator_evidence, evaluated_at=frame.observed_at,
+                )
+        current_lease = self.ownership.filtration_lease
+        assert current_lease is not None
+        lease = current_lease
+        if lease.pump_setpoint is None:
+            return
+        by_id = {item.observation_id: item for item in frame.observations}
+        actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+        configured = _live_state(by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT), frame.observed_at)
+        target = lease.pump_setpoint.intended_value
+        assert type(target) is int
+        usable = actual.usable and configured.usable and type(actual.value) in {int, float}
+        matches = bool(usable and configured.value == target
+                       and isinstance(actual.value, (int, float))
+                       and abs(float(actual.value) - target) <= self.pump_rpm_tolerance)
+        state = lease.domain_state(OwnershipDomain.PUMP).observe(
+            at=frame.observed_at, observed_at=actual.observed_at,
+            usable=usable, matches=matches,
+            expected_transition=self.attempt is not None,
+            generation=lease.generation, session_id=lease.body_session_id or lease.session_id,
+            equipment_id=lease.pool_pump_circuit_id, policy_identity="ordinary_filtration",
+            origin_id=lease.pump_setpoint.receipt_id, intended_value=target,
+            observed_value=actual.value if isinstance(actual.value, (int, float)) else None,
+        )
+        self.ownership.update_filtration_domain(state, session_id=lease.session_id)
+
     def _clean_spa_takeover(self, frame: FiltrationAutomaticExecutionFrame) -> bool:
         by_id = {item.observation_id: item for item in frame.observations}
         pool = _live_state(by_id.get("pool.active"), frame.observed_at)
@@ -982,13 +1059,24 @@ class FiltrationAutomaticExecutionDriver:
         reason: str,
         *,
         preempted: bool = False,
+        failed_domain: OwnershipDomain | None = None,
     ) -> FiltrationAutomaticAssessment:
         lease = self.ownership.filtration_lease
-        if lease is not None:
+        retained = bool(lease is not None and lease.body_verified
+                        and not preempted and failed_domain is not None)
+        if retained:
+            assert lease is not None and failed_domain is not None
+            state = lease.domain_state(failed_domain)
+            self.ownership.update_filtration_domain(replace(
+                state, health=OwnershipHealth.FAULTED,
+                evidence_kind=OwnershipEvidenceKind.COMMAND_OR_CONTROL_FAILURE,
+                command_blocker=reason,
+            ), session_id=lease.session_id)
+        elif lease is not None:
             self.ownership.release_filtration(session_id=lease.session_id)
         self.session_id = None
         self.attempt = None
-        self._requires_reenable = True
+        self._requires_reenable = not retained
         return self._publish(
             FiltrationAutomaticDriverState.PREEMPTED if preempted else FiltrationAutomaticDriverState.FAILED,
             at=frame.observed_at,

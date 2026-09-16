@@ -11,6 +11,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 from poolos.external_change import ExternalChangeBatch
+from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.physical_command_authority import PhysicalAuthorityReason
 from poolos.thermal_runtime_orchestration import ThermalOrchestrationLifecycle
@@ -140,7 +141,9 @@ def _runtime(module: ModuleType):
     runtime = module.PoolOSFiltrationAutomaticRuntime(
         hass=hass,
         coordinator=coordinator,
-        filtration_runtime=SimpleNamespace(assessment=object()),
+        filtration_runtime=SimpleNamespace(assessment=SimpleNamespace(
+            evaluated_at=NOW, independent_disposition=FiltrationDisposition.RUN_NOW,
+        )),
         thermal_runtime=SimpleNamespace(
             assessment=SimpleNamespace(pool_pump_circuit_id="p0102")
         ),
@@ -270,3 +273,28 @@ def test_unload_preserves_commissioned_desired_filtration_gate_state() -> None:
         assert runtime.enabled is True
 
     asyncio.run(scenario())
+
+
+def test_future_independent_filtration_window_is_not_blocked_by_noon_off() -> None:
+    from poolos.pool_automatic_control_suppression import PoolAutomaticControlSuppressionSource
+
+    module = _load_module()
+    runtime, *_ = _runtime(module)
+    accounting = runtime.filtration_runtime.assessment
+    accounting.independent_disposition = FiltrationDisposition.DEFERRED_TOU
+    runtime.observe(_snapshot(NOW), _orchestration("noon"),
+                    external_changes=ExternalChangeBatch(()))
+    runtime.pool_automatic_control.suppress(
+        source=PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+        suppressed_at=NOW, reason="manual_off",
+    )
+    accounting.evaluated_at = NOW + timedelta(seconds=1)
+    runtime.observe(_snapshot(accounting.evaluated_at), _orchestration("noon-refresh"),
+                    external_changes=ExternalChangeBatch(()))
+    assert runtime._latest_frame.pool_automatic_control_suppressed
+    accounting.evaluated_at = NOW + timedelta(hours=10)
+    accounting.independent_disposition = FiltrationDisposition.RUN_NOW
+    runtime.observe(_snapshot(accounting.evaluated_at), _orchestration("debt-window"),
+                    external_changes=ExternalChangeBatch(()))
+    assert not runtime._latest_frame.pool_automatic_control_suppressed
+    assert runtime.pool_automatic_control.state.suppressed

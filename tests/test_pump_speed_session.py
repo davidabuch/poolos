@@ -236,7 +236,7 @@ def test_startup_mismatch_is_anchor_not_override_and_repetition_does_not_adopt()
     assert second.effective_rpm == 2650
 
 
-def test_new_external_transition_is_adopted_only_after_session_establishment() -> None:
+def test_new_unattributed_transition_does_not_manufacture_override() -> None:
     runtime = PumpSpeedSessionRuntime(BASELINES)
     runtime.observe(evidence())
     runtime.apply_transition(
@@ -250,9 +250,9 @@ def test_new_external_transition_is_adopted_only_after_session_establishment() -
     )
 
     state = runtime.snapshot
-    assert state.override_state is PumpSpeedOverrideState.VERIFIED
-    assert state.override_source is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
-    assert state.effective_rpm == 3200
+    assert state.override_state is PumpSpeedOverrideState.NONE
+    assert state.override_source is PumpSpeedOverrideSource.NONE
+    assert state.effective_rpm == 2650
 
 
 def test_external_return_to_baseline_cancels_override_without_mutating_policy() -> None:
@@ -404,7 +404,7 @@ def test_failed_replacement_does_not_resurrect_superseded_pending_request() -> N
     assert runtime.snapshot.override_state is PumpSpeedOverrideState.NONE
 
 
-def test_different_external_transition_supersedes_pending_manual_request() -> None:
+def test_unattributed_transition_cannot_supersede_pending_manual_request() -> None:
     runtime = PumpSpeedSessionRuntime(BASELINES)
     runtime.observe(evidence())
     request = runtime.begin_manual_request(
@@ -424,8 +424,9 @@ def test_different_external_transition_supersedes_pending_manual_request() -> No
             NOW + timedelta(seconds=2),
         )
     )
-    assert runtime.snapshot.override_source is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
-    assert runtime.snapshot.effective_rpm == 3100
+    assert runtime.snapshot.override_state is PumpSpeedOverrideState.PENDING
+    assert runtime.snapshot.override_source is PumpSpeedOverrideSource.POOLOS_MANUAL
+    assert runtime.snapshot.effective_rpm == 3200
 
 
 def test_noop_manual_nonbaseline_uses_fresh_configured_truth_after_acceptance() -> None:

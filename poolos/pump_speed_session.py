@@ -424,15 +424,10 @@ class PumpSpeedSessionRuntime:
                         "correlated_manual_configured_speed_verified",
                     )
             return
-        baseline = self.configured_baseline_rpm
-        if transition.new_rpm == baseline:
-            self._clear_override("external_return_to_session_baseline")
-        else:
-            self._verify_override(
-                transition.new_rpm,
-                PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED,
-                "external_configured_speed_override_adopted",
-            )
+        # Configured-speed telemetry identifies a value, not an operator.
+        # Neither mismatch nor a return to baseline may create/clear an
+        # override. Explicit requests above retain their causal hand-back path.
+        self._last_override_reason = "unattributed_configured_speed_requires_reconciliation"
 
     @property
     def configured_baseline_rpm(self) -> int | None:

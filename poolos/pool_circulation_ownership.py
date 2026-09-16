@@ -14,9 +14,14 @@ from enum import StrEnum
 from hashlib import sha256
 
 from .intellicenter_readonly import is_pmpcirc_native_id
+from .ownership_evidence import (
+    DomainOwnershipState, OwnershipAuthority, OwnershipDomain,
+    OwnershipEvidenceKind, PositiveOperatorEvidence,
+)
 from .thermal_runtime_ownership import (
     ThermalRuntimeConceptProvenance,
     ThermalRuntimeOwnedConcept,
+    ThermalRuntimeOwnershipManager,
 )
 
 
@@ -63,8 +68,21 @@ class FiltrationCirculationLease:
     pump_session_effective_rpm: int | None = None
     body_verified: bool = False
     verified: bool = False
+    domain_states: tuple[DomainOwnershipState, ...] = ()
+    body_session_id: str | None = None
+    body_session_generation: int | None = None
+
+    def domain_state(self, domain: OwnershipDomain) -> DomainOwnershipState:
+        return next((item for item in self.domain_states if item.domain is domain),
+                    DomainOwnershipState(domain))
 
     def __post_init__(self) -> None:
+        if self.body_session_id is None and self.body_session_generation is None:
+            object.__setattr__(self, "body_session_id", self.session_id)
+            object.__setattr__(self, "body_session_generation", self.generation)
+        if (not self.body_session_id or self.body_session_generation is None
+                or self.body_session_generation < 1):
+            raise ValueError("filtration body session requires identity and generation")
         if not self.lease_id.strip() or not self.session_id.strip():
             raise ValueError("filtration lease identity must not be empty")
         if not is_pmpcirc_native_id(self.pool_pump_circuit_id):
@@ -114,6 +132,15 @@ class FiltrationCirculationLease:
             )
         ):
             raise ValueError("verified filtration ownership requires body and pump proof")
+        states = {item.domain: item for item in self.domain_states}
+        for domain, origin in (
+            (OwnershipDomain.BODY, self.body_activation or self.body_adoption),
+            (OwnershipDomain.PUMP, self.pump_setpoint),
+        ):
+            if origin is not None and domain not in states:
+                states[domain] = DomainOwnershipState(domain, OwnershipAuthority.POOLOS,
+                                                       command_blocker=None)
+        object.__setattr__(self, "domain_states", tuple(states.values()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,14 +153,28 @@ class FiltrationToThermalHandoff:
     thermal_purpose_id: str
     established_at: datetime
     body_activation: ThermalRuntimeConceptProvenance
+    pump_setpoint: ThermalRuntimeConceptProvenance | None = None
+    pump_setpoint_accepted_at: datetime | None = None
+    body_session_id: str | None = None
+    body_session_generation: int | None = None
 
     def __post_init__(self) -> None:
+        if self.body_session_id is None and self.body_session_generation is None:
+            object.__setattr__(self, "body_session_id", self.filtration_lease_id)
+            object.__setattr__(self, "body_session_generation", self.filtration_generation)
+        if (not self.body_session_id or self.body_session_generation is None
+                or self.body_session_generation < 1):
+            raise ValueError("handoff requires the donor body session")
         for name in ("token_id", "filtration_lease_id", "thermal_purpose_id"):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         if self.filtration_generation < 1:
             raise ValueError("handoff generation must be positive")
         _require_aware(self.established_at)
+        if self.pump_setpoint is not None:
+            if self.pump_setpoint_accepted_at is None:
+                raise ValueError("pump handoff requires its accepted timestamp")
+            _require_aware(self.pump_setpoint_accepted_at)
 
 
 @dataclass(slots=True)
@@ -147,6 +188,59 @@ class PoolCirculationOwnershipRegistry:
     _generation: int = field(default=0, init=False, repr=False)
     _epoch_identity: str | None = field(default=None, init=False, repr=False)
     _thermal_reserved_epoch: str | None = field(default=None, init=False, repr=False)
+
+    def update_filtration_domain(self, state: DomainOwnershipState, *, session_id: str) -> None:
+        lease = self.filtration_lease
+        if lease is None or lease.session_id != session_id:
+            raise ValueError("filtration domain session is not current")
+        states = {item.domain: item for item in lease.domain_states}
+        states[state.domain] = state
+        self.filtration_lease = replace(lease, domain_states=tuple(states.values()))
+
+    def record_operator_intent(
+        self, evidence: PositiveOperatorEvidence, *, evaluated_at: datetime,
+    ) -> bool:
+        lease = self.filtration_lease
+        if lease is None:
+            return False
+        expected_equipment = (lease.pool_pump_circuit_id
+                              if evidence.domain is OwnershipDomain.PUMP else "B1101")
+        if not evidence.applies(
+            generation=lease.body_session_generation or lease.generation,
+            session_id=lease.body_session_id or lease.session_id,
+            domain=evidence.domain, equipment_id=expected_equipment,
+            established_at=lease.established_at, evaluated_at=evaluated_at,
+        ):
+            return False
+        prior = lease.domain_state(evidence.domain).positive_operator_evidence
+        if prior is not None:
+            if prior == evidence:
+                return True
+            if evidence.requested_at <= prior.requested_at:
+                return False
+        self.update_filtration_domain(replace(
+            lease.domain_state(evidence.domain), authority=OwnershipAuthority.OPERATOR,
+            positive_operator_evidence=evidence,
+            evidence_kind=OwnershipEvidenceKind.POSITIVE_OPERATOR_INTERVENTION,
+            command_blocker="ownership_operator_domain_override",
+        ), session_id=lease.session_id)
+        return True
+
+    def domain_permission_blocker(self, domain: OwnershipDomain) -> str | None:
+        lease = self.filtration_lease
+        if lease is None:
+            return None
+        body = lease.domain_state(OwnershipDomain.BODY)
+        if body.authority in {OwnershipAuthority.OPERATOR, OwnershipAuthority.SAFETY}:
+            return "automatic_filtration_body_authority_yielded"
+        denial = lease.domain_state(domain).permission_denial()
+        if denial is None:
+            return None
+        if denial in {"operator", "safety"}:
+            return "automatic_filtration_domain_override:" + domain.value
+        if denial == "control_fault":
+            return "automatic_filtration_domain_control_fault:" + domain.value
+        return "automatic_filtration_domain_command_denied:" + denial
 
     def begin_epoch(self, epoch_identity: str) -> None:
         if not epoch_identity.strip():
@@ -439,6 +533,7 @@ class PoolCirculationOwnershipRegistry:
             or lease is None
             or not lease.verified
             or lease.body_activation is None
+            or lease.domain_state(OwnershipDomain.BODY).authority is not OwnershipAuthority.POOLOS
             or self._thermal_reserved_epoch != self._epoch_identity
         ):
             return None
@@ -451,6 +546,20 @@ class PoolCirculationOwnershipRegistry:
             thermal_purpose_id=thermal_purpose_id,
             established_at=established_at,
             body_activation=lease.body_activation,
+            pump_setpoint=(
+                lease.pump_setpoint
+                if lease.domain_state(OwnershipDomain.PUMP).authority
+                is OwnershipAuthority.POOLOS
+                else None
+            ),
+            pump_setpoint_accepted_at=(
+                lease.pump_established_at
+                if lease.domain_state(OwnershipDomain.PUMP).authority
+                is OwnershipAuthority.POOLOS
+                else None
+            ),
+            body_session_id=lease.body_session_id,
+            body_session_generation=lease.body_session_generation,
         )
         self.handoff = token
         self.owner = PoolCirculationOwner.FILTRATION_TO_THERMAL
@@ -461,12 +570,25 @@ class PoolCirculationOwnershipRegistry:
         *,
         token_id: str,
         thermal_lease_id: str,
+        recipient: ThermalRuntimeOwnershipManager | None = None,
     ) -> None:
         token = self.handoff
         if token is None or token.token_id != token_id:
             raise ValueError("thermal handoff token is not current")
+        lease = self.filtration_lease
+        if (lease is None or lease.lease_id != token.filtration_lease_id
+                or lease.generation != token.filtration_generation
+                or lease.body_session_id != token.body_session_id
+                or lease.body_session_generation != token.body_session_generation
+                or lease.pump_setpoint != token.pump_setpoint
+                or lease.domain_state(OwnershipDomain.BODY).authority is not OwnershipAuthority.POOLOS):
+            raise ValueError("thermal handoff body authority is no longer current")
         if not thermal_lease_id.strip():
             raise ValueError("thermal lease identity must not be empty")
+        if recipient is not None:
+            recipient.receive_verified_filtration_body_transfer(
+                token, thermal_lease_id=thermal_lease_id,
+            )
         self.filtration_lease = None
         self.handoff = None
         self.thermal_lease_id = thermal_lease_id
@@ -500,6 +622,8 @@ class PoolCirculationOwnershipRegistry:
         accepted_at: datetime,
         body_activation: ThermalRuntimeConceptProvenance,
         pump_setpoint: ThermalRuntimeConceptProvenance,
+        body_session_id: str | None = None,
+        body_session_generation: int | None = None,
     ) -> FiltrationCirculationLease:
         """Accept explicit verified thermal cleanup provenance as filtration."""
 
@@ -528,6 +652,8 @@ class PoolCirculationOwnershipRegistry:
             established_at=accepted_at,
             last_confirmed_at=accepted_at,
             body_activation=body_activation,
+            body_session_id=body_session_id,
+            body_session_generation=body_session_generation,
             pump_setpoint=pump_setpoint,
             pump_established_at=accepted_at,
             body_verified=True,

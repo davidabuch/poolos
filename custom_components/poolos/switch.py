@@ -558,7 +558,7 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
                     resumed_at=datetime.now(UTC)
                 )
         self._runtime.physical_command_authority.resolve_pool_automatic_control_suppressed(
-            self._runtime.pool_automatic_control.state.suppressed
+            self._runtime.pool_automatic_control.globally_suppressed
         )
         self.async_on_remove(
             self._runtime.pool_automatic_control.add_listener(

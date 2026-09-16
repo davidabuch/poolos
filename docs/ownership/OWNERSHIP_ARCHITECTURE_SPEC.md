@@ -2,7 +2,9 @@
 
 ## Status and authority
 
-Accepted behavioral specification, Stage 1: semantics only. This document and
+Accepted behavioral specification. Stage 1 froze semantics; the reviewed Stage 2
+implementation subset is recorded in
+[STAGE_2_LIFECYCLE_RECONCILIATION.md](STAGE_2_LIFECYCLE_RECONCILIATION.md). This document and
 [ADR-110](../adr/ADR-110-ownership-contract-semantics.md) incorporate the complete
 [accepted 90-scenario contract](PoolOS_Ownership_Scenario_Contract.txt) into
 repository governance. Every scenario is normative. The imported text is preserved
@@ -12,11 +14,11 @@ older ownership terminology without overriding the constitution's physical safet
 authorization, currentness, or commissioning gates.
 
 The [traceability matrix](scenario_traceability.json) records implementation gaps,
-not a second source of desired outcomes. Code and existing tests describe shipped
-behavior, not conformance to this new contract. No production behavior or test
-expectation changes in Stage 1. Numeric recovery budgets, new persistence schemas,
-and new command envelopes require implementation review and deterministic tests
-before activation; this document does not silently enable them.
+not a second source of desired outcomes. Code and tests remain evidence only for
+their mapped scenarios, not blanket conformance. Stage 2 activates fixed in-memory
+reconciliation episodes with a 120-second deadline and two correction identities;
+it does not authorize new persistence, Reset, general adoption, or command
+envelopes outside the mapped implementation.
 
 ## 1. Four independent axes
 

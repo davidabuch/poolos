@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "reviewed_main": "9307e6d882cfa847e4be97f4e1e755174e34b5ac",
   "normative_contract": "docs/ownership/PoolOS_Ownership_Scenario_Contract.txt",
   "contract_sha256": "0759872ed4ecdfb24eb762a7e59d1b2c27c0c6ae3c84c92cd9c02cf04099b1bd",
-  "scope": "Stage 1 audit mapping; no production or test semantics changed; SATISFIED denotes audited baseline behavior only, not new contract certification or commissioning.",
+  "scope": "The per-scenario records preserve the Stage 1 baseline audit. stage_2_review records the latest implementation status only for scenarios materially advanced by the Stage 2 candidate; no entry claims physical commissioning or compliance for an unlisted scenario.",
   "status_vocabulary": [
     "PARTIALLY SATISFIED",
     "ARCHITECTURAL MISMATCH",
@@ -14,6 +14,243 @@
     "MISSING RECOVERY/LIVENESS",
     "MISSING OBSERVABILITY"
   ],
+  "stage_2_review": {
+    "baseline": "629b84e7517669e9dd5b98285ec1357a0b9086f4",
+    "branch": "feat/ownership-lifecycle-reconciliation",
+    "implementation_record": "docs/ownership/STAGE_2_LIFECYCLE_RECONCILIATION.md",
+    "scenario_updates": [
+      {
+        "scenario_id": 1,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Verified filtration BODY/PUMP origin, completion responsibility, Pool Off, actual pump-zero verification and fresh later generation.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart", "tests/test_ownership_lifecycle_reconciliation.py::test_filtration_shutdown_requires_observed_actual_pump_zero"]
+      },
+      {
+        "scenario_id": 2,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Cold-start BODY acquisition, prime/preparation, selected source, physical engagement, Solar RPM, termination and cleanup remain one typed lifecycle.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_autonomous_solar_body_origin_survives_engagement_and_final_shutdown", "tests/test_probe_successor_real_cadence.py::test_real_cadence_probe_hands_off_to_owned_solar_successor"]
+      },
+      {
+        "scenario_id": 3,
+        "implementation_status": "SATISFIED",
+        "mechanism": "The 1500-RPM acquisition purpose hands the same BODY session to 2600-RPM Solar preparation before active Solar operation.",
+        "regressions": ["tests/test_probe_successor_real_cadence.py::test_real_cadence_probe_hands_off_to_owned_solar_successor"]
+      },
+      {
+        "scenario_id": 4,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Expected startup and priming values retain domain provenance inside a fixed episode; positive operator evidence still wins.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_unattributed_pump_drift_preserves_owned_body_lifecycle", "tests/test_thermal_runtime_ownership.py::test_owned_prime_actual_rpm_transition_does_not_self_preempt"]
+      },
+      {
+        "scenario_id": 5,
+        "implementation_status": "SATISFIED",
+        "mechanism": "H0002 selection and Solar Active are separate; 2900 RPM is acquired only for the physically active Solar purpose.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_solar_preparation_and_actual_engagement_have_distinct_rpm_requirements", "tests/test_ownership_lifecycle_reconciliation.py::test_autonomous_solar_body_origin_survives_engagement_and_final_shutdown"]
+      },
+      {
+        "scenario_id": 6,
+        "implementation_status": "SATISFIED",
+        "mechanism": "No-successor completion verifies source safe, Pool Off and actual pump zero before retiring the session.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_autonomous_solar_body_origin_survives_engagement_and_final_shutdown"]
+      },
+      {
+        "scenario_id": 7,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Typed Thermal-to-Filtration transfer retains BODY identity and normalizes the active circulation purpose.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"]
+      },
+      {
+        "scenario_id": 8,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Typed Filtration-to-Thermal transfer preserves BODY and compatible verified Pump origin while new Solar operations acquire exact grants.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"]
+      },
+      {
+        "scenario_id": 9,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Solar termination selects one immediate filtration successor with no competing circulation owner.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"]
+      },
+      {
+        "scenario_id": 10,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Without an immediate successor, retained BODY responsibility reaches Pool Off and pump zero rather than External ownership.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_autonomous_solar_body_origin_survives_engagement_and_final_shutdown"]
+      },
+      {
+        "scenario_id": 11,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Modest unattributed Pump drift starts bounded correction without yielding BODY or fabricating an operator.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_filtration_pump_disturbance_preserves_body_and_respects_operator"]
+      },
+      {
+        "scenario_id": 12,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Exact positive Pump evidence yields only PUMP; current native ICP/OCP telemetry still cannot prove actor intent.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent"],
+        "remaining_gap": "No defensible native ICP/OCP operator-intent adapter exists."
+      },
+      {
+        "scenario_id": 14,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Exact positive THERMAL evidence yields only THERMAL and leaves BODY/PUMP intact.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent"],
+        "remaining_gap": "Native ICP/OCP source changes remain unattributed without a trusted intent source."
+      },
+      {
+        "scenario_id": 15,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "BODY completion responsibility survives a THERMAL-domain override or fault.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_unattributed_source_drift_preserves_owned_body_lifecycle"],
+        "remaining_gap": "The full positively attributed Gas-override target-satisfied lifecycle is not yet a dedicated contract regression."
+      },
+      {
+        "scenario_id": 18,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Manual Body Off cancels the current opportunity identity; a later False-to-True independent filtration boundary creates a fresh eligible opportunity.",
+        "regressions": ["tests/test_ownership_opportunity_cancellation.py::test_manual_off_cancels_current_thermal_but_not_later_filtration_window", "tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"]
+      },
+      {
+        "scenario_id": 21,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Domain-scoped positive THERMAL intent no longer destroys BODY/PUMP.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent"],
+        "remaining_gap": "Session-scoped ICP/OCP Gas expiry and hand-back still require trusted positive intent."
+      },
+      {
+        "scenario_id": 26,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "A source contradiction without actor evidence reconciles; exact positive THERMAL intent yields only that domain.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent"],
+        "remaining_gap": "Native source-Off actor attribution is unavailable."
+      },
+      {
+        "scenario_id": 27,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "BODY completion remains independently represented when THERMAL authority is unavailable.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_unattributed_source_drift_preserves_owned_body_lifecycle"],
+        "remaining_gap": "A dedicated positively attributed source-Off/no-circulation end-to-end regression remains."
+      },
+      {
+        "scenario_id": 31,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Filtration transfers the continuous BODY session to Solar preparation and then active Solar without a new body activation.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"]
+      },
+      {
+        "scenario_id": 32,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Solar completion transfers to immediate filtration at 2600 with one circulation owner.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"]
+      },
+      {
+        "scenario_id": 33,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Deferred filtration is not an immediate successor; Solar completion reaches Pool Off and pump zero.",
+        "regressions": ["tests/test_residual_cleanup_transfer.py::test_async_source_observation_preserves_body_through_later_solar", "tests/test_ownership_lifecycle_reconciliation.py::test_autonomous_solar_body_origin_survives_engagement_and_final_shutdown"]
+      },
+      {
+        "scenario_id": 35,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Unattributed Pump drift during filtration is bounded and BODY completion remains available.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_filtration_pump_disturbance_preserves_body_and_respects_operator"],
+        "remaining_gap": "Dedicated positive override expiry at filtration completion remains to be added."
+      },
+      {
+        "scenario_id": 36,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Pump override is domain-specific and cannot erase BODY/THERMAL or create competing filtration ownership.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent"],
+        "remaining_gap": "The full positive Pump override through Solar-to-Filtration transition is not a dedicated regression."
+      },
+      {
+        "scenario_id": 71,
+        "implementation_status": "SATISFIED",
+        "mechanism": "A 2600/2550 mismatch receives one bounded correction and remains PoolOS, not External.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_filtration_pump_disturbance_preserves_body_and_respects_operator"]
+      },
+      {
+        "scenario_id": 72,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Startup/settling RPMs are expected native convergence bound to the current Pump origin and fixed deadline.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_autonomous_solar_body_origin_survives_engagement_and_final_shutdown", "tests/test_thermal_runtime_ownership.py::test_owned_prime_actual_rpm_transition_does_not_self_preempt"]
+      },
+      {
+        "scenario_id": 73,
+        "implementation_status": "SATISFIED",
+        "mechanism": "A trusted 2900-to-3200 Pump request yields PUMP only and blocks PoolOS from fighting it.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent", "tests/test_thermal_runtime_ownership.py::test_true_external_pump_change_still_preempts_after_owned_prime_model"]
+      },
+      {
+        "scenario_id": 74,
+        "implementation_status": "SATISFIED",
+        "mechanism": "The identical 2900-to-3200 telemetry without positive intent is unexplained drift with retained origin and bounded reconciliation.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_unattributed_pump_drift_preserves_owned_body_lifecycle"]
+      },
+      {
+        "scenario_id": 75,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Rejected Pump delivery becomes a control fault while verified BODY responsibility completes safely and future opportunity remains possible.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_rejected_thermal_prime_does_not_block_owned_body_cleanup"]
+      },
+      {
+        "scenario_id": 76,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Selected-but-inactive Solar remains bounded engagement observation and terminates/cleans without fabricated External ownership.",
+        "regressions": ["tests/test_thermal_automatic_execution.py::test_unengaged_solar_cold_start_is_bounded_and_not_immediately_retried"]
+      },
+      {
+        "scenario_id": 77,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Unusable PUMP/THERMAL evidence retains origin, marks reconciliation and denies unsafe domain commands; BODY/topology contradictions still preempt.",
+        "regressions": ["tests/test_thermal_runtime_orchestrator.py::test_unusable_live_evidence_cannot_retain_runtime_ownership", "tests/test_ownership_lifecycle_reconciliation.py::test_filtration_domain_gate_denies_unusable_or_rebound_episode"],
+        "remaining_gap": "Not every mixed contradictory vector in the contract has a dedicated composed regression."
+      },
+      {
+        "scenario_id": 78,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Correction rejection and convergence exhaustion are finite faults, not External ownership, and BODY completion remains explicit.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_rejected_filtration_correction_retains_body_for_verified_completion", "tests/test_ownership_evidence.py::test_correction_reservation_is_finite_and_idempotent"],
+        "remaining_gap": "General autonomous recovery from every command-failure class remains outside this slice."
+      },
+      {
+        "scenario_id": 81,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "PUMP and THERMAL operator evidence are separate and can yield independently without erasing BODY.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_same_contradiction_yields_only_with_positive_domain_intent"],
+        "remaining_gap": "A single-frame simultaneous dual-domain positive-intent regression remains."
+      },
+      {
+        "scenario_id": 85,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Manual adapter records positive intent before dispatch; final automatic authority reads current domain permission and exact binding rejects future/unrelated intent.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_direct_operator_adapter_cannot_yield_unrelated_or_future_binding", "tests/test_home_assistant_thermal_automatic_runtime.py::test_manual_pump_request_uses_current_session_equipment_after_plan_converges"],
+        "remaining_gap": "Physical ICP/OCP requests still lack a trusted actor feed."
+      },
+      {
+        "scenario_id": 86,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Filtration-to-Thermal transfer is generation-bound and pending transfer is invalidated by exact BODY operator intent.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_body_operator_intent_invalidates_pending_filtration_to_thermal_transfer"],
+        "remaining_gap": "Dedicated same-window PUMP intent during the transfer remains."
+      },
+      {
+        "scenario_id": 88,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Old-generation and regressive consequences cannot verify, steal, hand back or restart current reconciliation.",
+        "regressions": ["tests/test_thermal_runtime_ownership.py::test_old_event_cannot_preempt_typed_successor_after_prior_drift", "tests/test_ownership_evidence.py::test_regressive_observation_cannot_open_new_drift_episode"]
+      },
+      {
+        "scenario_id": 90,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Canonical HA runtime diagnostics expose per-domain authority/health/evidence, origin, session/generation, purpose, reconciliation, command blocker, termination responsibility and opportunity identity.",
+        "regressions": ["tests/test_thermal_automatic_execution.py::test_verified_body_origin_survives_unattributed_pump_drift", "tests/test_home_assistant_filtration_automatic_runtime.py::test_future_independent_filtration_window_is_not_blocked_by_noon_off"],
+        "remaining_gap": "Reset and not-yet-implemented adoption/persistence states cannot yet be exposed."
+      }
+    ]
+  },
   "scenarios": [
     {
       "scenario_id": 1,

@@ -24,6 +24,7 @@ from .physical_command_authority import (
     NativeConsequenceAttribution,
     PoolOSPhysicalCommandAuthority,
 )
+from .ownership_evidence import OwnershipDomain, OwnershipEvidenceKind, PositiveOperatorEvidence
 
 
 class ExternalChangePolicy(StrEnum):
@@ -71,6 +72,32 @@ class ExternalChangeEvent:
     maintenance_mode: bool = False
     changed_fields: tuple[str, ...] = ()
     event_id: str = field(default_factory=lambda: str(uuid4()))
+    positive_operator_evidence: PositiveOperatorEvidence | None = None
+
+    @property
+    def evidence_kind(self) -> OwnershipEvidenceKind:
+        """Unattributed telemetry is not proof of an operator request."""
+        return (
+            OwnershipEvidenceKind.POSITIVE_OPERATOR_INTERVENTION
+            if self.positive_operator_evidence is not None
+            else OwnershipEvidenceKind.UNEXPLAINED_DRIFT
+        )
+
+    def operator_applies(
+        self, *, generation: int, session_id: str, domain: OwnershipDomain,
+        equipment_id: str, established_at: datetime, evaluated_at: datetime,
+    ) -> bool:
+        """Validate attribution against the consumer's exact authority epoch."""
+        operator = self.positive_operator_evidence
+        return bool(
+            operator is not None
+            and operator.applies(
+                generation=generation, session_id=session_id, domain=domain,
+                equipment_id=equipment_id, established_at=established_at,
+                evaluated_at=evaluated_at,
+            )
+            and operator.requested_at <= self.observed_at <= evaluated_at
+        )
 
     def __post_init__(self) -> None:
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
@@ -94,6 +121,7 @@ class ExternalChangeEvent:
                 "reconciliation_required": self.reconciliation_required,
                 "intended_value": _bounded_value(self.intended_value),
                 "reason_code": self.reason_code,
+                "evidence_kind": self.evidence_kind.value,
                 "changed_fields": list(self.changed_fields),
             }
         )

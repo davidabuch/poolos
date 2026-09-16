@@ -313,7 +313,8 @@ def test_pool_autonomous_control_setup_preserves_preexisting_runtime_restraint()
         assert restraint.state.suppressed
         assert restraint.state.source is PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
         assert not entity.is_on
-        assert authority.pool_automatic_control_suppressed
+        assert not authority.pool_automatic_control_suppressed
+        assert restraint.blocks_opportunity("filtration")
 
     asyncio.run(run())
 
@@ -1447,7 +1448,8 @@ def test_pool_autonomous_control_keeps_same_day_manual_off_until_boundary(
 
         assert restraint.state.suppressed
         assert not entity.is_on
-        assert authority.pool_automatic_control_suppressed
+        assert not authority.pool_automatic_control_suppressed
+        assert restraint.blocks_opportunity("filtration")
 
     asyncio.run(run())
 
