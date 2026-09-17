@@ -562,12 +562,23 @@ class PoolOSThermalAutomaticRuntime:
         self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
 
         checkpoint = self._restart_checkpoint
+        restart_authority_pending = reason in {
+            PhysicalAuthorityReason.AUTHORITY_UNRESOLVED,
+            PhysicalAuthorityReason.CONTROLLER_MODE_UNRESOLVED,
+        }
         if (
             checkpoint is not None
             and self.driver.requested_enabled
             and thermal is not None
             and thermal.generated_at == snapshot.generated_at
         ):
+            if restart_authority_pending:
+                # Startup restoration is asynchronous.  Do not spend the
+                # one-shot restart checkpoint while Maintenance/controller
+                # authority is still unresolved; that is not yet an
+                # authoritative recovery epoch.
+                self.coordinator.async_update_listeners()
+                return
             observations = {
                 item.observation_id: item
                 for item in snapshot.observations
