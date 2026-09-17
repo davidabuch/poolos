@@ -44,6 +44,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnedConcept,
     ThermalRuntimeOwnershipEvidence,
 )
+from poolos.thermal_source_cleanup import ThermalSourceCleanupPolicy
 
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
@@ -205,11 +206,18 @@ def _evaluate(
     filtration: FiltrationSuccessorEvidence | None = None,
     outage: GridOutageAssessment | None = None,
 ):
+    resolved_entitlement = _entitlement() if entitlement is None else entitlement
+    resolved_evidence = _evidence() if evidence is None else evidence
     return CirculationSuccessorArbitrator().evaluate(
-        entitlement=_entitlement() if entitlement is None else entitlement,
-        evidence=_evidence() if evidence is None else evidence,
+        entitlement=resolved_entitlement,
+        evidence=resolved_evidence,
         filtration=_filtration() if filtration is None else filtration,
         outage=_grid() if outage is None else outage,
+        source_cleanup=ThermalSourceCleanupPolicy().evaluate(
+            resolved_entitlement,
+            resolved_evidence,
+            desired_source=PhysicalHeatMode.OFF,
+        ),
     )
 
 
@@ -233,6 +241,15 @@ def test_no_body_provenance_is_retained_as_preexisting_or_external(
         evidence=_evidence(),
         filtration=_filtration(),
         outage=_grid(),
+        source_cleanup=(
+            None
+            if entitlement is None
+            else ThermalSourceCleanupPolicy().evaluate(
+                entitlement,
+                _evidence(),
+                desired_source=PhysicalHeatMode.OFF,
+            )
+        ),
     )
 
     assert result.disposition is CirculationArbitrationDisposition.RETAIN_PREEXISTING
@@ -766,6 +783,7 @@ def test_matching_hardware_after_restart_does_not_reconstruct_ownership() -> Non
         evidence=_evidence(pump_rpm=2900, configured_rpm=2900),
         filtration=_filtration(),
         outage=_grid(),
+        source_cleanup=None,
     )
 
     assert result.circulation_origin is CirculationOrigin.PREEXISTING_OR_EXTERNAL
@@ -789,6 +807,11 @@ def test_only_current_on_grid_evidence_allows_positive_eligibility(
         evidence=_evidence(),
         filtration=_filtration(),
         outage=outage,
+        source_cleanup=ThermalSourceCleanupPolicy().evaluate(
+            _entitlement(),
+            _evidence(),
+            desired_source=PhysicalHeatMode.OFF,
+        ),
     )
 
     assert result.disposition is CirculationArbitrationDisposition.BLOCKED
@@ -871,18 +894,25 @@ def test_repeated_arbitration_is_pure_and_does_not_consume_entitlement() -> None
     evidence = _evidence()
     filtration = _filtration()
     policy = CirculationSuccessorArbitrator()
+    source_cleanup = ThermalSourceCleanupPolicy().evaluate(
+        entitlement,
+        evidence,
+        desired_source=PhysicalHeatMode.OFF,
+    )
 
     first = policy.evaluate(
         entitlement=entitlement,
         evidence=evidence,
         filtration=filtration,
         outage=_grid(),
+        source_cleanup=source_cleanup,
     )
     second = policy.evaluate(
         entitlement=entitlement,
         evidence=evidence,
         filtration=filtration,
         outage=_grid(),
+        source_cleanup=source_cleanup,
     )
 
     assert first == second

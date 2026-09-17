@@ -289,6 +289,7 @@ REASON_SOURCE_FILES = (
     "poolos/thermal_runtime_ownership.py",
     "poolos/thermal_live_execution.py",
     "poolos/thermal_termination.py",
+    "poolos/thermal_source_cleanup.py",
     "poolos/circulation_successor.py",
     "poolos/filtration_automatic_execution.py",
 )
@@ -299,6 +300,7 @@ REASON_PREFIXES = (
     "thermal_execution_",
     "thermal_live_",
     "thermal_termination_",
+    "thermal_source_cleanup_",
     "thermal_cleanup_",
     "circulation_",
     "automatic_filtration_",
@@ -337,8 +339,8 @@ REASON_SIGNALS = (
 )
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
-REASON_FAMILY_COUNT = 211
-REASON_FAMILY_SHA256 = "38b45be39456323a5844f86b9c80e830cb9984ffc17606a1cb94068f33cfd6c1"
+REASON_FAMILY_COUNT = 219
+REASON_FAMILY_SHA256 = "9feb5f8af63560d13258514b4b3287fd2c1f99df2c8f5b87e756a510e85f2fad"
 
 
 @cache
@@ -404,6 +406,10 @@ def _reason_classification(function: str, reason: str) -> ReasonClassification:
             "_verified",
             "solar_engaged",
             "owned_source_off_ready",
+            "body_session_source_off_ready",
+            "body_shutdown_required_to_preserve_operator_source",
+            "source_cleanup_owned_source_off_required",
+            "source_cleanup_body_session_source_off_required",
             "already_off",
         )
     ):
@@ -428,6 +434,10 @@ def _reason_regression(source: str, reason: str) -> str:
     if source.endswith("thermal_automatic_execution.py") and reason == "thermal_cleanup_arbitration_unavailable":
         return "test_verified_gas_off_does_not_consume_residual_when_capture_is_unavailable"
     if source.endswith("circulation_successor.py"):
+        if reason == "circulation_source_cleanup_assessment_unavailable":
+            return "test_source_cleanup_assessment_is_required_for_owned_body_arbitration"
+        if reason == "circulation_body_shutdown_required_to_preserve_operator_source":
+            return "test_runtime_preserves_operator_source_and_completes_owned_body_session"
         return "test_positive_operator_takeover_defeats_affected_thermal_exclusivity"
     if source.endswith("filtration_automatic_execution.py"):
         return "test_off_to_filtration_owned_to_off_is_closed_loop_and_provenance_based"
@@ -438,7 +448,18 @@ def _reason_regression(source: str, reason: str) -> str:
     if source.endswith("thermal_runtime_ownership.py"):
         return "test_full_execution_provenance_is_eligible_for_runtime_ownership"
     if source.endswith("thermal_termination.py"):
+        if reason == "thermal_termination_body_session_source_off_ready":
+            return "test_selected_solar_without_thermal_origin_cannot_strand_owned_body_shutdown"
         return "test_owned_pool_source_off_is_the_only_physical_termination_action"
+    if source.endswith("thermal_source_cleanup.py"):
+        if reason in {
+            "thermal_source_cleanup_evidence_unusable",
+            "thermal_source_cleanup_selected_off_not_current_for_cleanup",
+        }:
+            return "test_unusable_or_preboundary_source_evidence_cannot_authorize_cleanup"
+        if reason == "thermal_source_cleanup_no_capability":
+            return "test_pump_only_origin_cannot_synthesize_source_or_body_cleanup_authority"
+        return "test_selected_source_without_operator_intent_has_exact_off_reduction"
     if "cleanup" in reason:
         return "test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body"
     if "solar" in reason:

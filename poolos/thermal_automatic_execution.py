@@ -1805,14 +1805,25 @@ class ThermalAutomaticExecutionDriver:
             if entitlement.body is ThermalBody.POOL
             else frame.thermal.hot_tub
         )
+        evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=frame.observed_at,
+            observations={item.observation_id: item for item in frame.observations},
+            body=body,
+            external_changes=frame.external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+        )
+        desired_source = (
+            PhysicalHeatMode.OFF
+            if self._solar_nonengagement_cleanup_purpose_id is not None
+            else body.plan.desired.selected_source
+        )
         return self.circulation_arbitrator.evaluate(
             entitlement=entitlement,
-            evidence=build_thermal_runtime_ownership_evidence(
-                generated_at=frame.observed_at,
-                observations={item.observation_id: item for item in frame.observations},
-                body=body,
-                external_changes=frame.external_changes,
-                freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+            evidence=evidence,
+            source_cleanup=self.termination_policy.source_cleanup_policy.evaluate(
+                entitlement,
+                evidence,
+                desired_source=desired_source,
             ),
             filtration=frame.filtration_successor,
             outage=frame.orchestration.outage,
@@ -1873,7 +1884,7 @@ class ThermalAutomaticExecutionDriver:
             # The existing Hot Tub cleanup scope likewise requires body origin.
             return _CleanupCaptureDisposition.NO_CIRCULATION_CAPABILITY
         if entitlement.body is ThermalBody.POOL and (
-            circulation is None or not circulation.source_cleanup_complete
+            circulation is None or not circulation.body_shutdown_source_safe
         ):
             return _CleanupCaptureDisposition.WAITING_FOR_EVIDENCE
         captured = ThermalCirculationCleanupProvenance.from_residual(
@@ -1985,8 +1996,8 @@ class ThermalAutomaticExecutionDriver:
                 command_delivery_performed=False,
             )
         if (
-            external_reason.disposition is not ThermalTerminationDisposition.RELINQUISH_ONLY
-            or external_reason.source_action.value != "already_off"
+            external_reason.source_cleanup is None
+            or not external_reason.source_cleanup.body_shutdown_source_safe
         ):
             if external_reason.disposition is ThermalTerminationDisposition.INVALIDATED:
                 self._clear_cleanup()
@@ -2123,11 +2134,7 @@ class ThermalAutomaticExecutionDriver:
             or outage.disposition is not GridOutageDisposition.ON_GRID
         ):
             return "failed:thermal_cleanup_grid_not_authoritatively_on"
-        if (
-            evidence.effective_heat_source is not PhysicalHeatMode.OFF
-            or not evidence.heat_source_observation_fresh
-            or not evidence.heat_source_observation_usable
-        ):
+        if not assessment.body_shutdown_source_safe:
             return "failed:thermal_cleanup_source_off_not_current"
         if (
             evidence.spa_active is not False
@@ -2179,6 +2186,8 @@ class ThermalAutomaticExecutionDriver:
         filtration = frame.filtration_successor
         operation = attempt.candidate.operation
         assert isinstance(operation, SetPumpSpeed)
+        if not assessment.filtration_handoff_source_safe:
+            return "failed:thermal_cleanup_source_not_safe_for_filtration_handoff"
         if (
             filtration is None
             or filtration.evaluated_at != frame.observed_at
@@ -3029,6 +3038,43 @@ class ThermalAutomaticExecutionDriver:
             ),
             "termination_source_action": (
                 None if termination is None else termination.source_action.value
+            ),
+            "termination_source_cleanup_disposition": (
+                None
+                if termination is None or termination.source_cleanup is None
+                else termination.source_cleanup.disposition.value
+            ),
+            "termination_selected_source": (
+                None
+                if termination is None
+                or termination.source_cleanup is None
+                or termination.source_cleanup.selected_source is None
+                else termination.source_cleanup.selected_source.value
+            ),
+            "termination_source_cleanup_complete": bool(
+                termination
+                and termination.source_cleanup
+                and termination.source_cleanup.source_cleanup_complete
+            ),
+            "termination_body_shutdown_source_safe": bool(
+                termination
+                and termination.source_cleanup
+                and termination.source_cleanup.body_shutdown_source_safe
+            ),
+            "termination_filtration_handoff_source_safe": bool(
+                termination
+                and termination.source_cleanup
+                and termination.source_cleanup.filtration_handoff_source_safe
+            ),
+            "termination_operator_source_selection_preserved": bool(
+                termination
+                and termination.source_cleanup
+                and termination.source_cleanup.operator_selection_preserved
+            ),
+            "termination_source_reactivation_possible": bool(
+                termination
+                and termination.source_cleanup
+                and termination.source_cleanup.reactivation_possible_while_body_active
             ),
             "termination_pump_action": (
                 None if termination is None else termination.pump_action.value

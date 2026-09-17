@@ -16,6 +16,29 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 16, 2026 — v0.11.25 shutdown source-cleanup correction candidate
+
+Physical v0.11.25 commissioning reached verified PoolOS BODY/PUMP ownership at
+Solar 2900 RPM without THERMAL command provenance, then deadlocked after demand
+ended. H0002 remained selected while `solar.active` fell and later reactivated.
+Residual BODY/PUMP responsibility existed, but circulation required selected
+source Off while termination refused to produce Off without THERMAL provenance.
+
+The local correction introduces a typed source-cleanup disposition shared by
+termination and circulation arbitration. A verified PoolOS BODY origin grants
+only the exact monotonic source-Off reduction needed to unwind its session when
+the non-Off selection is unattributed. It does not create THERMAL ownership.
+Positive operator Solar/Gas selection is preserved; BODY responsibility instead
+ends the body session to verified body Off/pump zero and cannot hand that selected
+source into continuous filtration. Stale, unusable, pre-boundary and old-generation
+evidence remain command-free. Solar inactivity alone is never cleanup.
+
+The physical-cadence regression models H0002 and `solar.active` independently,
+retains H0002 until a modeled accepted command is later observed, preserves the
+PR #200 idempotent aligned-successor Pump provenance path, and verifies source
+Off -> Pool Off -> pump zero. The shutdown matrix is in
+[SHUTDOWN_OWNERSHIP_MATRIX.md](ownership/SHUTDOWN_OWNERSHIP_MATRIX.md).
+
 ### September 16, 2026 — ownership contract Stage 2 implementation candidate
 
 Stage 2 is implemented on `feat/ownership-lifecycle-reconciliation`, based on

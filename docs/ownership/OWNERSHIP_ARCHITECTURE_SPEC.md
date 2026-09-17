@@ -194,6 +194,29 @@ it must make the source/hydraulics safe through explicit completion authority,
 not silently reclaim normal THERMAL control. User Hot Tub target satisfaction
 ends heating demand, not the requested Hot Tub body session.
 
+### Body-session source cleanup
+
+Ongoing THERMAL authority and the narrow authority to unwind a PoolOS-created
+BODY lifecycle are separate. A residual with verified BODY origin may authorize
+only an exact source `Off` reduction when a current non-Off selection has no
+positive operator attribution and current policy no longer requires heat. This
+cleanup capability does not establish THERMAL ownership, cannot select a heating
+source, and remains bound to the residual body session, generation, topology,
+fresh evidence, delivery chronology and final gateway.
+
+Solar inactivity is not source cleanup. H0002 can remain selected and reactivate
+while the body remains active. Selected-but-idle Gas is likewise not clean. Both
+unattributed selections therefore require verified Off before a continuous
+filtration handoff or ordinary body shutdown.
+
+Positive operator THERMAL intent changes the disposition. PoolOS preserves the
+operator's Solar/Gas selection and uses its independent BODY responsibility to
+end the body session, verifying body Off and actual pump zero. It does not carry
+that selected source into an ordinary filtration handoff under the same body
+session because the source could reactivate. Source Off already selected by the
+operator is safe for the normal successor decision. See
+[SHUTDOWN_OWNERSHIP_MATRIX.md](SHUTDOWN_OWNERSHIP_MATRIX.md).
+
 ## 6. Manual scope, expiry and hand-back
 
 An override records positive evidence ID, body/domain, value/request, observed and
