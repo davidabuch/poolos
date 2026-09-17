@@ -449,6 +449,31 @@ def test_manual_matching_prefix_removal_does_not_manufacture_progress() -> None:
     assert decision.reason_code == "thermal_execution_residual_plan_incompatible"
 
 
+def test_compatible_progress_cannot_cross_pool_hot_tub_body_boundary() -> None:
+    """Similar residual work for another body is never semantic continuation."""
+
+    pool_assessment = _assessment(body=ThermalBody.POOL)
+    pool = _currentness(pool_assessment, "evaluation-pool")
+    hot_tub = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            body=ThermalBody.HOT_TUB,
+            pump_equipment_id="p0198",
+        ),
+        "evaluation-hot-tub",
+    )
+    progress = ThermalExecutionProgress(
+        accepted_current=_signature(pool_assessment, 0),
+        accepted_operation_id=pool_assessment.operations[0].operation_id,
+    )
+
+    decision = assess_execution_compatibility(pool, hot_tub, progress=progress)
+
+    assert not decision.continuation_allowed
+    assert decision.disposition is ThermalExecutionCompatibilityDisposition.SUPERSEDED
+    assert decision.reason_code == "thermal_execution_purpose_superseded"
+
+
 def test_pool_probe_accepts_only_attributed_source_body_and_acquisition_progress() -> None:
     original_assessment = _assessment(
         source=PhysicalHeatMode.OFF,

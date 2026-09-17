@@ -9,6 +9,7 @@ It performs no authorization, delivery, observation, or equipment I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -120,12 +121,15 @@ class ThermalExecutionCurrentness:
 
     evaluation_id: str
     plan_id: str
+    evaluated_at: datetime
     purpose: ThermalExecutionPurpose
     residual_plan: ThermalResidualPlan
 
     def __post_init__(self) -> None:
         if not self.evaluation_id.strip() or not self.plan_id.strip():
             raise ValueError("evaluation_id and plan_id must not be empty")
+        if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
+            raise ValueError("execution currentness timestamp must be timezone-aware")
 
     @classmethod
     def from_assessment(
@@ -140,6 +144,7 @@ class ThermalExecutionCurrentness:
         return cls(
             evaluation_id=evaluation_id,
             plan_id=assessment.plan_id,
+            evaluated_at=assessment.desired.evaluated_at,
             purpose=purpose,
             residual_plan=residual_plan_from_assessment(assessment),
         )

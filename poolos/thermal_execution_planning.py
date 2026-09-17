@@ -682,6 +682,7 @@ class ThermalExecutionPlanBuilder:
                     expected_observations=expected,
                     metadata={
                         **metadata,
+                        "strict_post_delivery_observation": "true",
                         "hydraulic_continuity_required": "true",
                         "hydraulic_target_body": desired.body.value,
                     },

@@ -173,6 +173,31 @@ the other's circulation concurrently. An inactive or different body, broken
 topology, reset/restart, stale generation, or incompatible operator intent defeats
 continuation. Pool origin never authorizes Hot Tub cleanup.
 
+An immutable thermal plan timestamp protects admission of old work; it is not a
+fixed lifetime for a command sequence that PoolOS has already begun. After an
+accepted or verified PoolOS operation proves attributable progress, a newly
+evaluated plan may supply current admission authority for the next exact operation
+only when canonical purpose and residual-plan compatibility explain that progress.
+The immutable origin remains the audit identity. The fresh plan remains subject to
+its own age/future checks, current observations, domain permission, topology,
+operator evidence, generation and final delivery gateway. Zero-progress physical
+equality, an incompatible residual, or a material purpose change cannot refresh an
+old execution.
+
+Every accepted thermal BODY, PUMP, and source operation requires a strictly later
+authoritative observation before it can enter the verified prefix. Semantic
+purpose compatibility never relaxes that chronology. A delayed consequence from
+an older execution or generation cannot verify current work. During a bounded
+priming hold, each accepted verification sample must advance beyond the preceding
+sample; reevaluation cannot replay delivery or renew the originating receipt.
+
+A healthy filtration owner remains exclusive while thermal evaluates. Thermal may
+continue only after the registry creates its exact typed Filtration-to-Thermal
+transfer. A suspended or acquiring filtration lease is not available for transfer;
+thermal waits command-free and cannot replace it. Suspension caused by temporarily
+unusable authoritative evidence retains the same filtration provenance and cleanup
+responsibility until usable evidence resumes or invalidates that lease.
+
 An internal waiting interval retains responsibility only with a typed current
 continuity/termination record and no unsafe command permission. Cleanup cannot be
 abandoned merely because evidence capture was attempted. Transfer the exact
@@ -234,6 +259,14 @@ A pump-purpose change alone must not erase a still-applicable Thermal override.
 The comparison for hand-back is PoolOS's exact current requirement, not an old
 target or merely the configured baseline. Verify authoritative resulting state;
 equal telemetry without positive hand-back evidence creates no new authority.
+
+If Solar is physically active during a PoolOS-owned filtration body/pump session,
+the active Solar pump requirement applies even when THERMAL is governed by a
+positively identified operator request. The typed Filtration-to-Thermal transition
+preserves BODY, establishes the new PUMP requirement through an accepted PoolOS
+operation, and yields only THERMAL. The same H0002/active telemetry without trusted
+operator evidence leaves THERMAL unowned; it does not fabricate either operator or
+PoolOS THERMAL authority.
 
 Positive Body OFF cancels that body session/opportunity, not future independent
 autonomy or the other body. Record the canceled semantic opportunity so the same

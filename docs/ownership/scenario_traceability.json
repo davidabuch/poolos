@@ -251,6 +251,53 @@
       }
     ]
   },
+  "v0_11_26_reacquisition_review": {
+    "baseline": "c8539e32a6519a35ab2ec2b069698b923e4a3f74",
+    "branch": "fix/thermal-solar-reacquisition-currentness",
+    "implementation_record": "docs/ownership/V0_11_26_SOLAR_REACQUISITION_CURRENTNESS.md",
+    "scenario_updates": [
+      {
+        "scenario_id": 2,
+        "implementation_status": "SATISFIED",
+        "mechanism": "A slow cold Solar acquisition retains its immutable audit origin while accepted/verified progress uses fresh compatible semantic currentness for the remaining source step and reaches active Solar at 2900.",
+        "regressions": ["tests/test_solar_reacquisition_currentness.py::test_fresh_solar_reacquisition_delivers_source_after_slow_compatible_probe_successor", "tests/test_solar_reacquisition_currentness.py::test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation", "tests/test_thermal_live_execution.py::test_verified_execution_progress_uses_fresh_compatible_current_authority_after_origin_ages"]
+      },
+      {
+        "scenario_id": 28,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "During a typed filtration-to-Solar transition, trusted THERMAL operator evidence yields only THERMAL while PoolOS BODY/PUMP establish the active-Solar 2900 requirement; a later trusted operator source-Off remains THERMAL-scoped while BODY/PUMP either hand off to immediate filtration or complete cleanup. Identical telemetry without the token fabricates no owner.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_solar_active_transfers_owned_filtration_pump_to_solar_requirement", "tests/test_ownership_lifecycle_reconciliation.py::test_operator_solar_then_off_preserves_poolos_body_pump_scope", "tests/test_thermal_runtime_ownership.py::test_domain_operator_intent_preceding_typed_handoff_survives_successor"],
+        "remaining_gap": "Current native ICP/OCP telemetry still provides no defensible positive operator-intent source."
+      },
+      {
+        "scenario_id": 31,
+        "implementation_status": "SATISFIED",
+        "mechanism": "Thermal may replace filtration only through the existing typed handoff; an acquiring or suspended filtration owner produces a command-free typed wait instead of an ownership-registry exception.",
+        "regressions": ["tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart", "tests/test_ownership_lifecycle_reconciliation.py::test_suspended_filtration_owner_defers_thermal_candidate_without_collision"]
+      },
+      {
+        "scenario_id": 53,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Restart reconstructs no BODY/THERMAL authority. If active Solar currently requires 2900 but the pump is 2600, an explicit accepted and verified 2900 command prospectively establishes PUMP only; if pump already equals 2900, equality establishes nothing.",
+        "regressions": ["tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_wrong_pump_establishes_only_pump_provenance", "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_matching_pump_remains_command_free_and_unowned", "tests/test_solar_reacquisition_currentness.py::test_restart_pump_only_provenance_never_grants_body_shutdown_authority"],
+        "remaining_gap": "This slice deliberately does not add broad post-restart BODY/THERMAL adoption or recovery of an interrupted cleanup generation."
+      },
+      {
+        "scenario_id": 82,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Target changes continue to create material purpose boundaries, while a later independent valid Solar opportunity can acquire a fresh generation and progress under fresh compatible currentness.",
+        "regressions": ["tests/test_solar_reacquisition_currentness.py::test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation", "tests/test_thermal_live_execution.py::test_fresh_compatible_epoch_cannot_refresh_old_admission_without_progress"],
+        "remaining_gap": "The continuous deterministic target-down/target-up path is covered; the post-v0.11.26 sequence still requires physical recommissioning."
+      },
+      {
+        "scenario_id": 88,
+        "implementation_status": "PARTIALLY SATISFIED",
+        "mechanism": "Every thermal BODY/PUMP/source step now requires a strictly post-delivery authoritative consequence; fresh semantic currentness cannot let an older matching observation verify a newer execution.",
+        "regressions": ["tests/test_thermal_live_execution.py::test_old_generation_consequence_cannot_verify_new_compatible_execution", "tests/test_thermal_runtime_ownership.py::test_old_event_cannot_preempt_typed_successor_after_prior_drift", "tests/test_thermal_runtime_ownership.py::test_session_provenance_promotion_rejects_different_session"],
+        "remaining_gap": "Transport telemetry that lacks a command/generation correlation identifier remains classified through chronology and current physical evidence rather than direct vendor attribution."
+      }
+    ]
+  },
   "scenarios": [
     {
       "scenario_id": 1,
