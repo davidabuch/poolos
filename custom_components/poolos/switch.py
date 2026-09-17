@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Mapping
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
@@ -35,6 +35,7 @@ from poolos.pool_automatic_control_suppression import (
     spa_suppression_is_current,
 )
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
+from poolos.thermal_runtime_ownership import ThermalQuickRestartCheckpoint
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,8 +326,38 @@ class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+
+        # Keep RestoreEntity attributes synchronized with each coordinator
+        # publication so the persisted checkpoint reflects the latest
+        # authoritative stable lease before a routine HA restart.
+        self.async_on_remove(
+            self._runtime.coordinator.async_add_listener(
+                self.async_write_ha_state
+            )
+        )
+
         previous = await self.async_get_last_state()
         if previous is not None and previous.state == "on":
+            payload = previous.attributes.get(
+                "quick_restart_checkpoint"
+            )
+            if isinstance(payload, Mapping):
+                try:
+                    checkpoint = (
+                        ThermalQuickRestartCheckpoint.from_restore_state(
+                            payload
+                        )
+                    )
+                except (TypeError, ValueError):
+                    checkpoint = None
+                if checkpoint is not None:
+                    self._runtime.thermal_automatic_runtime.arm_quick_restart_recovery(
+                        checkpoint
+                    )
+
+            # Enable only after the persisted recovery candidate is armed.
+            # The first fresh authoritative frame will adjudicate it before
+            # automatic delivery can be scheduled.
             self._runtime.thermal_automatic_runtime.set_enabled(True)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -341,10 +372,19 @@ class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        runtime = self._runtime.thermal_automatic_runtime
+        checkpoint = runtime.quick_restart_restore_payload()
+
         return {
-            **self._runtime.thermal_automatic_runtime.diagnostics(),
+            **runtime.diagnostics(),
             "commissioned_desired_state_persists_across_restart": True,
-            "physical_session_ownership_restored": False,
+            "physical_session_ownership_restored": (
+                runtime.orchestrator.ownership.state.reason_code
+                == "runtime_ownership_restored:quick_restart"
+            ),
+            "quick_restart_recovery_armed": runtime.quick_restart_recovery_armed,
+            "quick_restart_checkpoint": checkpoint,
+            "quick_restart_checkpoint_available": checkpoint is not None,
             "thermal_live_gate_is_independent": True,
             "cached_candidate_executes_on_enable": False,
             "fresh_authoritative_epoch_required": True,

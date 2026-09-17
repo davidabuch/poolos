@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 
 from homeassistant.core import HomeAssistant
@@ -52,6 +52,10 @@ from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment
 from poolos.thermal_runtime_orchestration import (
     ThermalRuntimeOrchestrationAssessment,
     ThermalRuntimeOrchestrator,
+)
+from poolos.thermal_runtime_ownership import (
+    ThermalQuickRestartCheckpoint,
+    ThermalRuntimeOwnershipDisposition,
 )
 
 from .coordinator import PoolOSCoordinator
@@ -268,6 +272,12 @@ class PoolOSThermalAutomaticRuntime:
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
+    _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
+        default=None, init=False, repr=False
+    )
+    _restart_recovery_max_age: timedelta = field(
+        default=timedelta(minutes=5), init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.driver = ThermalAutomaticExecutionDriver(
@@ -401,6 +411,33 @@ class PoolOSThermalAutomaticRuntime:
             domain, equipment, at,
         ), evaluated_at=at)
 
+    def arm_quick_restart_recovery(
+        self,
+        checkpoint: ThermalQuickRestartCheckpoint,
+    ) -> None:
+        """Arm one command-free recovery attempt for a persisted lease."""
+
+        self._restart_checkpoint = checkpoint
+
+    @property
+    def quick_restart_recovery_armed(self) -> bool:
+        return self._restart_checkpoint is not None
+
+    def quick_restart_restore_payload(self) -> dict[str, object] | None:
+        """Return the latest safely persisted stable thermal checkpoint."""
+
+        lease = self.orchestrator.ownership.state.lease
+        if lease is None:
+            return None
+        checkpoint = self.orchestrator.ownership.export_restart_checkpoint(
+            captured_at=lease.last_confirmed_at
+        )
+        return (
+            None
+            if checkpoint is None
+            else checkpoint.to_restore_state()
+        )
+
     @property
     def enabled(self) -> bool:
         return self._desired_enabled
@@ -522,10 +559,49 @@ class PoolOSThermalAutomaticRuntime:
             return
         self._latest_frame = frame
         self.circulation_ownership.begin_epoch(frame.epoch_identity)
+        self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
+
+        checkpoint = self._restart_checkpoint
+        if (
+            checkpoint is not None
+            and self.driver.requested_enabled
+            and thermal is not None
+            and thermal.generated_at == snapshot.generated_at
+        ):
+            observations = {
+                item.observation_id: item
+                for item in snapshot.observations
+            }
+            decision = self.orchestrator.restore_quick_restart(
+                checkpoint,
+                generated_at=snapshot.generated_at,
+                observations=observations,
+                thermal=thermal,
+                external_changes=external_changes,
+                max_age=self._restart_recovery_max_age,
+            )
+            # One authoritative attempt only.  A denial falls back to normal
+            # fail-closed startup behavior; it never retries equality later.
+            self._restart_checkpoint = None
+
+            if (
+                decision.disposition
+                is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+            ):
+                lease = self.orchestrator.ownership.state.lease
+                assert lease is not None
+                self.circulation_ownership.mark_thermal_owned(
+                    lease.lease_id
+                )
+
+                # Recovery itself is command-free.  Do not reserve, authorize,
+                # or schedule automatic delivery on the restoration epoch.
+                self.coordinator.async_update_listeners()
+                return
+
         reserve = getattr(self.driver, "reserve_circulation_candidate", None)
         if reserve is not None:
             reserve(frame)
-        self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled:
             self.driver.note_disabled_epoch(frame)
             self.coordinator.async_update_listeners()

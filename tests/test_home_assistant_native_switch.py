@@ -229,12 +229,24 @@ def test_commissioned_execution_switches_restore_desired_on_without_ownership() 
         class AutomaticRuntime:
             enabled = False
             authority_refreshes = 0
+            quick_restart_recovery_armed = False
+            orchestrator = SimpleNamespace(
+                ownership=SimpleNamespace(
+                    state=SimpleNamespace(reason_code=None)
+                )
+            )
 
             def set_enabled(self, enabled: bool) -> None:
                 self.enabled = enabled
 
             def arm_restart_recovery_adoption(self) -> None:
                 pass
+
+            def arm_quick_restart_recovery(self, _checkpoint: object) -> None:
+                self.quick_restart_recovery_armed = True
+
+            def quick_restart_restore_payload(self) -> None:
+                return None
 
             def authority_configuration_changed(self) -> None:
                 self.authority_refreshes += 1
@@ -251,6 +263,9 @@ def test_commissioned_execution_switches_restore_desired_on_without_ownership() 
                 thermal_runtime=thermal,
                 thermal_automatic_runtime=automatic,
                 filtration_automatic_runtime=filtration,
+                coordinator=SimpleNamespace(
+                    async_add_listener=lambda _listener: (lambda: None)
+                ),
             ),
         )
         entities = (
@@ -260,8 +275,13 @@ def test_commissioned_execution_switches_restore_desired_on_without_ownership() 
         )
         for entity in entities:
             entity.async_get_last_state = AsyncMock(
-                return_value=SimpleNamespace(state="on")
+                return_value=SimpleNamespace(
+                    state="on",
+                    attributes={},
+                )
             )
+            entity.async_on_remove = lambda _remove: None
+            entity.async_write_ha_state = lambda: None
             await entity.async_added_to_hass()
 
         assert thermal.effective_live_enabled
@@ -272,6 +292,10 @@ def test_commissioned_execution_switches_restore_desired_on_without_ownership() 
             entity.extra_state_attributes["physical_session_ownership_restored"]
             is False
             for entity in entities
+        )
+        assert (
+            entities[1].extra_state_attributes["quick_restart_recovery_armed"]
+            is False
         )
 
     asyncio.run(run())
