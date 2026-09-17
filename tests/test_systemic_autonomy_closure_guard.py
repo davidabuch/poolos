@@ -339,8 +339,8 @@ REASON_SIGNALS = (
 )
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
-REASON_FAMILY_COUNT = 220
-REASON_FAMILY_SHA256 = "48b6186dd269f5976ef32f05ede5161386fdee23c15371e650acb8f53fbe1484"
+REASON_FAMILY_COUNT = 222
+REASON_FAMILY_SHA256 = "16c6aa60acce9a63e2bbc09b48b35684421f69f48235d93adbb1a9bd9ff670ff"
 
 
 @cache
@@ -400,6 +400,7 @@ def _reason_classification(function: str, reason: str) -> ReasonClassification:
         word in reason
         for word in (
             "established",
+            "restored:",
             "promoted",
             "handed_off",
             "retained:",
@@ -452,6 +453,13 @@ def _reason_regression(source: str, reason: str) -> str:
     if source.endswith("thermal_runtime_orchestration.py"):
         return "test_integer_native_configured_pump_speed_accepts_integral_float"
     if source.endswith("thermal_runtime_ownership.py"):
+        if reason == "runtime_ownership_restored:quick_restart":
+            return (
+                "test_matching_fresh_restart_restores_same_provenance_"
+                "without_new_delivery"
+            )
+        if reason == "runtime_ownership_restart_denied:{}":
+            return "test_stale_restart_checkpoint_fails_closed"
         return "test_full_execution_provenance_is_eligible_for_runtime_ownership"
     if source.endswith("thermal_termination.py"):
         if reason == "thermal_termination_body_session_source_off_ready":
@@ -689,5 +697,36 @@ def test_v0_11_26_reacquisition_updates_are_unique_and_bound_to_regressions() ->
             assert separator == "::"
             assert (ROOT / path).is_file()
             assert test_name in defined
+        if item["implementation_status"] != "SATISFIED":
+            assert item["remaining_gap"].strip()
+
+
+def test_v0_11_27_quick_restart_updates_are_unique_and_bound_to_regressions() -> None:
+    payload = json.loads(
+        (ROOT / "docs" / "ownership" / "scenario_traceability.json").read_text()
+    )
+    review = payload["v0_11_27_quick_restart_review"]
+    assert review["baseline"] == "b68f69042b3bfbacbc40cdb3b8f1d0700d6f4509"
+    assert review["branch"] == "fix/thermal-quick-restart-adoption"
+    assert (ROOT / review["implementation_record"]).is_file()
+
+    updates = review["scenario_updates"]
+    updated_ids = [item["scenario_id"] for item in updates]
+
+    assert len(updated_ids) == len(set(updated_ids))
+    assert set(updated_ids) <= set(range(1, 91))
+
+    defined = _defined_tests()
+    for item in updates:
+        assert item["implementation_status"] in payload["status_vocabulary"]
+        assert item["mechanism"].strip()
+        assert item["regressions"]
+
+        for node in item["regressions"]:
+            path, separator, test_name = node.partition("::")
+            assert separator == "::"
+            assert (ROOT / path).is_file()
+            assert test_name in defined
+
         if item["implementation_status"] != "SATISFIED":
             assert item["remaining_gap"].strip()

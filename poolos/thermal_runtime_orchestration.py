@@ -36,6 +36,7 @@ from .thermal_runtime_assessment import (
 from .thermal_runtime_ownership import (
     SHARED_HYDRAULIC_SAFETY_BY_CONCEPT,
     SharedHydraulicCircuitEvidence,
+    ThermalQuickRestartCheckpoint,
     ThermalRuntimeOwnershipDecision,
     ThermalRuntimeOwnershipEvidence,
     ThermalRuntimeOwnershipLease,
@@ -395,6 +396,36 @@ class ThermalRuntimeOrchestrator:
             last_transition_at=unloaded_at,
         )
         return self.assessment
+
+    def restore_quick_restart(
+        self,
+        checkpoint: ThermalQuickRestartCheckpoint,
+        *,
+        generated_at: datetime,
+        observations: dict[str, PoolObservation],
+        thermal: ThermalRuntimeAssessment,
+        external_changes: ExternalChangeBatch,
+        max_age: timedelta,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Restore one short-lived prior PoolOS thermal lease command-free."""
+
+        body = (
+            thermal.pool
+            if checkpoint.body is ThermalBody.POOL
+            else thermal.hot_tub
+        )
+        evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=generated_at,
+            observations=observations,
+            body=body,
+            external_changes=external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+        )
+        return self.ownership.restore_restart_checkpoint(
+            checkpoint,
+            evidence=evidence,
+            max_age=max_age,
+        )
 
     def _evaluate_ownership(
         self,

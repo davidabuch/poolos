@@ -8,7 +8,7 @@ thermal delivery provenance and exposes no execution or delivery method.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -453,6 +453,288 @@ class ThermalRuntimeOwnershipTransitionDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
+class ThermalQuickRestartCheckpoint:
+    """Durable proof for one narrowly bounded quick-restart continuation.
+
+    This is not physical-state adoption.  Every owned concept must already
+    have accepted and verified PoolOS provenance before the checkpoint can be
+    exported.  Fresh post-restart observations may only revalidate that exact
+    prior authority for the same semantic thermal purpose.
+    """
+
+    captured_at: datetime
+    lease_id: str
+    generation: int
+    body: ThermalBody
+    requested_mode: str
+    execution_plan_id: str
+    purpose_id: str
+    established_at: datetime
+    body_activation: ThermalRuntimeConceptProvenance
+    pump_setpoint: ThermalRuntimeConceptProvenance
+    heat_source: ThermalRuntimeConceptProvenance
+    verified_concepts: tuple[ThermalRuntimeOwnedConcept, ...]
+    body_activation_accepted_at: datetime
+    pump_setpoint_accepted_at: datetime
+    heat_source_accepted_at: datetime
+    domain_states: tuple[DomainOwnershipState, ...]
+    body_session_id: str
+    body_session_generation: int
+
+    def __post_init__(self) -> None:
+        _require_aware(self.captured_at, "captured_at")
+        _require_aware(self.established_at, "established_at")
+        for name in (
+            "lease_id",
+            "requested_mode",
+            "execution_plan_id",
+            "purpose_id",
+            "body_session_id",
+        ):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        if self.generation < 1 or self.body_session_generation < 1:
+            raise ValueError("restart checkpoint generations must be positive")
+        object.__setattr__(self, "body", ThermalBody(self.body))
+        for name in (
+            "body_activation_accepted_at",
+            "pump_setpoint_accepted_at",
+            "heat_source_accepted_at",
+        ):
+            _require_aware(getattr(self, name), name)
+        verified = tuple(
+            ThermalRuntimeOwnedConcept(item)
+            for item in self.verified_concepts
+        )
+        object.__setattr__(self, "verified_concepts", verified)
+        object.__setattr__(self, "domain_states", tuple(self.domain_states))
+
+
+    def to_restore_state(self) -> dict[str, object]:
+        """Return a JSON-safe representation suitable for HA RestoreEntity."""
+
+        def provenance(
+            item: ThermalRuntimeConceptProvenance,
+        ) -> dict[str, object]:
+            intended = item.intended_value
+            if isinstance(intended, PhysicalHeatMode):
+                value: object = intended.value
+            else:
+                value = intended
+            return {
+                "concept": item.concept.value,
+                "operation_id": item.operation_id,
+                "receipt_id": item.receipt_id,
+                "correlation_id": item.correlation_id,
+                "intended_value": value,
+            }
+
+        return {
+            "schema": 1,
+            "captured_at": self.captured_at.isoformat(),
+            "lease_id": self.lease_id,
+            "generation": self.generation,
+            "body": self.body.value,
+            "requested_mode": self.requested_mode,
+            "execution_plan_id": self.execution_plan_id,
+            "purpose_id": self.purpose_id,
+            "established_at": self.established_at.isoformat(),
+            "body_activation": provenance(self.body_activation),
+            "pump_setpoint": provenance(self.pump_setpoint),
+            "heat_source": provenance(self.heat_source),
+            "body_activation_accepted_at": (
+                self.body_activation_accepted_at.isoformat()
+            ),
+            "pump_setpoint_accepted_at": (
+                self.pump_setpoint_accepted_at.isoformat()
+            ),
+            "heat_source_accepted_at": (
+                self.heat_source_accepted_at.isoformat()
+            ),
+            "body_session_id": self.body_session_id,
+            "body_session_generation": self.body_session_generation,
+        }
+
+    @classmethod
+    def from_restore_state(
+        cls,
+        value: Mapping[str, object],
+    ) -> "ThermalQuickRestartCheckpoint":
+        """Strictly decode one persisted RestoreEntity checkpoint."""
+
+        if value.get("schema") != 1:
+            raise ValueError("unsupported quick-restart checkpoint schema")
+
+        def required_string(name: str) -> str:
+            item = value.get(name)
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError(f"{name} must be a nonempty string")
+            return item
+
+        def required_int(name: str) -> int:
+            item = value.get(name)
+            if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+                raise ValueError(f"{name} must be a positive integer")
+            return item
+
+        def timestamp(name: str) -> datetime:
+            parsed = datetime.fromisoformat(required_string(name))
+            _require_aware(parsed, name)
+            return parsed
+
+        def provenance(
+            name: str,
+            concept: ThermalRuntimeOwnedConcept,
+        ) -> ThermalRuntimeConceptProvenance:
+            raw = value.get(name)
+            if not isinstance(raw, Mapping):
+                raise ValueError(f"{name} provenance must be a mapping")
+            if raw.get("concept") != concept.value:
+                raise ValueError(f"{name} provenance concept mismatch")
+
+            operation_id_raw = raw.get("operation_id")
+            receipt_id_raw = raw.get("receipt_id")
+            correlation_id_raw = raw.get("correlation_id")
+            if (
+                not isinstance(operation_id_raw, str)
+                or not operation_id_raw.strip()
+                or not isinstance(receipt_id_raw, str)
+                or not receipt_id_raw.strip()
+                or not isinstance(correlation_id_raw, str)
+                or not correlation_id_raw.strip()
+            ):
+                raise ValueError(f"{name} provenance identifiers invalid")
+
+            operation_id: str = operation_id_raw
+            receipt_id: str = receipt_id_raw
+            correlation_id: str = correlation_id_raw
+
+            intended = raw.get("intended_value")
+            if concept is ThermalRuntimeOwnedConcept.BODY_ACTIVATION:
+                if intended is not True:
+                    raise ValueError("restart BODY provenance must target active")
+                decoded: bool | int | PhysicalHeatMode = True
+            elif concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT:
+                if (
+                    isinstance(intended, bool)
+                    or not isinstance(intended, int)
+                    or intended <= 0
+                ):
+                    raise ValueError("restart PUMP provenance invalid")
+                decoded = intended
+            else:
+                if not isinstance(intended, str):
+                    raise ValueError("restart THERMAL provenance invalid")
+                decoded = PhysicalHeatMode(intended)
+
+            return ThermalRuntimeConceptProvenance(
+                concept=concept,
+                operation_id=operation_id,
+                receipt_id=receipt_id,
+                correlation_id=correlation_id,
+                intended_value=decoded,
+            )
+
+        captured_at = timestamp("captured_at")
+        body_activation = provenance(
+            "body_activation",
+            ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+        )
+        pump_setpoint = provenance(
+            "pump_setpoint",
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+        )
+        heat_source = provenance(
+            "heat_source",
+            ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+        )
+
+        # Export is restricted to fully stable PoolOS ownership. Reconstruct
+        # only those exact stable domain states; no operator/reconciliation
+        # episode is persisted or manufactured.
+        states = (
+            DomainOwnershipState(
+                domain=OwnershipDomain.BODY,
+                authority=OwnershipAuthority.POOLOS,
+                health=OwnershipHealth.STABLE,
+                evidence_kind=OwnershipEvidenceKind.EXPECTED_NATIVE_TRANSITION,
+                command_blocker=None,
+                target_value=True,
+                observed_value=True,
+                observed_at=captured_at,
+            ),
+            DomainOwnershipState(
+                domain=OwnershipDomain.PUMP,
+                authority=OwnershipAuthority.POOLOS,
+                health=OwnershipHealth.STABLE,
+                evidence_kind=OwnershipEvidenceKind.EXPECTED_NATIVE_TRANSITION,
+                command_blocker=None,
+                target_value=pump_setpoint.intended_value,
+                observed_value=pump_setpoint.intended_value,
+                observed_at=captured_at,
+            ),
+            DomainOwnershipState(
+                domain=OwnershipDomain.THERMAL,
+                authority=OwnershipAuthority.POOLOS,
+                health=OwnershipHealth.STABLE,
+                evidence_kind=OwnershipEvidenceKind.EXPECTED_NATIVE_TRANSITION,
+                command_blocker=None,
+                target_value=(
+                    heat_source.intended_value.value
+                    if isinstance(
+                        heat_source.intended_value,
+                        PhysicalHeatMode,
+                    )
+                    else heat_source.intended_value
+                ),
+                observed_value=(
+                    heat_source.intended_value.value
+                    if isinstance(
+                        heat_source.intended_value,
+                        PhysicalHeatMode,
+                    )
+                    else heat_source.intended_value
+                ),
+                observed_at=captured_at,
+            ),
+        )
+
+        return cls(
+            captured_at=captured_at,
+            lease_id=required_string("lease_id"),
+            generation=required_int("generation"),
+            body=ThermalBody(required_string("body")),
+            requested_mode=required_string("requested_mode"),
+            execution_plan_id=required_string("execution_plan_id"),
+            purpose_id=required_string("purpose_id"),
+            established_at=timestamp("established_at"),
+            body_activation=body_activation,
+            pump_setpoint=pump_setpoint,
+            heat_source=heat_source,
+            verified_concepts=(
+                ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+                ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+                ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+            ),
+            body_activation_accepted_at=timestamp(
+                "body_activation_accepted_at"
+            ),
+            pump_setpoint_accepted_at=timestamp(
+                "pump_setpoint_accepted_at"
+            ),
+            heat_source_accepted_at=timestamp(
+                "heat_source_accepted_at"
+            ),
+            domain_states=states,
+            body_session_id=required_string("body_session_id"),
+            body_session_generation=required_int(
+                "body_session_generation"
+            ),
+        )
+
+
+
+@dataclass(frozen=True, slots=True)
 class ThermalRuntimeOwnershipEvidence:
     """Current evidence that may confirm or invalidate an existing lease."""
 
@@ -605,6 +887,244 @@ class ThermalRuntimeOwnershipManager:
         """Return bounded diagnostics for the latest terminal transition."""
 
         return self._last_terminal_transition
+
+
+    def export_restart_checkpoint(
+        self,
+        *,
+        captured_at: datetime,
+    ) -> ThermalQuickRestartCheckpoint | None:
+        """Export only a fully verified Pool Solar ownership session."""
+
+        _require_aware(captured_at, "captured_at")
+        lease = self._state.lease
+        if (
+            self._state.status is not ThermalRuntimeOwnershipStatus.OWNED
+            or lease is None
+            or lease.body is not ThermalBody.POOL
+            or lease.originating_currentness is None
+        ):
+            return None
+
+        purpose = lease.originating_currentness.purpose
+        if (
+            purpose.kind is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+            or purpose.selected_source is not PhysicalHeatMode.SOLAR
+            or purpose.required_pump_rpm is None
+        ):
+            return None
+
+        if (
+            lease.body_activation is None
+            or lease.pump_setpoint is None
+            or lease.heat_source is None
+            or lease.body_activation_accepted_at is None
+            or lease.pump_setpoint_accepted_at is None
+            or lease.heat_source_accepted_at is None
+            or lease.body_session_id is None
+            or lease.body_session_generation is None
+        ):
+            return None
+
+        required = {
+            ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+            ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+        }
+        if set(lease.verified_concepts) != required:
+            return None
+
+        if (
+            lease.body_activation.intended_value is not True
+            or lease.pump_setpoint.intended_value != purpose.required_pump_rpm
+            or lease.heat_source.intended_value is not PhysicalHeatMode.SOLAR
+        ):
+            return None
+
+        states = {
+            state.domain: state
+            for state in lease.domain_states
+        }
+        for domain in (
+            OwnershipDomain.BODY,
+            OwnershipDomain.PUMP,
+            OwnershipDomain.THERMAL,
+        ):
+            state = states.get(domain)
+            if (
+                state is None
+                or state.authority is not OwnershipAuthority.POOLOS
+                or state.health is not OwnershipHealth.STABLE
+                or state.positive_operator_evidence is not None
+            ):
+                return None
+
+        return ThermalQuickRestartCheckpoint(
+            captured_at=captured_at,
+            lease_id=lease.lease_id,
+            generation=lease.generation,
+            body=lease.body,
+            requested_mode=lease.requested_mode,
+            execution_plan_id=lease.execution_plan_id,
+            purpose_id=purpose.purpose_id,
+            established_at=lease.established_at,
+            body_activation=lease.body_activation,
+            pump_setpoint=lease.pump_setpoint,
+            heat_source=lease.heat_source,
+            verified_concepts=lease.verified_concepts,
+            body_activation_accepted_at=lease.body_activation_accepted_at,
+            pump_setpoint_accepted_at=lease.pump_setpoint_accepted_at,
+            heat_source_accepted_at=lease.heat_source_accepted_at,
+            domain_states=lease.domain_states,
+            body_session_id=lease.body_session_id,
+            body_session_generation=lease.body_session_generation,
+        )
+
+    def restore_restart_checkpoint(
+        self,
+        checkpoint: ThermalQuickRestartCheckpoint,
+        *,
+        evidence: ThermalRuntimeOwnershipEvidence,
+        max_age: timedelta,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Restore exact prior authority after a short matching restart only."""
+
+        previous = self._state.status
+        at = evidence.evaluated_at
+
+        def deny(reason: str) -> ThermalRuntimeOwnershipDecision:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                f"runtime_ownership_restart_denied:{reason}",
+                previous,
+                at,
+            )
+
+        if max_age <= timedelta(0):
+            raise ValueError("restart recovery max_age must be positive")
+
+        if self._state.status is not ThermalRuntimeOwnershipStatus.UNOWNED:
+            return deny("already_owned")
+
+        if at < checkpoint.captured_at:
+            return deny("clock_regression")
+
+        if at - checkpoint.captured_at > max_age:
+            return deny("checkpoint_stale")
+
+        currentness = evidence.current_context.execution_currentness
+        if currentness is None:
+            return deny("currentness_unavailable")
+
+        purpose = currentness.purpose
+        if (
+            purpose.purpose_id != checkpoint.purpose_id
+            or purpose.body is not checkpoint.body
+            or purpose.requested_mode.casefold()
+            != checkpoint.requested_mode.casefold()
+            or purpose.kind is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+            or purpose.selected_source is not PhysicalHeatMode.SOLAR
+            or purpose.required_pump_rpm
+            != checkpoint.pump_setpoint.intended_value
+        ):
+            return deny("purpose_changed")
+
+        if (
+            evidence.requested_mode.casefold()
+            != checkpoint.requested_mode.casefold()
+        ):
+            return deny("requested_mode_changed")
+
+        if evidence.external_changes.events:
+            return deny("external_change_present")
+
+        if checkpoint.body is not ThermalBody.POOL:
+            return deny("unsupported_body")
+
+        if (
+            not evidence.pool_activity_fresh
+            or not evidence.pool_activity_usable
+            or evidence.pool_activity_observed_at is None
+            or evidence.pool_activity_observed_at <= checkpoint.captured_at
+            or evidence.pool_active is not True
+        ):
+            return deny("pool_state_mismatch")
+
+        if (
+            not evidence.spa_activity_fresh
+            or not evidence.spa_activity_usable
+            or evidence.spa_activity_observed_at is None
+            or evidence.spa_activity_observed_at <= checkpoint.captured_at
+            or evidence.spa_active is not False
+        ):
+            return deny("spa_state_mismatch")
+
+        expected_rpm = checkpoint.pump_setpoint.intended_value
+        if type(expected_rpm) is not int:
+            return deny("checkpoint_pump_invalid")
+
+        if (
+            not evidence.pump_observation_fresh
+            or not evidence.pump_observation_usable
+            or evidence.pump_observed_at is None
+            or evidence.pump_observed_at <= checkpoint.captured_at
+            or evidence.pump_rpm is None
+            or abs(evidence.pump_rpm - expected_rpm) > self.pump_rpm_tolerance
+        ):
+            return deny("pump_state_mismatch")
+
+        if (
+            not evidence.heat_source_observation_fresh
+            or not evidence.heat_source_observation_usable
+            or evidence.heat_source_observed_at is None
+            or evidence.heat_source_observed_at <= checkpoint.captured_at
+            or evidence.effective_heat_source
+            is not checkpoint.heat_source.intended_value
+        ):
+            return deny("heat_source_mismatch")
+
+        # Preserve the exact accepted command provenance and body-session
+        # generation.  Only the transient planner/evaluation identity advances
+        # to the fresh post-restart semantic context.
+        lease = ThermalRuntimeOwnershipLease(
+            lease_id=checkpoint.lease_id,
+            generation=checkpoint.generation,
+            body=checkpoint.body,
+            evaluation_id=currentness.evaluation_id,
+            thermal_plan_id=currentness.plan_id,
+            execution_plan_id=checkpoint.execution_plan_id,
+            requested_mode=checkpoint.requested_mode,
+            established_at=checkpoint.established_at,
+            last_confirmed_at=at,
+            status=ThermalRuntimeOwnershipStatus.OWNED,
+            reason_code="runtime_ownership_restored:quick_restart",
+            body_activation=checkpoint.body_activation,
+            pump_setpoint=checkpoint.pump_setpoint,
+            heat_source=checkpoint.heat_source,
+            originating_currentness=currentness,
+            execution_progress=ThermalExecutionProgress(),
+            verified_concepts=checkpoint.verified_concepts,
+            body_activation_accepted_at=checkpoint.body_activation_accepted_at,
+            pump_setpoint_accepted_at=checkpoint.pump_setpoint_accepted_at,
+            heat_source_accepted_at=checkpoint.heat_source_accepted_at,
+            domain_states=checkpoint.domain_states,
+            body_session_id=checkpoint.body_session_id,
+            body_session_generation=checkpoint.body_session_generation,
+        )
+
+        self._residual_termination = None
+        self._state = ThermalRuntimeOwnershipState(
+            status=ThermalRuntimeOwnershipStatus.OWNED,
+            lease=lease,
+            reason_code=lease.reason_code,
+        )
+
+        return self._decision(
+            ThermalRuntimeOwnershipDisposition.ESTABLISHED,
+            lease.reason_code,
+            previous,
+            at,
+        )
 
     def establish(
         self,

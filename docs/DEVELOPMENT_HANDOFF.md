@@ -16,6 +16,32 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 17, 2026 — v0.11.27 thermal quick-restart recovery candidate
+
+Physical v0.11.27 commissioning proved reusable autonomous Solar acquisition,
+source cleanup, Pool shutdown/pump-zero completion and later fresh Solar
+reacquisition, but a routine Home Assistant restart still discarded volatile
+BODY/PUMP/THERMAL authority even when the physical Pool/Solar/2900 state had not
+changed.
+
+The quick-restart correction persists only a fully stable, fully verified
+PoolOS-owned Pool Solar session. On startup it arms one bounded recovery
+candidate and requires the first fresh authoritative epoch to match the prior
+semantic purpose, Pool/Spa topology, Solar source and operating RPM. The
+checkpoint is limited to five minutes, retains the exact previously accepted
+command provenance and body-session generation, restores circulation ownership
+in lockstep, and issues no equipment command on the restoration epoch.
+Malformed, stale, changed-purpose, externally changed, partial or mismatched
+state remains unowned and the candidate is consumed once.
+
+This is deliberately not broad physical-state adoption and does not solve a
+multi-hour outage where policy or environmental conditions changed while Home
+Assistant was unavailable. Long-outage reconciliation and interrupted-cleanup
+recovery remain separate future work.
+
+See the
+[v0.11.27 quick-restart recovery record](ownership/V0_11_27_THERMAL_QUICK_RESTART_RECOVERY.md).
+
 ### September 17, 2026 — v0.11.26 Solar reacquisition currentness correction
 
 Physical v0.11.26 commissioning proved the complete no-successor shutdown path,
