@@ -339,8 +339,8 @@ REASON_SIGNALS = (
 )
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
-REASON_FAMILY_COUNT = 219
-REASON_FAMILY_SHA256 = "9feb5f8af63560d13258514b4b3287fd2c1f99df2c8f5b87e756a510e85f2fad"
+REASON_FAMILY_COUNT = 220
+REASON_FAMILY_SHA256 = "48b6186dd269f5976ef32f05ede5161386fdee23c15371e650acb8f53fbe1484"
 
 
 @cache
@@ -422,6 +422,7 @@ def _reason_classification(function: str, reason: str) -> ReasonClassification:
             "cold_start_activation_required",
             "residual_termination_required",
             "candidate_unavailable",
+            "circulation_handoff_unavailable",
             "no_authorized_candidate",
             "not_immediately_required",
         )
@@ -431,6 +432,11 @@ def _reason_classification(function: str, reason: str) -> ReasonClassification:
 
 
 def _reason_regression(source: str, reason: str) -> str:
+    if (
+        source.endswith("thermal_automatic_execution.py")
+        and reason == "automatic_thermal_circulation_handoff_unavailable"
+    ):
+        return "test_suspended_filtration_owner_defers_thermal_candidate_without_collision"
     if source.endswith("thermal_automatic_execution.py") and reason == "thermal_cleanup_arbitration_unavailable":
         return "test_verified_gas_off_does_not_consume_residual_when_capture_is_unavailable"
     if source.endswith("circulation_successor.py"):
@@ -648,6 +654,31 @@ def test_stage_2_scenario_updates_are_unique_and_bound_to_regressions() -> None:
     assert payload["stage_2_review"]["baseline"] == (
         "629b84e7517669e9dd5b98285ec1357a0b9086f4"
     )
+    defined = _defined_tests()
+    for item in updates:
+        assert item["implementation_status"] in payload["status_vocabulary"]
+        assert item["mechanism"].strip()
+        assert item["regressions"]
+        for node in item["regressions"]:
+            path, separator, test_name = node.partition("::")
+            assert separator == "::"
+            assert (ROOT / path).is_file()
+            assert test_name in defined
+        if item["implementation_status"] != "SATISFIED":
+            assert item["remaining_gap"].strip()
+
+
+def test_v0_11_26_reacquisition_updates_are_unique_and_bound_to_regressions() -> None:
+    payload = json.loads(
+        (ROOT / "docs/ownership/scenario_traceability.json").read_text()
+    )
+    review = payload["v0_11_26_reacquisition_review"]
+    assert review["baseline"] == "c8539e32a6519a35ab2ec2b069698b923e4a3f74"
+    assert (ROOT / review["implementation_record"]).is_file()
+    updates = review["scenario_updates"]
+    updated_ids = [item["scenario_id"] for item in updates]
+    assert len(updated_ids) == len(set(updated_ids))
+    assert set(updated_ids) <= set(range(1, 91))
     defined = _defined_tests()
     for item in updates:
         assert item["implementation_status"] in payload["status_vocabulary"]

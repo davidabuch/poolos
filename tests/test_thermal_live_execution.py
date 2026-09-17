@@ -891,6 +891,214 @@ def test_each_step_records_only_its_fresh_delivery_authorization() -> None:
     ] == second_authorization_id
 
 
+def test_verified_execution_progress_uses_fresh_compatible_current_authority_after_origin_ages() -> None:
+    """A running execution must not die only because its audit plan aged."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery()
+
+    pump_waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=delivery,
+        )
+    )
+    pump_verified = engine.verify_current_step(
+        pump_waiting,
+        store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=pump_waiting.originating_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+    assert pump_verified.status is ThermalLiveExecutionStatus.READY
+
+    fresh_at = NOW + timedelta(seconds=121)
+    fresh_desired = replace(
+        desired(PhysicalHeatMode.SOLAR, 2900),
+        evaluated_at=fresh_at,
+    )
+    fresh_plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_POOL_PUMP_ID,
+        configured_speed_concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        fresh_desired,
+        ThermalCurrentState(
+            observed_at=fresh_at,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2900,
+        ),
+    )
+    fresh_currentness = ThermalExecutionCurrentness.from_assessment(
+        fresh_plan,
+        evaluation_id="evaluation-fresh-compatible",
+    )
+    fresh_evidence = evidence(
+        plan,
+        at=fresh_at,
+        evaluation_id=pump_verified.evaluation_id,
+        current_evaluation_id="evaluation-fresh-compatible",
+        current_plan_id=fresh_plan.plan_id,
+        execution_currentness=fresh_currentness,
+    )
+
+    source_waiting = asyncio.run(
+        engine.deliver_current_step(
+            pump_verified,
+            policy=policy(),
+            evidence=fresh_evidence,
+            delivery=delivery,
+        )
+    )
+
+    assert source_waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION, (
+        source_waiting.status,
+        source_waiting.failure_reason,
+    )
+    assert source_waiting.failure_reason is None
+    assert len(delivery.calls) == 2
+    assert isinstance(delivery.calls[-1][0], SetHeatMode)
+    assert delivery.calls[-1][0].mode is PhysicalHeatMode.SOLAR
+
+
+def test_fresh_compatible_epoch_cannot_refresh_old_admission_without_progress() -> None:
+    """A look-alike current plan cannot admit an old execution from equality."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    fresh_at = NOW + timedelta(seconds=121)
+    fresh_plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_POOL_PUMP_ID,
+        configured_speed_concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        replace(desired(PhysicalHeatMode.SOLAR, 2900), evaluated_at=fresh_at),
+        ThermalCurrentState(
+            observed_at=fresh_at,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2600,
+        ),
+    )
+    live = evidence(
+        plan,
+        at=fresh_at,
+        current_evaluation_id="evaluation-fresh-look-alike",
+        current_plan_id=fresh_plan.plan_id,
+        execution_currentness=ThermalExecutionCurrentness.from_assessment(
+            fresh_plan,
+            evaluation_id="evaluation-fresh-look-alike",
+        ),
+    )
+    delivery = FakeThermalDelivery()
+
+    result = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=live,
+            delivery=delivery,
+        )
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.BLOCKED
+    assert result.failure_reason == "thermal_plan_stale"
+    assert delivery.calls == []
+
+
+@pytest.mark.parametrize(
+    ("current_evaluated_at", "expected_reason"),
+    (
+        (NOW + timedelta(seconds=121), "thermal_plan_stale"),
+        (NOW + timedelta(seconds=243), "plan_created_in_future"),
+    ),
+)
+def test_compatible_progress_requires_a_currently_fresh_nonfuture_epoch(
+    current_evaluated_at: datetime,
+    expected_reason: str,
+) -> None:
+    """Progress compatibility never bypasses the current epoch age gate."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery()
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=delivery,
+        )
+    )
+    ready = engine.verify_current_step(
+        waiting,
+        store("pump.rpm", 2900, at=NOW + timedelta(seconds=1)),
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+    fresh_plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_POOL_PUMP_ID,
+        configured_speed_concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        replace(
+            desired(PhysicalHeatMode.SOLAR, 2900),
+            evaluated_at=current_evaluated_at,
+        ),
+        ThermalCurrentState(
+            observed_at=current_evaluated_at,
+            body=ThermalBody.POOL,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2900,
+        ),
+    )
+    evaluated_at = NOW + timedelta(seconds=242)
+    live = evidence(
+        plan,
+        at=evaluated_at,
+        current_evaluation_id="evaluation-current-age-boundary",
+        current_plan_id=fresh_plan.plan_id,
+        execution_currentness=ThermalExecutionCurrentness.from_assessment(
+            fresh_plan,
+            evaluation_id="evaluation-current-age-boundary",
+        ),
+    )
+
+    result = asyncio.run(
+        engine.deliver_current_step(
+            ready,
+            policy=policy(),
+            evidence=live,
+            delivery=delivery,
+        )
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.BLOCKED
+    assert result.failure_reason == expected_reason
+    assert len(delivery.calls) == 1
+
 @pytest.mark.parametrize(
     ("current_source", "current_rpm", "desired_source", "desired_rpm", "types"),
     (
@@ -2574,6 +2782,147 @@ def test_new_epoch_same_purpose_residual_plan_verifies_without_false_supersessio
 
     assert result.status is ThermalLiveExecutionStatus.READY
     assert result.coordination.current_step_sequence == 2
+
+
+@pytest.mark.parametrize("concept", ("body", "pump", "source"))
+def test_old_generation_consequence_cannot_verify_new_compatible_execution(
+    concept: str,
+) -> None:
+    """Same-purpose currentness never relaxes exact post-receipt chronology."""
+
+    if concept == "body":
+        plan = inactive_body_plan(ThermalBody.POOL)
+    elif concept == "pump":
+        plan = thermal_plan(
+            PhysicalHeatMode.SOLAR,
+            2600,
+            PhysicalHeatMode.SOLAR,
+            2900,
+        )
+    else:
+        plan = thermal_plan(
+            PhysicalHeatMode.GAS,
+            2900,
+            PhysicalHeatMode.SOLAR,
+            2900,
+        )
+
+    @dataclass
+    class TimedDelivery(FakeThermalDelivery):
+        issued_at: datetime = NOW
+
+        async def deliver(
+            self,
+            operation: PoolOperation,
+            *,
+            correlation_id: str,
+        ) -> CommandReceipt:
+            self.calls.append((operation, correlation_id))
+            return CommandReceipt(
+                status=CommandStatus.ACKNOWLEDGED,
+                command_id=f"receipt-{len(self.calls)}",
+                issued_at=self.issued_at,
+                acknowledged_at=self.issued_at,
+                verification_required=True,
+            )
+
+    old_engine = ThermalLiveExecutionEngine()
+    old_session = old_engine.begin(
+        plan,
+        policy=policy(),
+        evidence=evidence(
+            plan,
+            evaluation_id="generation-n",
+            current_evaluation_id="generation-n",
+            body_active=concept != "body",
+        ),
+    )
+    asyncio.run(
+        old_engine.deliver_current_step(
+            old_session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                evaluation_id="generation-n",
+                current_evaluation_id="generation-n",
+                execution_currentness=old_session.originating_currentness,
+                body_active=concept != "body",
+            ),
+            delivery=TimedDelivery(issued_at=NOW),
+        )
+    )
+
+    accepted_at = NOW + timedelta(seconds=10)
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(
+        plan,
+        policy=policy(),
+        evidence=evidence(
+            plan,
+            at=accepted_at,
+            evaluation_id="generation-n-plus-1",
+            current_evaluation_id="generation-n-plus-1",
+            body_active=concept != "body",
+        ),
+    )
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(
+                plan,
+                at=accepted_at,
+                evaluation_id="generation-n-plus-1",
+                current_evaluation_id="generation-n-plus-1",
+                execution_currentness=session.originating_currentness,
+                body_active=concept != "body",
+            ),
+            delivery=TimedDelivery(issued_at=accepted_at),
+        )
+    )
+    assert waiting.current_attempt is not None
+    old_observations = ObservationStore()
+    for observation_id, expected in waiting.current_attempt.step.expected_observations.items():
+        old_observations.put(
+            PoolObservation(
+                observation_id=observation_id,
+                value=expected,
+                observed_at=NOW + timedelta(seconds=1),
+                source_kind=ObservationSourceKind.LIVE,
+                source_id="native-intellicenter",
+                quality=ObservationQuality.GOOD,
+                confidence=1.0,
+            )
+        )
+    for observation_id, value in (("pool.active", True), ("spa.active", False)):
+        if old_observations.get(observation_id) is None:
+            old_observations.put(
+                PoolObservation(
+                    observation_id=observation_id,
+                    value=value,
+                    observed_at=accepted_at + timedelta(seconds=1),
+                    source_kind=ObservationSourceKind.LIVE,
+                    source_id="native-intellicenter",
+                    quality=ObservationQuality.GOOD,
+                    confidence=1.0,
+                )
+            )
+
+    still_waiting = engine.verify_current_step(
+        waiting,
+        old_observations,
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=accepted_at + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert still_waiting.status is ThermalLiveExecutionStatus.FAILED
+    assert (
+        still_waiting.failure_reason
+        == "authoritative_verification_evidence_unusable"
+    )
+    assert still_waiting.coordination.current_step_sequence == 1
 
 
 def test_current_convergence_does_not_skip_delivered_step_verification() -> None:

@@ -1163,6 +1163,57 @@ def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     assert successor.predecessor_lease_id == predecessor.lease_id
 
 
+def test_domain_operator_intent_preceding_typed_handoff_survives_successor() -> None:
+    """A nested purpose transfer cannot erase current body-session intent."""
+
+    manager = full_manager()
+    predecessor = manager.state.lease
+    assert predecessor is not None
+    assert predecessor.body_session_generation is not None
+    assert predecessor.body_session_id is not None
+    changed_at = NOW + timedelta(milliseconds=500)
+    event = replace(
+        external_event(
+            "pool.raw_heater_id",
+            "H0002",
+            "H0001",
+            observed_at=changed_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "operator-source-before-handoff",
+            predecessor.body_session_generation,
+            predecessor.body_session_id,
+            OwnershipDomain.THERMAL,
+            "pool.raw_heater_id",
+            changed_at,
+        ),
+    )
+
+    decision = manager.handoff(
+        handoff_request(manager),
+        evidence(
+            at=NOW + timedelta(seconds=1),
+            evaluation_id="evaluation-2",
+            plan_id="plan-2",
+            changes=ExternalChangeBatch((event,)),
+        ),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.HANDED_OFF
+    successor = manager.state.lease
+    assert successor is not None
+    assert successor.body_session_id == predecessor.body_session_id
+    assert successor.domain_state(OwnershipDomain.THERMAL).authority is (
+        OwnershipAuthority.OPERATOR
+    )
+    assert successor.domain_state(OwnershipDomain.BODY).authority is (
+        OwnershipAuthority.POOLOS
+    )
+    assert successor.domain_state(OwnershipDomain.PUMP).authority is (
+        OwnershipAuthority.POOLOS
+    )
+
+
 def test_probe_successor_handoff_retains_body_and_replaces_pump_provenance() -> None:
     builder = ThermalExecutionPlanBuilder(pump_equipment_id="p0102")
     probe_plan = builder.build(

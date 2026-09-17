@@ -805,7 +805,29 @@ class ThermalLiveAuthorizationEngine:
                 != "thermal_execution_convergence_not_attributed"
             ):
                 reasons.append(currentness.reason_code)
-        age = evidence.evaluated_at - assessment.desired.evaluated_at
+        freshness_reference = assessment.desired.evaluated_at
+        if (
+            originating_currentness is not None
+            and evidence.execution_currentness is not None
+            and execution_progress is not None
+            and (
+                execution_progress.verified_prefix
+                or execution_progress.accepted_current is not None
+            )
+        ):
+            compatibility = assess_execution_compatibility(
+                originating_currentness,
+                evidence.execution_currentness,
+                progress=execution_progress,
+            )
+            if compatibility.continuation_allowed:
+                # The immutable origin remains the audit identity. Once an
+                # accepted or verified PoolOS prefix proves how the current
+                # residual was reached, a fresh compatible planner epoch may
+                # supply current admission authority for the next exact step.
+                # Currentness itself still grants no delivery permission.
+                freshness_reference = evidence.execution_currentness.evaluated_at
+        age = evidence.evaluated_at - freshness_reference
         if age < timedelta(0):
             reasons.append("plan_created_in_future")
         elif age > policy.maximum_plan_age:
@@ -1604,8 +1626,8 @@ class ThermalLiveExecutionEngine:
                 step=attempt.step,
                 observations=observations,
                 verification_started_at=(
-                    evaluated_at
-                    if hold_in_progress
+                    attempt.verifications[-1].evaluated_at
+                    if hold_in_progress and attempt.verifications
                     else attempt.receipt.issued_at
                 ),
                 evaluated_at=evaluated_at,

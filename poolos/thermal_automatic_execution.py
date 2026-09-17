@@ -44,6 +44,7 @@ from .pool_temperature_probe_execution import (
 )
 from .pool_circulation_ownership import (
     FiltrationToThermalHandoff,
+    PoolCirculationOwner,
     PoolCirculationOwnershipRegistry,
 )
 from .operating_baselines import PumpOperatingBaselines
@@ -985,6 +986,7 @@ class ThermalAutomaticExecutionDriver:
                         preflight=preflight,
                     )
                 if body.body_active is True and body.body is ThermalBody.POOL:
+                    circulation_owner = self.circulation_ownership.owner
                     self._filtration_handoff = (
                         self.circulation_ownership.begin_filtration_to_thermal(
                             thermal_purpose_id=(
@@ -993,6 +995,22 @@ class ThermalAutomaticExecutionDriver:
                             established_at=frame.observed_at,
                         )
                     )
+                    if (
+                        self._filtration_handoff is None
+                        and circulation_owner
+                        in {
+                            PoolCirculationOwner.FILTRATION_ACQUIRING,
+                            PoolCirculationOwner.FILTRATION,
+                            PoolCirculationOwner.FILTRATION_SUSPENDED,
+                            PoolCirculationOwner.FILTRATION_TO_THERMAL,
+                        }
+                    ):
+                        return self._blocked(
+                            frame,
+                            "automatic_thermal_circulation_handoff_unavailable",
+                            body=body,
+                            preflight=preflight,
+                        )
                     if (
                         self._filtration_handoff is None
                         and body.plan.desired.evidence.get("active_operating_purpose")
@@ -1166,6 +1184,10 @@ class ThermalAutomaticExecutionDriver:
                     self._filtration_handoff = None
                 else:
                     self.circulation_ownership.mark_thermal_owned(lease.lease_id)
+            self.orchestrator.ownership.record_operator_events(
+                frame.external_changes,
+                evaluated_at=frame.observed_at,
+            )
         if self._retire_after_inflight or not self.requested_enabled or self._unloaded:
             self._retire_after_inflight = False
             self._retire_session(

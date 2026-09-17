@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 
 from poolos.integration import PhysicalHeatMode
-from poolos.external_change import ExternalChangeBatch
+from poolos.external_change import ExternalChangeBatch, ExternalChangeEvent
 from poolos.ownership_evidence import (
     OwnershipAuthority, OwnershipDomain, OwnershipHealth, PositiveOperatorEvidence,
 )
@@ -29,6 +29,7 @@ from poolos.pump_speed_session import PumpSpeedNativeTransition, PumpSpeedSessio
 from test_pump_speed_session import BASELINES as PUMP_BASELINES, NOW as PUMP_NOW, evidence as pump_evidence, verified_manual
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
+from poolos.pool_circulation_ownership import PoolCirculationOwner
 
 
 @pytest.mark.parametrize("manual_override", [False, True])
@@ -457,6 +458,330 @@ def test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_rest
     assert orchestrator.ownership.residual_termination is None
     assert registry.owner is PoolCirculationOwner.NONE
     ledger.assert_complete()
+
+
+def test_suspended_filtration_owner_defers_thermal_candidate_without_collision() -> None:
+    """Thermal must not deliver before a suspended filtration owner can hand off."""
+
+    filtration, _, _ = _verified_filtration_driver()
+    registry = filtration.ownership
+    filtration_lease = registry.filtration_lease
+    assert filtration_lease is not None and filtration_lease.verified
+    registry.suspend_filtration(session_id=filtration_lease.session_id)
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    thermal = ThermalAutomaticExecutionDriver(
+        orchestrator,
+        circulation_ownership=registry,
+    )
+    thermal.set_enabled(
+        True,
+        changed_at=FILTRATION_NOW,
+        current_epoch_identity=None,
+    )
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=thermal)
+    frame = thermal_frame(
+        orchestrator,
+        FILTRATION_NOW + timedelta(seconds=3),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="00000",
+        solar_active=False,
+        solar_temperature=110.0,
+        pool_temperature=80.0,
+        mode=ThermalRequestedMode.SOLAR,
+    )
+    registry.begin_epoch(frame.epoch_identity)
+    thermal.reserve_circulation_candidate(frame)
+
+    result = asyncio.run(
+        thermal.process_epoch(frame, delivery_factory=factory)
+    )
+
+    assert result.state.value == "blocked"
+    assert result.blocker == "automatic_thermal_circulation_handoff_unavailable"
+    assert delivery.calls == []
+    assert registry.owner.value == "filtration_suspended"
+    assert registry.filtration_lease == filtration_lease
+    assert orchestrator.ownership.state.lease is None
+
+
+@pytest.mark.parametrize("positive_intent", [False, True])
+def test_solar_active_transfers_owned_filtration_pump_to_solar_requirement(
+    positive_intent: bool,
+) -> None:
+    """Solar ACTIVE requires 2900 without fabricating THERMAL authority."""
+
+    filtration, _, _ = _verified_filtration_driver()
+    registry = filtration.ownership
+    filtration_lease = registry.filtration_lease
+    assert filtration_lease is not None and filtration_lease.verified
+    body_session_id = filtration_lease.body_session_id or filtration_lease.session_id
+    body_generation = (
+        filtration_lease.body_session_generation or filtration_lease.generation
+    )
+    at = FILTRATION_NOW + timedelta(seconds=3)
+    manual_solar = ExternalChangeEvent(
+        concept="pool.raw_heater_id",
+        semantic_event_type="native_value_changed",
+        native_object_id="B1101",
+        previous_value="00000",
+        new_value="H0002",
+        observed_at=at,
+        external_policy="accept",
+        action_taken="operator_request",
+        notification_recommended=True,
+        reconciliation_required=False,
+        positive_operator_evidence=(
+            PositiveOperatorEvidence(
+                request_id="operator-select-solar",
+                authority_generation=body_generation,
+                body_session_id=body_session_id,
+                domain=OwnershipDomain.THERMAL,
+                equipment_id="pool.raw_heater_id",
+                requested_at=at,
+            )
+            if positive_intent
+            else None
+        ),
+    )
+    orchestrator = ThermalRuntimeOrchestrator()
+    thermal = ThermalAutomaticExecutionDriver(
+        orchestrator,
+        circulation_ownership=registry,
+    )
+    thermal.set_enabled(
+        True,
+        changed_at=FILTRATION_NOW,
+        current_epoch_identity=None,
+    )
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=thermal)
+    frame = thermal_frame(
+        orchestrator,
+        at,
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        solar_active=True,
+        solar_temperature=110.0,
+        pool_temperature=80.0,
+        mode=ThermalRequestedMode.SOLAR,
+        external_changes=ExternalChangeBatch((manual_solar,)),
+    )
+    registry.begin_epoch(frame.epoch_identity)
+    thermal.reserve_circulation_candidate(frame)
+    assert registry.thermal_reserved_for(frame.epoch_identity), (
+        frame.orchestration.lifecycle,
+        frame.orchestration.blocking_reason,
+        registry.owner,
+    )
+
+    result = asyncio.run(
+        thermal.process_epoch(frame, delivery_factory=factory)
+    )
+
+    assert result.state.value == "awaiting_reobservation"
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetPumpSpeed)
+    assert delivery.calls[0].rpm == 2900
+    transferred = orchestrator.ownership.state.lease
+    assert transferred is not None
+    assert transferred.domain_state(OwnershipDomain.THERMAL).authority is (
+        OwnershipAuthority.OPERATOR
+        if positive_intent
+        else OwnershipAuthority.NONE
+    )
+    verified_frame = thermal_frame(
+        orchestrator,
+        at + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        solar_temperature=110.0,
+        pool_temperature=80.0,
+        mode=ThermalRequestedMode.SOLAR,
+        external_changes=ExternalChangeBatch((manual_solar,)),
+    )
+    registry.begin_epoch(verified_frame.epoch_identity)
+    thermal.reserve_circulation_candidate(verified_frame)
+    asyncio.run(
+        thermal.process_epoch(verified_frame, delivery_factory=factory)
+    )
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert lease.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert lease.domain_state(OwnershipDomain.THERMAL).authority is (
+        OwnershipAuthority.OPERATOR
+        if positive_intent
+        else OwnershipAuthority.NONE
+    )
+
+
+@pytest.mark.parametrize("filtration_required", [False, True])
+def test_operator_solar_then_off_preserves_poolos_body_pump_scope(
+    filtration_required: bool,
+) -> None:
+    """Operator THERMAL changes neither steal nor widen BODY/PUMP authority."""
+
+    filtration, _, _ = _verified_filtration_driver()
+    registry = filtration.ownership
+    filtration_lease = registry.filtration_lease
+    assert filtration_lease is not None and filtration_lease.verified
+    body_session_id = filtration_lease.body_session_id or filtration_lease.session_id
+    body_generation = (
+        filtration_lease.body_session_generation or filtration_lease.generation
+    )
+    at = FILTRATION_NOW + timedelta(seconds=3)
+    manual_solar = ExternalChangeEvent(
+        concept="pool.raw_heater_id",
+        semantic_event_type="native_value_changed",
+        native_object_id="B1101",
+        previous_value="00000",
+        new_value="H0002",
+        observed_at=at,
+        external_policy="accept",
+        action_taken="operator_request",
+        notification_recommended=True,
+        reconciliation_required=False,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id="operator-select-solar",
+            authority_generation=body_generation,
+            body_session_id=body_session_id,
+            domain=OwnershipDomain.THERMAL,
+            equipment_id="pool.raw_heater_id",
+            requested_at=at,
+        ),
+    )
+    orchestrator = ThermalRuntimeOrchestrator()
+    thermal = ThermalAutomaticExecutionDriver(
+        orchestrator,
+        circulation_ownership=registry,
+    )
+    thermal.set_enabled(True, changed_at=FILTRATION_NOW, current_epoch_identity=None)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=thermal)
+    first = thermal_frame(
+        orchestrator,
+        at,
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        solar_active=True,
+        solar_temperature=110.0,
+        pool_temperature=80.0,
+        mode=ThermalRequestedMode.SOLAR,
+        external_changes=ExternalChangeBatch((manual_solar,)),
+    )
+    registry.begin_epoch(first.epoch_identity)
+    thermal.reserve_circulation_candidate(first)
+    asyncio.run(thermal.process_epoch(first, delivery_factory=factory))
+    verified = thermal_frame(
+        orchestrator,
+        at + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        solar_temperature=110.0,
+        pool_temperature=80.0,
+        mode=ThermalRequestedMode.SOLAR,
+        external_changes=ExternalChangeBatch((manual_solar,)),
+    )
+    registry.begin_epoch(verified.epoch_identity)
+    thermal.reserve_circulation_candidate(verified)
+    asyncio.run(thermal.process_epoch(verified, delivery_factory=factory))
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert lease.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert lease.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.OPERATOR
+
+    off_at = at + timedelta(seconds=2)
+    assert lease.body_session_id is not None
+    assert lease.body_session_generation is not None
+    manual_off = ExternalChangeEvent(
+        concept="pool.raw_heater_id",
+        semantic_event_type="native_value_changed",
+        native_object_id="B1101",
+        previous_value="H0002",
+        new_value="00000",
+        observed_at=off_at,
+        external_policy="accept",
+        action_taken="operator_request",
+        notification_recommended=True,
+        reconciliation_required=False,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id="operator-select-off",
+            authority_generation=lease.body_session_generation,
+            body_session_id=lease.body_session_id,
+            domain=OwnershipDomain.THERMAL,
+            equipment_id="pool.raw_heater_id",
+            requested_at=off_at,
+        ),
+    )
+    physical = {
+        "pool_active": True,
+        "pump_rpm": 2900,
+        "configured_rpm": 2900,
+    }
+    for seconds in range(2, 10):
+        before = len(delivery.calls)
+        frame = thermal_frame(
+            orchestrator,
+            at + timedelta(seconds=seconds),
+            pool_heater="00000",
+            solar_active=False,
+            solar_temperature=80.0,
+            pool_temperature=100.0,
+            mode=ThermalRequestedMode.SOLAR,
+            filtration_remaining=(
+                timedelta(hours=1) if filtration_required else timedelta(0)
+            ),
+            filtration_disposition=(
+                FiltrationDisposition.RUN_NOW
+                if filtration_required
+                else FiltrationDisposition.SATISFIED
+            ),
+            external_changes=ExternalChangeBatch((manual_off,)),
+            **physical,
+        )
+        registry.begin_epoch(frame.epoch_identity)
+        thermal.reserve_circulation_candidate(frame)
+        asyncio.run(thermal.process_epoch(frame, delivery_factory=factory))
+        for operation in delivery.calls[before:]:
+            if isinstance(operation, SetPumpSpeed):
+                physical["pump_rpm"] = operation.rpm
+                physical["configured_rpm"] = operation.rpm
+            elif isinstance(operation, SetBodyActive):
+                physical["pool_active"] = operation.active
+                if not operation.active:
+                    physical["pump_rpm"] = 0
+
+    assert not any(isinstance(operation, SetHeatMode) for operation in delivery.calls)
+    if filtration_required:
+        assert physical == {
+            "pool_active": True,
+            "pump_rpm": 2600,
+            "configured_rpm": 2600,
+        }
+        assert registry.owner is PoolCirculationOwner.FILTRATION
+        assert not any(
+            isinstance(operation, SetBodyActive) and not operation.active
+            for operation in delivery.calls
+        )
+    else:
+        assert physical["pool_active"] is False
+        assert physical["pump_rpm"] == 0
+        assert registry.owner is PoolCirculationOwner.NONE
 
 
 def test_rejected_filtration_correction_retains_body_for_verified_completion() -> None:

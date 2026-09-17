@@ -16,6 +16,35 @@ Repository truth and current authoritative runtime evidence always outrank this 
 
 ## Current Repository State
 
+### September 17, 2026 — v0.11.26 Solar reacquisition currentness correction
+
+Physical v0.11.26 commissioning proved the complete no-successor shutdown path,
+then exposed a fresh-opportunity reacquisition failure. BODY activation, probe and
+preparation could take longer than the two-minute immutable plan-age limit, so the
+remaining Solar source operation was rejected even though fresh planner epochs
+still described the same purpose and the residual was explained by accepted and
+verified PoolOS progress.
+
+The correction keeps stale admission strict while allowing only attributable
+running progress to continue under a fresh compatible currentness epoch. It also
+turns an unavailable Filtration-to-Thermal transfer into typed command-free
+arbitration instead of a circulation-owner `ValueError`, and carries exact trusted
+THERMAL operator evidence through the same body-generation transfer while the
+PoolOS-owned PUMP establishes 2900 when Solar is physically active. Filtration
+OWNED/SUSPENDED transitions caused by temporarily unusable evidence remain the
+intentional provenance-retaining fail-closed behavior.
+
+The supplemental restart review confirmed the intended provenance split: active
+Solar at 2600 may acquire PUMP only through an explicit accepted and verified 2900
+command, while active Solar already at 2900 remains command-free and unowned after
+restart. It also found and corrected a shared verification gap: ordinary thermal
+BODY/PUMP/source steps had not all required strictly post-delivery observations,
+so an older matching observation could verify a newer execution. Every thermal
+step now enforces that chronology, including advancing samples during priming
+holds. Restart still reconstructs no volatile BODY, THERMAL, or cleanup authority.
+
+See the [v0.11.26 correction record](ownership/V0_11_26_SOLAR_REACQUISITION_CURRENTNESS.md).
+
 ### September 16, 2026 — v0.11.25 shutdown source-cleanup correction candidate
 
 Physical v0.11.25 commissioning reached verified PoolOS BODY/PUMP ownership at

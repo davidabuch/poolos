@@ -754,15 +754,22 @@ class ThermalRuntimeOwnershipManager:
                 evidence.evaluated_at,
             )
         if lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
-            for event in evidence.external_changes.events:
-                if event.positive_operator_evidence is not None:
-                    self.record_operator_intent(event.positive_operator_evidence, evaluated_at=evidence.evaluated_at)
+            self.record_operator_events(
+                evidence.external_changes,
+                evaluated_at=evidence.evaluated_at,
+            )
             return self._decision(
                 ThermalRuntimeOwnershipDisposition.DENIED,
                 "runtime_ownership_terminal",
                 previous,
                 evidence.evaluated_at,
             )
+        self.record_operator_events(
+            evidence.external_changes,
+            evaluated_at=evidence.evaluated_at,
+        )
+        lease = self._state.lease
+        assert lease is not None
         lease = self._confirm_accepted_consequence(lease, evidence)
         lease = self._observe_domains(lease, evidence)
         override_transition = _pump_session_override_transition(lease, evidence)
@@ -1143,6 +1150,21 @@ class ThermalRuntimeOwnershipManager:
             )
         return True
 
+    def record_operator_events(
+        self,
+        events: ExternalChangeBatch,
+        *,
+        evaluated_at: datetime,
+    ) -> None:
+        """Apply trusted domain intent to the current exact body generation."""
+
+        for event in events.events:
+            if event.positive_operator_evidence is not None:
+                self.record_operator_intent(
+                    event.positive_operator_evidence,
+                    evaluated_at=evaluated_at,
+                )
+
     def promote_session_provenance(
         self,
         ownership: ThermalLiveExecutionOwnership,
@@ -1359,6 +1381,12 @@ class ThermalRuntimeOwnershipManager:
 
         previous = self._state.status
         lease = self._state.lease
+        if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
+            self.record_operator_events(
+                evidence.external_changes,
+                evaluated_at=evidence.evaluated_at,
+            )
+            lease = self._state.lease
         denial = self._handoff_denial_reason(lease, request, evidence)
         if denial is not None:
             return self._decision(
@@ -1455,6 +1483,12 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 evidence.evaluated_at,
             )
+        self.record_operator_events(
+            evidence.external_changes,
+            evaluated_at=evidence.evaluated_at,
+        )
+        lease = self._state.lease
+        assert lease is not None
         lease = self._confirm_accepted_consequence(lease, evidence)
         lease = self._observe_domains(lease, evidence)
         failure = self._continuation_failure_reason(
