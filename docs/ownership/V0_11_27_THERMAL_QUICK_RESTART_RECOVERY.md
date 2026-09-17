@@ -63,8 +63,12 @@ switch may arm one checkpoint candidate.
 
 Armed does not mean owned.
 
-The first fresh authoritative thermal epoch adjudicates the checkpoint before
-ordinary automatic command scheduling.
+Startup authority restoration is part of the recovery boundary.  A checkpoint
+remains armed while Maintenance/controller authority is still unresolved during
+Home Assistant initialization.  Those transient startup frames are not recovery
+attempts and issue no equipment work.  Once startup authority resolves, the first
+fresh authoritative thermal epoch adjudicates the checkpoint before ordinary
+automatic command scheduling.
 
 Recovery requires:
 
