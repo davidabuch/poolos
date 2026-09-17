@@ -401,6 +401,79 @@ def _quick_restart_thermal(at: datetime):
     )
 
 
+def test_quick_restart_waits_for_startup_authority_before_adjudication() -> None:
+    from poolos.pool_circulation_ownership import PoolCirculationOwner
+    from poolos.thermal_runtime_ownership import (
+        ThermalRuntimeOwnershipDisposition,
+    )
+
+    module = _load_module()
+    runtime, hass, authority, coordinator, driver = _runtime(module)
+
+    checkpoint = SimpleNamespace()
+    runtime.arm_quick_restart_recovery(checkpoint)
+    runtime.set_enabled(True)
+
+    lease = SimpleNamespace(lease_id="restored-thermal-lease")
+    restore_calls: list[str] = []
+
+    def restore_quick_restart(
+        supplied_checkpoint,
+        **_: object,
+    ):
+        assert supplied_checkpoint is checkpoint
+        restore_calls.append("restore")
+        return SimpleNamespace(
+            disposition=ThermalRuntimeOwnershipDisposition.ESTABLISHED
+        )
+
+    runtime.orchestrator = SimpleNamespace(
+        restore_quick_restart=restore_quick_restart,
+        ownership=SimpleNamespace(
+            state=SimpleNamespace(lease=lease),
+        ),
+    )
+
+    authority.base_authority_reason = (
+        PhysicalAuthorityReason.CONTROLLER_MODE_UNRESOLVED
+    )
+    pending_at = NOW + timedelta(seconds=1)
+    runtime.observe(
+        _snapshot(pending_at),
+        _quick_restart_thermal(pending_at),
+        _orchestration(pending_at, "restart-pending-authority"),
+    )
+
+    assert restore_calls == []
+    assert runtime.quick_restart_recovery_armed is True
+    assert runtime.circulation_ownership.owner is PoolCirculationOwner.NONE
+    assert hass.tasks == []
+    assert driver.processed == []
+
+    authority.base_authority_reason = PhysicalAuthorityReason.ALLOWED
+    ready_at = NOW + timedelta(seconds=2)
+    runtime.observe(
+        _snapshot(ready_at),
+        _quick_restart_thermal(ready_at),
+        _orchestration(ready_at, "restart-authority-ready"),
+    )
+
+    assert restore_calls == ["restore"]
+    assert runtime.quick_restart_recovery_armed is False
+    assert runtime.circulation_ownership.owner is PoolCirculationOwner.THERMAL
+    assert (
+        runtime.circulation_ownership.thermal_lease_id
+        == "restored-thermal-lease"
+    )
+    assert hass.tasks == []
+    assert driver.processed == []
+    assert authority.epochs == [
+        "restart-pending-authority",
+        "restart-authority-ready",
+    ]
+    assert coordinator.listener_updates >= 2
+
+
 def test_quick_restart_success_restores_circulation_and_is_command_free() -> None:
     from poolos.pool_circulation_ownership import PoolCirculationOwner
     from poolos.thermal_runtime_ownership import (
