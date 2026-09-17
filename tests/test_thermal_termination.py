@@ -118,7 +118,11 @@ def _evidence(
         effective_heat_source=source,
         heat_source_observation_fresh=True,
         heat_source_observation_usable=True,
-        heat_source_observed_at=source_observed_at,
+        heat_source_observed_at=(
+            NOW + timedelta(seconds=1)
+            if source_observed_at is None
+            else source_observed_at
+        ),
         external_changes=changes,
         shared_hydraulic_circuits=circuits,
         shared_hydraulic_inventory_complete=True,

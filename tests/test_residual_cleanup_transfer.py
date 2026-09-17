@@ -551,6 +551,242 @@ def test_async_source_observation_preserves_body_through_later_solar(
         )
 
 
+def test_selected_solar_without_thermal_origin_cannot_strand_owned_body_shutdown():
+    """Physical v0.11.25 cadence: selected Solar must not deadlock cleanup.
+
+    BODY comes from the accepted autonomous Pool activation.  PUMP comes from
+    the accepted idempotent aligned-successor command added by PR #200.  H0002
+    and Solar activity are native observations, so they deliberately establish
+    no THERMAL command provenance.
+    """
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+
+    def frame(
+        seconds,
+        *,
+        active=True,
+        rpm=2900,
+        heater="H0002",
+        solar_active=True,
+        temperature=86.0,
+        missing=(),
+    ):
+        return _frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=active,
+            pump_rpm=rpm if active else 0,
+            configured_rpm=rpm or 2900,
+            mode=ThermalRequestedMode.SOLAR,
+            pool_temperature=temperature,
+            solar_temperature=110.0,
+            pool_heater=heater,
+            solar_active=solar_active,
+            evaluator=evaluator,
+            driver=driver,
+            filtration_remaining=timedelta(0),
+            filtration_disposition=FiltrationDisposition.SATISFIED,
+            missing=missing,
+        )
+
+    baseline = frame(
+        0,
+        active=False,
+        rpm=0,
+        heater="00000",
+        solar_active=False,
+        missing=("pool.temperature",),
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    # Use the real accepted probe path to establish BODY/PUMP provenance.
+    for seconds, active, rpm, configured in (
+        (1, False, 0, 2600),
+        (2, True, 2600, 2600),
+        (3, True, 1500, 1500),
+    ):
+        result = asyncio.run(
+            driver.process_epoch(
+                frame(
+                    seconds,
+                    active=active,
+                    rpm=rpm,
+                    heater="00000",
+                    solar_active=False,
+                    missing=("pool.temperature",),
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert result.blocker is None
+    for seconds in (23, 43, 63, 83, 103):
+        asyncio.run(
+            driver.process_epoch(
+                frame(
+                    seconds,
+                    active=True,
+                    rpm=1500,
+                    heater="00000",
+                    solar_active=False,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    # H0002 becomes selected natively at the internal successor boundary. It
+    # is current physical truth, but no PoolOS source command caused it.
+    asyncio.run(
+        driver.process_epoch(
+            frame(123, rpm=1500, solar_active=False),
+            delivery_factory=factory,
+        )
+    )
+
+    # Native IntelliCenter reaches selected/active Solar and 2900 before the
+    # successor accepts its Pump command. PR #200 must still deliver that
+    # idempotent command, while equality supplies no THERMAL provenance.
+    startup_history = []
+    for seconds, solar_active, rpm in ((124, False, 2600), (125, True, 2900), (126, True, 2900), (156, True, 2900), (187, True, 2900), (188, True, 2900)):
+        result = asyncio.run(
+            driver.process_epoch(
+                frame(seconds, rpm=rpm, solar_active=solar_active),
+                delivery_factory=factory,
+            )
+        )
+        startup_history.append((seconds, result.state.value, result.blocker, [type(operation).__name__ for operation in delivery.calls]))
+    assert result.state.value == "converged", startup_history
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.owns_body_activation
+    assert lease.owns_pump_setpoint
+    assert not lease.owns_heat_source
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+    assert any(
+        isinstance(operation, SetPumpSpeed) and operation.rpm == 2900
+        for operation in delivery.calls
+    )
+    assert not any(isinstance(operation, SetHeatMode) for operation in delivery.calls)
+
+    # Thermal demand ends. Solar activity drops independently, but H0002 stays
+    # explicitly selected exactly as observed on the physical controller.
+    before_cleanup = len(delivery.calls)
+    termination_history = []
+    for seconds in range(189, 910, 30):
+        superseded = frame(seconds, temperature=100.0)
+        ending = asyncio.run(driver.process_epoch(superseded, delivery_factory=factory))
+        termination_history.append((seconds, ending.state.value, ending.blocker))
+        if orchestrator.ownership.residual_termination is not None:
+            break
+    entitlement = orchestrator.ownership.residual_termination
+    assert entitlement is not None, termination_history
+    assert entitlement.body_activation is not None
+    assert entitlement.pump_setpoint is not None
+    assert entitlement.heat_source is None
+    assert driver._termination_assessment(superseded).reason_code == (
+        "thermal_termination_body_session_source_off_ready"
+    )
+
+    # The corrected lifecycle must create a bounded, authorized source cleanup
+    # step rather than waiting forever for an actor that does not exist.
+    assert len(delivery.calls) == before_cleanup + 1, termination_history
+    assert isinstance(delivery.calls[-1], SetHeatMode), termination_history
+    assert delivery.calls[-1].mode.value == "off", termination_history
+
+    # Solar activity can drop while H0002 remains selected and source-Off is
+    # awaiting its own later authoritative consequence. The command is not
+    # duplicated and selection is never assumed to follow activity.
+    current = frame(seconds + 1, solar_active=False, temperature=100.0)
+    observed = {item.observation_id: item.value for item in current.observations}
+    assert observed["pool.raw_heater_id"] == "H0002"
+    assert observed["solar.active"] is False
+    awaiting = asyncio.run(driver.process_epoch(current, delivery_factory=factory))
+    assert awaiting.state.value == "awaiting_termination_verification"
+    assert len(delivery.calls) == before_cleanup + 1
+
+    reactivated = frame(seconds + 2, solar_active=True, temperature=100.0)
+    observed = {item.observation_id: item.value for item in reactivated.observations}
+    assert observed["pool.raw_heater_id"] == "H0002"
+    assert observed["solar.active"] is True
+    awaiting = asyncio.run(
+        driver.process_epoch(reactivated, delivery_factory=factory)
+    )
+    assert awaiting.state.value == "awaiting_termination_verification"
+    assert len(delivery.calls) == before_cleanup + 1
+
+    source_off_at = seconds + 3
+    asyncio.run(
+        driver.process_epoch(
+            frame(
+                source_off_at,
+                heater="00000",
+                solar_active=False,
+                temperature=100.0,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert driver.cleanup_provenance is not None
+    assert orchestrator.ownership.residual_termination is None
+
+    result = asyncio.run(
+        driver.process_epoch(
+            frame(
+                source_off_at + 1,
+                heater="00000",
+                solar_active=False,
+                temperature=100.0,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert result.state.value == "awaiting_cleanup_verification"
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is False
+
+    final = asyncio.run(
+        driver.process_epoch(
+            frame(
+                source_off_at + 2,
+                active=False,
+                rpm=0,
+                heater="00000",
+                solar_active=False,
+                temperature=100.0,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert final.blocker == "thermal_cleanup_pool_body_off_verified"
+    assert driver.cleanup_provenance is None
+    assert driver.cleanup_attempt is None
+    final_count = len(delivery.calls)
+    assert asyncio.run(
+        driver.process_epoch(
+            frame(
+                source_off_at + 3,
+                active=False,
+                rpm=0,
+                heater="00000",
+                solar_active=False,
+                temperature=100.0,
+            ),
+            delivery_factory=factory,
+        )
+    ).command_delivery_performed is False
+    assert len(delivery.calls) == final_count
+
+
 @pytest.mark.parametrize("takeover", ("body_off", "pump", "spa"))
 def test_retained_capture_wait_rechecks_takeover_before_any_cleanup(takeover):
     orchestrator, driver, delivery, factory, frame, _ = completed_probe(

@@ -15,7 +15,7 @@ from .external_change import (
 from .ownership_evidence import OwnershipDomain
 from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
-from .integration import PhysicalHeatMode, ThermalBody
+from .integration import ThermalBody
 from .thermal_runtime_ownership import (
     SHARED_HYDRAULIC_SAFETY_BY_CONCEPT,
     SharedHydraulicCircuitEvidence,
@@ -23,6 +23,7 @@ from .thermal_runtime_ownership import (
     ThermalResidualTerminationEntitlement,
     ThermalRuntimeOwnershipEvidence,
 )
+from .thermal_source_cleanup import ThermalSourceCleanupAssessment
 
 
 class CirculationOrigin(StrEnum):
@@ -148,6 +149,11 @@ class CirculationSuccessorAssessment:
     pool_activity_current: bool
     spa_activity_current: bool
     source_cleanup_complete: bool
+    source_cleanup_disposition: str
+    body_shutdown_source_safe: bool
+    filtration_handoff_source_safe: bool
+    source_selection_preserved: bool
+    source_reactivation_possible: bool
     filtration_disposition: FiltrationDisposition | None
     filtration_debt_present: bool | None
     filtration_immediate_need: bool | None
@@ -196,6 +202,11 @@ class CirculationSuccessorAssessment:
                 "circulation_pool_activity_current": self.pool_activity_current,
                 "circulation_spa_activity_current": self.spa_activity_current,
                 "circulation_source_cleanup_complete": self.source_cleanup_complete,
+                "circulation_source_cleanup_disposition": self.source_cleanup_disposition,
+                "circulation_body_shutdown_source_safe": self.body_shutdown_source_safe,
+                "circulation_filtration_handoff_source_safe": self.filtration_handoff_source_safe,
+                "circulation_source_selection_preserved": self.source_selection_preserved,
+                "circulation_source_reactivation_possible": self.source_reactivation_possible,
                 "filtration_disposition": (
                     None
                     if self.filtration_disposition is None
@@ -240,8 +251,9 @@ class CirculationSuccessorArbitrator:
         evidence: ThermalRuntimeOwnershipEvidence,
         filtration: FiltrationSuccessorEvidence | None,
         outage: GridOutageAssessment | None,
+        source_cleanup: ThermalSourceCleanupAssessment | None = None,
     ) -> CirculationSuccessorAssessment:
-        facts = _facts(entitlement, evidence, filtration, outage)
+        facts = _facts(entitlement, evidence, source_cleanup, filtration, outage)
         at = evidence.evaluated_at
         if entitlement is not None and entitlement.body is not ThermalBody.POOL:
             return _blocked(at, "circulation_hot_tub_not_commissioned", facts)
@@ -252,6 +264,12 @@ class CirculationSuccessorArbitrator:
                 CirculationSuccessorKind.PREEXISTING_OR_EXTERNAL,
                 "circulation_retained_preexisting_or_external",
                 CirculationOrigin.PREEXISTING_OR_EXTERNAL,
+                facts,
+            )
+        if source_cleanup is None:
+            return _blocked(
+                at,
+                "circulation_source_cleanup_assessment_unavailable",
                 facts,
             )
         if evidence.evaluated_at < entitlement.retained_at:
@@ -296,7 +314,7 @@ class CirculationSuccessorArbitrator:
             )
         if entitlement.body_activation is not None and not facts.body_provenance_current:
             return _blocked(at, "circulation_body_provenance_not_current", facts)
-        if not facts.source_cleanup_complete:
+        if not facts.body_shutdown_source_safe:
             return _blocked(at, "circulation_source_cleanup_not_complete", facts)
         if filtration is None or not facts.filtration_evidence_current:
             return _blocked(at, "circulation_filtration_evidence_not_current", facts)
@@ -305,7 +323,33 @@ class CirculationSuccessorArbitrator:
             or filtration.immediate_circulation_required is None
         ):
             return _blocked(at, "circulation_filtration_evidence_unavailable", facts)
+        if facts.source_selection_preserved:
+            if entitlement.body_activation is None:
+                return _result(
+                    at,
+                    CirculationArbitrationDisposition.RETAIN_PREEXISTING,
+                    CirculationSuccessorKind.PREEXISTING_OR_EXTERNAL,
+                    "circulation_operator_source_preserved_without_body_origin",
+                    CirculationOrigin.PREEXISTING_OR_EXTERNAL,
+                    facts,
+                )
+            return _result(
+                at,
+                CirculationArbitrationDisposition.EXCLUSIVE_THERMAL,
+                CirculationSuccessorKind.NONE,
+                "circulation_body_shutdown_required_to_preserve_operator_source",
+                CirculationOrigin.POOLOS_THERMAL,
+                facts,
+                keep_body_active=False,
+                body_deactivation_eligible=True,
+            )
         if filtration.immediate_circulation_required:
+            if not facts.filtration_handoff_source_safe:
+                return _blocked(
+                    at,
+                    "circulation_source_not_safe_for_filtration_handoff",
+                    facts,
+                )
             pump_eligible = _pump_handoff_eligible(entitlement, evidence, filtration)
             return _result(
                 at,
@@ -350,6 +394,11 @@ class _Facts:
     pool_activity_current: bool
     spa_activity_current: bool
     source_cleanup_complete: bool
+    source_cleanup_disposition: str
+    body_shutdown_source_safe: bool
+    filtration_handoff_source_safe: bool
+    source_selection_preserved: bool
+    source_reactivation_possible: bool
     filtration_disposition: FiltrationDisposition | None
     filtration_debt_present: bool | None
     filtration_immediate_need: bool | None
@@ -368,6 +417,7 @@ class _Facts:
 def _facts(
     entitlement: ThermalResidualTerminationEntitlement | None,
     evidence: ThermalRuntimeOwnershipEvidence,
+    source_cleanup: ThermalSourceCleanupAssessment | None,
     filtration: FiltrationSuccessorEvidence | None,
     outage: GridOutageAssessment | None,
 ) -> _Facts:
@@ -415,13 +465,6 @@ def _facts(
         ),
         None,
     )
-    source_current = _current(
-        evidence.heat_source_observed_at,
-        evidence.evaluated_at,
-        retained_at,
-        evidence.heat_source_observation_fresh,
-        evidence.heat_source_observation_usable,
-    )
     filtration_current = filtration is not None and filtration.evaluated_at == evidence.evaluated_at
     return _Facts(
         entitlement_present=entitlement is not None,
@@ -435,8 +478,25 @@ def _facts(
         ),
         pool_activity_current=pool_current,
         spa_activity_current=spa_current,
-        source_cleanup_complete=(
-            source_current and evidence.effective_heat_source is PhysicalHeatMode.OFF
+        source_cleanup_complete=bool(
+            source_cleanup and source_cleanup.source_cleanup_complete
+        ),
+        source_cleanup_disposition=(
+            "unavailable" if source_cleanup is None else source_cleanup.disposition.value
+        ),
+        body_shutdown_source_safe=bool(
+            source_cleanup and source_cleanup.body_shutdown_source_safe
+        ),
+        filtration_handoff_source_safe=bool(
+            source_cleanup and source_cleanup.filtration_handoff_source_safe
+        ),
+        source_selection_preserved=bool(
+            source_cleanup and source_cleanup.operator_selection_preserved
+        ),
+        source_reactivation_possible=(
+            False
+            if source_cleanup is None
+            else source_cleanup.reactivation_possible_while_body_active
         ),
         filtration_disposition=None if filtration is None else filtration.disposition,
         filtration_debt_present=(
@@ -632,6 +692,11 @@ def _result(
         pool_activity_current=facts.pool_activity_current,
         spa_activity_current=facts.spa_activity_current,
         source_cleanup_complete=facts.source_cleanup_complete,
+        source_cleanup_disposition=facts.source_cleanup_disposition,
+        body_shutdown_source_safe=facts.body_shutdown_source_safe,
+        filtration_handoff_source_safe=facts.filtration_handoff_source_safe,
+        source_selection_preserved=facts.source_selection_preserved,
+        source_reactivation_possible=facts.source_reactivation_possible,
         filtration_disposition=facts.filtration_disposition,
         filtration_debt_present=facts.filtration_debt_present,
         filtration_immediate_need=facts.filtration_immediate_need,
@@ -655,7 +720,7 @@ def _result(
             and facts.shared_hydraulic_evidence_current
             and facts.filtration_evidence_current
             and facts.grid_evidence_current
-            and facts.source_cleanup_complete
+            and facts.body_shutdown_source_safe
             and facts.body_provenance_current
         ),
     )

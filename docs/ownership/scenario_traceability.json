@@ -474,16 +474,19 @@
         "tests/test_circulation_successor.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Source and body cleanup exist; body-Off verification alone can complete while actual RPM remains nonzero.",
-      "implementation_status": "PARTIALLY SATISFIED",
+      "current_behavior_and_gap": "Target completion now uses typed source cleanup, verified source Off, body Off and actual pump zero even when the active Solar selection lacked THERMAL command provenance.",
+      "implementation_status": "SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-006",
           "behavior": "Target satisfied with deferred debt verifies source Off, body Off and pump zero before inactive outcome.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "IMPLEMENTED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_residual_cleanup_transfer.py::test_selected_solar_without_thermal_origin_cannot_strand_owned_body_shutdown",
+        "tests/test_ownership_lifecycle_reconciliation.py::test_complete_normal_pool_day_preserves_authority_and_future_eligibility"
+      ]
     },
     {
       "scenario_id": 7,
@@ -816,16 +819,18 @@
         "tests/test_systemic_autonomy_closure_guard.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Body-only residual may remain after source takeover but cleanup is blocked by active source/retained event.",
-      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "current_behavior_and_gap": "Positive operator Solar/Gas is preserved while verified BODY origin authorizes body-session completion to body Off/pump zero; continuous filtration handoff is denied until a new session.",
+      "implementation_status": "SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-015",
           "behavior": "Target satisfied during manual Gas uses explicit safe completion scope and expires override on body shutdown.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "IMPLEMENTED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_shutdown_source_cleanup.py::test_runtime_preserves_operator_source_and_completes_owned_body_session"
+      ]
     },
     {
       "scenario_id": 16,
@@ -1146,16 +1151,18 @@
         "tests/test_systemic_autonomy_closure_guard.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Source takeover can block body-only residual cleanup despite retained original body origin.",
-      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "current_behavior_and_gap": "Session-scoped manual Gas selection is preserved while the independently owned body session completes to body Off/pump zero.",
+      "implementation_status": "SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-024",
           "behavior": "Complete owned body at target under manual Gas using reviewed reduction and end its override.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "IMPLEMENTED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_shutdown_source_cleanup.py::test_runtime_preserves_operator_source_and_completes_owned_body_session[gas-H0001]"
+      ]
     },
     {
       "scenario_id": 25,
@@ -1267,16 +1274,18 @@
         "tests/test_systemic_autonomy_closure_guard.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Thermal-only intervention can poison circulation completion via retained evidence.",
-      "implementation_status": "ARCHITECTURAL MISMATCH",
+      "current_behavior_and_gap": "Current selected Off is an explicit safe source disposition; BODY completion remains independently authorized without adopting source ownership.",
+      "implementation_status": "PARTIALLY SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-027",
           "behavior": "Manual heat Off plus no immediate purpose completes PoolOS body to pump zero without adopting source from equality.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "PARTIALLY IMPLEMENTED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_shutdown_source_cleanup.py::test_positive_operator_off_is_already_safe_and_needs_no_source_command"
+      ]
     },
     {
       "scenario_id": 28,
@@ -1497,7 +1506,7 @@
         "tests/test_circulation_successor.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "TOU deferral is respected; full physical pump-zero termination and later session need combined proof.",
+      "current_behavior_and_gap": "TOU deferral and selected-source cleanup now reach verified body Off/pump zero; later independent generation eligibility is covered by the normal-day lifecycle but remains uncommissioned physically.",
       "implementation_status": "PARTIALLY SATISFIED",
       "required_future_regressions": [
         {
@@ -3712,7 +3721,7 @@
         "tests/test_pump_speed_session.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Rich nested diagnostics exist but no complete direct per-domain owner/origin/recovery surface.",
+      "current_behavior_and_gap": "Rich nested diagnostics now include selected-source cleanup disposition, body/filtration source safety, reactivation risk and operator-selection preservation, but no complete direct per-domain owner/origin/recovery surface.",
       "implementation_status": "MISSING OBSERVABILITY",
       "required_future_regressions": [
         {

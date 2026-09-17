@@ -21,6 +21,11 @@ from .thermal_runtime_ownership import (
     ThermalResidualTerminationEntitlement,
     ThermalRuntimeOwnershipEvidence,
 )
+from .thermal_source_cleanup import (
+    ThermalSourceCleanupAssessment,
+    ThermalSourceCleanupDisposition,
+    ThermalSourceCleanupPolicy,
+)
 
 
 class ThermalTerminationDisposition(StrEnum):
@@ -70,6 +75,7 @@ class ThermalTerminationAssessment:
     pump_action: ThermalTerminationPumpAction
     body_action: ThermalTerminationBodyAction
     operation: SetHeatMode | None = None
+    source_cleanup: ThermalSourceCleanupAssessment | None = None
     monotonic: bool = True
     physical_action_required: bool = False
     command_delivery_enabled: bool = False
@@ -96,6 +102,7 @@ class ThermalTerminationPolicy:
     """Evaluate residual provenance against fresh authoritative current truth."""
 
     pump_rpm_tolerance = 25
+    source_cleanup_policy = ThermalSourceCleanupPolicy()
 
     def evaluate(
         self,
@@ -166,24 +173,50 @@ class ThermalTerminationPolicy:
             # RPM disagreement cannot revoke separately proven THERMAL/BODY
             # responsibility. This path authorizes only source Off, never a
             # pump correction; topology and authoritative evidence remain gates.
-        source = entitlement.heat_source
-        if source is None:
-            return _assessment(
-                ThermalTerminationDisposition.RELINQUISH_ONLY,
-                "thermal_termination_no_owned_active_source",
-                **common,
-            )
+        source_cleanup = self.source_cleanup_policy.evaluate(
+            entitlement,
+            evidence,
+            desired_source=desired_source,
+        )
         if (
-            evidence.effective_heat_source is None
-            or not evidence.heat_source_observation_fresh
-            or not evidence.heat_source_observation_usable
+            source_cleanup.disposition
+            is ThermalSourceCleanupDisposition.EVIDENCE_UNUSABLE
         ):
+            if entitlement.heat_source is None:
+                return _assessment(
+                    ThermalTerminationDisposition.RELINQUISH_ONLY,
+                    "thermal_termination_no_owned_active_source",
+                    source_cleanup=source_cleanup,
+                    **common,
+                )
             return _assessment(
                 ThermalTerminationDisposition.BLOCKED,
                 "thermal_termination_source_evidence_unusable",
+                source_cleanup=source_cleanup,
                 **common,
             )
-        if evidence.effective_heat_source is PhysicalHeatMode.OFF:
+        if (
+            source_cleanup.disposition
+            is ThermalSourceCleanupDisposition.SELECTED_OFF_NOT_CURRENT_FOR_CLEANUP
+        ):
+            if verification_after is not None:
+                return _assessment(
+                    ThermalTerminationDisposition.BLOCKED,
+                    "thermal_termination_source_observation_not_post_delivery",
+                    source_cleanup=source_cleanup,
+                    **common,
+                )
+            return _assessment(
+                ThermalTerminationDisposition.RELINQUISH_ONLY,
+                (
+                    "thermal_termination_no_owned_active_source"
+                    if entitlement.heat_source is None
+                    else "thermal_termination_source_observation_not_post_entitlement"
+                ),
+                source_cleanup=source_cleanup,
+                **common,
+            )
+        if source_cleanup.source_cleanup_complete:
             if (
                 verification_after is not None
                 and (
@@ -196,30 +229,42 @@ class ThermalTerminationPolicy:
                     "thermal_termination_source_observation_not_post_delivery",
                     **common,
                 )
+            if entitlement.heat_source is None and verification_after is None:
+                return _assessment(
+                    ThermalTerminationDisposition.RELINQUISH_ONLY,
+                    "thermal_termination_no_owned_active_source",
+                    source_cleanup=source_cleanup,
+                    **common,
+                )
             return _assessment(
                 ThermalTerminationDisposition.RELINQUISH_ONLY,
                 "thermal_termination_source_already_off",
                 source_action=ThermalTerminationSourceAction.ALREADY_OFF,
+                source_cleanup=source_cleanup,
                 **common,
             )
-        if any(event.operator_applies(
-            generation=entitlement.body_session_generation or entitlement.generation,
-            session_id=entitlement.body_session_id or entitlement.lease_id,
-            domain=OwnershipDomain.THERMAL,
-            equipment_id=("pool.raw_heater_id" if entitlement.body is ThermalBody.POOL
-                          else "spa.raw_heater_id"),
-            established_at=entitlement.originating_lease_established_at,
-            evaluated_at=evidence.evaluated_at,
-        ) for event in evidence.external_changes.events):
+        if source_cleanup.operator_selection_preserved:
             return _assessment(
-                ThermalTerminationDisposition.BLOCKED,
-                "thermal_termination_operator_thermal_override",
+                ThermalTerminationDisposition.RELINQUISH_ONLY,
+                "thermal_termination_operator_source_preserved_for_body_shutdown",
+                source_cleanup=source_cleanup,
                 **common,
             )
-        if desired_source is not PhysicalHeatMode.OFF:
+        if (
+            source_cleanup.disposition
+            is ThermalSourceCleanupDisposition.CURRENT_POLICY_REQUIRES_SOURCE
+        ):
             return _assessment(
                 ThermalTerminationDisposition.RELINQUISH_ONLY,
                 "thermal_termination_current_policy_still_requires_heat_source",
+                source_cleanup=source_cleanup,
+                **common,
+            )
+        if not source_cleanup.source_off_authorized:
+            return _assessment(
+                ThermalTerminationDisposition.RELINQUISH_ONLY,
+                "thermal_termination_no_owned_active_source",
+                source_cleanup=source_cleanup,
                 **common,
             )
         operation = SetHeatMode(
@@ -229,13 +274,19 @@ class ThermalTerminationPolicy:
                 "thermal_termination": True,
                 "residual_entitlement_id": entitlement.entitlement_id,
                 "residual_generation": entitlement.generation,
+                "source_cleanup_disposition": source_cleanup.disposition.value,
             },
         )
         return _assessment(
             ThermalTerminationDisposition.SOURCE_OFF_READY,
-            "thermal_termination_owned_source_off_ready",
+            (
+                "thermal_termination_owned_source_off_ready"
+                if entitlement.heat_source is not None
+                else "thermal_termination_body_session_source_off_ready"
+            ),
             source_action=ThermalTerminationSourceAction.SET_OFF,
             operation=operation,
+            source_cleanup=source_cleanup,
             physical_action_required=True,
             **common,
         )
@@ -341,6 +392,7 @@ def _assessment(
     pump_action: ThermalTerminationPumpAction = ThermalTerminationPumpAction.NONE,
     body_action: ThermalTerminationBodyAction = ThermalTerminationBodyAction.NONE,
     operation: SetHeatMode | None = None,
+    source_cleanup: ThermalSourceCleanupAssessment | None = None,
     monotonic: bool = True,
     physical_action_required: bool = False,
 ) -> ThermalTerminationAssessment:
@@ -354,6 +406,7 @@ def _assessment(
         pump_action=pump_action,
         body_action=body_action,
         operation=operation,
+        source_cleanup=source_cleanup,
         monotonic=monotonic,
         physical_action_required=physical_action_required,
     )
