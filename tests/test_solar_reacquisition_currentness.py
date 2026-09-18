@@ -660,8 +660,15 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     shutdown_command_count = None
     second_generation = None
     native_refresh_at = NOW
+    native_transition_pending = False
     for seconds in range(1, 1201):
         at = NOW + timedelta(seconds=seconds)
+        if native_transition_pending:
+            # Accepted commands are followed by a distinct authoritative
+            # IntelliCenter consequence observation. Strict post-delivery
+            # chronology requires this epoch to be later than acceptance.
+            native_refresh_at = at
+            native_transition_pending = False
         special_purpose = driver.active_pump_session_purpose()
         probe = driver.probe_execution_evidence()
         refresh_owned_session = bool(
@@ -701,7 +708,7 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
             driver.process_epoch(frame, delivery_factory=factory)
         )
         if delivery.calls[before:]:
-            native_refresh_at = at
+            native_transition_pending = True
         for operation in delivery.calls[before:]:
             if isinstance(operation, SetBodyActive):
                 physical["pool_active"] = operation.active
