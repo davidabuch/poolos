@@ -663,12 +663,16 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     for seconds in range(1, 1201):
         at = NOW + timedelta(seconds=seconds)
         special_purpose = driver.active_pump_session_purpose()
+        probe = driver.probe_execution_evidence()
+        refresh_owned_session = bool(
+            special_purpose is PumpSpeedSessionPurpose.PRIMING
+            or (
+                probe is not None
+                and probe.phase.value == "acquiring"
+            )
+        )
         if (
-            special_purpose
-            in {
-                PumpSpeedSessionPurpose.PRIMING,
-                PumpSpeedSessionPurpose.TEMPERATURE_PROBE,
-            }
+            refresh_owned_session
             and (at - native_refresh_at).total_seconds() >= 15
         ):
             # Model the HA runtime's bounded read-only GetParamList refresh.
