@@ -18,6 +18,7 @@ from .integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
 from .intellicenter_readonly import is_pmpcirc_native_id
 from .thermal_runtime_ownership import (
     ThermalResidualTerminationEntitlement,
+    ThermalRuntimeBodyAdoption,
     ThermalRuntimeConceptProvenance,
 )
 
@@ -40,6 +41,7 @@ class ThermalCirculationCleanupProvenance:
     originating_lease_established_at: datetime
     established_at: datetime
     body_activation: ThermalRuntimeConceptProvenance | None
+    body_adoption: ThermalRuntimeBodyAdoption | None
     pump_setpoint: ThermalRuntimeConceptProvenance | None
     pump_setpoint_accepted_at: datetime | None = None
     body_session_id: str | None = None
@@ -65,7 +67,13 @@ class ThermalCirculationCleanupProvenance:
             if self.pump_setpoint_accepted_at > self.established_at:
                 raise ValueError("pump acceptance cannot follow cleanup provenance")
         object.__setattr__(self, "body", ThermalBody(self.body))
-        if self.body_activation is None and self.pump_setpoint is None:
+        if self.body_activation is not None and self.body_adoption is not None:
+            raise ValueError("cleanup BODY command provenance and adoption are exclusive")
+        if (
+            self.body_activation is None
+            and self.body_adoption is None
+            and self.pump_setpoint is None
+        ):
             raise ValueError("cleanup provenance requires an owned body or pump concept")
 
     @classmethod
@@ -80,6 +88,7 @@ class ThermalCirculationCleanupProvenance:
         if (
             (
                 entitlement.body_activation is None
+                and entitlement.body_adoption is None
                 and entitlement.pump_setpoint is None
             )
         ):
@@ -107,6 +116,7 @@ class ThermalCirculationCleanupProvenance:
             ),
             established_at=established_at,
             body_activation=entitlement.body_activation,
+            body_adoption=entitlement.body_adoption,
             pump_setpoint=entitlement.pump_setpoint,
             pump_setpoint_accepted_at=entitlement.pump_setpoint_accepted_at,
             body_session_id=entitlement.body_session_id,
@@ -126,6 +136,7 @@ class ThermalCirculationCleanupProvenance:
             retained_at=self.established_at,
             reason_code="thermal_circulation_cleanup_provenance",
             body_activation=self.body_activation,
+            body_adoption=self.body_adoption,
             pump_setpoint=self.pump_setpoint,
             heat_source=None,
             pump_setpoint_accepted_at=self.pump_setpoint_accepted_at,
@@ -136,7 +147,7 @@ class ThermalCirculationCleanupProvenance:
     def without_pump(self) -> ThermalCirculationCleanupProvenance | None:
         """Consume only pump cleanup capability after verified normalization."""
 
-        if self.body_activation is None:
+        if self.body_activation is None and self.body_adoption is None:
             return None
         return replace(
             self,
