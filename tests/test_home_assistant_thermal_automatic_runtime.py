@@ -67,6 +67,7 @@ class FakeDriver:
     release: asyncio.Event = field(default_factory=asyncio.Event)
     started: asyncio.Event = field(default_factory=asyncio.Event)
     pump_session_purpose: object | None = None
+    probe_evidence: object | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
         self.requested_enabled = enabled
@@ -92,6 +93,9 @@ class FakeDriver:
     def unload(self, **_: object) -> None:
         self.unloaded = True
         self.requested_enabled = False
+
+    def probe_execution_evidence(self) -> object | None:
+        return self.probe_evidence
 
     def active_pump_session_purpose(self) -> object | None:
         return self.pump_session_purpose
@@ -235,13 +239,23 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
 
 
 def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_evidence() -> None:
-    async def scenario(purpose: object) -> None:
+    async def scenario(*, priming: bool) -> None:
         module = _load_module()
         module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
         runtime, _, _, coordinator, driver = _runtime(module)
 
+        from poolos.pool_temperature_probe_execution import (
+            PoolTemperatureProbeExecutionPhase,
+        )
+        from poolos.pump_speed_session import PumpSpeedSessionPurpose
+
         driver.requested_enabled = True
-        driver.pump_session_purpose = purpose
+        if priming:
+            driver.pump_session_purpose = PumpSpeedSessionPurpose.PRIMING
+        else:
+            driver.probe_evidence = SimpleNamespace(
+                phase=PoolTemperatureProbeExecutionPhase.ACQUIRING
+            )
 
         runtime._sync_owned_pump_session_reobservation()
         await asyncio.wait_for(
@@ -253,6 +267,7 @@ def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_ev
         assert runtime._owned_pump_session_reobservation_task is not None
 
         driver.pump_session_purpose = None
+        driver.probe_evidence = None
         await asyncio.sleep(0.01)
 
         task = runtime._owned_pump_session_reobservation_task
@@ -260,10 +275,8 @@ def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_ev
             await asyncio.wait_for(task, timeout=1)
         assert runtime._owned_pump_session_reobservation_task is None
 
-    from poolos.pump_speed_session import PumpSpeedSessionPurpose
-
-    asyncio.run(scenario(PumpSpeedSessionPurpose.PRIMING))
-    asyncio.run(scenario(PumpSpeedSessionPurpose.TEMPERATURE_PROBE))
+    asyncio.run(scenario(priming=True))
+    asyncio.run(scenario(priming=False))
 
 
 def test_unload_invalidates_final_authority_and_waits_for_inflight_task() -> None:
