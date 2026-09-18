@@ -286,6 +286,68 @@ def test_spa_takeover_does_not_misclassify_routed_pool_off_as_manual_off() -> No
     }
 
 
+
+def test_sparse_pool_off_then_spa_on_reclassifies_takeover_without_pool_restraint() -> None:
+    module = _load_module()
+    pool = PoolAutomaticControlSuppression()
+    spa = SpaAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=PoolOSPhysicalCommandAuthority(),
+        thermal_runtime=_thermal_runtime(
+            module, assessment=None, pool_resolved=False, hot_tub_resolved=False,
+        ),
+        pool_automatic_control=pool,
+        spa_automatic_control=spa,
+    )
+    now = datetime(2026, 9, 18, 20, 18, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(_native(now, pool_active=True, spa_active=False), transport, 1)
+    runtime.process(
+        _native(now + timedelta(seconds=1), pool_active=False, spa_active=False),
+        transport, 1,
+    )
+    assert pool.state.suppressed
+
+    runtime.process(
+        _native(now + timedelta(seconds=5), pool_active=False, spa_active=True),
+        transport, 1,
+    )
+
+    assert not pool.state.suppressed
+    assert not spa.state.suppressed
+
+
+def test_pool_off_without_timely_spa_takeover_remains_manual_restraint() -> None:
+    module = _load_module()
+    pool = PoolAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=PoolOSPhysicalCommandAuthority(),
+        thermal_runtime=_thermal_runtime(
+            module, assessment=None, pool_resolved=False, hot_tub_resolved=False,
+        ),
+        pool_automatic_control=pool,
+    )
+    now = datetime(2026, 9, 18, 20, 18, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(_native(now, pool_active=True, spa_active=False), transport, 1)
+    runtime.process(
+        _native(now + timedelta(seconds=1), pool_active=False, spa_active=False),
+        transport, 1,
+    )
+    runtime.process(
+        _native(now + timedelta(seconds=20), pool_active=False, spa_active=True),
+        transport, 1,
+    )
+
+    assert pool.state.suppressed
+    assert pool.state.suppressed_at == now + timedelta(seconds=1)
+
+
+
 def test_correlated_poolos_owned_cleanup_off_does_not_false_latch() -> None:
     module = _load_module()
     authority = PoolOSPhysicalCommandAuthority()
