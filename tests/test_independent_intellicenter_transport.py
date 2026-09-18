@@ -1485,7 +1485,7 @@ def test_active_probe_refresh_uses_read_only_getparamlist_and_republishes(
             },
         ]
 
-        refreshed = await transport.async_refresh_probe_evidence()
+        refreshed = await transport._async_refresh_probe_evidence()
 
         assert refreshed is True
         assert transport._controller.sent_operations == ["GetParamList"] * 4
