@@ -776,7 +776,26 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     assert phase == "second_solar", (phase, result.state, result.blocker, physical)
     assert first_generation is not None
     assert shutdown_command_count is not None
-    assert second_generation is not None and second_generation > first_generation
+    final_lease = orchestrator.ownership.state.lease
+    ownership_debug = None
+    if final_lease is not None:
+        ownership_debug = {
+            domain.value: (
+                final_lease.domain_state(domain).authority.value,
+                final_lease.domain_state(domain).health.value,
+                final_lease.domain_state(domain).command_blocker,
+            )
+            for domain in OwnershipDomain
+        }
+    assert second_generation is not None and second_generation > first_generation, (
+        result.state,
+        result.blocker,
+        result.last_failure_reason,
+        physical,
+        ownership_debug,
+        driver.active_pump_session_purpose(),
+        driver.probe_execution_evidence(),
+    )
     assert len(delivery.calls) > shutdown_command_count
     assert physical == {
         "pool_active": True,
