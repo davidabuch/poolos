@@ -671,21 +671,23 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
                 and probe.phase.value == "acquiring"
             )
         )
-        if (
-            refresh_owned_session
-            and (at - native_refresh_at).total_seconds() >= 15
-        ):
-            # Model the HA runtime's bounded read-only GetParamList refresh.
-            # Unchanged native values otherwise do not advance their timestamps.
+        observation_times = None
+        if refresh_owned_session:
+            if (at - native_refresh_at).total_seconds() >= 15:
+                # Model the HA runtime's bounded read-only GetParamList refresh.
+                # Unchanged priming/probe values otherwise do not advance.
+                native_refresh_at = at
+            observation_times = {
+                "pool.active": native_refresh_at,
+                "spa.active": native_refresh_at,
+                "pump.rpm": native_refresh_at,
+                "pool.pump_circuit.configured_speed_rpm": native_refresh_at,
+                "pool.temperature": native_refresh_at,
+            }
+        else:
+            # Outside an owned priming/probe hold, normal native traffic
+            # republishes the authoritative snapshot as seen on live hardware.
             native_refresh_at = at
-
-        observation_times = {
-            "pool.active": native_refresh_at,
-            "spa.active": native_refresh_at,
-            "pump.rpm": native_refresh_at,
-            "pool.pump_circuit.configured_speed_rpm": native_refresh_at,
-            "pool.temperature": native_refresh_at,
-        }
         before = len(delivery.calls)
         frame = _frame(
             orchestrator,
