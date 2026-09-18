@@ -776,26 +776,30 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     assert phase == "second_solar", (phase, result.state, result.blocker, physical)
     assert first_generation is not None
     assert shutdown_command_count is not None
-    final_lease = orchestrator.ownership.state.lease
-    ownership_debug = None
-    if final_lease is not None:
-        ownership_debug = {
-            domain.value: (
-                final_lease.domain_state(domain).authority.value,
-                final_lease.domain_state(domain).health.value,
-                final_lease.domain_state(domain).command_blocker,
-            )
-            for domain in OwnershipDomain
-        }
-    assert second_generation is not None and second_generation > first_generation, (
-        result.state,
-        result.blocker,
-        result.last_failure_reason,
-        physical,
-        ownership_debug,
-        driver.active_pump_session_purpose(),
-        driver.probe_execution_evidence(),
-    )
+    final_diagnostics = dict(driver.diagnostics())
+    ownership_summary = final_diagnostics["runtime_ownership_summary"]
+    assert isinstance(ownership_summary, dict)
+    assert second_generation is not None and second_generation > first_generation, {
+        "state": result.state.value,
+        "blocker": result.blocker,
+        "failure": result.last_failure_reason,
+        "physical": physical,
+        "ownership_reason": ownership_summary["reason_code"],
+        "terminal_reason": ownership_summary["terminal_transition_reason_code"],
+        "terminal_concept": ownership_summary["terminal_transition_affected_concept"],
+        "terminal_expected": ownership_summary["terminal_transition_expected_value"],
+        "terminal_observed": ownership_summary["terminal_transition_observed_value"],
+        "failed_opportunity": ownership_summary["failed_pool_opportunity_id"],
+        "current_opportunity": ownership_summary["pool_opportunity_id"],
+        "pending_role": ownership_summary["accepted_consequence_pending_role"],
+        "pending_value": ownership_summary["accepted_consequence_pending_value"],
+        "active_pump_purpose": (
+            None
+            if driver.active_pump_session_purpose() is None
+            else driver.active_pump_session_purpose().value
+        ),
+        "probe_phase": ownership_summary["pool_temperature_probe_phase"],
+    }
     assert len(delivery.calls) > shutdown_command_count
     assert physical == {
         "pool_active": True,
