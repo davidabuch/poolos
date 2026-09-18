@@ -130,6 +130,8 @@ class ThermalRuntimeBodyAdoption:
     evaluation_id: str
     thermal_plan_id: str
     execution_plan_id: str
+    body_session_id: str
+    body_session_generation: int
     opportunity_id: str
     reason_code: str
     adopted_at: datetime
@@ -140,11 +142,14 @@ class ThermalRuntimeBodyAdoption:
             "evaluation_id",
             "thermal_plan_id",
             "execution_plan_id",
+            "body_session_id",
             "opportunity_id",
             "reason_code",
         ):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
+        if self.body_session_generation < 1:
+            raise ValueError("body_session_generation must be positive")
         object.__setattr__(self, "body", ThermalBody(self.body))
         _require_aware(self.adopted_at, "adopted_at")
 
@@ -307,6 +312,10 @@ class ThermalRuntimeOwnershipLease:
                 raise ValueError("ownership end cannot precede establishment")
         object.__setattr__(self, "body", ThermalBody(self.body))
         object.__setattr__(self, "status", ThermalRuntimeOwnershipStatus(self.status))
+        if self.body_session_id is None:
+            object.__setattr__(self, "body_session_id", self.lease_id)
+        if self.body_session_generation is None:
+            object.__setattr__(self, "body_session_generation", self.generation)
         if (self.originating_currentness is None) != (self.execution_progress is None):
             raise ValueError(
                 "ownership currentness and execution progress must be supplied together"
@@ -358,11 +367,20 @@ class ThermalRuntimeOwnershipLease:
             if self.body_adoption.body is not self.body:
                 raise ValueError("thermal body adoption must match lease body")
             if (
+                self.body_adoption.body_session_id != self.body_session_id
+                or self.body_adoption.body_session_generation
+                != self.body_session_generation
+            ):
+                raise ValueError("thermal body adoption must match body session")
+            if self.body_adoption.adopted_at > self.established_at:
+                raise ValueError("thermal body adoption cannot follow lease establishment")
+            if self.predecessor_lease_id is None and (
                 self.body_adoption.evaluation_id != self.evaluation_id
                 or self.body_adoption.thermal_plan_id != self.thermal_plan_id
                 or self.body_adoption.execution_plan_id != self.execution_plan_id
+                or self.body_adoption.adopted_at != self.established_at
             ):
-                raise ValueError("thermal body adoption must reference lease origin")
+                raise ValueError("initial thermal body adoption must reference lease origin")
         provenance_by_concept = {
             ThermalRuntimeOwnedConcept.BODY_ACTIVATION: self.body_activation,
             ThermalRuntimeOwnedConcept.PUMP_SETPOINT: self.pump_setpoint,
@@ -390,10 +408,6 @@ class ThermalRuntimeOwnershipLease:
                     health=OwnershipHealth.PENDING, command_blocker=None,
                 )
         object.__setattr__(self, "domain_states", tuple(states.values()))
-        if self.body_session_id is None:
-            object.__setattr__(self, "body_session_id", self.lease_id)
-        if self.body_session_generation is None:
-            object.__setattr__(self, "body_session_generation", self.generation)
 
     @property
     def owns_body_activation(self) -> bool:
@@ -1303,6 +1317,8 @@ class ThermalRuntimeOwnershipManager:
             evaluation_id=current_context.evaluation_id,
             thermal_plan_id=current_context.plan_id,
             execution_plan_id=execution_plan_id,
+            body_session_id=lease_id,
+            body_session_generation=generation,
             opportunity_id=opportunity_id,
             reason_code=reason_code,
             adopted_at=adopted_at,
@@ -3379,10 +3395,9 @@ def _body_adoption_current_for_lease(
     return bool(
         adoption is not None
         and adoption.body is lease.body
-        and adoption.evaluation_id == lease.evaluation_id
-        and adoption.thermal_plan_id == lease.thermal_plan_id
-        and adoption.execution_plan_id == lease.execution_plan_id
-        and adoption.adopted_at == lease.established_at
+        and adoption.body_session_id == lease.body_session_id
+        and adoption.body_session_generation == lease.body_session_generation
+        and adoption.adopted_at <= lease.established_at
         and lease.domain_state(OwnershipDomain.BODY).authority
         is OwnershipAuthority.POOLOS
     )
