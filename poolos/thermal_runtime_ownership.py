@@ -130,6 +130,7 @@ class ThermalRuntimeBodyAdoption:
     evaluation_id: str
     thermal_plan_id: str
     execution_plan_id: str
+    opportunity_id: str
     reason_code: str
     adopted_at: datetime
 
@@ -139,6 +140,7 @@ class ThermalRuntimeBodyAdoption:
             "evaluation_id",
             "thermal_plan_id",
             "execution_plan_id",
+            "opportunity_id",
             "reason_code",
         ):
             if not getattr(self, name).strip():
@@ -1197,6 +1199,7 @@ class ThermalRuntimeOwnershipManager:
         execution_plan_id: str,
         execution_progress: ThermalExecutionProgress,
         evidence: ThermalRuntimeOwnershipEvidence,
+        opportunity_id: str,
         reason_code: str,
     ) -> ThermalRuntimeOwnershipDecision:
         """Prospectively adopt an already-active BODY from fresh current policy.
@@ -1223,8 +1226,8 @@ class ThermalRuntimeOwnershipManager:
             return deny("body_not_commissioned")
         if not requested_mode.strip() or not execution_plan_id.strip():
             return deny("identity_incomplete")
-        if not reason_code.strip():
-            raise ValueError("adoption reason_code must not be empty")
+        if not opportunity_id.strip() or not reason_code.strip():
+            raise ValueError("adoption opportunity and reason must not be empty")
         if current is not None and current.status is ThermalRuntimeOwnershipStatus.OWNED:
             return deny("already_owned")
         if evidence.evaluated_at != adopted_at:
@@ -1300,6 +1303,7 @@ class ThermalRuntimeOwnershipManager:
             evaluation_id=current_context.evaluation_id,
             thermal_plan_id=current_context.plan_id,
             execution_plan_id=execution_plan_id,
+            opportunity_id=opportunity_id,
             reason_code=reason_code,
             adopted_at=adopted_at,
         )
