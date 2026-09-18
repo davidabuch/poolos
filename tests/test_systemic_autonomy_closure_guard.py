@@ -339,7 +339,7 @@ REASON_SIGNALS = (
 )
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
-REASON_FAMILY_COUNT = 222
+REASON_FAMILY_COUNT = 224
 REASON_FAMILY_SHA256 = "16c6aa60acce9a63e2bbc09b48b35684421f69f48235d93adbb1a9bd9ff670ff"
 
 
@@ -453,6 +453,11 @@ def _reason_regression(source: str, reason: str) -> str:
     if source.endswith("thermal_runtime_orchestration.py"):
         return "test_integer_native_configured_pump_speed_accepts_integral_float"
     if source.endswith("thermal_runtime_ownership.py"):
+        if reason in {
+            "runtime_ownership_adoption_denied:",
+            "runtime_ownership_established:prospective_body_adoption",
+        }:
+            return "test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body"
         if reason == "runtime_ownership_restored:quick_restart":
             return (
                 "test_matching_fresh_restart_restores_same_provenance_"
