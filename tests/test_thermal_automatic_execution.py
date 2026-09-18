@@ -1095,7 +1095,12 @@ def test_adopted_pool_probe_promotes_source_off_progress_before_probe_rpm() -> N
 
     lease = orchestrator.ownership.state.lease
     assert lease is not None
-    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED, (
+        lease.reason_code,
+        second.state,
+        second.blocker,
+        second.runtime_ownership_summary,
+    )
     assert lease.owns_body_adoption
     assert second.state is not ThermalAutomaticDriverState.PREEMPTED
     assert not (
