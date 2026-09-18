@@ -3280,9 +3280,16 @@ def _restrained_body(
     if driver.cleanup_provenance is not None:
         return driver.cleanup_provenance.body
     lease = driver.orchestrator.ownership.state.lease
+    if (
+        lease is not None
+        and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    ):
+        return lease.body
+    if frame.orchestration.candidate_body is not None:
+        return frame.orchestration.candidate_body
     if lease is not None:
         return lease.body
-    return frame.orchestration.candidate_body
+    return None
 
 
 def filtration_source_off_precondition(body: object) -> bool:
