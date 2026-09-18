@@ -19,6 +19,7 @@ from poolos.ownership_evidence import (
     OwnershipDomain,
     OwnershipHealth,
 )
+from poolos.pump_speed_session import PumpSpeedSessionPurpose
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
@@ -658,11 +659,33 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     first_generation = None
     shutdown_command_count = None
     second_generation = None
+    native_refresh_at = NOW
     for seconds in range(1, 1201):
+        at = NOW + timedelta(seconds=seconds)
+        special_purpose = driver.active_pump_session_purpose()
+        if (
+            special_purpose
+            in {
+                PumpSpeedSessionPurpose.PRIMING,
+                PumpSpeedSessionPurpose.TEMPERATURE_PROBE,
+            }
+            and (at - native_refresh_at).total_seconds() >= 15
+        ):
+            # Model the HA runtime's bounded read-only GetParamList refresh.
+            # Unchanged native values otherwise do not advance their timestamps.
+            native_refresh_at = at
+
+        observation_times = {
+            "pool.active": native_refresh_at,
+            "spa.active": native_refresh_at,
+            "pump.rpm": native_refresh_at,
+            "pool.pump_circuit.configured_speed_rpm": native_refresh_at,
+            "pool.temperature": native_refresh_at,
+        }
         before = len(delivery.calls)
         frame = _frame(
             orchestrator,
-            NOW + timedelta(seconds=seconds),
+            at,
             pool_temperature=81.0,
             pool_target=target,
             solar_temperature=110.0,
@@ -671,11 +694,14 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
             driver=driver,
             filtration_remaining=timedelta(0),
             filtration_disposition=FiltrationDisposition.SATISFIED,
+            observation_times=observation_times,
             **physical,
         )
         result = asyncio.run(
             driver.process_epoch(frame, delivery_factory=factory)
         )
+        if delivery.calls[before:]:
+            native_refresh_at = at
         for operation in delivery.calls[before:]:
             if isinstance(operation, SetBodyActive):
                 physical["pool_active"] = operation.active
