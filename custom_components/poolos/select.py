@@ -254,6 +254,7 @@ _COMMISSIONING_SCOPE_OPTION = {
     "Disabled": ThermalLiveCommissioningScope.DISABLED,
     "Pool": ThermalLiveCommissioningScope.POOL,
     "Hot Tub": ThermalLiveCommissioningScope.HOT_TUB,
+    "Pool + Hot Tub": ThermalLiveCommissioningScope.BOTH,
 }
 
 
