@@ -1090,8 +1090,8 @@ def test_owned_hot_tub_lease_still_scopes_spa_restraint_over_pool_candidate() ->
     assert _restrained_body(driver, frame) is ThermalBody.HOT_TUB
 
 
-def test_terminal_hot_tub_history_without_successor_remains_scoped_to_hot_tub() -> None:
-    """Terminal history remains a restraint fallback until a successor exists."""
+def test_terminal_hot_tub_history_without_successor_scopes_no_restraint() -> None:
+    """Completed Spa history cannot restrain later unrelated convergence."""
 
     driver = SimpleNamespace(
         active_session=None,
@@ -1111,7 +1111,7 @@ def test_terminal_hot_tub_history_without_successor_remains_scoped_to_hot_tub() 
         orchestration=SimpleNamespace(candidate_body=None)
     )
 
-    assert _restrained_body(driver, frame) is ThermalBody.HOT_TUB
+    assert _restrained_body(driver, frame) is None
 
 
 
