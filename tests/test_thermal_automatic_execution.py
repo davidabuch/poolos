@@ -467,6 +467,8 @@ def _frame(
     pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
     command_ledger: StructuredCommandLedger | None = None,
     real_probe_continuity: bool = False,
+    pool_opportunity_id: str | None = None,
+    pool_automatic_control_suppressed: bool = False,
 ) -> ThermalAutomaticExecutionFrame:
     evidence_at = at if native_observation_at is None else native_observation_at
     values = _values(
@@ -618,6 +620,8 @@ def _frame(
         live_policy=policy,
         physical_authority_ready=True,
         external_changes=external_changes,
+        pool_opportunity_id=pool_opportunity_id,
+        pool_automatic_control_suppressed=pool_automatic_control_suppressed,
         filtration_successor=(
             None
             if filtration_remaining is None
@@ -955,6 +959,157 @@ def test_filtration_cold_start_neutralizes_armed_solar_before_circulation() -> N
         isinstance(operation, SetPumpSpeed)
         for operation in delivery.calls
     )
+
+
+def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body() -> None:
+    """Scenario 20/56: fresh Pool purpose adopts BODY without fake Pool ON."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    successor = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=0,
+        configured_rpm=2600,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=125.0,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:successor",
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(successor, delivery_factory=factory)
+    )
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.owns_body
+    assert lease.owns_body_adoption
+    assert not lease.owns_body_activation
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == "pool:thermal:successor"
+    assert lease.body_adoption.reason_code == "independent_pool_thermal_opportunity"
+    assert not any(
+        isinstance(operation, SetBodyActive) and operation.active
+        for operation in delivery.calls
+    )
+    assert result.runtime_ownership_summary["owns_body"] is True
+    assert result.runtime_ownership_summary["owns_body_adoption"] is True
+
+
+def test_preexisting_pool_without_independent_thermal_work_is_not_adopted() -> None:
+    """Hardware equality/body activity alone never creates BODY authority."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+    satisfied = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        mode=ThermalRequestedMode.SOLAR,
+        pool_temperature=92.0,
+        pool_target=90.0,
+        solar_temperature=125.0,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:satisfied",
+    )
+
+    result = asyncio.run(driver.process_epoch(satisfied, delivery_factory=factory))
+
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.UNOWNED
+    assert not delivery.calls
+    assert result.state in {
+        ThermalAutomaticDriverState.BLOCKED,
+        ThermalAutomaticDriverState.CONVERGED,
+    }
+
+
+def test_manual_pool_restraint_forbids_prospective_body_adoption() -> None:
+    """A positive Pool OFF restraint still defeats later physical coincidence."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(True, changed_at=NOW, current_epoch_identity=baseline.epoch_identity)
+
+    restrained = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=0,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:restrained",
+        pool_automatic_control_suppressed=True,
+    )
+
+    result = asyncio.run(driver.process_epoch(restrained, delivery_factory=factory))
+
+    assert result.state is ThermalAutomaticDriverState.PREEMPTED
+    assert result.blocker == "automatic_thermal_manual_pool_off_preempted"
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.UNOWNED
+    assert not delivery.calls
 
 
 def test_filtration_source_neutralization_never_rewrites_preexisting_active_pool() -> None:

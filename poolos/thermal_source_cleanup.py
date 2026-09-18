@@ -143,7 +143,7 @@ class ThermalSourceCleanupPolicy:
                 source_off_authorized=True,
                 reactivation_possible_while_body_active=True,
             )
-        if entitlement.body_activation is not None:
+        if (entitlement.body_activation is not None or entitlement.body_adoption is not None):
             # This exact safe reduction is authority to unwind the accepted
             # BODY session.  It does not claim ongoing THERMAL policy ownership
             # and cannot select Solar or Gas.

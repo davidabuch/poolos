@@ -312,7 +312,7 @@ class CirculationSuccessorArbitrator:
                 CirculationOrigin.PREEXISTING_OR_EXTERNAL,
                 facts,
             )
-        if entitlement.body_activation is not None and not facts.body_provenance_current:
+        if (entitlement.body_activation is not None or entitlement.body_adoption is not None) and not facts.body_provenance_current:
             return _blocked(at, "circulation_body_provenance_not_current", facts)
         if not facts.body_shutdown_source_safe:
             return _blocked(at, "circulation_source_cleanup_not_complete", facts)
@@ -324,7 +324,7 @@ class CirculationSuccessorArbitrator:
         ):
             return _blocked(at, "circulation_filtration_evidence_unavailable", facts)
         if facts.source_selection_preserved:
-            if entitlement.body_activation is None:
+            if (entitlement.body_activation is None and entitlement.body_adoption is None):
                 return _result(
                     at,
                     CirculationArbitrationDisposition.RETAIN_PREEXISTING,
@@ -358,14 +358,14 @@ class CirculationSuccessorArbitrator:
                 "circulation_retained_for_immediate_filtration",
                 (
                     CirculationOrigin.POOLOS_THERMAL
-                    if entitlement.body_activation is not None
+                    if (entitlement.body_activation is not None or entitlement.body_adoption is not None)
                     else CirculationOrigin.PREEXISTING_OR_EXTERNAL
                 ),
                 facts,
                 pump_handoff_eligible=pump_eligible,
                 physical_handoff_ready=pump_eligible,
             )
-        if entitlement.body_activation is None:
+        if (entitlement.body_activation is None and entitlement.body_adoption is None):
             return _result(
                 at,
                 CirculationArbitrationDisposition.RETAIN_PREEXISTING,
@@ -586,7 +586,7 @@ def _pump_handoff_eligible(
         return False
     if filtration.successor_target_rpm is None:
         return False
-    if pump is None and entitlement.body_activation is None:
+    if pump is None and (entitlement.body_activation is None and entitlement.body_adoption is None):
         return False
     if not all(
         (

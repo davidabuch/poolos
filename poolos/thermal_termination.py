@@ -130,7 +130,7 @@ class ThermalTerminationPolicy:
             ),
             body_action=(
                 ThermalTerminationBodyAction.KEEP_ACTIVE
-                if entitlement.body_activation is not None
+                if (entitlement.body_activation is not None or entitlement.body_adoption is not None)
                 else ThermalTerminationBodyAction.NONE
             ),
         )
@@ -359,7 +359,7 @@ def _external_takeover(
 ) -> str | None:
     prefix = "pool" if entitlement.body is ThermalBody.POOL else "spa"
     concepts = set()
-    if entitlement.body_activation is not None:
+    if (entitlement.body_activation is not None or entitlement.body_adoption is not None):
         concepts.add(f"{prefix}.active")
     if entitlement.pump_setpoint is not None:
         concepts.add("pump.rpm")
