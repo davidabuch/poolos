@@ -671,19 +671,13 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
                 and probe.phase.value == "acquiring"
             )
         )
-        observation_times = None
         if refresh_owned_session:
             if (at - native_refresh_at).total_seconds() >= 15:
-                # Model the HA runtime's bounded read-only GetParamList refresh.
-                # Unchanged priming/probe values otherwise do not advance.
+                # The production GetParamList refresh updates selected native
+                # model objects and then republishes one new authoritative
+                # transport snapshot. Canonical observations derived from that
+                # snapshot therefore share the refreshed observation epoch.
                 native_refresh_at = at
-            observation_times = {
-                "pool.active": native_refresh_at,
-                "spa.active": native_refresh_at,
-                "pump.rpm": native_refresh_at,
-                "pool.pump_circuit.configured_speed_rpm": native_refresh_at,
-                "pool.temperature": native_refresh_at,
-            }
         else:
             # Outside an owned priming/probe hold, normal native traffic
             # republishes the authoritative snapshot as seen on live hardware.
@@ -700,7 +694,7 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
             driver=driver,
             filtration_remaining=timedelta(0),
             filtration_disposition=FiltrationDisposition.SATISFIED,
-            observation_times=observation_times,
+            native_observation_at=native_refresh_at,
             **physical,
         )
         result = asyncio.run(
