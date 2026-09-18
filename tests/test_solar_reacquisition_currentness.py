@@ -774,9 +774,6 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
             assert lease.lease_id != first_lease_id
             break
 
-    assert phase == "second_solar", (phase, result.state, result.blocker, physical)
-    assert first_generation is not None
-    assert shutdown_command_count is not None
     final_diagnostics = dict(driver.diagnostics())
     ownership_summary = final_diagnostics["runtime_ownership_summary"]
     assert isinstance(ownership_summary, dict)
@@ -798,6 +795,9 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
         physical["pool_heater"],
         physical["solar_active"],
     )
+    assert phase == "second_solar", terminal_debug
+    assert first_generation is not None
+    assert shutdown_command_count is not None
     assert second_generation is not None and second_generation > first_generation, terminal_debug
     assert len(delivery.calls) > shutdown_command_count
     assert physical == {
