@@ -394,40 +394,14 @@ def test_real_cadence_adopted_probe_hands_off_to_owned_solar_successor() -> None
     )
     assert lease.owns_body_adoption
     assert driver.probe_execution_evidence() is None
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
 
-    handoff = asyncio.run(
+    source_command = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
                 NOW + timedelta(seconds=124),
-                pool_active=True,
-                pump_rpm=1500,
-                configured_rpm=1500,
-                pool_heater="00000",
-                solar_active=False,
-                mode=ThermalRequestedMode.SOLAR,
-                solar_temperature=125.0,
-                evaluator=evaluator,
-                driver=driver,
-                pool_opportunity_id="pool:thermal:spa-successor",
-            ),
-            delivery_factory=factory,
-        )
-    )
-    assert handoff.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION, (
-        handoff.state,
-        handoff.blocker,
-        handoff.runtime_ownership_summary,
-        orchestrator.ownership.state.lease,
-    )
-    assert isinstance(delivery.calls[-1], SetPumpSpeed)
-    assert delivery.calls[-1].rpm == 2600
-
-    prepared = asyncio.run(
-        driver.process_epoch(
-            _frame(
-                orchestrator,
-                NOW + timedelta(seconds=125),
                 pool_active=True,
                 pump_rpm=2600,
                 configured_rpm=2600,
@@ -442,11 +416,32 @@ def test_real_cadence_adopted_probe_hands_off_to_owned_solar_successor() -> None
             delivery_factory=factory,
         )
     )
-    assert prepared.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert source_command.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
     assert isinstance(delivery.calls[-1], SetHeatMode)
     assert delivery.calls[-1].mode is PhysicalHeatMode.SOLAR
 
-    engaged = asyncio.run(
+    source_verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=125),
+                pool_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="H0002",
+                solar_active=False,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=125.0,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:spa-successor",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert source_verified.state is ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+
+    solar_engaged = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
@@ -465,30 +460,36 @@ def test_real_cadence_adopted_probe_hands_off_to_owned_solar_successor() -> None
             delivery_factory=factory,
         )
     )
-    assert engaged.state in {
-        ThermalAutomaticDriverState.AWAITING_REOBSERVATION,
-        ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
-    }
-
-    if not isinstance(delivery.calls[-1], SetPumpSpeed):
-        engaged = asyncio.run(
-            driver.process_epoch(
-                _frame(
-                    orchestrator,
-                    NOW + timedelta(seconds=127),
-                    pool_active=True,
-                    pump_rpm=2600,
-                    configured_rpm=2600,
-                    pool_heater="H0002",
-                    solar_active=True,
-                    mode=ThermalRequestedMode.SOLAR,
-                    solar_temperature=125.0,
-                    evaluator=evaluator,
-                    driver=driver,
-                    pool_opportunity_id="pool:thermal:spa-successor",
-                ),
-                delivery_factory=factory,
-            )
-        )
+    assert solar_engaged.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
     assert isinstance(delivery.calls[-1], SetPumpSpeed)
     assert delivery.calls[-1].rpm == 2900
+
+    pump_verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=127),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                mode=ThermalRequestedMode.SOLAR,
+                solar_temperature=125.0,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:spa-successor",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert pump_verified.state is ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status.value == "owned"
+    assert lease.owns_body_adoption
+    assert lease.owns_pump_setpoint
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+    assert lease.owns_heat_source
+
