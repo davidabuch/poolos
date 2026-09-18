@@ -122,6 +122,32 @@ class ThermalRuntimeConceptProvenance:
 
 
 @dataclass(frozen=True, slots=True)
+class ThermalRuntimeBodyAdoption:
+    """Fresh prospective BODY origin; never an accepted command receipt."""
+
+    adoption_id: str
+    body: ThermalBody
+    evaluation_id: str
+    thermal_plan_id: str
+    execution_plan_id: str
+    reason_code: str
+    adopted_at: datetime
+
+    def __post_init__(self) -> None:
+        for name in (
+            "adoption_id",
+            "evaluation_id",
+            "thermal_plan_id",
+            "execution_plan_id",
+            "reason_code",
+        ):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        object.__setattr__(self, "body", ThermalBody(self.body))
+        _require_aware(self.adopted_at, "adopted_at")
+
+
+@dataclass(frozen=True, slots=True)
 class ThermalResidualTerminationEntitlement:
     """Ephemeral proof of PoolOS-created effects eligible only for reduction.
 
@@ -138,6 +164,7 @@ class ThermalResidualTerminationEntitlement:
     retained_at: datetime
     reason_code: str
     body_activation: ThermalRuntimeConceptProvenance | None = None
+    body_adoption: ThermalRuntimeBodyAdoption | None = None
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
     heat_source: ThermalRuntimeConceptProvenance | None = None
     pump_setpoint_accepted_at: datetime | None = None
@@ -163,6 +190,10 @@ class ThermalResidualTerminationEntitlement:
         if self.retained_at < self.originating_lease_established_at:
             raise ValueError("termination retention cannot precede lease establishment")
         object.__setattr__(self, "body", ThermalBody(self.body))
+        if self.body_activation is not None and self.body_adoption is not None:
+            raise ValueError("residual body command provenance and adoption are exclusive")
+        if self.body_adoption is not None and self.body_adoption.body is not self.body:
+            raise ValueError("residual body adoption must match entitlement body")
         if self.pump_setpoint_accepted_at is not None:
             _require_aware(
                 self.pump_setpoint_accepted_at,
@@ -176,7 +207,10 @@ class ThermalResidualTerminationEntitlement:
         return tuple(
             concept
             for concept, provenance in (
-                (ThermalRuntimeOwnedConcept.BODY_ACTIVATION, self.body_activation),
+                (
+                    ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+                    self.body_activation or self.body_adoption,
+                ),
                 (ThermalRuntimeOwnedConcept.PUMP_SETPOINT, self.pump_setpoint),
                 (ThermalRuntimeOwnedConcept.HEAT_SOURCE, self.heat_source),
             )
@@ -225,6 +259,7 @@ class ThermalRuntimeOwnershipLease:
     status: ThermalRuntimeOwnershipStatus
     reason_code: str
     body_activation: ThermalRuntimeConceptProvenance | None = None
+    body_adoption: ThermalRuntimeBodyAdoption | None = None
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
     heat_source: ThermalRuntimeConceptProvenance | None = None
     predecessor_lease_id: str | None = None
@@ -315,6 +350,17 @@ class ThermalRuntimeOwnershipLease:
                 raise ValueError(
                     f"{label} provenance and acceptance time must be supplied together"
                 )
+        if self.body_activation is not None and self.body_adoption is not None:
+            raise ValueError("thermal body command provenance and adoption are exclusive")
+        if self.body_adoption is not None:
+            if self.body_adoption.body is not self.body:
+                raise ValueError("thermal body adoption must match lease body")
+            if (
+                self.body_adoption.evaluation_id != self.evaluation_id
+                or self.body_adoption.thermal_plan_id != self.thermal_plan_id
+                or self.body_adoption.execution_plan_id != self.execution_plan_id
+            ):
+                raise ValueError("thermal body adoption must reference lease origin")
         provenance_by_concept = {
             ThermalRuntimeOwnedConcept.BODY_ACTIVATION: self.body_activation,
             ThermalRuntimeOwnedConcept.PUMP_SETPOINT: self.pump_setpoint,
@@ -330,7 +376,7 @@ class ThermalRuntimeOwnershipLease:
             raise ValueError("owned and relinquished pump concepts are exclusive")
         states = {state.domain: state for state in self.domain_states}
         for domain, origin in (
-            (OwnershipDomain.BODY, self.body_activation),
+            (OwnershipDomain.BODY, self.body_activation or self.body_adoption),
             (OwnershipDomain.PUMP, self.pump_setpoint),
             (OwnershipDomain.THERMAL, self.heat_source),
         ):
@@ -349,8 +395,23 @@ class ThermalRuntimeOwnershipLease:
 
     @property
     def owns_body_activation(self) -> bool:
-        return (self.body_activation is not None
-                and self.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS)
+        return (
+            self.body_activation is not None
+            and self.domain_state(OwnershipDomain.BODY).authority
+            is OwnershipAuthority.POOLOS
+        )
+
+    @property
+    def owns_body_adoption(self) -> bool:
+        return (
+            self.body_adoption is not None
+            and self.domain_state(OwnershipDomain.BODY).authority
+            is OwnershipAuthority.POOLOS
+        )
+
+    @property
+    def owns_body(self) -> bool:
+        return self.owns_body_activation or self.owns_body_adoption
 
     @property
     def owns_pump_setpoint(self) -> bool:
