@@ -442,6 +442,18 @@ class ThermalAutomaticExecutionDriver:
         session = self.active_session
         if session is None:
             return None
+
+        # A delivered step moves into current_attempt while its authoritative
+        # consequence is being verified.  Priming remains a live semantic
+        # pump session for the entire verified hold, even when the coordinator
+        # no longer exposes that step through current_step_sequence.
+        attempt = session.current_attempt
+        if (
+            attempt is not None
+            and attempt.step.metadata.get("priming_step") == "true"
+        ):
+            return PumpSpeedSessionPurpose.PRIMING
+
         sequence = session.coordination.current_step_sequence
         if sequence is not None:
             step = session.execution_plan.steps[sequence - 1]

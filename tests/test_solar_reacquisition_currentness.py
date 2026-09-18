@@ -19,6 +19,7 @@ from poolos.ownership_evidence import (
     OwnershipDomain,
     OwnershipHealth,
 )
+from poolos.pump_speed_session import PumpSpeedSessionPurpose
 from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
@@ -658,11 +659,40 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     first_generation = None
     shutdown_command_count = None
     second_generation = None
+    native_refresh_at = NOW
+    native_transition_pending = False
     for seconds in range(1, 1201):
+        at = NOW + timedelta(seconds=seconds)
+        if native_transition_pending:
+            # Accepted commands are followed by a distinct authoritative
+            # IntelliCenter consequence observation. Strict post-delivery
+            # chronology requires this epoch to be later than acceptance.
+            native_refresh_at = at
+            native_transition_pending = False
+        special_purpose = driver.active_pump_session_purpose()
+        probe = driver.probe_execution_evidence()
+        refresh_owned_session = bool(
+            special_purpose is PumpSpeedSessionPurpose.PRIMING
+            or (
+                probe is not None
+                and probe.phase.value == "acquiring"
+            )
+        )
+        if refresh_owned_session:
+            if (at - native_refresh_at).total_seconds() >= 15:
+                # The production GetParamList refresh updates selected native
+                # model objects and then republishes one new authoritative
+                # transport snapshot. Canonical observations derived from that
+                # snapshot therefore share the refreshed observation epoch.
+                native_refresh_at = at
+        else:
+            # Outside an owned priming/probe hold, normal native traffic
+            # republishes the authoritative snapshot as seen on live hardware.
+            native_refresh_at = at
         before = len(delivery.calls)
         frame = _frame(
             orchestrator,
-            NOW + timedelta(seconds=seconds),
+            at,
             pool_temperature=81.0,
             pool_target=target,
             solar_temperature=110.0,
@@ -671,11 +701,14 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
             driver=driver,
             filtration_remaining=timedelta(0),
             filtration_disposition=FiltrationDisposition.SATISFIED,
+            native_observation_at=native_refresh_at,
             **physical,
         )
         result = asyncio.run(
             driver.process_epoch(frame, delivery_factory=factory)
         )
+        if delivery.calls[before:]:
+            native_transition_pending = True
         for operation in delivery.calls[before:]:
             if isinstance(operation, SetBodyActive):
                 physical["pool_active"] = operation.active
@@ -741,10 +774,31 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
             assert lease.lease_id != first_lease_id
             break
 
-    assert phase == "second_solar", (phase, result.state, result.blocker, physical)
+    final_diagnostics = dict(driver.diagnostics())
+    ownership_summary = final_diagnostics["runtime_ownership_summary"]
+    assert isinstance(ownership_summary, dict)
+    terminal_debug = (
+        result.state.value,
+        result.blocker,
+        ownership_summary["reason_code"],
+        ownership_summary["terminal_transition_reason_code"],
+        ownership_summary["terminal_transition_affected_concept"],
+        ownership_summary["terminal_transition_expected_value"],
+        ownership_summary["terminal_transition_observed_value"],
+        ownership_summary["failed_pool_opportunity_id"],
+        ownership_summary["pool_opportunity_id"],
+        ownership_summary["accepted_consequence_pending_role"],
+        ownership_summary["accepted_consequence_pending_value"],
+        physical["pool_active"],
+        physical["pump_rpm"],
+        physical["configured_rpm"],
+        physical["pool_heater"],
+        physical["solar_active"],
+    )
+    assert phase == "second_solar", terminal_debug
     assert first_generation is not None
     assert shutdown_command_count is not None
-    assert second_generation is not None and second_generation > first_generation
+    assert second_generation is not None and second_generation > first_generation, terminal_debug
     assert len(delivery.calls) > shutdown_command_count
     assert physical == {
         "pool_active": True,

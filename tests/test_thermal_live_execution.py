@@ -1637,6 +1637,42 @@ def test_priming_step_does_not_advance_until_60_seconds_continuously_verified() 
     assert session.coordination.current_step_sequence == 2
 
 
+def test_priming_hold_does_not_require_new_native_event_on_every_runtime_epoch() -> None:
+    """Fresh matching post-delivery evidence may span evaluator epochs within the hold."""
+
+    engine, live_policy, session = delivered_priming_session()
+    first_verified_at = NOW + timedelta(seconds=2)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(at=first_verified_at),
+        current_context=session.originating_context,
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert session.current_attempt is not None
+    assert session.current_attempt.verified_hold_started_at == first_verified_at
+
+    # The runtime may reevaluate before the bounded native refresh fires.
+    # Reusing still-fresh evidence later than the accepted command must not
+    # become unusable merely because it is older than the previous evaluation.
+    reevaluated_at = first_verified_at + timedelta(seconds=5)
+    session = engine.verify_current_step(
+        session,
+        hydraulic_store(at=first_verified_at),
+        current_context=session.originating_context,
+        policy=live_policy,
+        evaluated_at=reevaluated_at,
+        source_id="native-intellicenter",
+    )
+
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert session.failure_reason is None
+    assert session.current_attempt is not None
+    assert session.current_attempt.verified_hold_started_at == first_verified_at
+
+
 def test_priming_hold_fails_closed_if_rpm_deviates_before_completion() -> None:
     plan = thermal_plan(
         PhysicalHeatMode.OFF,

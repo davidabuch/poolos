@@ -66,6 +66,7 @@ class FakeDriver:
     unloaded: bool = False
     release: asyncio.Event = field(default_factory=asyncio.Event)
     started: asyncio.Event = field(default_factory=asyncio.Event)
+    pump_session_purpose: object | None = None
     probe_evidence: object | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
@@ -95,6 +96,9 @@ class FakeDriver:
 
     def probe_execution_evidence(self) -> object | None:
         return self.probe_evidence
+
+    def active_pump_session_purpose(self) -> object | None:
+        return self.pump_session_purpose
 
     def diagnostics(self) -> dict[str, object]:
         return {"state": "test", "requested_enabled": self.requested_enabled}
@@ -138,7 +142,7 @@ class FakeHass:
     ) -> asyncio.Task[object]:
         assert name in {
             "PoolOS automatic thermal execution epoch",
-            "PoolOS active probe native reobservation",
+            "PoolOS owned pump-session native reobservation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -149,16 +153,16 @@ def _runtime(module: ModuleType):
     hass = FakeHass()
     authority = FakeAuthority()
 
-    async def refresh_probe_evidence() -> bool:
-        coordinator.probe_refresh_count += 1
-        coordinator.probe_refresh_event.set()
+    async def refresh_owned_pump_session_evidence() -> bool:
+        coordinator.pump_session_refresh_count += 1
+        coordinator.pump_session_refresh_event.set()
         return True
 
     coordinator = SimpleNamespace(
         listener_updates=0,
-        probe_refresh_count=0,
-        probe_refresh_event=asyncio.Event(),
-        async_refresh_native_probe_evidence=refresh_probe_evidence,
+        pump_session_refresh_count=0,
+        pump_session_refresh_event=asyncio.Event(),
+        async_refresh_native_owned_pump_session_evidence=refresh_owned_pump_session_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -234,36 +238,45 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
     asyncio.run(scenario())
 
 
-def test_owned_probe_actively_reobserves_unchanged_native_evidence() -> None:
-    async def scenario() -> None:
+def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_evidence() -> None:
+    async def scenario(*, priming: bool) -> None:
         module = _load_module()
-        module._PROBE_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
         runtime, _, _, coordinator, driver = _runtime(module)
 
         from poolos.pool_temperature_probe_execution import (
             PoolTemperatureProbeExecutionPhase,
         )
+        from poolos.pump_speed_session import PumpSpeedSessionPurpose
 
         driver.requested_enabled = True
-        driver.probe_evidence = SimpleNamespace(
-            phase=PoolTemperatureProbeExecutionPhase.ACQUIRING
+        if priming:
+            driver.pump_session_purpose = PumpSpeedSessionPurpose.PRIMING
+        else:
+            driver.probe_evidence = SimpleNamespace(
+                phase=PoolTemperatureProbeExecutionPhase.ACQUIRING
+            )
+
+        runtime._sync_owned_pump_session_reobservation()
+        await asyncio.wait_for(
+            coordinator.pump_session_refresh_event.wait(),
+            timeout=1,
         )
 
-        runtime._sync_probe_reobservation()
-        await asyncio.wait_for(coordinator.probe_refresh_event.wait(), timeout=1)
+        assert coordinator.pump_session_refresh_count >= 1
+        assert runtime._owned_pump_session_reobservation_task is not None
 
-        assert coordinator.probe_refresh_count >= 1
-        assert runtime._probe_reobservation_task is not None
-
+        driver.pump_session_purpose = None
         driver.probe_evidence = None
         await asyncio.sleep(0.01)
 
-        task = runtime._probe_reobservation_task
+        task = runtime._owned_pump_session_reobservation_task
         if task is not None:
             await asyncio.wait_for(task, timeout=1)
-        assert runtime._probe_reobservation_task is None
+        assert runtime._owned_pump_session_reobservation_task is None
 
-    asyncio.run(scenario())
+    asyncio.run(scenario(priming=True))
+    asyncio.run(scenario(priming=False))
 
 
 def test_unload_invalidates_final_authority_and_waits_for_inflight_task() -> None:

@@ -28,7 +28,8 @@ from poolos.external_change import ExternalChangeBatch
 from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain, PositiveOperatorEvidence
 from poolos.pool_circulation_ownership import PoolCirculationOwner, PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
-from poolos.pump_speed_session import PumpSpeedSessionRuntime
+from poolos.pump_speed_session import PumpSpeedSessionPurpose, PumpSpeedSessionRuntime
+from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
     SpaAutomaticControlSuppression,
@@ -47,7 +48,6 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
 )
-from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.thermal_execution_currentness import ThermalExecutionPurposeKind
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment
 from poolos.thermal_runtime_orchestration import (
@@ -68,7 +68,7 @@ from .thermal_runtime import PoolOSThermalRuntime
 
 
 LOGGER = logging.getLogger(__name__)
-_PROBE_REOBSERVATION_INTERVAL_SECONDS = 15.0
+_OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 15.0
 
 
 
@@ -273,7 +273,7 @@ class PoolOSThermalAutomaticRuntime:
         default=None, init=False, repr=False
     )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
-    _probe_reobservation_task: asyncio.Task[object] | None = field(
+    _owned_pump_session_reobservation_task: asyncio.Task[object] | None = field(
         default=None, init=False, repr=False
     )
     _unloaded: bool = field(default=False, init=False, repr=False)
@@ -464,7 +464,7 @@ class PoolOSThermalAutomaticRuntime:
         )
         self._sync_authority_configuration()
         if not enabled:
-            self._cancel_probe_reobservation()
+            self._cancel_owned_pump_session_reobservation()
         self.coordinator.async_update_listeners()
 
     def authority_configuration_changed(self) -> None:
@@ -663,11 +663,11 @@ class PoolOSThermalAutomaticRuntime:
                     "PoolOS automatic thermal task failed during command-free unload"
                 )
         self._task = None
-        probe_task = self._probe_reobservation_task
+        probe_task = self._owned_pump_session_reobservation_task
         if probe_task is not None and not probe_task.done():
             probe_task.cancel()
             await asyncio.gather(probe_task, return_exceptions=True)
-        self._probe_reobservation_task = None
+        self._owned_pump_session_reobservation_task = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -684,43 +684,51 @@ class PoolOSThermalAutomaticRuntime:
             commissioning_scope=scope.value,
         )
 
-    def _cancel_probe_reobservation(self) -> None:
-        task = self._probe_reobservation_task
+    def _cancel_owned_pump_session_reobservation(self) -> None:
+        task = self._owned_pump_session_reobservation_task
         if task is not None and not task.done():
             task.cancel()
-        self._probe_reobservation_task = None
+        self._owned_pump_session_reobservation_task = None
 
-    def _probe_reobservation_required(self) -> bool:
+    def _owned_pump_session_reobservation_required(self) -> bool:
+        if not self.driver.requested_enabled:
+            return False
+
         probe = self.driver.probe_execution_evidence()
-        return bool(
-            self.driver.requested_enabled
-            and probe is not None
+        if (
+            probe is not None
             and probe.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+        ):
+            return True
+
+        return (
+            self.driver.active_pump_session_purpose()
+            is PumpSpeedSessionPurpose.PRIMING
         )
 
-    def _sync_probe_reobservation(self) -> None:
-        if not self._probe_reobservation_required():
-            self._cancel_probe_reobservation()
+    def _sync_owned_pump_session_reobservation(self) -> None:
+        if not self._owned_pump_session_reobservation_required():
+            self._cancel_owned_pump_session_reobservation()
             return
-        task = self._probe_reobservation_task
+        task = self._owned_pump_session_reobservation_task
         if task is not None and not task.done():
             return
-        self._probe_reobservation_task = self.hass.async_create_task(
-            self._probe_reobservation_loop(),
-            "PoolOS active probe native reobservation",
+        self._owned_pump_session_reobservation_task = self.hass.async_create_task(
+            self._owned_pump_session_reobservation_loop(),
+            "PoolOS owned pump-session native reobservation",
         )
 
-    async def _probe_reobservation_loop(self) -> None:
-        """Keep unchanged native probe evidence current without manufacturing truth."""
+    async def _owned_pump_session_reobservation_loop(self) -> None:
+        """Keep unchanged owned pump-session evidence current without manufacturing truth."""
 
         try:
-            while not self._unloaded and self._probe_reobservation_required():
-                await asyncio.sleep(_PROBE_REOBSERVATION_INTERVAL_SECONDS)
-                if self._unloaded or not self._probe_reobservation_required():
+            while not self._unloaded and self._owned_pump_session_reobservation_required():
+                await asyncio.sleep(_OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS)
+                if self._unloaded or not self._owned_pump_session_reobservation_required():
                     return
                 refresh = getattr(
                     self.coordinator,
-                    "async_refresh_native_probe_evidence",
+                    "async_refresh_native_owned_pump_session_evidence",
                     None,
                 )
                 if refresh is None:
@@ -729,10 +737,10 @@ class PoolOSThermalAutomaticRuntime:
         except asyncio.CancelledError:
             raise
         except Exception:
-            LOGGER.exception("PoolOS active probe native reobservation failed")
+            LOGGER.exception("PoolOS owned pump-session native reobservation failed")
         finally:
-            if asyncio.current_task() is self._probe_reobservation_task:
-                self._probe_reobservation_task = None
+            if asyncio.current_task() is self._owned_pump_session_reobservation_task:
+                self._owned_pump_session_reobservation_task = None
 
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
@@ -780,7 +788,7 @@ class PoolOSThermalAutomaticRuntime:
                 reason=f"automatic_thermal_driver_exception:{type(exc).__name__}",
             )
         self.coordinator.async_update_listeners()
-        self._sync_probe_reobservation()
+        self._sync_owned_pump_session_reobservation()
         if self._unloaded or not self.driver.requested_enabled:
             return
         latest = self._latest_frame
