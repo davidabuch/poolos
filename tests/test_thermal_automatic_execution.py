@@ -29,6 +29,7 @@ from poolos.filtration_policy import (
     FiltrationDisposition,
     FiltrationObservation,
 )
+from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.integration import (
     PhysicalHeatMode,
     PoolOperation,
@@ -85,6 +86,7 @@ from poolos.thermal_runtime_assessment import (
 from poolos.thermal_runtime_orchestration import (
     ThermalOrchestrationLifecycle,
     ThermalRuntimeOrchestrator,
+    assess_pool_temperature_probe_continuity,
 )
 from poolos.thermal_runtime_ownership import (
     ThermalRuntimeConceptProvenance,
@@ -462,6 +464,7 @@ def _frame(
     pump_session_effective_rpm: int | None = None,
     pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
     command_ledger: StructuredCommandLedger | None = None,
+    real_probe_continuity: bool = False,
 ) -> ThermalAutomaticExecutionFrame:
     evidence_at = at if native_observation_at is None else native_observation_at
     values = _values(
@@ -496,23 +499,26 @@ def _frame(
             ),
         )
         for concept, value in values.items()
-        if concept
-        in {
-            "pool.active",
-            "spa.active",
-            "pump.rpm",
-            "pool.pump_circuit.configured_speed_rpm",
-            "spa.pump_circuit.configured_speed_rpm",
-            "pool.raw_heater_id",
-            "spa.raw_heater_id",
-            "heater.active",
-            "spa.heating_demand_active",
-            "solar.active",
-            "grid.outage_active",
-            "waterfall.active",
-            "jets.active",
-            "slide.active",
-        }
+        if (
+            concept
+            in {
+                "pool.active",
+                "spa.active",
+                "pump.rpm",
+                "pool.pump_circuit.configured_speed_rpm",
+                "spa.pump_circuit.configured_speed_rpm",
+                "pool.raw_heater_id",
+                "spa.raw_heater_id",
+                "heater.active",
+                "spa.heating_demand_active",
+                "solar.active",
+                "grid.outage_active",
+                "waterfall.active",
+                "jets.active",
+                "slide.active",
+            }
+            or (real_probe_continuity and concept == "pool.temperature")
+        )
         and not (omit_solar_observation and concept == "solar.active")
     )
     if command_ledger is not None:
@@ -527,6 +533,23 @@ def _frame(
         ),
     )
     probe_execution = None if driver is None else driver.probe_execution_evidence()
+    probe_continuity = None
+    if (
+        probe_execution is not None
+        and probe_execution.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+    ):
+        probe_continuity = (
+            assess_pool_temperature_probe_continuity(
+                generated_at=at,
+                observations=observations,
+                prior_grid_disposition=GridOutageDisposition.ON_GRID,
+            )
+            if real_probe_continuity
+            else PoolTemperatureProbeContinuityEvidence(
+                evaluated_at=at,
+                valid=True,
+            )
+        )
     thermal = (evaluator or ThermalRuntimeEvaluator()).evaluate(
         ThermalRuntimeEvidence(
             evaluated_at=at,
@@ -562,13 +585,7 @@ def _frame(
             ),
             spa_session_kind=(None if driver is None else driver.spa_session_kind()),
             pool_temperature_probe_execution=probe_execution,
-            pool_temperature_probe_continuity=(
-                PoolTemperatureProbeContinuityEvidence(evaluated_at=at, valid=True)
-                if probe_execution is not None
-                and probe_execution.phase
-                is PoolTemperatureProbeExecutionPhase.ACQUIRING
-                else None
-            ),
+            pool_temperature_probe_continuity=probe_continuity,
             pump_session_body=(
                 PumpSpeedSessionBody.POOL
                 if pump_session_id is not None

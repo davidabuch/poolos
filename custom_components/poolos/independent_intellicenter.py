@@ -242,6 +242,58 @@ class _ReadOnlyModelController(ICModelController):
         self._read_only_guard.require_allowed("SETPARAMLIST")
         raise AssertionError("unreachable")
 
+    async def refresh_probe_evidence(
+        self,
+        *,
+        generation_is_current: Callable[[], bool],
+    ) -> None:
+        """Actively re-read the exact native evidence required by a Pool probe.
+
+        GetParamList is read-only and does not alter RequestParamList
+        subscription semantics.  The probe contract requires current configured
+        PMPCIRC, actual pump, Pool body, and Pool-water evidence even when those
+        values remain unchanged and IntelliCenter therefore emits no NotifyList.
+        """
+
+        requests = (
+            (
+                "OBJTYP = PMPCIRC",
+                ("CIRCUIT", "SELECT", PARENT_ATTR, "SPEED"),
+            ),
+            (
+                "OBJTYP = PUMP",
+                (RPM_ATTR, STATUS_ATTR),
+            ),
+            (
+                "OBJTYP = SENSE",
+                (SOURCE_ATTR, SUBTYP_ATTR),
+            ),
+            (
+                "OBJTYP = BODY",
+                (STATUS_ATTR, SUBTYP_ATTR, SNAME_ATTR),
+            ),
+        )
+        for condition, keys in requests:
+            if not generation_is_current():
+                return
+            response = await self.send_cmd(
+                "GetParamList",
+                {
+                    "condition": condition,
+                    "objectList": [
+                        {
+                            "objnam": "ALL",
+                            "keys": list(keys),
+                        }
+                    ],
+                },
+            )
+            if not generation_is_current():
+                return
+            object_list = response.get("objectList")
+            if isinstance(object_list, list):
+                self._apply_updates(object_list)
+
     async def refresh_body_metadata(
         self,
         objnam: str,
@@ -499,6 +551,33 @@ class IndependentIntelliCenterReadOnlyTransport:
         with contextlib.suppress(Exception):
             await self._controller.stop()
         self._state = IndependentIntelliCenterTransportState.UNAVAILABLE
+
+    async def _async_refresh_probe_evidence(self) -> bool:
+        """Refresh unchanged probe evidence from IntelliCenter without commands."""
+
+        if not self.connected:
+            return False
+        generation = self._discovery_generation
+        try:
+            await self._controller.refresh_probe_evidence(
+                generation_is_current=lambda: self._refresh_generation_is_current(
+                    generation
+                )
+            )
+        except (ICConnectionError, ICTimeoutError) as exc:
+            self._last_error_code = type(exc).__name__.upper()
+            return False
+        if not self._refresh_generation_is_current(generation):
+            return False
+        observed_at = datetime.now(UTC)
+        self._last_native_update = observed_at
+        self._last_error_code = None
+        self._latest_snapshot = self._copy_snapshot(
+            observed_at=observed_at,
+            connected=True,
+        )
+        self._notify_snapshot_updated()
+        return True
 
     def read_snapshot(self) -> NativeIntelliCenterTransportSnapshot:
         """Return the latest immutable snapshot through the existing read contract."""

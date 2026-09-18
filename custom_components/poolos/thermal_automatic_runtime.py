@@ -47,6 +47,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
 )
+from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.thermal_execution_currentness import ThermalExecutionPurposeKind
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment
 from poolos.thermal_runtime_orchestration import (
@@ -67,6 +68,8 @@ from .thermal_runtime import PoolOSThermalRuntime
 
 
 LOGGER = logging.getLogger(__name__)
+_PROBE_REOBSERVATION_INTERVAL_SECONDS = 15.0
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +273,9 @@ class PoolOSThermalAutomaticRuntime:
         default=None, init=False, repr=False
     )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
+    _probe_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
@@ -457,6 +463,8 @@ class PoolOSThermalAutomaticRuntime:
             current_epoch_identity=current,
         )
         self._sync_authority_configuration()
+        if not enabled:
+            self._cancel_probe_reobservation()
         self.coordinator.async_update_listeners()
 
     def authority_configuration_changed(self) -> None:
@@ -655,6 +663,11 @@ class PoolOSThermalAutomaticRuntime:
                     "PoolOS automatic thermal task failed during command-free unload"
                 )
         self._task = None
+        probe_task = self._probe_reobservation_task
+        if probe_task is not None and not probe_task.done():
+            probe_task.cancel()
+            await asyncio.gather(probe_task, return_exceptions=True)
+        self._probe_reobservation_task = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -670,6 +683,56 @@ class PoolOSThermalAutomaticRuntime:
             thermal_live_enabled=self.thermal_runtime.effective_live_enabled,
             commissioning_scope=scope.value,
         )
+
+    def _cancel_probe_reobservation(self) -> None:
+        task = self._probe_reobservation_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._probe_reobservation_task = None
+
+    def _probe_reobservation_required(self) -> bool:
+        probe = self.driver.probe_execution_evidence()
+        return bool(
+            self.driver.requested_enabled
+            and probe is not None
+            and probe.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+        )
+
+    def _sync_probe_reobservation(self) -> None:
+        if not self._probe_reobservation_required():
+            self._cancel_probe_reobservation()
+            return
+        task = self._probe_reobservation_task
+        if task is not None and not task.done():
+            return
+        self._probe_reobservation_task = self.hass.async_create_task(
+            self._probe_reobservation_loop(),
+            "PoolOS active probe native reobservation",
+        )
+
+    async def _probe_reobservation_loop(self) -> None:
+        """Keep unchanged native probe evidence current without manufacturing truth."""
+
+        try:
+            while not self._unloaded and self._probe_reobservation_required():
+                await asyncio.sleep(_PROBE_REOBSERVATION_INTERVAL_SECONDS)
+                if self._unloaded or not self._probe_reobservation_required():
+                    return
+                refresh = getattr(
+                    self.coordinator,
+                    "async_refresh_native_probe_evidence",
+                    None,
+                )
+                if refresh is None:
+                    return
+                await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS active probe native reobservation failed")
+        finally:
+            if asyncio.current_task() is self._probe_reobservation_task:
+                self._probe_reobservation_task = None
 
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
@@ -717,6 +780,7 @@ class PoolOSThermalAutomaticRuntime:
                 reason=f"automatic_thermal_driver_exception:{type(exc).__name__}",
             )
         self.coordinator.async_update_listeners()
+        self._sync_probe_reobservation()
         if self._unloaded or not self.driver.requested_enabled:
             return
         latest = self._latest_frame

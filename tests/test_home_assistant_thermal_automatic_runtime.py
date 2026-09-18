@@ -66,6 +66,7 @@ class FakeDriver:
     unloaded: bool = False
     release: asyncio.Event = field(default_factory=asyncio.Event)
     started: asyncio.Event = field(default_factory=asyncio.Event)
+    probe_evidence: object | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
         self.requested_enabled = enabled
@@ -91,6 +92,9 @@ class FakeDriver:
     def unload(self, **_: object) -> None:
         self.unloaded = True
         self.requested_enabled = False
+
+    def probe_execution_evidence(self) -> object | None:
+        return self.probe_evidence
 
     def diagnostics(self) -> dict[str, object]:
         return {"state": "test", "requested_enabled": self.requested_enabled}
@@ -132,7 +136,10 @@ class FakeHass:
         coroutine: object,
         name: str,
     ) -> asyncio.Task[object]:
-        assert name == "PoolOS automatic thermal execution epoch"
+        assert name in {
+            "PoolOS automatic thermal execution epoch",
+            "PoolOS active probe native reobservation",
+        }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
         return task
@@ -141,8 +148,17 @@ class FakeHass:
 def _runtime(module: ModuleType):
     hass = FakeHass()
     authority = FakeAuthority()
+
+    async def refresh_probe_evidence() -> bool:
+        coordinator.probe_refresh_count += 1
+        coordinator.probe_refresh_event.set()
+        return True
+
     coordinator = SimpleNamespace(
         listener_updates=0,
+        probe_refresh_count=0,
+        probe_refresh_event=asyncio.Event(),
+        async_refresh_native_probe_evidence=refresh_probe_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -214,6 +230,38 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
         assert len(hass.tasks) == 2
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
+
+    asyncio.run(scenario())
+
+
+def test_owned_probe_actively_reobserves_unchanged_native_evidence() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        module._PROBE_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        runtime, _, _, coordinator, driver = _runtime(module)
+
+        from poolos.pool_temperature_probe_execution import (
+            PoolTemperatureProbeExecutionPhase,
+        )
+
+        driver.requested_enabled = True
+        driver.probe_evidence = SimpleNamespace(
+            phase=PoolTemperatureProbeExecutionPhase.ACQUIRING
+        )
+
+        runtime._sync_probe_reobservation()
+        await asyncio.wait_for(coordinator.probe_refresh_event.wait(), timeout=1)
+
+        assert coordinator.probe_refresh_count >= 1
+        assert runtime._probe_reobservation_task is not None
+
+        driver.probe_evidence = None
+        await asyncio.sleep(0.01)
+
+        task = runtime._probe_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+        assert runtime._probe_reobservation_task is None
 
     asyncio.run(scenario())
 

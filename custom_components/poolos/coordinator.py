@@ -194,6 +194,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             await self.hass.async_add_executor_job(load_and_summarize)
         )
 
+    async def async_refresh_native_probe_evidence(self) -> bool:
+        """Request one bounded read-only refresh for active probe evidence."""
+
+        transport = self.independent_intellicenter_transport
+        if transport is None or self._unloading:
+            return False
+        return await transport._async_refresh_probe_evidence()
+
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run the periodic reconciliation/backstop observation refresh."""
 

@@ -13,6 +13,43 @@ from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
 from test_thermal_automatic_execution import FakeDelivery, FakeDeliveryFactory, NOW, _frame
 
 
+def test_real_probe_continuity_rejects_unchanged_configured_speed_after_freshness_window() -> None:
+    """Reproduce the 2026-09-18 live failure boundary without synthetic freshness."""
+
+    from poolos.grid_outage_confirmation import GridOutageDisposition
+    from poolos.thermal_runtime_orchestration import (
+        assess_pool_temperature_probe_continuity,
+    )
+    from test_thermal_automatic_execution import _observation
+
+    started = NOW + timedelta(seconds=3)
+    evaluated = started + timedelta(seconds=35)
+    observations = (
+        _observation("pool.active", True, evaluated),
+        _observation("spa.active", False, evaluated),
+        _observation("pump.rpm", 1500, evaluated),
+        _observation(
+            "pool.pump_circuit.configured_speed_rpm",
+            1500,
+            started,
+        ),
+        _observation("pool.temperature", 82.0, evaluated),
+        _observation("grid.outage_active", False, evaluated),
+        _observation("waterfall.active", False, evaluated),
+        _observation("jets.active", False, evaluated),
+        _observation("slide.active", False, evaluated),
+    )
+
+    continuity = assess_pool_temperature_probe_continuity(
+        generated_at=evaluated,
+        observations=observations,
+        prior_grid_disposition=GridOutageDisposition.ON_GRID,
+    )
+
+    assert continuity.valid is False
+    assert continuity.blocker == "temperature_probe_pool_circulation_not_proven"
+
+
 def test_real_cadence_probe_hands_off_to_owned_solar_successor() -> None:
     """Carry realistic probe cadence through fresh Solar successor ownership."""
 
@@ -82,6 +119,7 @@ def test_real_cadence_probe_hands_off_to_owned_solar_successor() -> None:
             solar_temperature=110.0,
             evaluator=evaluator,
             driver=driver,
+            real_probe_continuity=True,
         )
         final = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
 
@@ -93,6 +131,17 @@ def test_real_cadence_probe_hands_off_to_owned_solar_successor() -> None:
     assert len(delivery.calls) == 3
     assert isinstance(delivery.calls[-1], SetPumpSpeed)
     assert delivery.calls[-1].rpm == 2600
+
+    # One semantic morning opportunity may activate the Pool only once.
+    # Probe sampling and the probe->Solar successor handoff must never create
+    # an OFF/ON replay loop.
+    body_calls = [
+        operation
+        for operation in delivery.calls
+        if isinstance(operation, SetBodyActive)
+    ]
+    assert len(body_calls) == 1
+    assert body_calls[0].active is True
 
     handoff = asyncio.run(
         driver.process_epoch(
