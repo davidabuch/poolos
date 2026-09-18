@@ -720,8 +720,7 @@ class ThermalAutomaticExecutionDriver:
                     and lease.status is ThermalRuntimeOwnershipStatus.OWNED
                     and lease.originating_currentness is not None
                     and lease.execution_progress is not None
-                    and ThermalRuntimeOwnedConcept.BODY_ACTIVATION
-                    in lease.verified_concepts
+                    and lease.owns_body
                 ):
                     # The exact accepted consequences are historical proof,
                     # not permission for the obsolete execution to continue.
@@ -2701,7 +2700,7 @@ class ThermalAutomaticExecutionDriver:
         if (
             lease is None
             or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
-            or not lease.owns_body_activation
+            or not lease.owns_body
             or not lease.owns_pump_setpoint
             or lease.pump_setpoint is None
             or lease.pump_setpoint.intended_value
@@ -2714,7 +2713,7 @@ class ThermalAutomaticExecutionDriver:
             execution_plan_id=lease.execution_plan_id,
             ownership_lease_id=lease.lease_id,
             ownership_generation=lease.generation,
-            body_activation_owned=True,
+            body_activation_owned=lease.owns_body,
             pump_setpoint_owned=True,
             acquisition_started_at=started_at,
         )
@@ -2740,7 +2739,7 @@ class ThermalAutomaticExecutionDriver:
             or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
             or lease.originating_currentness is None
             or lease.originating_currentness.purpose.purpose_id != purpose.purpose_id
-            or not lease.owns_body_activation
+            or not lease.owns_body
             or not lease.owns_heat_source
         ):
             return
