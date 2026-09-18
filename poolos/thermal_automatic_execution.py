@@ -1400,7 +1400,10 @@ class ThermalAutomaticExecutionDriver:
         assert assessment.entitlement_generation is not None
         if not frame.live_policy.thermal_live_execution_enabled:
             return self._blocked(frame, "thermal_termination_thermal_live_disabled")
-        if frame.live_policy.commissioning_scope.value != assessment.body.value:
+        if frame.live_policy.commissioning_scope.value not in {
+            assessment.body.value,
+            "both",
+        }:
             return self._blocked(frame, "thermal_termination_commissioning_scope_mismatch")
         try:
             delivery = delivery_factory.for_termination(
