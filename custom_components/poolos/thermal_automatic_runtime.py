@@ -29,6 +29,7 @@ from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain, Posit
 from poolos.pool_circulation_ownership import PoolCirculationOwner, PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pump_speed_session import PumpSpeedSessionPurpose, PumpSpeedSessionRuntime
+from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
     SpaAutomaticControlSuppression,
@@ -692,11 +693,18 @@ class PoolOSThermalAutomaticRuntime:
     def _owned_pump_session_reobservation_required(self) -> bool:
         if not self.driver.requested_enabled:
             return False
-        purpose = self.driver.active_pump_session_purpose()
-        return purpose in {
-            PumpSpeedSessionPurpose.PRIMING,
-            PumpSpeedSessionPurpose.TEMPERATURE_PROBE,
-        }
+
+        probe = self.driver.probe_execution_evidence()
+        if (
+            probe is not None
+            and probe.phase is PoolTemperatureProbeExecutionPhase.ACQUIRING
+        ):
+            return True
+
+        return (
+            self.driver.active_pump_session_purpose()
+            is PumpSpeedSessionPurpose.PRIMING
+        )
 
     def _sync_owned_pump_session_reobservation(self) -> None:
         if not self._owned_pump_session_reobservation_required():
