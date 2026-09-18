@@ -47,7 +47,6 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
 )
-from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.thermal_execution_currentness import ThermalExecutionPurposeKind
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment
 from poolos.thermal_runtime_orchestration import (
