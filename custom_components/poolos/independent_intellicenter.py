@@ -552,7 +552,7 @@ class IndependentIntelliCenterReadOnlyTransport:
             await self._controller.stop()
         self._state = IndependentIntelliCenterTransportState.UNAVAILABLE
 
-    async def async_refresh_probe_evidence(self) -> bool:
+    async def _async_refresh_probe_evidence(self) -> bool:
         """Refresh unchanged probe evidence from IntelliCenter without commands."""
 
         if not self.connected:
