@@ -1612,7 +1612,7 @@ class ThermalRuntimeOwnershipManager:
         for state in lease.domain_states:
             actual: bool | int | str | None
             if state.domain is OwnershipDomain.BODY:
-                origin = lease.body_activation
+                origin = lease.body_activation or lease.body_adoption
                 actual = evidence.pool_active if prefix == "pool" else evidence.spa_active
                 observed_at = (evidence.pool_activity_observed_at if prefix == "pool"
                                else evidence.spa_activity_observed_at)
@@ -1620,7 +1620,7 @@ class ThermalRuntimeOwnershipManager:
                           if prefix == "pool" else
                           evidence.spa_activity_fresh and evidence.spa_activity_usable)
                 matches = actual is True
-                expected = role == "body_activation"
+                expected = role == "body_activation" and lease.body_activation is not None
                 equipment = lease.body.value
             elif state.domain is OwnershipDomain.PUMP:
                 origin = lease.pump_setpoint
@@ -1657,12 +1657,22 @@ class ThermalRuntimeOwnershipManager:
                 and lease.established_at <= event.positive_operator_evidence.requested_at
                 <= evidence.evaluated_at
             ), None)
+            origin_id = (
+                origin.adoption_id
+                if isinstance(origin, ThermalRuntimeBodyAdoption)
+                else origin.receipt_id
+            )
+            intended_value = (
+                True
+                if isinstance(origin, ThermalRuntimeBodyAdoption)
+                else origin.intended_value
+            )
             states.append(state.observe(
                 at=evidence.evaluated_at, observed_at=observed_at, usable=usable,
                 matches=matches, expected_transition=expected,
                 generation=lease.body_session_generation, session_id=lease.body_session_id,
                 equipment_id=equipment, policy_identity=lease.requested_mode,
-                origin_id=origin.receipt_id, intended_value=origin.intended_value,
+                origin_id=origin_id, intended_value=intended_value,
                 operator=operator,
                 observed_value=actual,
             ))
