@@ -1187,6 +1187,165 @@ class ThermalRuntimeOwnershipManager:
             at,
         )
 
+    def adopt_body(
+        self,
+        *,
+        body: ThermalBody,
+        adopted_at: datetime,
+        requested_mode: str,
+        current_context: ThermalLiveExecutionContext,
+        execution_plan_id: str,
+        execution_progress: ThermalExecutionProgress,
+        evidence: ThermalRuntimeOwnershipEvidence,
+        reason_code: str,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Prospectively adopt an already-active BODY from fresh current policy.
+
+        Adoption creates a new BODY origin from this boundary forward. It never
+        fabricates a historical SetBodyActive receipt and grants no PUMP or
+        THERMAL provenance.
+        """
+
+        _require_aware(adopted_at, "adopted_at")
+        body = ThermalBody(body)
+        previous = self._state.status
+        current = self._state.lease
+
+        def deny(reason: str) -> ThermalRuntimeOwnershipDecision:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_adoption_denied:" + reason,
+                previous,
+                adopted_at,
+            )
+
+        if body is not ThermalBody.POOL:
+            return deny("body_not_commissioned")
+        if not requested_mode.strip() or not execution_plan_id.strip():
+            return deny("identity_incomplete")
+        if not reason_code.strip():
+            raise ValueError("adoption reason_code must not be empty")
+        if current is not None and current.status is ThermalRuntimeOwnershipStatus.OWNED:
+            return deny("already_owned")
+        if evidence.evaluated_at != adopted_at:
+            return deny("evidence_epoch_mismatch")
+        if (
+            evidence.current_context.evaluation_id != current_context.evaluation_id
+            or evidence.current_context.plan_id != current_context.plan_id
+            or evidence.current_context.execution_currentness
+            != current_context.execution_currentness
+        ):
+            return deny("currentness_mismatch")
+        currentness = current_context.execution_currentness
+        if (
+            currentness is None
+            or currentness.purpose.body is not body
+            or currentness.purpose.kind
+            not in {
+                ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+                ThermalExecutionPurposeKind.THERMAL_CONTROL,
+            }
+        ):
+            return deny("independent_current_purpose_unavailable")
+        if evidence.requested_mode != requested_mode:
+            return deny("requested_mode_changed")
+        if not (
+            evidence.pool_active is True
+            and evidence.pool_activity_fresh
+            and evidence.pool_activity_usable
+            and evidence.pool_activity_observed_at is not None
+            and evidence.pool_activity_observed_at <= adopted_at
+        ):
+            return deny("pool_activity_unusable")
+        if not (
+            evidence.spa_active is False
+            and evidence.spa_activity_fresh
+            and evidence.spa_activity_usable
+            and evidence.spa_activity_observed_at is not None
+            and evidence.spa_activity_observed_at <= adopted_at
+        ):
+            return deny("spa_activity_unusable")
+        if not evidence.shared_hydraulic_inventory_complete:
+            return deny("shared_hydraulic_inventory_incomplete")
+        if any(
+            item.active is not False
+            or not item.fresh
+            or not item.usable
+            or item.observed_at is None
+            or item.observed_at > adopted_at
+            or item.safety_class is SharedHydraulicSafetyClass.UNKNOWN
+            for item in evidence.shared_hydraulic_circuits
+        ):
+            return deny("shared_hydraulic_topology_unusable")
+
+        generation = 1 if current is None else current.generation + 1
+        lease_id = _lease_id(
+            generation=generation,
+            body=body,
+            evaluation_id=current_context.evaluation_id,
+            plan_id=current_context.plan_id,
+            execution_plan_id=execution_plan_id,
+            predecessor_lease_id=None,
+        )
+        adoption = ThermalRuntimeBodyAdoption(
+            adoption_id=_body_adoption_id(
+                generation=generation,
+                body=body,
+                evaluation_id=current_context.evaluation_id,
+                plan_id=current_context.plan_id,
+                execution_plan_id=execution_plan_id,
+                adopted_at=adopted_at,
+            ),
+            body=body,
+            evaluation_id=current_context.evaluation_id,
+            thermal_plan_id=current_context.plan_id,
+            execution_plan_id=execution_plan_id,
+            reason_code=reason_code,
+            adopted_at=adopted_at,
+        )
+        body_state = DomainOwnershipState(
+            OwnershipDomain.BODY,
+            authority=OwnershipAuthority.POOLOS,
+            health=OwnershipHealth.STABLE,
+            evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+            command_blocker=None,
+            target_value=True,
+            observed_value=True,
+            observed_at=evidence.pool_activity_observed_at,
+        )
+        lease = ThermalRuntimeOwnershipLease(
+            lease_id=lease_id,
+            generation=generation,
+            body=body,
+            evaluation_id=current_context.evaluation_id,
+            thermal_plan_id=current_context.plan_id,
+            execution_plan_id=execution_plan_id,
+            requested_mode=requested_mode,
+            established_at=adopted_at,
+            last_confirmed_at=adopted_at,
+            status=ThermalRuntimeOwnershipStatus.OWNED,
+            reason_code="runtime_ownership_established:prospective_body_adoption",
+            body_adoption=adoption,
+            originating_currentness=currentness,
+            execution_progress=execution_progress,
+            verified_concepts=(),
+            domain_states=(body_state,),
+            body_session_id=lease_id,
+            body_session_generation=generation,
+        )
+        self._residual_termination = None
+        self._state = ThermalRuntimeOwnershipState(
+            status=lease.status,
+            lease=lease,
+            reason_code=lease.reason_code,
+        )
+        return self._decision(
+            ThermalRuntimeOwnershipDisposition.ESTABLISHED,
+            lease.reason_code,
+            previous,
+            adopted_at,
+        )
+
     def establish(
         self,
         ownership: ThermalLiveExecutionOwnership,
@@ -2667,6 +2826,30 @@ def _pump_session_override_transition(
             return PumpSpeedOverrideState.PENDING
         return None
     return state
+
+
+def _body_adoption_id(
+    *,
+    generation: int,
+    body: ThermalBody,
+    evaluation_id: str,
+    plan_id: str,
+    execution_plan_id: str,
+    adopted_at: datetime,
+) -> str:
+    payload = json.dumps(
+        {
+            "generation": generation,
+            "body": body.value,
+            "evaluation_id": evaluation_id,
+            "plan_id": plan_id,
+            "execution_plan_id": execution_plan_id,
+            "adopted_at": adopted_at.isoformat(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "thermal-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
 
 
 def _lease_id(
