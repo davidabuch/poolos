@@ -411,7 +411,7 @@ class ThermalAutomaticExecutionDriver:
             ):
                 return self._probe_acquisition
             return None
-        if not (lease.owns_body_activation or lease.owns_pump_setpoint):
+        if not (lease.owns_body or lease.owns_pump_setpoint):
             return None
         return PoolTemperatureProbeExecutionEvidence(
             phase=PoolTemperatureProbeExecutionPhase.PREPARING,
@@ -419,7 +419,7 @@ class ThermalAutomaticExecutionDriver:
             execution_plan_id=lease.execution_plan_id,
             ownership_lease_id=lease.lease_id,
             ownership_generation=lease.generation,
-            body_activation_owned=lease.owns_body_activation,
+            body_activation_owned=lease.owns_body,
             pump_setpoint_owned=lease.owns_pump_setpoint,
         )
 
@@ -997,6 +997,7 @@ class ThermalAutomaticExecutionDriver:
                         body=body,
                         preflight=preflight,
                     )
+                prospective_pool_adoption = False
                 if body.body_active is True and body.body is ThermalBody.POOL:
                     circulation_owner = self.circulation_ownership.owner
                     self._filtration_handoff = (
@@ -1028,12 +1029,23 @@ class ThermalAutomaticExecutionDriver:
                         and body.plan.desired.evidence.get("active_operating_purpose")
                         is None
                     ):
-                        return self._blocked(
-                            frame,
-                            "automatic_thermal_preexisting_body_unowned",
-                            body=body,
-                            preflight=preflight,
+                        prospective_pool_adoption = bool(
+                            frame.pool_opportunity_id
+                            and not frame.pool_automatic_control_suppressed
+                            and body.plan.disposition is ThermalPlanDisposition.READY
+                            and (
+                                body.plan.desired.required_pump_rpm is not None
+                                or body.plan.desired.selected_source
+                                is not PhysicalHeatMode.OFF
+                            )
                         )
+                        if not prospective_pool_adoption:
+                            return self._blocked(
+                                frame,
+                                "automatic_thermal_preexisting_body_unowned",
+                                body=body,
+                                preflight=preflight,
+                            )
                 if (
                     self._filtration_handoff is None
                     and (
@@ -1065,6 +1077,39 @@ class ThermalAutomaticExecutionDriver:
                         policy=frame.live_policy,
                         evidence=safety,
                     )
+                    if prospective_pool_adoption:
+                        adoption_evidence = build_thermal_runtime_ownership_evidence(
+                            generated_at=frame.observed_at,
+                            observations={
+                                item.observation_id: item
+                                for item in frame.observations
+                            },
+                            body=body,
+                            external_changes=frame.external_changes,
+                            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+                        )
+                        adoption = self.orchestrator.ownership.adopt_body(
+                            body=ThermalBody.POOL,
+                            adopted_at=frame.observed_at,
+                            requested_mode=body.requested_mode.value,
+                            current_context=self.active_session.originating_context,
+                            execution_plan_id=self.active_session.execution_plan.plan_id,
+                            execution_progress=self.active_session.execution_progress,
+                            evidence=adoption_evidence,
+                            opportunity_id=frame.pool_opportunity_id or "",
+                            reason_code="independent_pool_thermal_opportunity",
+                        )
+                        if (
+                            adoption.disposition
+                            is not ThermalRuntimeOwnershipDisposition.ESTABLISHED
+                        ):
+                            self.active_session = None
+                            return self._blocked(
+                                frame,
+                                adoption.reason_code,
+                                body=body,
+                                preflight=preflight,
+                            )
                     if self._filtration_handoff is not None:
                         provenance = self._filtration_handoff.body_activation
                         pump = self._filtration_handoff.pump_setpoint
