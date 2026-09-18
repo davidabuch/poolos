@@ -499,23 +499,26 @@ def _frame(
             ),
         )
         for concept, value in values.items()
-        if concept
-        in {
-            "pool.active",
-            "spa.active",
-            "pump.rpm",
-            "pool.pump_circuit.configured_speed_rpm",
-            "spa.pump_circuit.configured_speed_rpm",
-            "pool.raw_heater_id",
-            "spa.raw_heater_id",
-            "heater.active",
-            "spa.heating_demand_active",
-            "solar.active",
-            "grid.outage_active",
-            "waterfall.active",
-            "jets.active",
-            "slide.active",
-        }
+        if (
+            concept
+            in {
+                "pool.active",
+                "spa.active",
+                "pump.rpm",
+                "pool.pump_circuit.configured_speed_rpm",
+                "spa.pump_circuit.configured_speed_rpm",
+                "pool.raw_heater_id",
+                "spa.raw_heater_id",
+                "heater.active",
+                "spa.heating_demand_active",
+                "solar.active",
+                "grid.outage_active",
+                "waterfall.active",
+                "jets.active",
+                "slide.active",
+            }
+            or (real_probe_continuity and concept == "pool.temperature")
+        )
         and not (omit_solar_observation and concept == "solar.active")
     )
     if command_ledger is not None:
