@@ -3287,8 +3287,6 @@ def _restrained_body(
         return lease.body
     if frame.orchestration.candidate_body is not None:
         return frame.orchestration.candidate_body
-    if lease is not None:
-        return lease.body
     return None
 
 
