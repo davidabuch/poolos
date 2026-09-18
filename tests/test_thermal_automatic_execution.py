@@ -1043,23 +1043,6 @@ def test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry(
     assert driver.active_session is None
 
 
-@pytest.mark.parametrize(
-    ("body", "pool_suppressed", "spa_suppressed", "forbidden_blocker"),
-    (
-        (
-            ThermalBody.HOT_TUB,
-            True,
-            False,
-            "automatic_thermal_manual_pool_off_preempted",
-        ),
-        (
-            ThermalBody.POOL,
-            False,
-            True,
-            "automatic_thermal_manual_spa_off_preempted",
-        ),
-    ),
-)
 def test_terminal_hot_tub_history_cannot_apply_spa_restraint_to_fresh_pool_candidate() -> None:
     """A completed Spa session cannot restrain an independent Pool successor."""
 
@@ -1132,6 +1115,23 @@ def test_terminal_hot_tub_history_without_successor_remains_scoped_to_hot_tub() 
 
 
 
+@pytest.mark.parametrize(
+    ("body", "pool_suppressed", "spa_suppressed", "forbidden_blocker"),
+    (
+        (
+            ThermalBody.HOT_TUB,
+            True,
+            False,
+            "automatic_thermal_manual_pool_off_preempted",
+        ),
+        (
+            ThermalBody.POOL,
+            False,
+            True,
+            "automatic_thermal_manual_spa_off_preempted",
+        ),
+    ),
+)
 def test_manual_off_suppression_is_scoped_to_its_body(
     body: ThermalBody,
     pool_suppressed: bool,
