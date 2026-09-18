@@ -1423,6 +1423,91 @@ def test_body_update_during_pending_refresh_forces_one_rerun(
     asyncio.run(exercise())
 
 
+def test_active_probe_refresh_uses_read_only_getparamlist_and_republishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        transport._controller.sent_operations.clear()
+        transport._controller.sent_requests.clear()
+        transport._controller.command_response_queues["GetParamList"] = [
+            {
+                "objectList": [
+                    {
+                        "objnam": "PC001",
+                        "params": {
+                            "CIRCUIT": "C0006",
+                            "SELECT": "RPM",
+                            "PARENT": "P0001",
+                            "SPEED": "1500",
+                        },
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "P0001",
+                        "params": {"RPM": 1500, "STATUS": "10"},
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "S0001",
+                        "params": {"SOURCE": 82, "SUBTYP": "POOL"},
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "B1101",
+                        "params": {"STATUS": "ON"},
+                    }
+                ]
+            },
+        ]
+
+        refreshed = await transport.async_refresh_probe_evidence()
+
+        assert refreshed is True
+        assert transport._controller.sent_operations == ["GetParamList"] * 4
+        assert all(
+            request is not None
+            and request["objectList"][0]["objnam"] == "ALL"
+            for _, request in transport._controller.sent_requests
+        )
+        assert all(
+            operation not in {"SetParamList", "SETPARAMLIST"}
+            for operation in transport._controller.sent_operations
+        )
+        assert transport.latest_snapshot is not None
+        assert transport.latest_snapshot.connected is True
+        assert transport._controller.model["PC001"]["SPEED"] == "1500"
+        assert transport._controller.model["P0001"]["RPM"] == 1500
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
 def test_unsolicited_lotmp_and_heater_update_still_refreshes_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
