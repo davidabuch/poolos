@@ -106,19 +106,27 @@ class PoolOSExternalChangeRuntime:
         # their own lease-epoch chronology checks.
         self.latest_batch = self._thermal_external_evidence.update(batch)
         if self.pool_automatic_control is not None:
-            spa_takeover = any(
-                event.concept == "spa.active"
+            spa_takeover_events = tuple(
+                event
+                for event in batch.events
+                if event.concept == "spa.active"
                 and event.previous_value is False
                 and event.new_value is True
-                for event in batch.events
             )
+            correlated_spa_takeover = bool(
+                values.get("spa.active") is True
+                and any(
+                    consequence.operation == "body_active"
+                    and consequence.target == "B1202"
+                    for consequence in batch.correlated_consequences
+                )
+            )
+            spa_takeover = bool(spa_takeover_events or correlated_spa_takeover)
             if spa_takeover and self._pending_pool_off_at is not None:
-                spa_on_at = min(
-                    event.observed_at
-                    for event in batch.events
-                    if event.concept == "spa.active"
-                    and event.previous_value is False
-                    and event.new_value is True
+                spa_on_at = (
+                    min(event.observed_at for event in spa_takeover_events)
+                    if spa_takeover_events
+                    else native.generated_at
                 )
                 if (
                     spa_on_at >= self._pending_pool_off_at
