@@ -3066,6 +3066,53 @@ def test_new_epoch_changed_purpose_still_supersedes_before_verification() -> Non
     assert result.failure_reason == "thermal_execution_purpose_superseded"
 
 
+def test_priming_hold_waits_through_temporarily_stale_followup_evidence() -> None:
+    """A verified priming hold must not restart on ambiguous follow-up evidence."""
+
+    engine, live_policy, waiting = delivered_priming_session()
+    first_verified_at = NOW + timedelta(seconds=2)
+
+    holding = engine.verify_current_step(
+        waiting,
+        hydraulic_store(at=first_verified_at),
+        current_context=waiting.originating_context,
+        policy=live_policy,
+        evaluated_at=first_verified_at,
+        source_id="native-intellicenter",
+    )
+    assert holding.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert holding.current_attempt is not None
+    assert holding.current_attempt.verified_hold_started_at == first_verified_at
+
+    stale_at = first_verified_at + live_policy.observation_freshness + timedelta(seconds=1)
+    stale = engine.verify_current_step(
+        holding,
+        hydraulic_store(at=first_verified_at),
+        current_context=holding.originating_context,
+        policy=live_policy,
+        evaluated_at=stale_at,
+        source_id="native-intellicenter",
+    )
+
+    assert stale.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert stale.failure_reason is None
+    assert stale.current_attempt is not None
+    assert stale.current_attempt.verified_hold_started_at == first_verified_at
+
+    fresh_after_hold = first_verified_at + timedelta(seconds=62)
+    completed = engine.verify_current_step(
+        stale,
+        hydraulic_store(at=fresh_after_hold),
+        current_context=stale.originating_context,
+        policy=live_policy,
+        evaluated_at=fresh_after_hold,
+        source_id="native-intellicenter",
+    )
+
+    assert completed.status is ThermalLiveExecutionStatus.READY
+    assert completed.coordination.current_step_sequence == 2
+
+
 def test_priming_hold_continues_across_compatible_runtime_epochs() -> None:
     engine, live_policy, waiting = delivered_priming_session()
     first_verified_at = NOW + timedelta(seconds=2)
