@@ -2999,7 +2999,24 @@ class ThermalAutomaticExecutionDriver:
                 state.domain.value: state.diagnostics() for state in lease.domain_states
             },
             "body": None if lease is None else lease.body.value,
+            "owns_body": bool(lease and lease.owns_body),
             "owns_body_activation": bool(lease and lease.owns_body_activation),
+            "owns_body_adoption": bool(lease and lease.owns_body_adoption),
+            "body_adoption_id": (
+                None
+                if lease is None or lease.body_adoption is None
+                else lease.body_adoption.adoption_id
+            ),
+            "body_adoption_opportunity_id": (
+                None
+                if lease is None or lease.body_adoption is None
+                else lease.body_adoption.opportunity_id
+            ),
+            "body_adopted_at": (
+                None
+                if lease is None or lease.body_adoption is None
+                else lease.body_adoption.adopted_at.isoformat()
+            ),
             "owns_pump_setpoint": bool(lease and lease.owns_pump_setpoint),
             "owns_heat_source": bool(lease and lease.owns_heat_source),
             "verified_owned_concepts": (
