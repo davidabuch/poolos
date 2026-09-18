@@ -779,27 +779,25 @@ def test_target_down_shutdown_then_target_up_reacquires_fresh_solar_generation()
     final_diagnostics = dict(driver.diagnostics())
     ownership_summary = final_diagnostics["runtime_ownership_summary"]
     assert isinstance(ownership_summary, dict)
-    assert second_generation is not None and second_generation > first_generation, {
-        "state": result.state.value,
-        "blocker": result.blocker,
-        "failure": result.last_failure_reason,
-        "physical": physical,
-        "ownership_reason": ownership_summary["reason_code"],
-        "terminal_reason": ownership_summary["terminal_transition_reason_code"],
-        "terminal_concept": ownership_summary["terminal_transition_affected_concept"],
-        "terminal_expected": ownership_summary["terminal_transition_expected_value"],
-        "terminal_observed": ownership_summary["terminal_transition_observed_value"],
-        "failed_opportunity": ownership_summary["failed_pool_opportunity_id"],
-        "current_opportunity": ownership_summary["pool_opportunity_id"],
-        "pending_role": ownership_summary["accepted_consequence_pending_role"],
-        "pending_value": ownership_summary["accepted_consequence_pending_value"],
-        "active_pump_purpose": (
-            None
-            if driver.active_pump_session_purpose() is None
-            else driver.active_pump_session_purpose().value
-        ),
-        "probe_phase": ownership_summary["pool_temperature_probe_phase"],
-    }
+    terminal_debug = (
+        result.state.value,
+        result.blocker,
+        ownership_summary["reason_code"],
+        ownership_summary["terminal_transition_reason_code"],
+        ownership_summary["terminal_transition_affected_concept"],
+        ownership_summary["terminal_transition_expected_value"],
+        ownership_summary["terminal_transition_observed_value"],
+        ownership_summary["failed_pool_opportunity_id"],
+        ownership_summary["pool_opportunity_id"],
+        ownership_summary["accepted_consequence_pending_role"],
+        ownership_summary["accepted_consequence_pending_value"],
+        physical["pool_active"],
+        physical["pump_rpm"],
+        physical["configured_rpm"],
+        physical["pool_heater"],
+        physical["solar_active"],
+    )
+    assert second_generation is not None and second_generation > first_generation, terminal_debug
     assert len(delivery.calls) > shutdown_command_count
     assert physical == {
         "pool_active": True,
