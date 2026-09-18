@@ -319,6 +319,60 @@ def test_sparse_pool_off_then_spa_on_reclassifies_takeover_without_pool_restrain
     assert not spa.state.suppressed
 
 
+def test_correlated_manual_spa_on_clears_sparse_pool_off_restraint() -> None:
+    """Live regression: command-correlated Spa ON still proves topology takeover."""
+
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    pool = PoolAutomaticControlSuppression()
+    spa = SpaAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(
+            module, assessment=None, pool_resolved=False, hot_tub_resolved=False,
+        ),
+        pool_automatic_control=pool,
+        spa_automatic_control=spa,
+    )
+    now = datetime(2026, 9, 18, 21, 45, 58, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(_native(now, pool_active=True, spa_active=False), transport, 1)
+    runtime.process(
+        _native(now + timedelta(seconds=1), pool_active=False, spa_active=False),
+        transport, 1,
+    )
+    assert pool.state.suppressed
+
+    expectation = authority.reserve(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=True,
+        ),
+        ExpectedNativeConsequence("spa.active", "B1202", True),
+        now=now + timedelta(seconds=2),
+    )
+    assert expectation is not None
+    authority.mark_dispatch_started(expectation)
+
+    runtime.process(
+        _native(now + timedelta(seconds=8), pool_active=False, spa_active=True),
+        transport, 1,
+    )
+
+    assert runtime.latest_batch.correlated_consequences
+    assert not any(
+        event.concept == "spa.active" for event in runtime.latest_batch.events
+    )
+    assert not pool.state.suppressed
+    assert not spa.state.suppressed
+
+
 def test_pool_off_without_timely_spa_takeover_remains_manual_restraint() -> None:
     module = _load_module()
     pool = PoolAutomaticControlSuppression()
