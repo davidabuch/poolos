@@ -1804,14 +1804,6 @@ class ThermalLiveExecutionEngine:
                 evaluated_at,
             )
         if unusable & {item.disposition for item in verification.evidence}:
-            if hold_in_progress:
-                # A verified priming hold is a continuity observation, not a
-                # new command. Temporary absence/staleness of authoritative
-                # evidence is ambiguous and must not turn into a synthetic
-                # ownership loss/restart loop. Keep waiting for a later fresh
-                # authoritative observation. Fresh usable disagreement is
-                # handled above by priming_verified_hold_continuity_lost.
-                return updated
             return self._terminal(
                 updated,
                 ThermalLiveExecutionStatus.FAILED,
