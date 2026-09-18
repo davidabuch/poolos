@@ -2464,16 +2464,28 @@ class ThermalAutomaticExecutionDriver:
         promoted_at: datetime,
         requested_mode: str,
     ) -> str | None:
+        lease = self.orchestrator.ownership.state.lease
+        existing_same_session_body_origin = bool(
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.body is ThermalBody.POOL
+            and lease.owns_body
+            and lease.execution_plan_id == session.execution_plan.plan_id
+            and lease.originating_currentness == session.originating_currentness
+        )
         if (
             session.originating_currentness.purpose.kind
             is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
             and ownership.body_activation_operation_id is None
+            and not existing_same_session_body_origin
         ):
             # Source-Off is a prerequisite, not proof that PoolOS owns
             # circulation. Keep its accepted provenance on the live session
-            # until the body-activation operation is itself accepted.
+            # until the body-activation operation is itself accepted. A
+            # prospectively adopted BODY is different: BODY provenance already
+            # exists, so accepted source-Off progress must be promoted or the
+            # next residual probe plan becomes falsely incompatible.
             return None
-        lease = self.orchestrator.ownership.state.lease
         if (
             lease is not None
             and lease.status is ThermalRuntimeOwnershipStatus.PREEMPTED
