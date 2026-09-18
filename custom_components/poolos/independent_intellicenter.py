@@ -242,17 +242,18 @@ class _ReadOnlyModelController(ICModelController):
         self._read_only_guard.require_allowed("SETPARAMLIST")
         raise AssertionError("unreachable")
 
-    async def refresh_probe_evidence(
+    async def refresh_owned_pump_session_evidence(
         self,
         *,
         generation_is_current: Callable[[], bool],
     ) -> None:
-        """Actively re-read the exact native evidence required by a Pool probe.
+        """Actively re-read native evidence required by an owned pump session.
 
         GetParamList is read-only and does not alter RequestParamList
-        subscription semantics.  The probe contract requires current configured
-        PMPCIRC, actual pump, Pool body, and Pool-water evidence even when those
-        values remain unchanged and IntelliCenter therefore emits no NotifyList.
+        subscription semantics.  Priming and temperature-probe contracts require
+        current configured PMPCIRC, actual pump, body topology, and temperature
+        evidence even when those values remain unchanged and IntelliCenter therefore
+        emits no NotifyList.
         """
 
         requests = (
@@ -552,14 +553,14 @@ class IndependentIntelliCenterReadOnlyTransport:
             await self._controller.stop()
         self._state = IndependentIntelliCenterTransportState.UNAVAILABLE
 
-    async def _async_refresh_probe_evidence(self) -> bool:
-        """Refresh unchanged probe evidence from IntelliCenter without commands."""
+    async def _async_refresh_owned_pump_session_evidence(self) -> bool:
+        """Refresh unchanged owned pump-session evidence without commands."""
 
         if not self.connected:
             return False
         generation = self._discovery_generation
         try:
-            await self._controller.refresh_probe_evidence(
+            await self._controller.refresh_owned_pump_session_evidence(
                 generation_is_current=lambda: self._refresh_generation_is_current(
                     generation
                 )
