@@ -100,6 +100,7 @@ class ThermalLiveCommissioningScope(StrEnum):
     DISABLED = "disabled"
     POOL = "pool"
     HOT_TUB = "hot_tub"
+    BOTH = "both"
 
 
 class ThermalLiveAuthorizationDisposition(StrEnum):
@@ -755,7 +756,10 @@ class ThermalLiveAuthorizationEngine:
                 reasons.append("thermal_live_kill_switch_disabled")
             if policy.commissioning_scope is ThermalLiveCommissioningScope.DISABLED:
                 reasons.append("thermal_live_commissioning_scope_disabled")
-            elif policy.commissioning_scope.value != assessment.desired.body.value:
+            elif policy.commissioning_scope not in {
+                ThermalLiveCommissioningScope.BOTH,
+                ThermalLiveCommissioningScope(assessment.desired.body.value),
+            }:
                 reasons.append("body_outside_commissioning_scope")
         if assessment.disposition is not ThermalPlanDisposition.READY:
             reasons.append("thermal_plan_not_ready")
