@@ -2902,6 +2902,15 @@ def _residual_entitlement(
         if include_body
         else None
     )
+    body_adoption = (
+        lease.body_adoption
+        if (
+            include_body
+            and lease.owns_body_adoption
+            and _body_adoption_current_for_lease(lease)
+        )
+        else None
+    )
     pump_setpoint = (
         None
         if body_only
@@ -2918,7 +2927,12 @@ def _residual_entitlement(
             ThermalRuntimeOwnedConcept.HEAT_SOURCE,
         )
     )
-    if body_activation is None and pump_setpoint is None and heat_source is None:
+    if (
+        body_activation is None
+        and body_adoption is None
+        and pump_setpoint is None
+        and heat_source is None
+    ):
         return None
     payload = json.dumps(
         {
@@ -2945,6 +2959,7 @@ def _residual_entitlement(
         retained_at=at,
         reason_code=reason,
         body_activation=body_activation,
+        body_adoption=body_adoption,
         pump_setpoint=pump_setpoint,
         heat_source=heat_source,
         pump_setpoint_accepted_at=(
@@ -3043,10 +3058,17 @@ def _body_origin_continuity_proven(
 ) -> bool:
     """Require positive current topology before retaining body cleanup proof."""
 
-    if _verified_provenance(
-        lease,
-        ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
-    ) is None:
+    if not (
+        _verified_provenance(
+            lease,
+            ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+        )
+        is not None
+        or (
+            lease.owns_body_adoption
+            and _body_adoption_current_for_lease(lease)
+        )
+    ):
         return False
     target_active = (
         evidence.pool_active
@@ -3346,6 +3368,22 @@ def _diagnostic_external_event(
     return max(candidates, key=lambda event: event.observed_at, default=None)
 
 
+def _body_adoption_current_for_lease(
+    lease: ThermalRuntimeOwnershipLease,
+) -> bool:
+    adoption = lease.body_adoption
+    return bool(
+        adoption is not None
+        and adoption.body is lease.body
+        and adoption.evaluation_id == lease.evaluation_id
+        and adoption.thermal_plan_id == lease.thermal_plan_id
+        and adoption.execution_plan_id == lease.execution_plan_id
+        and adoption.adopted_at == lease.established_at
+        and lease.domain_state(OwnershipDomain.BODY).authority
+        is OwnershipAuthority.POOLOS
+    )
+
+
 def _verified_provenance(
     lease: ThermalRuntimeOwnershipLease,
     concept: ThermalRuntimeOwnedConcept,
@@ -3425,6 +3463,7 @@ __all__ = [
     "SharedHydraulicCircuitEvidence",
     "SharedHydraulicSafetyClass",
     "ThermalResidualTerminationEntitlement",
+    "ThermalRuntimeBodyAdoption",
     "ThermalRuntimeConceptProvenance",
     "ThermalRuntimeHandoffRequest",
     "ThermalRuntimeOwnedConcept",
