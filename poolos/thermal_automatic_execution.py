@@ -1072,8 +1072,13 @@ class ThermalAutomaticExecutionDriver:
                         preflight=preflight,
                     )
                 try:
+                    execution_assessment = (
+                        _bind_adopted_probe_hydraulic_contract(body.plan)
+                        if prospective_pool_adoption
+                        else body.plan
+                    )
                     self.active_session = self.engine.begin(
-                        body.plan,
+                        execution_assessment,
                         policy=frame.live_policy,
                         evidence=safety,
                     )
@@ -3413,6 +3418,50 @@ def filtration_source_off_precondition(body: object) -> bool:
         and isinstance(operations[0], SetHeatMode)
         and operations[0].equipment_id == ThermalBody.POOL.value
         and operations[0].mode is PhysicalHeatMode.OFF
+    )
+
+
+def _bind_adopted_probe_hydraulic_contract(
+    assessment,
+):
+    """Keep an already-adopted Pool active while neutralizing probe source.
+
+    Cold-start probe source neutralization expects the Pool to remain inactive
+    until the later SetBodyActive step. Prospective BODY adoption is a distinct
+    lifecycle: Pool is already legitimately active, so source-Off verification
+    must require that same adopted Pool to remain active. The operation
+    sequence and currentness identity are unchanged; only the hydraulic
+    verification contract is specialized for the adoption boundary.
+    """
+
+    if (
+        assessment.desired.body is not ThermalBody.POOL
+        or assessment.desired.reason_code != "pool_temperature_probe_required"
+        or not assessment.operations
+        or not isinstance(assessment.operations[0], SetHeatMode)
+        or assessment.operations[0].mode is not PhysicalHeatMode.OFF
+        or not assessment.step_specifications
+        or assessment.step_specifications[0].metadata.get(
+            "pool_temperature_probe_source_precondition"
+        )
+        != "true"
+    ):
+        return assessment
+
+    first = assessment.step_specifications[0]
+    bound_first = replace(
+        first,
+        metadata={
+            **dict(first.metadata),
+            "pool_temperature_probe_target_body_active": "true",
+        },
+    )
+    return replace(
+        assessment,
+        step_specifications=(
+            bound_first,
+            *assessment.step_specifications[1:],
+        ),
     )
 
 
