@@ -1581,16 +1581,8 @@ class ThermalLiveExecutionEngine:
             hydraulic_failure = _hydraulic_continuity_failure_reason(
                 observations,
                 target=hydraulic_target,
-                required_target_active=(
-                    None
-                    if isinstance(attempt.step.operation, SetBodyActive)
-                    and attempt.step.operation.active is True
-                    else (
-                        attempt.step.metadata.get(
-                            "pool_temperature_probe_source_precondition"
-                        )
-                        != "true"
-                    )
+                required_target_active=_required_target_active_for_step(
+                    attempt.step
                 ),
                 evaluated_at=evaluated_at,
                 freshness_policy=FreshnessPolicy(
@@ -2125,6 +2117,28 @@ def _hydraulic_verification_contract(
     if target is not assessment.desired.body:
         return None, "hydraulic_continuity_contract_body_mismatch"
     return target, None
+
+
+def _required_target_active_for_step(
+    step: ExecutionStep,
+) -> bool | None:
+    """Return the exact target-body activity contract for one live step."""
+
+    if isinstance(step.operation, SetBodyActive) and step.operation.active is True:
+        return None
+    if (
+        step.metadata.get("pool_temperature_probe_source_precondition")
+        == "true"
+    ):
+        return (
+            True
+            if step.metadata.get(
+                "pool_temperature_probe_target_body_active"
+            )
+            == "true"
+            else False
+        )
+    return True
 
 
 def _hydraulic_continuity_failure_reason(
