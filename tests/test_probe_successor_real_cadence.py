@@ -159,7 +159,12 @@ def test_real_cadence_probe_hands_off_to_owned_solar_successor() -> None:
             delivery_factory=factory,
         )
     )
-    assert handoff.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert handoff.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION, (
+        handoff.state,
+        handoff.blocker,
+        handoff.runtime_ownership_summary,
+        orchestrator.ownership.state.lease,
+    )
     assert isinstance(delivery.calls[-1], SetHeatMode)
     assert delivery.calls[-1].mode is PhysicalHeatMode.SOLAR
 
