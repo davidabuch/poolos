@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import partial
+from types import SimpleNamespace
 
 import pytest
 
@@ -66,6 +67,7 @@ from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
     ThermalAutomaticExecutionFrame,
+    _restrained_body,
 )
 from poolos.thermal_circulation_cleanup import (
     ThermalCirculationCleanupCandidate,
@@ -1058,6 +1060,30 @@ def test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry(
         ),
     ),
 )
+def test_terminal_hot_tub_history_cannot_apply_spa_restraint_to_fresh_pool_candidate() -> None:
+    """A completed Spa session cannot restrain an independent Pool successor."""
+
+    driver = SimpleNamespace(
+        active_session=None,
+        cleanup_provenance=None,
+        orchestrator=SimpleNamespace(
+            ownership=SimpleNamespace(
+                state=SimpleNamespace(
+                    lease=SimpleNamespace(
+                        body=ThermalBody.HOT_TUB,
+                        status=ThermalRuntimeOwnershipStatus.RELINQUISHED,
+                    )
+                )
+            )
+        ),
+    )
+    frame = SimpleNamespace(
+        orchestration=SimpleNamespace(candidate_body=ThermalBody.POOL)
+    )
+
+    assert _restrained_body(driver, frame) is ThermalBody.POOL
+
+
 def test_manual_off_suppression_is_scoped_to_its_body(
     body: ThermalBody,
     pool_suppressed: bool,
