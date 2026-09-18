@@ -784,7 +784,7 @@ class PoolOSPhysicalCommandAuthority:
         """Set restrictive automatic gates and invalidate queued authority."""
 
         scope = str(commissioning_scope).strip().casefold()
-        if scope not in {"disabled", "pool", "hot_tub"}:
+        if scope not in {"disabled", "pool", "hot_tub", "both"}:
             raise ValueError("unsupported automatic thermal commissioning scope")
         changed = (
             self._automatic_thermal_driver_enabled != bool(driver_enabled)
@@ -1316,7 +1316,7 @@ class PoolOSPhysicalCommandAuthority:
             self.baselines,
         ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
-        if self._automatic_thermal_scope != context.body:
+        if self._automatic_thermal_scope not in {context.body, "both"}:
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_SCOPE_MISMATCH
         if (
             context.generation != self._automatic_thermal_generation

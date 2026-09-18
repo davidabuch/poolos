@@ -285,7 +285,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             lifecycle_blocker = "temperature_probe_automatic_execution_disabled"
         elif not thermal_runtime.effective_live_enabled:
             lifecycle_blocker = "temperature_probe_thermal_live_disabled"
-        elif thermal_runtime.commissioning_scope is not ThermalLiveCommissioningScope.POOL:
+        elif thermal_runtime.commissioning_scope not in {
+            ThermalLiveCommissioningScope.POOL,
+            ThermalLiveCommissioningScope.BOTH,
+        }:
             lifecycle_blocker = "temperature_probe_pool_scope_not_commissioned"
         elif base_reason is not PhysicalAuthorityReason.ALLOWED:
             lifecycle_blocker = f"physical_authority:{base_reason.value}"

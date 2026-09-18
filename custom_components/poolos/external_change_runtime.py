@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
 
 from homeassistant.core import HomeAssistant
@@ -32,6 +33,7 @@ from .thermal_runtime import PoolOSThermalRuntime
 
 
 EVENT_POOLOS_EXTERNAL_CHANGE = "poolos_external_change"
+_SPA_TAKEOVER_CORRELATION_WINDOW = timedelta(seconds=10)
 
 
 @dataclass(slots=True)
@@ -57,6 +59,7 @@ class PoolOSExternalChangeRuntime:
         init=False,
         repr=False,
     )
+    _pending_pool_off_at: datetime | None = field(default=None, init=False, repr=False)
     _thermal_external_evidence: ThermalRuntimeExternalChangeEvidence = field(
         default_factory=ThermalRuntimeExternalChangeEvidence,
         init=False,
@@ -90,6 +93,7 @@ class PoolOSExternalChangeRuntime:
             self.latest_batch = ExternalChangeBatch(())
             self._last_native_values.clear()
             self._last_ownership = ExternalOwnershipContext()
+            self._pending_pool_off_at = None
         ownership = self._ownership()
         batch = self.monitor.process(
             native,
@@ -108,6 +112,26 @@ class PoolOSExternalChangeRuntime:
                 and event.new_value is True
                 for event in batch.events
             )
+            if spa_takeover and self._pending_pool_off_at is not None:
+                spa_on_at = min(
+                    event.observed_at
+                    for event in batch.events
+                    if event.concept == "spa.active"
+                    and event.previous_value is False
+                    and event.new_value is True
+                )
+                if (
+                    spa_on_at >= self._pending_pool_off_at
+                    and spa_on_at - self._pending_pool_off_at
+                    <= _SPA_TAKEOVER_CORRELATION_WINDOW
+                    and self.pool_automatic_control.state.suppressed
+                    and self.pool_automatic_control.state.source
+                    is PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
+                    and self.pool_automatic_control.state.suppressed_at
+                    == self._pending_pool_off_at
+                ):
+                    self.pool_automatic_control.resume(resumed_at=spa_on_at)
+                self._pending_pool_off_at = None
             for event in batch.events:
                 if (
                     event.concept == "pool.active"
@@ -115,6 +139,7 @@ class PoolOSExternalChangeRuntime:
                     and event.new_value is False
                     and not spa_takeover
                 ):
+                    self._pending_pool_off_at = event.observed_at
                     self.pool_automatic_control.suppress(
                         source=(
                             PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
