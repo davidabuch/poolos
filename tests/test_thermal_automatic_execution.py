@@ -1023,6 +1023,89 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
     assert result.runtime_ownership_summary["owns_body_adoption"] is True
 
 
+def test_adopted_pool_probe_promotes_source_off_progress_before_probe_rpm() -> None:
+    """Live regression: adopted BODY survives source-Off -> probe RPM evolution."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    adopted = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=0,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        solar_active=True,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=125.0,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:spa-successor",
+    )
+
+    first = asyncio.run(driver.process_epoch(adopted, delivery_factory=factory))
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.owns_body_adoption
+    assert first.state is ThermalAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
+
+    source_off = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=2),
+        pool_active=True,
+        pump_rpm=0,
+        configured_rpm=2600,
+        pool_heater="00000",
+        solar_active=False,
+        mode=ThermalRequestedMode.SOLAR,
+        missing=("pool.temperature",),
+        solar_temperature=125.0,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:spa-successor",
+    )
+
+    second = asyncio.run(driver.process_epoch(source_off, delivery_factory=factory))
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.owns_body_adoption
+    assert second.state is not ThermalAutomaticDriverState.PREEMPTED
+    assert not (
+        second.blocker
+        and "thermal_execution_residual_plan_incompatible" in second.blocker
+    )
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 1500
+
+
 def test_preexisting_pool_without_independent_thermal_work_is_not_adopted() -> None:
     """Hardware equality/body activity alone never creates BODY authority."""
 
