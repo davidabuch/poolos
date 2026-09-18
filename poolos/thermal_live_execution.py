@@ -1625,11 +1625,14 @@ class ThermalLiveExecutionEngine:
                 plan_id=session.execution_plan.plan_id,
                 step=attempt.step,
                 observations=observations,
-                verification_started_at=(
-                    attempt.verifications[-1].evaluated_at
-                    if hold_in_progress and attempt.verifications
-                    else attempt.receipt.issued_at
-                ),
+                # Strict post-delivery chronology is anchored to the
+                # accepted command receipt for the whole verified hold.  The
+                # hold's continuity contract is enforced independently by
+                # freshness, hydraulic continuity, and matching observations.
+                # Advancing this boundary to the prior verification timestamp
+                # incorrectly makes arbitrary evaluator cadence require a new
+                # native event on every epoch.
+                verification_started_at=attempt.receipt.issued_at,
                 evaluated_at=evaluated_at,
                 timeout=policy.verification_timeout,
                 freshness_policy=FreshnessPolicy(
