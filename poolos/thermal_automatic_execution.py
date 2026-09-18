@@ -3369,6 +3369,9 @@ def _terminal_execution_failure_requires_reenable(reason: str) -> bool:
         or reason.startswith("automatic_thermal_delivery")
         or "verification_deadline_reached" in reason
         or "verification_failed" in reason
+        or reason == "authoritative_verification_evidence_unusable"
+        or reason == "priming_verified_hold_continuity_lost"
+        or reason == "fresh_observations_do_not_match_expectations"
     )
 
 

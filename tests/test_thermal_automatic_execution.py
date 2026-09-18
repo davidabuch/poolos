@@ -785,6 +785,20 @@ def _driver_awaiting_source_off_verification():
     return orchestrator, driver, factory, ending, requested
 
 
+def test_terminal_verification_failures_require_reenable_before_same_opportunity_replay() -> None:
+    from poolos.thermal_automatic_execution import (
+        _terminal_execution_failure_requires_reenable,
+    )
+
+    for reason in (
+        "authoritative_verification_evidence_unusable",
+        "priming_verified_hold_continuity_lost",
+        "fresh_observations_do_not_match_expectations",
+        "verification_deadline_reached",
+    ):
+        assert _terminal_execution_failure_requires_reenable(reason) is True
+
+
 def test_driver_defaults_off_and_enable_requires_a_new_epoch() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
