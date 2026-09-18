@@ -1083,6 +1083,54 @@ def test_terminal_hot_tub_history_cannot_apply_spa_restraint_to_fresh_pool_candi
 
     assert _restrained_body(driver, frame) is ThermalBody.POOL
 
+def test_owned_hot_tub_lease_still_scopes_spa_restraint_over_pool_candidate() -> None:
+    """A live Spa owner must not be displaced merely because Pool is eligible."""
+
+    driver = SimpleNamespace(
+        active_session=None,
+        cleanup_provenance=None,
+        orchestrator=SimpleNamespace(
+            ownership=SimpleNamespace(
+                state=SimpleNamespace(
+                    lease=SimpleNamespace(
+                        body=ThermalBody.HOT_TUB,
+                        status=ThermalRuntimeOwnershipStatus.OWNED,
+                    )
+                )
+            )
+        ),
+    )
+    frame = SimpleNamespace(
+        orchestration=SimpleNamespace(candidate_body=ThermalBody.POOL)
+    )
+
+    assert _restrained_body(driver, frame) is ThermalBody.HOT_TUB
+
+
+def test_terminal_hot_tub_history_without_successor_remains_scoped_to_hot_tub() -> None:
+    """Terminal history remains a restraint fallback until a successor exists."""
+
+    driver = SimpleNamespace(
+        active_session=None,
+        cleanup_provenance=None,
+        orchestrator=SimpleNamespace(
+            ownership=SimpleNamespace(
+                state=SimpleNamespace(
+                    lease=SimpleNamespace(
+                        body=ThermalBody.HOT_TUB,
+                        status=ThermalRuntimeOwnershipStatus.RELINQUISHED,
+                    )
+                )
+            )
+        ),
+    )
+    frame = SimpleNamespace(
+        orchestration=SimpleNamespace(candidate_body=None)
+    )
+
+    assert _restrained_body(driver, frame) is ThermalBody.HOT_TUB
+
+
 
 def test_manual_off_suppression_is_scoped_to_its_body(
     body: ThermalBody,
