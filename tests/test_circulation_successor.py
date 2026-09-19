@@ -40,6 +40,7 @@ from poolos.thermal_runtime_ownership import (
     SharedHydraulicCircuitEvidence,
     SharedHydraulicSafetyClass,
     ThermalResidualTerminationEntitlement,
+    ThermalRuntimeBodyAdoption,
     ThermalRuntimeConceptProvenance,
     ThermalRuntimeOwnedConcept,
     ThermalRuntimeOwnershipEvidence,
@@ -70,6 +71,7 @@ def _entitlement(
     pump_owned: bool = True,
     source_owned: bool = True,
     body: ThermalBody = ThermalBody.POOL,
+    adopted: bool = False,
 ) -> ThermalResidualTerminationEntitlement:
     return ThermalResidualTerminationEntitlement(
         entitlement_id="entitlement-1",
@@ -81,7 +83,25 @@ def _entitlement(
         retained_at=NOW,
         reason_code="runtime_ownership_superseded:execution_purpose",
         body_activation=(
-            _provenance(ThermalRuntimeOwnedConcept.BODY_ACTIVATION, True) if body_owned else None
+            _provenance(ThermalRuntimeOwnedConcept.BODY_ACTIVATION, True)
+            if body_owned and not adopted
+            else None
+        ),
+        body_adoption=(
+            ThermalRuntimeBodyAdoption(
+                adoption_id="adoption-1",
+                body=body,
+                evaluation_id="evaluation-adopted",
+                thermal_plan_id="thermal-plan-adopted",
+                execution_plan_id="execution-plan-adopted",
+                body_session_id="body-session-adopted",
+                body_session_generation=1,
+                opportunity_id="pool:thermal:adopted",
+                reason_code="prospective_body_adoption",
+                adopted_at=NOW - timedelta(milliseconds=750),
+            )
+            if body_owned and adopted
+            else None
         ),
         pump_setpoint=(
             _provenance(ThermalRuntimeOwnedConcept.PUMP_SETPOINT, 2900) if pump_owned else None
@@ -346,6 +366,46 @@ def test_crediting_with_deferrable_counterfactual_is_not_a_successor() -> None:
     assert result.filtration_immediate_need is False
     assert result.successor_kind is CirculationSuccessorKind.NONE
     assert result.body_deactivation_eligible
+
+
+def test_adopted_body_can_shut_down_after_solar_when_filtration_is_deferred() -> None:
+    """Prospective BODY adoption is valid shutdown provenance after Solar ends."""
+
+    result = _evaluate(
+        entitlement=_entitlement(adopted=True),
+        filtration=_filtration(
+            FiltrationDisposition.CREDITING,
+            debt=timedelta(hours=2),
+            independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        ),
+    )
+
+    assert result.body_activation_provenance_present is True
+    assert result.body_provenance_current is True
+    assert result.circulation_origin is CirculationOrigin.POOLOS_THERMAL
+    assert result.successor_kind is CirculationSuccessorKind.NONE
+    assert result.body_deactivation_eligible is True
+    assert result.keep_body_active is False
+
+
+def test_adopted_body_can_handoff_to_immediate_filtration_after_solar() -> None:
+    """Adopted BODY origin also remains valid for the typed filtration successor."""
+
+    result = _evaluate(
+        entitlement=_entitlement(adopted=True),
+        filtration=_filtration(
+            FiltrationDisposition.CREDITING,
+            debt=timedelta(hours=2),
+            target=2600,
+            independent_disposition=FiltrationDisposition.RUN_NOW,
+        ),
+    )
+
+    assert result.body_provenance_current is True
+    assert result.successor_kind is CirculationSuccessorKind.FILTRATION
+    assert result.pump_handoff_eligible is True
+    assert result.physical_handoff_ready is True
+    assert result.keep_body_active is True
 
 
 def test_stale_crediting_cannot_perpetuate_circulation() -> None:
