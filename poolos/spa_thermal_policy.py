@@ -48,12 +48,22 @@ class SpaPolicyConfig:
     timezone_name: str = "America/Los_Angeles"
     heat_up_solar_roof_f: float = 130.0
     maintenance_solar_roof_f: float = 120.0
+    opportunistic_solar_roof_f: float = 130.0
+    opportunistic_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
     maintenance_deficit_f: float = 2.0
     opportunity_start_hour: int = 13
     opportunity_end_hour: int = 18
     preserve_end_hour: int = 22
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
+
+    def __post_init__(self) -> None:
+        if not 110.0 <= self.opportunistic_solar_roof_f <= 150.0:
+            raise ValueError("opportunistic_solar_roof_f must be between 110 and 150 F")
+        if self.opportunistic_solar_hysteresis_f <= 0:
+            raise ValueError("opportunistic_solar_hysteresis_f must be positive")
+        if self.opportunistic_solar_hysteresis_f >= self.opportunistic_solar_roof_f:
+            raise ValueError("opportunistic solar hysteresis must remain below start threshold")
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +234,7 @@ class SpaThermalPolicyTracker:
                     "opportunistic_target_cap_reached",
                     preserve=True,
                 )
-            if roof is not None and roof < self._policy.maintenance_solar_roof_f:
+            if roof is not None and roof < (self._policy.opportunistic_solar_roof_f - self._policy.opportunistic_solar_hysteresis_f):
                 if self._below_120_since is None:
                     self._below_120_since = observation.evaluated_at
             else:
@@ -241,7 +251,7 @@ class SpaThermalPolicyTracker:
                 )
             return self._solar(observation, "opportunistic_active", opportunistic=True)
 
-        if roof is not None and roof >= self._policy.heat_up_solar_roof_f:
+        if roof is not None and roof >= self._policy.opportunistic_solar_roof_f:
             if self._above_130_since is None:
                 self._above_130_since = observation.evaluated_at
         else:
