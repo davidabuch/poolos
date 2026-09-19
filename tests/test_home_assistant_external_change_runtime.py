@@ -766,7 +766,7 @@ def test_assessment_refresh_recomputes_drift_without_native_transition() -> None
     )
 
     runtime.process(native, transport, 1)
-    assert runtime.diagnostics()["active_drift_count"] == 2
+    assert runtime.diagnostics()["active_drift_count"] == 1
 
     runtime.thermal_runtime.assessment = SimpleNamespace(
         pool=_body_assessment(
@@ -788,11 +788,11 @@ def test_assessment_refresh_recomputes_drift_without_native_transition() -> None
     runtime.thermal_runtime.assessment = assessment
     runtime.thermal_runtime.pool_requested_mode = module.ThermalRequestedMode.SOLAR
     runtime.refresh_ownership()
-    assert runtime.diagnostics()["active_drift_count"] == 2
+    assert runtime.diagnostics()["active_drift_count"] == 1
 
 
-def test_direct_solar_configuration_does_not_drift_when_planner_temporarily_selects_off() -> None:
-    """Configured Solar remains H0002 when cold-roof policy selects no active heat."""
+def test_direct_solar_configuration_is_policy_not_physical_heater_intent() -> None:
+    """Configured Solar alone cannot manufacture physical H0002 ownership."""
     module = _load_module()
     authority = PoolOSPhysicalCommandAuthority()
     authority.resolve_maintenance(False)
@@ -840,7 +840,7 @@ def test_direct_solar_configuration_does_not_drift_when_planner_temporarily_sele
             ),
             PoolObservation(
                 "pool.raw_heater_id",
-                "H0002",
+                "00000",
                 observed_at=now,
                 source_id="B1101",
                 quality=ObservationQuality.GOOD,
@@ -857,40 +857,28 @@ def test_direct_solar_configuration_does_not_drift_when_planner_temporarily_sele
 
     runtime.process(native, transport, 1)
 
-    assert dict(runtime._ownership().intended_values) == {
-        "pool.raw_heater_id": "H0002"
-    }
+    assert "pool.raw_heater_id" not in runtime._ownership().intended_values
     assert runtime.diagnostics()["active_drift_count"] == 0
 
 
 @pytest.mark.parametrize(
+    ("body", "requested_mode", "native_heater", "body_active"),
     (
-        "body",
-        "requested_mode",
-        "native_heater",
-        "body_active",
-        "expected_intended",
-    ),
-    (
-        ("pool", "Solar", "H0002", True, None),
-        ("pool", "Solar", "H0002", False, None),
-        ("pool", "Solar", "H0001", True, "H0002"),
-        ("pool", "Gas", "H0001", True, None),
-        ("pool", "Gas", "H0002", False, "H0001"),
-        ("pool", "Off", "00000", False, None),
-        ("pool", "Off", "H0002", False, "00000"),
-        ("spa", "Solar", "H0002", False, None),
-        ("spa", "Gas", "H0001", False, None),
-        ("spa", "Solar", "H0001", False, "H0002"),
-        ("spa", "Gas", "H0002", False, "H0001"),
+        ("pool", "Solar", "00000", False),
+        ("pool", "Solar", "H0002", True),
+        ("pool", "Gas", "00000", False),
+        ("pool", "Gas", "H0001", True),
+        ("pool", "Off", "00000", False),
+        ("spa", "Solar", "00000", False),
+        ("spa", "Gas", "00000", False),
+        ("spa", "Gas", "H0001", True),
     ),
 )
-def test_direct_configured_mode_ownership_is_independent_of_operational_plan(
+def test_configured_heat_policy_does_not_create_physical_heater_ownership(
     body: str,
     requested_mode: str,
     native_heater: str,
     body_active: bool,
-    expected_intended: str | None,
 ) -> None:
     module = _load_module()
     authority = PoolOSPhysicalCommandAuthority()
@@ -937,19 +925,27 @@ def test_direct_configured_mode_ownership_is_independent_of_operational_plan(
     )
 
     concept = f"{body}.raw_heater_id"
-    ownership = dict(runtime._ownership().intended_values)
-    assert ownership[concept] == {
-        "Off": "00000",
-        "Gas": "H0001",
-        "Solar": "H0002",
-    }[requested_mode]
-    diagnostics = runtime.diagnostics()
-    if expected_intended is None:
-        assert concept not in diagnostics["active_drift_concepts"]
-    else:
-        assert diagnostics["active_drift_intended_values"][concept] == (
-            expected_intended
-        )
+    assert concept not in runtime._ownership().intended_values
+    assert concept not in runtime.diagnostics()["active_drift_concepts"]
+
+
+def test_accepted_heat_source_execution_provenance_still_detects_real_drift() -> None:
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(module, assessment=None),
+        owned_intent_provider=lambda: {"pool.raw_heater_id": "H0002"},
+    )
+    now = datetime(2026, 9, 2, 13, 5, tzinfo=UTC)
+    runtime.process(_thermal_native(now, pool_heater="00000"), _transport(now), 1)
+
+    assert runtime.diagnostics()["active_drift_concepts"] == ["pool.raw_heater_id"]
+    assert runtime.diagnostics()["active_drift_intended_values"] == {
+        "pool.raw_heater_id": "H0002"
+    }
 
 
 @pytest.mark.parametrize("native_heater", ("H0001", "H0002"))
