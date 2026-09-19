@@ -26,9 +26,10 @@ permit it. The obsolete ten-minute activation hold is removed. While active,
 differential below 7°F and target satisfaction each have independent continuous
 ten-minute shutdown debounce.
 
-Pool modes are one mutually exclusive enum: Solar Only, Solar Preferred, or Gas
-Only. Solar Only never authorizes gas. Solar Preferred authorizes gas fallback
-and bypasses forecast suppression. Gas Only suppresses solar. A separate
+Pool modes are one mutually exclusive enum: Solar Only, Eco Heat, or Gas
+Only. Solar Only never authorizes gas. Eco Heat prefers solar, authorizes gas
+fallback, and bypasses forecast suppression. `Solar Preferred` is reserved for
+Pentair's native IntelliCenter terminology and is not the PoolOS policy name. Gas Only suppresses solar. A separate
 persistent solar override bypasses only Solar Only's predictive gate, never
 physical eligibility or hard permissions.
 

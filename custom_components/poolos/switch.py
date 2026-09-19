@@ -216,7 +216,7 @@ class PoolOSNativeIntelliCenterSolarSwitch(
         )
         if requested is ThermalRequestedMode.SOLAR_PREFERRED:
             raise ManualIntelliCenterCommandError(
-                "Solar OFF cannot replace a Solar Preferred policy request"
+                "Solar OFF cannot replace an Eco Heat policy request"
             )
         if requested is not ThermalRequestedMode.SOLAR:
             raise ManualIntelliCenterCommandError(
