@@ -855,12 +855,13 @@ def test_authoritative_filtration_debt_does_not_block_opportunistic_spa_policy()
     )
     native["pool.temperature"] = 90.0
     native["spa.temperature"] = 90.0
-    first = ThermalRuntimeEvaluator().evaluate(
+    evaluator = ThermalRuntimeEvaluator()
+    first = evaluator.evaluate(
         evidence(native_values=native, filtration_debt=timedelta(hours=1)),
         live_policy=disabled_policy(),
     )
 
-    later = ThermalRuntimeEvaluator().evaluate(
+    later = evaluator.evaluate(
         evidence(
             native_values=native,
             filtration_debt=timedelta(hours=1),
