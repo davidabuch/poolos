@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
+
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -26,6 +29,7 @@ async def async_setup_entry(
         [
             PoolOSResetHealthIncidentButton(runtime.coordinator, entry),
             PoolOSAcknowledgeExpectedOutageButton(runtime.coordinator, entry),
+            PoolOSResetControlButton(runtime.coordinator, entry),
         ]
     )
 
@@ -90,3 +94,105 @@ class PoolOSAcknowledgeExpectedOutageButton(
         """Record local annotation context; never actuate or clear health."""
 
         await self.coordinator.async_acknowledge_expected_outage()
+
+
+class PoolOSResetControlButton(
+    CoordinatorEntity[PoolOSCoordinator], ButtonEntity
+):
+    """Explicit operator recovery to a verified physical Off baseline."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Reset PoolOS Control"
+    _attr_icon = "mdi:restart-alert"
+
+    def __init__(
+        self, coordinator: PoolOSCoordinator, entry: ConfigEntry[PoolOSRuntimeData]
+    ) -> None:
+        super().__init__(coordinator)
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = f"{entry.entry_id}_reset_poolos_control"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "PoolOS Control Center",
+            "manufacturer": "PoolOS",
+            "model": "Operational Commissioning Runtime",
+        }
+        self._reset_lock = asyncio.Lock()
+
+    @property
+    def available(self) -> bool:
+        manual = self._runtime.manual_intellicenter
+        authority = self._runtime.physical_command_authority
+        return bool(
+            super().available
+            and manual is not None
+            and manual.available
+            and authority.base_authority_reason.value == "allowed"
+        )
+
+    async def async_press(self) -> None:
+        """Fence old work, reduce to Off, refresh, then reopen fresh policy."""
+
+        async with self._reset_lock:
+            runtime = self._runtime
+            authority = runtime.physical_command_authority
+            manual = runtime.manual_intellicenter
+            if manual is None:
+                raise RuntimeError("Reset PoolOS Control requires IntelliCenter delivery")
+
+            reset_at = datetime.now(UTC)
+            authority.begin_reset_recovery()
+            runtime.thermal_automatic_runtime.driver.restrictive_authority_changed(
+                changed_at=reset_at
+            )
+            runtime.thermal_runtime_orchestrator.reset_session_authority(
+                reset_at=reset_at
+            )
+            runtime.thermal_automatic_runtime.circulation_ownership.unload()
+            runtime.thermal_runtime_orchestrator.ownership.invalidate_residual_termination()
+
+            try:
+                native = self.coordinator.native_intellicenter_snapshot
+                values = {} if native is None else {
+                    item.observation_id: item.value for item in native.observations
+                }
+
+                # Source Off precedes body Off whenever a source is selected.
+                if values.get("spa.raw_heater_id") not in {None, "00000"}:
+                    await manual.async_set_body_heat_source(
+                        "B1202", "00000", reset_recovery=True
+                    )
+                if values.get("pool.raw_heater_id") not in {None, "00000"}:
+                    await manual.async_set_body_heat_source(
+                        "B1101", "00000", reset_recovery=True
+                    )
+                if values.get("spa.active") is True:
+                    await manual.async_set_body_active(
+                        "B1202", False, reset_recovery=True
+                    )
+                if values.get("pool.active") is True:
+                    await manual.async_set_body_active(
+                        "B1101", False, reset_recovery=True
+                    )
+
+                await self.coordinator.async_request_refresh()
+                native = self.coordinator.native_intellicenter_snapshot
+                values = {} if native is None else {
+                    item.observation_id: item.value for item in native.observations
+                }
+                safe = (
+                    values.get("pool.active") is False
+                    and values.get("spa.active") is False
+                    and values.get("pump.rpm") in {0, 0.0}
+                    and values.get("pool.raw_heater_id") in {None, "00000"}
+                    and values.get("spa.raw_heater_id") in {None, "00000"}
+                )
+                if not safe:
+                    raise RuntimeError(
+                        "Reset shutdown dispatched but safe baseline is not yet verified"
+                    )
+            finally:
+                # Closing Reset never restores an old session. The next native
+                # epoch is evaluated from durable policy/accounting only.
+                authority.finish_reset_recovery()
+                await self.coordinator.async_request_refresh()
