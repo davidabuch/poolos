@@ -604,7 +604,7 @@ class ThermalRuntimeEvaluator:
         cls,
         baselines: PumpOperatingBaselines,
         *,
-        spa_opportunistic_solar_roof_f: float = 135.0,
+        spa_opportunistic_solar_roof_f: float = 130.0,
     ) -> ThermalRuntimeEvaluator:
         """Build every nested thermal policy from one logical baseline source."""
 
