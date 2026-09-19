@@ -397,6 +397,16 @@ class ThermalRuntimeOrchestrator:
         )
         return self.assessment
 
+    def reset_session_authority(self, *, reset_at: datetime) -> None:
+        """Discard live session authority for an explicit Reset recovery epoch."""
+
+        _require_aware(reset_at)
+        self.ownership = ThermalRuntimeOwnershipManager()
+        self._last_snapshot_at = None
+        self._last_frame_fingerprint = None
+        self._conflicting_snapshot_at = None
+        self.assessment = None
+
     def restore_quick_restart(
         self,
         checkpoint: ThermalQuickRestartCheckpoint,
