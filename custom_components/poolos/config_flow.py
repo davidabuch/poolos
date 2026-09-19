@@ -22,7 +22,7 @@ from .const import (
     CONF_PUMP_PRIMING_RPM,
     CONF_PUMP_SOLAR_HEATING_RPM,
     CONF_PUMP_TEMPERATURE_PROBE_RPM,
-    CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+    CONF_SPA_SOLAR_ROOF_F,
     CONF_HEATER_ACTIVE_ENTITY,
     CONF_INTELLICENTER_HOST,
     CONF_INTELLICENTER_TRANSPORT,
@@ -44,11 +44,11 @@ from .const import (
     DEFAULT_DIAGNOSTICS_ENABLED,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     DEFAULT_INTELLICENTER_TRANSPORT,
-    DEFAULT_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+    DEFAULT_SPA_SOLAR_ROOF_F,
     DEFAULT_OPERATING_MODE,
     DOMAIN,
-    MAX_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
-    MIN_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+    MAX_SPA_SOLAR_ROOF_F,
+    MIN_SPA_SOLAR_ROOF_F,
     NAME,
     INTELLICENTER_TRANSPORT_OPTIONS,
 )
@@ -157,16 +157,16 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
     ] = selector.TimeSelector()
     fields[
         vol.Required(
-            CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+            CONF_SPA_SOLAR_ROOF_F,
             default=current.get(
-                CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
-                DEFAULT_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+                CONF_SPA_SOLAR_ROOF_F,
+                DEFAULT_SPA_SOLAR_ROOF_F,
             ),
         )
     ] = selector.NumberSelector(
         selector.NumberSelectorConfig(
-            min=MIN_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
-            max=MAX_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+            min=MIN_SPA_SOLAR_ROOF_F,
+            max=MAX_SPA_SOLAR_ROOF_F,
             step=1,
             mode="box",
             unit_of_measurement="°F",
