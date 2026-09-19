@@ -1303,7 +1303,7 @@ def test_solar_off_fails_closed_when_effective_source_is_unknown() -> None:
     asyncio.run(run())
 
 
-def test_solar_off_does_not_destroy_solar_preferred_intent() -> None:
+def test_solar_off_does_not_destroy_eco_heat_intent() -> None:
     async def run() -> None:
         module = _load_executable_switch_module()
         coordinator = _Coordinator(
@@ -1327,7 +1327,7 @@ def test_solar_off_does_not_destroy_solar_preferred_intent() -> None:
 
         with pytest.raises(
             module.ManualIntelliCenterCommandError,
-            match="Solar Preferred",
+            match="Eco Heat",
         ):
             await solar.async_turn_off()
 
