@@ -1790,3 +1790,39 @@ def test_cleanup_candidate_registration_rejects_cross_purpose_shapes(
             target=target,
             requested_value=value,
         )
+
+
+def test_reset_recovery_fences_normal_work_and_allows_only_reductions() -> None:
+    authority = ready()
+    authority.begin_reset_recovery()
+    manual = PhysicalCommandRequest(
+        operation="body_active", target="B1101",
+        source=PhysicalRequestSource.MANUAL, requested_value=True,
+    )
+    assert authority.assess(manual).reason is PhysicalAuthorityReason.RESET_RECOVERY_ACTIVE
+    pool_off = PhysicalCommandRequest(
+        operation="body_active", target="B1101",
+        source=PhysicalRequestSource.RESET_RECOVERY, requested_value=False,
+    )
+    source_off = PhysicalCommandRequest(
+        operation="body_heat_source", target="B1101",
+        source=PhysicalRequestSource.RESET_RECOVERY, requested_value="00000",
+    )
+    source_on = PhysicalCommandRequest(
+        operation="body_heat_source", target="B1101",
+        source=PhysicalRequestSource.RESET_RECOVERY, requested_value="H0002",
+    )
+    assert authority.assess(pool_off).allowed
+    assert authority.assess(source_off).allowed
+    assert authority.assess(source_on).reason is PhysicalAuthorityReason.RESET_RECOVERY_OPERATION_UNAUTHORIZED
+    authority.finish_reset_recovery()
+    assert authority.assess(pool_off).reason is PhysicalAuthorityReason.RESET_RECOVERY_INACTIVE
+
+
+def test_reset_recovery_invalidates_queued_normal_expectations() -> None:
+    authority = ready()
+    pending = authority.reserve(request(), consequence(), now=NOW)
+    assert pending is not None
+    authority.begin_reset_recovery()
+    assert authority.diagnostics(now=NOW)["pending_expectation_count"] == 0
+    assert authority.diagnostics(now=NOW)["reset_recovery_active"] is True
