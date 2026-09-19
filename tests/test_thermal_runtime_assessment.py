@@ -846,7 +846,7 @@ def test_stateful_evaluator_rejects_timestamp_regression_with_exact_reason() -> 
         )
 
 
-def test_authoritative_filtration_debt_blocks_opportunistic_spa_policy() -> None:
+def test_authoritative_filtration_debt_does_not_block_opportunistic_spa_policy() -> None:
     native = live_values(
         pool_active=True,
         pool_heater="00000",
@@ -855,12 +855,22 @@ def test_authoritative_filtration_debt_blocks_opportunistic_spa_policy() -> None
     )
     native["pool.temperature"] = 90.0
     native["spa.temperature"] = 90.0
-    result = ThermalRuntimeEvaluator().evaluate(
+    first = ThermalRuntimeEvaluator().evaluate(
         evidence(native_values=native, filtration_debt=timedelta(hours=1)),
         live_policy=disabled_policy(),
     )
 
-    assert result.hot_tub.plan.desired.reason_code == "opportunistic_ineligible"
+    later = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=native,
+            filtration_debt=timedelta(hours=1),
+            evaluated_at=NOW + timedelta(minutes=2),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert first.hot_tub.plan.desired.reason_code == "opportunistic_waiting_for_roof"
+    assert later.hot_tub.plan.desired.reason_code == "opportunistic_started_or_resumed"
     assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
 
 
