@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from zoneinfo import ZoneInfo
-
 from .operating_baselines import PumpOperatingBaselines, command_disabled_criterion, pump_baseline_criterion
 from .operational_intent import IntentCriterion, OperationalIntent, OperationalIntentPriority, OperationalIntentSource, OperationalIntentType
 from .thermal_source_policy import HeatSourcePermissions, ThermalHeatSource
@@ -50,9 +48,6 @@ class SpaPolicyConfig:
     spa_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
     maintenance_deficit_f: float = 2.0
-    opportunity_start_hour: int = 13
-    opportunity_end_hour: int = 18
-    preserve_end_hour: int = 22
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
 
     def __post_init__(self) -> None:
@@ -194,28 +189,27 @@ class SpaThermalPolicyTracker:
         return self._gas_or_none(observation, "spa_heat_up_gas")
 
     def _evaluate_opportunistic(self, observation: SpaPolicyInput) -> SpaPolicyAssessment:
-        local = observation.evaluated_at.astimezone(ZoneInfo(self._policy.timezone_name))
         roof = observation.collector_temperature_f
-        if local.hour >= self._policy.preserve_end_hour:
-            self._state = SpaPolicyState.RELEASE_TO_POOL
-            return self._result(observation, self._state, ThermalHeatSource.NONE, None, "ten_pm_release", preserve=False)
-        if local.hour >= self._policy.opportunity_end_hour:
-            self._state = SpaPolicyState.PRESERVE_UNTIL_10PM
-            return self._result(observation, self._state, ThermalHeatSource.NONE, None, "six_pm_preserve", preserve=True)
 
         eligible = (
-            local.hour >= self._policy.opportunity_start_hour
-            and observation.opportunistic_allowed
+            observation.opportunistic_allowed
             and observation.heating_mode is not SpaHeatingMode.GAS_ONLY
             and observation.permissions.solar_allowed
             and observation.pool_demand_satisfied
-            and observation.filtration_debt is not None
-            and observation.filtration_debt <= timedelta(0)
             and not observation.higher_priority_conflict
         )
         if not eligible:
             self._state = SpaPolicyState.IDLE
-            return self._result(observation, self._state, ThermalHeatSource.NONE, None, "opportunistic_ineligible")
+            self._above_130_since = None
+            self._below_120_since = None
+            return self._result(
+                observation,
+                self._state,
+                ThermalHeatSource.NONE,
+                None,
+                "opportunistic_ineligible",
+                preserve=False,
+            )
 
         if self._state is SpaPolicyState.OPPORTUNISTIC_ACTIVE:
             if (
@@ -224,43 +218,80 @@ class SpaThermalPolicyTracker:
                 and observation.spa_temperature_f >= observation.spa_target_f
             ):
                 self._state = SpaPolicyState.OPPORTUNISTIC_HOLD
+                self._below_120_since = None
                 return self._result(
                     observation,
                     self._state,
                     ThermalHeatSource.NONE,
-                    self._policy.baselines.filtration_rpm,
+                    None,
                     "opportunistic_target_cap_reached",
-                    preserve=True,
+                    preserve=False,
                 )
-            if roof is not None and roof < (self._policy.spa_solar_roof_f - self._policy.spa_solar_hysteresis_f):
+            if (
+                roof is not None
+                and roof
+                < (
+                    self._policy.spa_solar_roof_f
+                    - self._policy.spa_solar_hysteresis_f
+                )
+            ):
                 if self._below_120_since is None:
                     self._below_120_since = observation.evaluated_at
             else:
                 self._below_120_since = None
-            if self._below_120_since is not None and observation.evaluated_at - self._below_120_since >= self._policy.qualification_hold:
+            if (
+                self._below_120_since is not None
+                and observation.evaluated_at - self._below_120_since
+                >= self._policy.qualification_hold
+            ):
                 self._state = SpaPolicyState.OPPORTUNISTIC_HOLD
                 return self._result(
                     observation,
                     self._state,
                     ThermalHeatSource.NONE,
-                    self._policy.baselines.filtration_rpm,
-                    "opportunistic_roof_low_hold",
-                    preserve=True,
+                    None,
+                    "opportunistic_roof_low_wait",
+                    preserve=False,
                 )
-            return self._solar(observation, "opportunistic_active", opportunistic=True)
+            return self._solar(
+                observation,
+                "opportunistic_active",
+                opportunistic=True,
+            )
 
         if roof is not None and roof >= self._policy.spa_solar_roof_f:
             if self._above_130_since is None:
                 self._above_130_since = observation.evaluated_at
         else:
             self._above_130_since = None
-        qualified = self._above_130_since is not None and observation.evaluated_at - self._above_130_since >= self._policy.qualification_hold
+
+        qualified = (
+            self._above_130_since is not None
+            and observation.evaluated_at - self._above_130_since
+            >= self._policy.qualification_hold
+        )
         if qualified:
             self._state = SpaPolicyState.OPPORTUNISTIC_ACTIVE
             self._below_120_since = None
-            return self._solar(observation, "opportunistic_started_or_resumed", opportunistic=True)
-        self._state = SpaPolicyState.OPPORTUNISTIC_HOLD if self._state is SpaPolicyState.OPPORTUNISTIC_HOLD else SpaPolicyState.OPPORTUNISTIC_QUALIFYING
-        return self._result(observation, self._state, ThermalHeatSource.NONE, None, "opportunistic_waiting_for_roof", preserve=self._state is SpaPolicyState.OPPORTUNISTIC_HOLD)
+            return self._solar(
+                observation,
+                "opportunistic_started_or_resumed",
+                opportunistic=True,
+            )
+
+        self._state = (
+            SpaPolicyState.OPPORTUNISTIC_HOLD
+            if self._state is SpaPolicyState.OPPORTUNISTIC_HOLD
+            else SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+        )
+        return self._result(
+            observation,
+            self._state,
+            ThermalHeatSource.NONE,
+            None,
+            "opportunistic_waiting_for_roof",
+            preserve=False,
+        )
 
     def _solar(self, observation: SpaPolicyInput, reason: str, *, opportunistic: bool = False) -> SpaPolicyAssessment:
         self._last_source = ThermalHeatSource.SOLAR
