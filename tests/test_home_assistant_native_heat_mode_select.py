@@ -30,7 +30,7 @@ def test_exact_user_heat_mode_options() -> None:
     assert 'HEAT_MODE_SOLAR = "Solar"' in source
     assert 'HEAT_MODE_GAS = "Gas"' in source
     assert 'HEAT_MODE_ECO_HEAT = "Eco Heat"' in source
-    assert 'LEGACY_HEAT_MODE_ECO_HEAT = "Solar Preferred"' in source
+    assert 'LEGACY_HEAT_MODE_SOLAR_PREFERRED = "Solar Preferred"' in source
 
 
 def test_pool_and_hot_tub_defaults_are_body_specific() -> None:
