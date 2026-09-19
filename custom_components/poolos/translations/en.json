@@ -23,6 +23,7 @@
           "slide_active_entity": "Slide entity (optional hydraulic context)",
           "diagnostics_enabled": "Enable diagnostics",
           "preferred_filtration_catchup_start": "Preferred filtration catch-up start",
+          "spa_opportunistic_solar_roof_f": "Opportunistic Hot Tub Solar roof threshold (°F)",
           "pump_filtration_rpm": "Ordinary / filtration pump speed (RPM)",
           "pump_solar_heating_rpm": "Solar-heating pump speed (RPM)",
           "pump_gas_heating_rpm": "Gas-heating pump speed (RPM)",
@@ -44,7 +45,7 @@
     "step": {
       "init": {
         "title": "PoolOS high-fidelity observation mappings",
-        "description": "Update observation sources and the canonical Pump Speeds policy used after the config entry reloads. Saving options does not directly issue equipment commands.",
+        "description": "Update observation sources and operating policy used after the config entry reloads. Saving options does not directly issue equipment commands. Opportunistic Hot Tub Solar accepts 110–150°F; 130–140°F is suggested for normal use. PoolOS automatically continues an active opportunistic Solar session until the roof falls 10°F below the configured start threshold.",
         "data": {
           "pool_thermostat_entity": "Pool thermostat entity",
           "spa_thermostat_entity": "Spa thermostat entity",
@@ -63,6 +64,7 @@
           "slide_active_entity": "Slide entity (optional hydraulic context)",
           "diagnostics_enabled": "Enable diagnostics",
           "preferred_filtration_catchup_start": "Preferred filtration catch-up start",
+          "spa_opportunistic_solar_roof_f": "Opportunistic Hot Tub Solar roof threshold (°F)",
           "pump_filtration_rpm": "Ordinary / filtration pump speed (RPM)",
           "pump_solar_heating_rpm": "Solar-heating pump speed (RPM)",
           "pump_gas_heating_rpm": "Gas-heating pump speed (RPM)",
