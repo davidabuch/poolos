@@ -46,10 +46,8 @@ class SpaPolicyState(str, Enum):
 @dataclass(frozen=True, slots=True)
 class SpaPolicyConfig:
     timezone_name: str = "America/Los_Angeles"
-    heat_up_solar_roof_f: float = 130.0
-    maintenance_solar_roof_f: float = 120.0
-    opportunistic_solar_roof_f: float = 130.0
-    opportunistic_solar_hysteresis_f: float = 10.0
+    spa_solar_roof_f: float = 130.0
+    spa_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
     maintenance_deficit_f: float = 2.0
     opportunity_start_hour: int = 13
@@ -58,12 +56,12 @@ class SpaPolicyConfig:
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
 
     def __post_init__(self) -> None:
-        if not 110.0 <= self.opportunistic_solar_roof_f <= 150.0:
-            raise ValueError("opportunistic_solar_roof_f must be between 110 and 150 F")
-        if self.opportunistic_solar_hysteresis_f <= 0:
-            raise ValueError("opportunistic_solar_hysteresis_f must be positive")
-        if self.opportunistic_solar_hysteresis_f >= self.opportunistic_solar_roof_f:
-            raise ValueError("opportunistic solar hysteresis must remain below start threshold")
+        if not 110.0 <= self.spa_solar_roof_f <= 150.0:
+            raise ValueError("spa_solar_roof_f must be between 110 and 150 F")
+        if self.spa_solar_hysteresis_f <= 0:
+            raise ValueError("spa_solar_hysteresis_f must be positive")
+        if self.spa_solar_hysteresis_f >= self.spa_solar_roof_f:
+            raise ValueError("spa solar hysteresis must remain below start threshold")
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,12 +173,12 @@ class SpaThermalPolicyTracker:
         roof = observation.collector_temperature_f
         if self._maintenance_latched:
             deficit = None if observation.spa_temperature_f is None or observation.spa_target_f is None else observation.spa_target_f - observation.spa_temperature_f
-            solar = roof is not None and (roof >= self._policy.heat_up_solar_roof_f or (roof >= self._policy.maintenance_solar_roof_f and (deficit is None or deficit <= self._policy.maintenance_deficit_f)))
+            solar = roof is not None and (roof >= self._policy.spa_solar_roof_f or (roof >= (self._policy.spa_solar_roof_f - self._policy.spa_solar_hysteresis_f) and (deficit is None or deficit <= self._policy.maintenance_deficit_f)))
             if solar and observation.permissions.solar_allowed:
                 return self._solar(observation, "spa_maintenance_solar")
             return self._gas_or_none(observation, "spa_maintenance_gas")
 
-        if roof is not None and roof >= self._policy.heat_up_solar_roof_f:
+        if roof is not None and roof >= self._policy.spa_solar_roof_f:
             if self._above_130_since is None:
                 self._above_130_since = observation.evaluated_at
             self._below_130_since = None
@@ -234,7 +232,7 @@ class SpaThermalPolicyTracker:
                     "opportunistic_target_cap_reached",
                     preserve=True,
                 )
-            if roof is not None and roof < (self._policy.opportunistic_solar_roof_f - self._policy.opportunistic_solar_hysteresis_f):
+            if roof is not None and roof < (self._policy.spa_solar_roof_f - self._policy.spa_solar_hysteresis_f):
                 if self._below_120_since is None:
                     self._below_120_since = observation.evaluated_at
             else:
@@ -251,7 +249,7 @@ class SpaThermalPolicyTracker:
                 )
             return self._solar(observation, "opportunistic_active", opportunistic=True)
 
-        if roof is not None and roof >= self._policy.opportunistic_solar_roof_f:
+        if roof is not None and roof >= self._policy.spa_solar_roof_f:
             if self._above_130_since is None:
                 self._above_130_since = observation.evaluated_at
         else:
