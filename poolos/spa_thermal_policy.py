@@ -57,8 +57,6 @@ class SpaPolicyConfig:
     preserve_end_hour: int = 22
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
 
-
-@dataclass(frozen=True, slots=True)
     def __post_init__(self) -> None:
         if not 110.0 <= self.opportunistic_solar_roof_f <= 150.0:
             raise ValueError("opportunistic_solar_roof_f must be between 110 and 150 F")
