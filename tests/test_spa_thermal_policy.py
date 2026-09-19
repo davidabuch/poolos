@@ -196,9 +196,9 @@ def test_restart_actual_equipment_state_overrides_stale_session_marker() -> None
     assert on.state is SpaPolicyState.SPA_IN_USE_HEAT_UP
 
 
-def test_opportunistic_threshold_is_independent_of_user_spa_heat_up_threshold() -> None:
+def test_shared_spa_solar_threshold_applies_to_user_and_opportunistic_sessions() -> None:
     tracker = SpaThermalPolicyTracker(
-        SpaPolicyConfig(opportunistic_solar_roof_f=110.0)
+        SpaPolicyConfig(spa_solar_roof_f=110.0)
     )
     user = tracker.evaluate(
         observation(active=True, source=SpaUserSource.HOME_ASSISTANT, roof=110)
@@ -206,9 +206,9 @@ def test_opportunistic_threshold_is_independent_of_user_spa_heat_up_threshold() 
     assert user.heat_source is ThermalHeatSource.GAS
 
 
-def test_opportunistic_commissioning_threshold_110_starts_after_hold() -> None:
+def test_shared_spa_solar_threshold_110_starts_opportunistic_after_hold() -> None:
     tracker = SpaThermalPolicyTracker(
-        SpaPolicyConfig(opportunistic_solar_roof_f=110.0)
+        SpaPolicyConfig(spa_solar_roof_f=110.0)
     )
     first = tracker.evaluate(observation(roof=110))
     active = tracker.evaluate(
@@ -219,9 +219,9 @@ def test_opportunistic_commissioning_threshold_110_starts_after_hold() -> None:
     assert active.heat_source is ThermalHeatSource.SOLAR
 
 
-def test_opportunistic_threshold_uses_ten_degree_continuation_hysteresis() -> None:
+def test_shared_spa_solar_threshold_uses_ten_degree_continuation_hysteresis() -> None:
     tracker = SpaThermalPolicyTracker(
-        SpaPolicyConfig(opportunistic_solar_roof_f=135.0)
+        SpaPolicyConfig(spa_solar_roof_f=135.0)
     )
     tracker.evaluate(observation(roof=135))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=135))
@@ -233,8 +233,8 @@ def test_opportunistic_threshold_uses_ten_degree_continuation_hysteresis() -> No
 
 
 @pytest.mark.parametrize("threshold", (109.0, 151.0))
-def test_opportunistic_threshold_rejects_values_outside_supported_range(
+def test_shared_spa_solar_threshold_rejects_values_outside_supported_range(
     threshold: float,
 ) -> None:
     with pytest.raises(ValueError, match="between 110 and 150"):
-        SpaPolicyConfig(opportunistic_solar_roof_f=threshold)
+        SpaPolicyConfig(spa_solar_roof_f=threshold)
