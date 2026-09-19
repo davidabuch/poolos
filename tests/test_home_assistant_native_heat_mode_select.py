@@ -29,7 +29,8 @@ def test_exact_user_heat_mode_options() -> None:
     assert 'HEAT_MODE_OFF = "Off"' in source
     assert 'HEAT_MODE_SOLAR = "Solar"' in source
     assert 'HEAT_MODE_GAS = "Gas"' in source
-    assert 'HEAT_MODE_SOLAR_PREFERRED = "Solar Preferred"' in source
+    assert 'HEAT_MODE_ECO_HEAT = "Eco Heat"' in source
+    assert 'LEGACY_HEAT_MODE_SOLAR_PREFERRED = "Solar Preferred"' in source
 
 
 def test_pool_and_hot_tub_defaults_are_body_specific() -> None:
@@ -41,7 +42,7 @@ def test_pool_and_hot_tub_defaults_are_body_specific() -> None:
 
     assert 'key="hot_tub"' in source
     assert 'body_objnam="B1202"' in source
-    assert "default_mode=HEAT_MODE_SOLAR_PREFERRED" in source
+    assert "default_mode=HEAT_MODE_ECO_HEAT" in source
 
 
 def test_direct_modes_map_only_to_empirically_commissioned_ids() -> None:
@@ -58,13 +59,13 @@ def test_direct_modes_map_only_to_empirically_commissioned_ids() -> None:
     assert "async_set_body_heat_source(" in manual
 
 
-def test_solar_preferred_is_poolos_policy_not_pentair_mode() -> None:
+def test_eco_heat_is_poolos_policy_not_pentair_mode() -> None:
     source = _source()
     canonical = (COMPONENT / "manual_thermal.py").read_text(encoding="utf-8")
 
-    assert '"solar_preferred_owner": "poolos"' in source
+    assert '"eco_heat_owner": "poolos"' in source
     assert '"pentair_solar_preferred_used": False' in source
-    assert '"solar_preferred_autonomous_delivery_enabled": False' in source
+    assert '"eco_heat_autonomous_delivery_enabled": False' in source
 
     assert "ThermalRequestedMode.SOLAR_PREFERRED" in canonical
     assert "async_set_body_heat_source" not in canonical.split(
@@ -355,7 +356,7 @@ def test_cross_body_requested_configuration_ignores_other_body_activity() -> Non
     assert [item.value for item in observations_b] == [False, True, "00000", "00000", 90.0, 101.0]
 
 
-def test_solar_preferred_is_inactive_body_configuration_only() -> None:
+def test_eco_heat_is_inactive_body_configuration_only() -> None:
     import asyncio
 
     module, entities, manual, observations = _build_select_entities(
@@ -364,14 +365,14 @@ def test_solar_preferred_is_inactive_body_configuration_only() -> None:
     )
 
     asyncio.run(
-        entities["pool"].async_select_option(module.HEAT_MODE_SOLAR_PREFERRED)
+        entities["pool"].async_select_option(module.HEAT_MODE_ECO_HEAT)
     )
     asyncio.run(
-        entities["hot_tub"].async_select_option(module.HEAT_MODE_SOLAR_PREFERRED)
+        entities["hot_tub"].async_select_option(module.HEAT_MODE_ECO_HEAT)
     )
 
-    assert entities["pool"].current_option == module.HEAT_MODE_SOLAR_PREFERRED
-    assert entities["hot_tub"].current_option == module.HEAT_MODE_SOLAR_PREFERRED
+    assert entities["pool"].current_option == module.HEAT_MODE_ECO_HEAT
+    assert entities["hot_tub"].current_option == module.HEAT_MODE_ECO_HEAT
     assert manual.calls == []
     assert [item.value for item in observations[:2]] == [False, False]
 
@@ -455,3 +456,23 @@ def test_selector_has_no_activity_prerequisite_but_reports_no_implicit_activatio
     assert "unless its body is active" not in source
     assert '"configuration_independent_of_body_activity": True' in source
     assert '"configuration_activates_body": False' in source
+
+
+def test_legacy_solar_preferred_restore_migrates_to_eco_heat_without_command() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    module, entities, manual, _observations = _build_select_entities(
+        pool_active=False,
+        spa_active=False,
+    )
+    entity = entities["hot_tub"]
+
+    async def last_state():
+        return SimpleNamespace(state=module.LEGACY_HEAT_MODE_SOLAR_PREFERRED)
+
+    entity.async_get_last_state = last_state
+    asyncio.run(entity.async_added_to_hass())
+
+    assert entity.current_option == module.HEAT_MODE_ECO_HEAT
+    assert manual.calls == []

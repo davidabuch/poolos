@@ -20,7 +20,8 @@ from .manual_thermal import (
     HEAT_MODE_OFF,
     HEAT_MODE_OPTIONS,
     HEAT_MODE_SOLAR,
-    HEAT_MODE_SOLAR_PREFERRED,
+    HEAT_MODE_ECO_HEAT,
+    LEGACY_HEAT_MODE_SOLAR_PREFERRED,
     async_request_heat_mode,
     requested_heat_mode,
 )
@@ -33,7 +34,7 @@ __all__ = [
     "HEAT_MODE_OFF",
     "HEAT_MODE_OPTIONS",
     "HEAT_MODE_SOLAR",
-    "HEAT_MODE_SOLAR_PREFERRED",
+    "HEAT_MODE_ECO_HEAT",
 ]
 
 
@@ -72,7 +73,7 @@ HEAT_MODE_DESCRIPTIONS = (
         name="Hot Tub Heat Mode",
         body_objnam="B1202",
         heater_id_concept="spa.raw_heater_id",
-        default_mode=HEAT_MODE_SOLAR_PREFERRED,
+        default_mode=HEAT_MODE_ECO_HEAT,
         icon="mdi:hot-tub",
         body=ThermalBody.HOT_TUB,
     ),
@@ -146,16 +147,20 @@ class PoolOSHeatModeSelect(
 
         previous = await self.async_get_last_state()
 
-        if (
-            previous is not None
-            and previous.state in HEAT_MODE_OPTIONS
-        ):
+        if previous is not None and previous.state == LEGACY_HEAT_MODE_SOLAR_PREFERRED:
+            requested = HEAT_MODE_ECO_HEAT
+        elif previous is not None and previous.state in HEAT_MODE_OPTIONS:
             requested = previous.state
         else:
             requested = self._description.default_mode
+        mode = (
+            ThermalRequestedMode.SOLAR_PREFERRED
+            if requested == HEAT_MODE_ECO_HEAT
+            else ThermalRequestedMode(requested)
+        )
         self._runtime.thermal_runtime.set_requested_mode(
             self._description.body,
-            ThermalRequestedMode(requested),
+            mode,
             publish=False,
         )
 
@@ -179,10 +184,11 @@ class PoolOSHeatModeSelect(
     def current_option(self) -> str:
         """Return persistent user-requested PoolOS heat mode."""
 
-        return requested_heat_mode(
+        mode = requested_heat_mode(
             self._runtime,
             self._description.body,
-        ).value
+        )
+        return HEAT_MODE_ECO_HEAT if mode is ThermalRequestedMode.SOLAR_PREFERRED else mode.value
 
     @property
     def effective_native_heater_id(self) -> str | None:
@@ -236,9 +242,9 @@ class PoolOSHeatModeSelect(
             "manual_command_delivery_enabled": (
                 manual is not None and manual.available
             ),
-            "solar_preferred_owner": "poolos",
+            "eco_heat_owner": "poolos",
             "pentair_solar_preferred_used": False,
-            "solar_preferred_autonomous_delivery_enabled": False,
+            "eco_heat_autonomous_delivery_enabled": False,
             "direct_htmode_write_enabled": False,
             "configuration_independent_of_body_activity": True,
             "configuration_activates_body": False,

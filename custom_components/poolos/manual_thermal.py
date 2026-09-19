@@ -17,13 +17,14 @@ if TYPE_CHECKING:
 HEAT_MODE_OFF = "Off"
 HEAT_MODE_SOLAR = "Solar"
 HEAT_MODE_GAS = "Gas"
-HEAT_MODE_SOLAR_PREFERRED = "Solar Preferred"
+HEAT_MODE_ECO_HEAT = "Eco Heat"
+LEGACY_HEAT_MODE_SOLAR_PREFERRED = "Solar Preferred"
 
 HEAT_MODE_OPTIONS = (
     HEAT_MODE_OFF,
     HEAT_MODE_SOLAR,
     HEAT_MODE_GAS,
-    HEAT_MODE_SOLAR_PREFERRED,
+    HEAT_MODE_ECO_HEAT,
 )
 
 _BODY_OBJNAM = {
@@ -49,10 +50,14 @@ async def async_request_heat_mode(
 ) -> None:
     """Apply one requested mode without conflating it with observed truth."""
 
-    if option not in HEAT_MODE_OPTIONS:
+    if option not in HEAT_MODE_OPTIONS and option != LEGACY_HEAT_MODE_SOLAR_PREFERRED:
         raise ValueError(f"unsupported heat mode: {option}")
 
-    mode = ThermalRequestedMode(option)
+    mode = (
+        ThermalRequestedMode.SOLAR_PREFERRED
+        if option in {HEAT_MODE_ECO_HEAT, LEGACY_HEAT_MODE_SOLAR_PREFERRED}
+        else ThermalRequestedMode(option)
+    )
     if mode is ThermalRequestedMode.SOLAR_PREFERRED:
         runtime.thermal_runtime.set_requested_mode(body, mode)
         return
