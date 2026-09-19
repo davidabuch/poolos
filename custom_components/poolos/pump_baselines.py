@@ -19,6 +19,8 @@ from .const import (
     CONF_PUMP_PRIMING_RPM,
     CONF_PUMP_SOLAR_HEATING_RPM,
     CONF_PUMP_TEMPERATURE_PROBE_RPM,
+    CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+    DEFAULT_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
 )
 
 
@@ -73,9 +75,18 @@ def compose_pump_baseline_runtime(
     """Construct the RPM-sensitive core graph from one effective policy."""
 
     baselines = effective_pump_operating_baselines(configured)
+    spa_opportunistic_solar_roof_f = float(
+        configured.get(
+            CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+            DEFAULT_SPA_OPPORTUNISTIC_SOLAR_ROOF_F,
+        )
+    )
     return PumpBaselineRuntimeComposition(
         baselines=baselines,
-        thermal_evaluator=ThermalRuntimeEvaluator.with_baselines(baselines),
+        thermal_evaluator=ThermalRuntimeEvaluator.with_baselines(
+            baselines,
+            spa_opportunistic_solar_roof_f=spa_opportunistic_solar_roof_f,
+        ),
         thermal_orchestrator=ThermalRuntimeOrchestrator(baselines=baselines),
         physical_authority=PoolOSPhysicalCommandAuthority(baselines=baselines),
         grid_outage_engine=GridOutagePhysicalSafetyEngine(baselines=baselines),
