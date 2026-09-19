@@ -274,6 +274,7 @@ class ManualIntelliCenterControl:
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
+        reset_recovery: bool = False,
     ) -> ManualCommandReceipt:
         """Turn Pool/Spa body circulation on or off."""
 
@@ -305,7 +306,7 @@ class ManualIntelliCenterControl:
             request=PhysicalCommandRequest(
                 operation="body_active",
                 target=body_objnam,
-                source=request_source,
+                source=(PhysicalRequestSource.RESET_RECOVERY if reset_recovery else request_source),
                 requested_value=active,
                 automatic_thermal_context=automatic_thermal_context,
                 automatic_filtration_context=automatic_filtration_context,
@@ -430,6 +431,7 @@ class ManualIntelliCenterControl:
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
+        reset_recovery: bool = False,
     ) -> ManualCommandReceipt:
         """Select one explicitly allow-listed heat source for a Pool/Spa body."""
 
@@ -445,7 +447,7 @@ class ManualIntelliCenterControl:
             request=PhysicalCommandRequest(
                 operation="body_heat_source",
                 target=body_objnam,
-                source=request_source,
+                source=(PhysicalRequestSource.RESET_RECOVERY if reset_recovery else request_source),
                 requested_value=heater_objnam,
                 automatic_thermal_context=automatic_thermal_context,
                 grid_outage_context=grid_outage_context,

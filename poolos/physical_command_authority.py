@@ -30,6 +30,7 @@ class PhysicalRequestSource(StrEnum):
     RECONCILIATION = "reconciliation"
     SAFETY_INTERLOCK = "safety_interlock"
     GRID_OUTAGE_SAFETY = "grid_outage_safety"
+    RESET_RECOVERY = "reset_recovery"
 
 
 class PhysicalAuthorityReason(StrEnum):
@@ -70,6 +71,9 @@ class PhysicalAuthorityReason(StrEnum):
     GRID_OUTAGE_DRIVER_UNLOADED = "grid_outage_driver_unloaded"
     MANUAL_PUMP_SESSION_STALE = "manual_pump_session_stale"
     OWNERSHIP_DOMAIN_COMMAND_DENIED = "ownership_domain_command_denied"
+    RESET_RECOVERY_INACTIVE = "reset_recovery_inactive"
+    RESET_RECOVERY_ACTIVE = "reset_recovery_active"
+    RESET_RECOVERY_OPERATION_UNAUTHORIZED = "reset_recovery_operation_unauthorized"
 
 
 class GridOutageDispatchPurpose(StrEnum):
@@ -663,6 +667,8 @@ class PoolOSPhysicalCommandAuthority:
     _grid_outage_authority: GridOutageDispatchAuthority | None = field(
         default=None, init=False, repr=False
     )
+    _reset_recovery_generation: int = field(default=0, init=False, repr=False)
+    _reset_recovery_active: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.expectation_ttl <= timedelta(0):
@@ -773,6 +779,32 @@ class PoolOSPhysicalCommandAuthority:
         self._controller_mode = accepted
         if changed:
             self.invalidate_expectations()
+
+    def begin_reset_recovery(self) -> int:
+        """Fence normal work and open one exact reduction-only Reset epoch."""
+
+        self._reset_recovery_generation += 1
+        self._reset_recovery_active = True
+        self.invalidate_expectations()
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+        self._invalidate_grid_outage_context()
+        return self._reset_recovery_generation
+
+    def finish_reset_recovery(self) -> None:
+        """Close Reset authority only after a verified safe baseline."""
+
+        self._reset_recovery_active = False
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+
+    @property
+    def reset_recovery_active(self) -> bool:
+        return self._reset_recovery_active
+
+    @property
+    def reset_recovery_generation(self) -> int:
+        return self._reset_recovery_generation
 
     def configure_automatic_thermal(
         self,
@@ -1189,6 +1221,24 @@ class PoolOSPhysicalCommandAuthority:
         reason = self.base_authority_reason
         if (
             reason is PhysicalAuthorityReason.ALLOWED
+            and self._reset_recovery_active
+            and request.source not in {
+                PhysicalRequestSource.RESET_RECOVERY,
+                PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+                PhysicalRequestSource.SAFETY_INTERLOCK,
+            }
+        ):
+            reason = PhysicalAuthorityReason.RESET_RECOVERY_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source is PhysicalRequestSource.RESET_RECOVERY
+        ):
+            if not self._reset_recovery_active:
+                reason = PhysicalAuthorityReason.RESET_RECOVERY_INACTIVE
+            elif not _reset_recovery_request_allowed(request):
+                reason = PhysicalAuthorityReason.RESET_RECOVERY_OPERATION_UNAUTHORIZED
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
             and request.source
             in {
                 PhysicalRequestSource.AUTOMATIC_THERMAL,
@@ -1576,6 +1626,8 @@ class PoolOSPhysicalCommandAuthority:
                         and self._spa_automatic_restraint_restored
                     )
                 ),
+                "reset_recovery_active": self._reset_recovery_active,
+                "reset_recovery_generation": self._reset_recovery_generation,
                 "pending_expectation_count": len(self._expectations),
                 "pending_expectation_limit": self.expectation_limit,
                 "expectation_ttl_seconds": self.expectation_ttl.total_seconds(),
@@ -1608,6 +1660,20 @@ class PoolOSPhysicalCommandAuthority:
                 ),
             }
         )
+
+
+def _reset_recovery_request_allowed(request: PhysicalCommandRequest) -> bool:
+    """Allow only the reviewed monotonic Reset shutdown envelope."""
+
+    return (
+        request.operation == "body_heat_source"
+        and request.target in {"B1101", "B1202"}
+        and request.requested_value == "00000"
+    ) or (
+        request.operation == "body_active"
+        and request.target in {"B1101", "B1202"}
+        and request.requested_value is False
+    )
 
 
 def _automatic_thermal_request_matches_context(
