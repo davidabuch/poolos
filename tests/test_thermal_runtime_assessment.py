@@ -870,8 +870,9 @@ def test_authoritative_filtration_debt_does_not_block_opportunistic_spa_policy()
     )
 
     assert first.hot_tub.plan.desired.reason_code == "opportunistic_waiting_for_roof"
+    assert first.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
     assert later.hot_tub.plan.desired.reason_code == "opportunistic_started_or_resumed"
-    assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert later.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
 
 
 def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> None:
