@@ -48,7 +48,7 @@ class SpaPolicyConfig:
     timezone_name: str = "America/Los_Angeles"
     heat_up_solar_roof_f: float = 130.0
     maintenance_solar_roof_f: float = 120.0
-    opportunistic_solar_roof_f: float = 135.0
+    opportunistic_solar_roof_f: float = 130.0
     opportunistic_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
     maintenance_deficit_f: float = 2.0
