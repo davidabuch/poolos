@@ -943,7 +943,9 @@ def test_accepted_heat_source_execution_provenance_still_detects_real_drift() ->
     runtime.process(_thermal_native(now, pool_heater="00000"), _transport(now), 1)
 
     assert runtime.diagnostics()["active_drift_concepts"] == ["pool.raw_heater_id"]
-    assert "pool.raw_heater_id" not in runtime.diagnostics()["active_drift_concepts"]
+    assert runtime.diagnostics()["active_drift_intended_values"] == {
+        "pool.raw_heater_id": "H0002"
+    }
 
 
 @pytest.mark.parametrize("native_heater", ("H0001", "H0002"))
@@ -1112,9 +1114,8 @@ def test_requested_mode_changes_do_not_create_physical_heater_drift() -> None:
     thermal_runtime.pool_requested_mode = module.ThermalRequestedMode.SOLAR
     assessment.pool.requested_mode = module.ThermalRequestedMode.SOLAR
     runtime.refresh_ownership()
-    assert runtime.diagnostics()["active_drift_intended_values"] == {
-        "pool.raw_heater_id": "H0002"
-    }
+    assert "pool.raw_heater_id" not in runtime._ownership().intended_values
+    assert "pool.raw_heater_id" not in runtime.diagnostics()["active_drift_concepts"]
 
 
 def test_restored_heat_policy_waits_for_execution_provenance_not_native_baseline() -> None:
@@ -1161,9 +1162,8 @@ def test_restored_heat_policy_waits_for_execution_provenance_not_native_baseline
 
     thermal_runtime.pool_requested_mode_resolved = True
     runtime.refresh_ownership()
-    assert runtime.diagnostics()["active_drift_intended_values"] == {
-        "pool.raw_heater_id": "H0002"
-    }
+    assert "pool.raw_heater_id" not in runtime._ownership().intended_values
+    assert "pool.raw_heater_id" not in runtime.diagnostics()["active_drift_concepts"]
 
     no_baseline_runtime = module.PoolOSExternalChangeRuntime(
         hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
