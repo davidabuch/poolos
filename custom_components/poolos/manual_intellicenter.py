@@ -289,6 +289,7 @@ class ManualIntelliCenterControl:
             body_objnam == "B1101"
             and active is False
             and request_source is PhysicalRequestSource.MANUAL
+            and not reset_recovery
             and pool_off_requested is not None
         ):
             # Arm the operator restraint synchronously before the first await or
@@ -299,6 +300,7 @@ class ManualIntelliCenterControl:
             body_objnam == "B1202"
             and active is False
             and request_source is PhysicalRequestSource.MANUAL
+            and not reset_recovery
             and spa_off_requested is not None
         ):
             spa_off_requested(datetime.now(UTC))
