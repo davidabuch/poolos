@@ -159,3 +159,20 @@ def test_native_observer_expires_transient_manual_off_before_runtime_processing(
     assert "async_set_body_active" not in observer
     assert "async_set_pump_circuit_speed" not in observer
     assert "services.async_call" not in observer
+
+
+def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
+    button = (COMPONENT / "button.py").read_text(encoding="utf-8")
+    authority = (ROOT / "poolos" / "physical_command_authority.py").read_text(encoding="utf-8")
+    assert 'PoolOSResetControlButton' in button
+    assert '_attr_name = "Reset PoolOS Control"' in button
+    assert 'begin_reset_recovery()' in button
+    assert 'reset_session_authority(' in button
+    assert 'circulation_ownership.unload()' in button
+    assert 'reset_recovery=True' in button
+    assert 'PhysicalRequestSource.RESET_RECOVERY' in authority
+    assert '_reset_recovery_request_allowed' in authority
+    assert 'requested_value is False' in authority
+    assert 'requested_value == "00000"' in authority
+    assert 'async_set_heating_setpoint' not in button[button.index("class PoolOSResetControlButton"):]
+    assert 'filtration_runtime' not in button[button.index("class PoolOSResetControlButton"):]
