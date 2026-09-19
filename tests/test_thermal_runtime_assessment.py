@@ -864,7 +864,7 @@ def test_authoritative_filtration_debt_does_not_block_opportunistic_spa_policy()
         evidence(
             native_values=native,
             filtration_debt=timedelta(hours=1),
-            evaluated_at=NOW + timedelta(minutes=2),
+            at=NOW + timedelta(minutes=2),
         ),
         live_policy=disabled_policy(),
     )
