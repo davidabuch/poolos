@@ -150,6 +150,11 @@ class PoolOSResetControlButton(
             )
             runtime.thermal_automatic_runtime.circulation_ownership.unload()
             runtime.thermal_runtime_orchestrator.ownership.invalidate_residual_termination()
+            # Reset clears session-scoped operator restraints but preserves
+            # durable policy/accounting. It must not leave future autonomy
+            # suppressed after reaching the safe baseline.
+            runtime.pool_automatic_control.resume(resumed_at=reset_at)
+            runtime.spa_automatic_control.resume(resumed_at=reset_at)
 
             try:
                 native = self.coordinator.native_intellicenter_snapshot

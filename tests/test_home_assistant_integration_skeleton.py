@@ -176,3 +176,6 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     assert 'requested_value == "00000"' in authority
     assert 'async_set_heating_setpoint' not in button[button.index("class PoolOSResetControlButton"):]
     assert 'filtration_runtime' not in button[button.index("class PoolOSResetControlButton"):]
+    reset = button[button.index("class PoolOSResetControlButton"):]
+    assert "pool_automatic_control.resume" in reset
+    assert "spa_automatic_control.resume" in reset
