@@ -37,13 +37,10 @@ class SpaPolicyState(str, Enum):
     OPPORTUNISTIC_QUALIFYING = "opportunistic_qualifying"
     OPPORTUNISTIC_ACTIVE = "opportunistic_active"
     OPPORTUNISTIC_HOLD = "opportunistic_hold"
-    PRESERVE_UNTIL_10PM = "preserve_until_10pm"
-    RELEASE_TO_POOL = "release_to_pool"
 
 
 @dataclass(frozen=True, slots=True)
 class SpaPolicyConfig:
-    timezone_name: str = "America/Los_Angeles"
     spa_solar_roof_f: float = 130.0
     spa_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
@@ -343,8 +340,6 @@ class SpaThermalPolicyTracker:
                 in {
                     SpaPolicyState.OPPORTUNISTIC_ACTIVE,
                     SpaPolicyState.OPPORTUNISTIC_HOLD,
-                    SpaPolicyState.PRESERVE_UNTIL_10PM,
-                    SpaPolicyState.RELEASE_TO_POOL,
                 }
                 else SpaSessionKind.INACTIVE
             )
