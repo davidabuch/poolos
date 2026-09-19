@@ -468,10 +468,13 @@ def _facts(
     filtration_current = filtration is not None and filtration.evaluated_at == evidence.evaluated_at
     return _Facts(
         entitlement_present=entitlement is not None,
-        body_provenance_present=bool(entitlement and entitlement.body_activation),
+        body_provenance_present=bool(
+            entitlement
+            and (entitlement.body_activation is not None or entitlement.body_adoption is not None)
+        ),
         body_provenance_current=bool(
             entitlement
-            and entitlement.body_activation
+            and (entitlement.body_activation is not None or entitlement.body_adoption is not None)
             and evidence.evaluated_at >= entitlement.retained_at
             and pool_current
             and spa_current
