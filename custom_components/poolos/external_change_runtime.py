@@ -28,7 +28,6 @@ from poolos.pool_automatic_control_suppression import (
 from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
 
-from .configured_thermal import configured_heater_intent_for_direct_requested_mode
 from .thermal_runtime import PoolOSThermalRuntime
 
 
@@ -225,34 +224,15 @@ class PoolOSExternalChangeRuntime:
             if self.owned_intent_provider is None
             else dict(self.owned_intent_provider())
         )
-        configured_modes = (
-            (
-                "pool",
-                self.thermal_runtime.pool_requested_mode,
-                self.thermal_runtime.pool_requested_mode_resolved,
-            ),
-            (
-                "spa",
-                self.thermal_runtime.hot_tub_requested_mode,
-                self.thermal_runtime.hot_tub_requested_mode_resolved,
-            ),
-        )
-        for prefix, requested_mode, resolved in configured_modes:
-            concept = f"{prefix}.raw_heater_id"
-            if not resolved:
-                blockers.append(f"{prefix}_requested_heat_mode_unresolved")
-                continue
-            heater_id = configured_heater_intent_for_direct_requested_mode(
-                requested_mode
-            )
-            if heater_id is None:
-                continue
-            if concept not in self.monitor.current_concepts():
-                blockers.append(f"{prefix}_native_heater_baseline_unavailable")
-                continue
-            if concept not in accepted_intent:
-                intended[concept] = heater_id
-
+        # Configured heat policy is not current physical heat-source intent.
+        # raw_heater_id belongs in the owned-intent set only when an accepted
+        # PoolOS execution provenance explicitly claims that concept.
+        #
+        # Example: requested mode Solar while the Pool is idle means "Solar is
+        # the allowed policy when a thermal opportunity exists", not "H0002
+        # must be physically selected now". Treating configuration as physical
+        # intent creates false drift whenever an idle body correctly reports
+        # native heater 00000.
         assessment = self.thermal_runtime.assessment
         if assessment is None:
             self._ownership_blockers = tuple(blockers)
