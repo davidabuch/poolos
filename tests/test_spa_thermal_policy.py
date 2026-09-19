@@ -197,13 +197,31 @@ def test_restart_actual_equipment_state_overrides_stale_session_marker() -> None
 
 
 def test_shared_spa_solar_threshold_applies_to_user_and_opportunistic_sessions() -> None:
-    tracker = SpaThermalPolicyTracker(
+    user_tracker = SpaThermalPolicyTracker(
         SpaPolicyConfig(spa_solar_roof_f=110.0)
     )
-    user = tracker.evaluate(
+    user_tracker.evaluate(
         observation(active=True, source=SpaUserSource.HOME_ASSISTANT, roof=110)
     )
-    assert user.heat_source is ThermalHeatSource.GAS
+    user = user_tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=2),
+            active=True,
+            source=SpaUserSource.HOME_ASSISTANT,
+            roof=110,
+        )
+    )
+
+    opportunistic_tracker = SpaThermalPolicyTracker(
+        SpaPolicyConfig(spa_solar_roof_f=110.0)
+    )
+    opportunistic_tracker.evaluate(observation(roof=110))
+    opportunistic = opportunistic_tracker.evaluate(
+        observation(at=NOW + timedelta(minutes=2), roof=110)
+    )
+
+    assert user.heat_source is ThermalHeatSource.SOLAR
+    assert opportunistic.heat_source is ThermalHeatSource.SOLAR
 
 
 def test_shared_spa_solar_threshold_110_starts_opportunistic_after_hold() -> None:
