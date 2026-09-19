@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from poolos.spa_thermal_policy import SpaHeatingMode, SpaPolicyInput, SpaPolicyState, SpaThermalPolicyTracker, SpaUserSource
+from poolos.spa_thermal_policy import SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState, SpaThermalPolicyTracker, SpaUserSource
 from poolos.thermal_source_policy import HeatSourcePermissions, ThermalHeatSource
 
 
@@ -194,3 +194,47 @@ def test_restart_actual_equipment_state_overrides_stale_session_marker() -> None
     assert not off.spa_in_use
     assert on.spa_in_use
     assert on.state is SpaPolicyState.SPA_IN_USE_HEAT_UP
+
+
+def test_opportunistic_threshold_is_independent_of_user_spa_heat_up_threshold() -> None:
+    tracker = SpaThermalPolicyTracker(
+        SpaPolicyConfig(opportunistic_solar_roof_f=110.0)
+    )
+    user = tracker.evaluate(
+        observation(active=True, source=SpaUserSource.HOME_ASSISTANT, roof=110)
+    )
+    assert user.heat_source is ThermalHeatSource.GAS
+
+
+def test_opportunistic_commissioning_threshold_110_starts_after_hold() -> None:
+    tracker = SpaThermalPolicyTracker(
+        SpaPolicyConfig(opportunistic_solar_roof_f=110.0)
+    )
+    first = tracker.evaluate(observation(roof=110))
+    active = tracker.evaluate(
+        observation(at=NOW + timedelta(minutes=2), roof=110)
+    )
+    assert first.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+    assert active.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
+    assert active.heat_source is ThermalHeatSource.SOLAR
+
+
+def test_opportunistic_threshold_uses_ten_degree_continuation_hysteresis() -> None:
+    tracker = SpaThermalPolicyTracker(
+        SpaPolicyConfig(opportunistic_solar_roof_f=135.0)
+    )
+    tracker.evaluate(observation(roof=135))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=135))
+    useful = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), roof=125))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=4), roof=124))
+    hold = tracker.evaluate(observation(at=NOW + timedelta(minutes=6), roof=124))
+    assert useful.heat_source is ThermalHeatSource.SOLAR
+    assert hold.state is SpaPolicyState.OPPORTUNISTIC_HOLD
+
+
+@pytest.mark.parametrize("threshold", (109.0, 151.0))
+def test_opportunistic_threshold_rejects_values_outside_supported_range(
+    threshold: float,
+) -> None:
+    with pytest.raises(ValueError, match="between 110 and 150"):
+        SpaPolicyConfig(opportunistic_solar_roof_f=threshold)
