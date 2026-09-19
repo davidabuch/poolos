@@ -177,12 +177,12 @@ class SpaThermalPolicyTracker:
         roof = observation.collector_temperature_f
         if self._maintenance_latched:
             deficit = None if observation.spa_temperature_f is None or observation.spa_target_f is None else observation.spa_target_f - observation.spa_temperature_f
-            solar = roof is not None and (roof >= self._policy.opportunistic_solar_roof_f or (roof >= self._policy.maintenance_solar_roof_f and (deficit is None or deficit <= self._policy.maintenance_deficit_f)))
+            solar = roof is not None and (roof >= self._policy.heat_up_solar_roof_f or (roof >= self._policy.maintenance_solar_roof_f and (deficit is None or deficit <= self._policy.maintenance_deficit_f)))
             if solar and observation.permissions.solar_allowed:
                 return self._solar(observation, "spa_maintenance_solar")
             return self._gas_or_none(observation, "spa_maintenance_gas")
 
-        if roof is not None and roof >= self._policy.opportunistic_solar_roof_f:
+        if roof is not None and roof >= self._policy.heat_up_solar_roof_f:
             if self._above_130_since is None:
                 self._above_130_since = observation.evaluated_at
             self._below_130_since = None
