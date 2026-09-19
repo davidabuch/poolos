@@ -79,6 +79,7 @@ def configured_values() -> dict[str, Any]:
         CONST.CONF_PUMP_TEMPERATURE_PROBE_RPM: 1550,
         CONST.CONF_PUMP_PRIMING_RPM: 3050,
         CONST.CONF_PUMP_GRID_OUTAGE_RPM: 1600,
+        CONST.CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F: 110,
     }
 
 
@@ -152,6 +153,7 @@ def test_production_composition_binds_every_nested_core_dependency() -> None:
     assert graph.thermal_evaluator.baselines is graph.baselines
     assert graph.thermal_evaluator.pool_selector._policy.baselines is graph.baselines
     assert graph.thermal_evaluator.spa_tracker._policy.baselines is graph.baselines
+    assert graph.thermal_evaluator.spa_tracker._policy.opportunistic_solar_roof_f == 110
     assert (
         graph.thermal_evaluator.planner.priming_policy.baselines
         is graph.baselines
@@ -189,6 +191,7 @@ def test_reload_builds_a_new_policy_without_mutating_the_old_policy() -> None:
     updated = configured_values()
     updated[CONST.CONF_PUMP_SOLAR_HEATING_RPM] = 3100
     updated[CONST.CONF_PUMP_GRID_OUTAGE_RPM] = 1650
+    updated[CONST.CONF_SPA_OPPORTUNISTIC_SOLAR_ROOF_F] = 140
 
     second = PUMP_BASELINES.compose_pump_baseline_runtime(updated)
 
@@ -198,6 +201,8 @@ def test_reload_builds_a_new_policy_without_mutating_the_old_policy() -> None:
     assert second.baselines.grid_outage_rpm == 1650
     assert first.baselines is not second.baselines
     assert first.baselines.fingerprint != second.baselines.fingerprint
+    assert first.thermal_evaluator.spa_tracker._policy.opportunistic_solar_roof_f == 110
+    assert second.thermal_evaluator.spa_tracker._policy.opportunistic_solar_roof_f == 140
 
 
 def test_configuration_surface_exposes_all_six_values_without_command_side_effects() -> None:
