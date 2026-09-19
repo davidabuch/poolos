@@ -46,12 +46,21 @@ maintenance for the session. Maintenance uses solar at roof ≥120°F while clos
 to target, gas below 120°F, or gas when deficit exceeds 2°F and roof is below
 130°F. Spa Gas Only suppresses all spa solar.
 
-Opportunistic spa heating is optional, solar-only, debt-aware, and available
-from 1 PM to 6 PM after two minutes at roof ≥130°F. Once active it continues to
-120°F and enters an isolated pump-off spa hold after two minutes below 120°F.
-It may resume before 6 PM, preserves spa mode from 6 PM to 10 PM, never probes
-the pool during that hold, and never uses gas. Human spa ON immediately claims
-the session; human OFF returns to opportunistic reevaluation.
+Opportunistic spa heating is optional and solar-only. Pool heating demand has
+priority. Once Pool demand is satisfied, PoolOS continuously reevaluates the Spa
+opportunity whether the Pool is still running or already off. After two
+continuous minutes at or above the configured Hot Tub Solar roof threshold,
+PoolOS may start a new opportunistic Spa Solar session. This opportunity is not
+clock-window gated and does not require filtration debt to be zero. If the roof
+is initially too cool, PoolOS may shut circulation down and later start
+opportunistic Spa Solar when the roof becomes viable.
+
+Once opportunistic Spa Solar is active, it may continue through the configured
+10°F hysteresis band. After two continuous minutes below that continuation
+threshold, or when the Spa target cap is reached, PoolOS stops opportunistic Spa
+circulation and waits while remaining eligible to reevaluate later. Autonomous
+opportunistic Spa heating never uses gas. Human Spa ON immediately claims the
+session; human OFF returns to opportunistic reevaluation.
 
 ### Filtration, TOU, and pump policy
 
