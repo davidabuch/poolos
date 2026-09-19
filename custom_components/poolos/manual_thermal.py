@@ -49,7 +49,7 @@ async def async_request_heat_mode(
 ) -> None:
     """Apply one requested mode without conflating it with observed truth."""
 
-    if option not in HEAT_MODE_OPTIONS:
+    if option not in HEAT_MODE_OPTIONS and option != LEGACY_HEAT_MODE_SOLAR_PREFERRED:
         raise ValueError(f"unsupported heat mode: {option}")
 
     mode = (
