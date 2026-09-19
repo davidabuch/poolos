@@ -113,20 +113,28 @@ def test_opportunistic_toggle_off_blocks_entry_without_affecting_user_spa() -> N
     assert user.spa_in_use
 
 
-def test_opportunistic_entry_requires_window_toggle_debt_and_two_minutes_at_130() -> None:
+def test_opportunistic_entry_is_not_clock_or_filtration_debt_gated() -> None:
     tracker = SpaThermalPolicyTracker()
-    early = tracker.evaluate(observation(at=NOW.replace(hour=12), roof=140))
-    debt = tracker.evaluate(observation(at=NOW, roof=140, debt=timedelta(minutes=1)))
-    first = tracker.evaluate(observation(at=NOW + timedelta(minutes=1), roof=130))
-    active = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), roof=130))
-    assert early.state is SpaPolicyState.IDLE
-    assert debt.state is SpaPolicyState.IDLE
+    first = tracker.evaluate(
+        observation(
+            at=NOW.replace(hour=10),
+            roof=130,
+            debt=timedelta(hours=6),
+        )
+    )
+    active = tracker.evaluate(
+        observation(
+            at=NOW.replace(hour=10, minute=2),
+            roof=130,
+            debt=timedelta(hours=6),
+        )
+    )
     assert first.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
     assert active.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
     assert active.heat_source is ThermalHeatSource.SOLAR
 
 
-def test_opportunistic_continues_to_120_then_enters_isolated_hold() -> None:
+def test_opportunistic_continues_to_hysteresis_then_stops_and_waits() -> None:
     tracker = SpaThermalPolicyTracker()
     tracker.evaluate(observation(roof=130))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
@@ -135,12 +143,12 @@ def test_opportunistic_continues_to_120_then_enters_isolated_hold() -> None:
     hold = tracker.evaluate(observation(at=NOW + timedelta(minutes=6), roof=119))
     assert useful.heat_source is ThermalHeatSource.SOLAR
     assert hold.state is SpaPolicyState.OPPORTUNISTIC_HOLD
-    assert hold.preserve_spa_mode
-    assert hold.recommended_pump_rpm == 2600
+    assert not hold.preserve_spa_mode
+    assert hold.recommended_pump_rpm is None
     assert not hold.pool_reprobe_allowed
 
 
-def test_opportunistic_target_is_a_cap_not_a_gas_backed_obligation() -> None:
+def test_opportunistic_target_is_a_cap_and_stops_circulation() -> None:
     tracker = SpaThermalPolicyTracker()
     tracker.evaluate(observation(roof=130))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
@@ -149,10 +157,11 @@ def test_opportunistic_target_is_a_cap_not_a_gas_backed_obligation() -> None:
     )
     assert capped.state is SpaPolicyState.OPPORTUNISTIC_HOLD
     assert capped.heat_source is ThermalHeatSource.NONE
-    assert capped.preserve_spa_mode
+    assert not capped.preserve_spa_mode
+    assert capped.recommended_pump_rpm is None
 
 
-def test_opportunistic_hold_resumes_after_two_minutes_at_130_before_six() -> None:
+def test_opportunistic_hold_resumes_after_two_minutes_when_roof_recovers() -> None:
     tracker = SpaThermalPolicyTracker()
     tracker.evaluate(observation(roof=130))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
@@ -172,14 +181,6 @@ def test_user_claims_opportunistic_spa_and_off_can_return_to_policy() -> None:
     assert claimed.spa_in_use
     assert claimed.heat_source is ThermalHeatSource.GAS
     assert off.state in {SpaPolicyState.OPPORTUNISTIC_QUALIFYING, SpaPolicyState.OPPORTUNISTIC_ACTIVE}
-
-
-def test_six_pm_preserves_spa_and_ten_pm_releases_to_pool() -> None:
-    tracker = SpaThermalPolicyTracker()
-    six = tracker.evaluate(observation(at=NOW.replace(hour=18), roof=130))
-    ten = tracker.evaluate(observation(at=NOW.replace(hour=22), roof=130))
-    assert six.state is SpaPolicyState.PRESERVE_UNTIL_10PM and six.preserve_spa_mode
-    assert ten.state is SpaPolicyState.RELEASE_TO_POOL and not ten.preserve_spa_mode
 
 
 def test_opportunistic_never_uses_gas_even_when_solar_permission_is_off() -> None:
@@ -256,3 +257,44 @@ def test_shared_spa_solar_threshold_rejects_values_outside_supported_range(
 ) -> None:
     with pytest.raises(ValueError, match="between 110 and 150"):
         SpaPolicyConfig(spa_solar_roof_f=threshold)
+
+
+def test_pool_target_reached_but_roof_low_waits_then_later_roof_starts_spa() -> None:
+    tracker = SpaThermalPolicyTracker()
+    waiting = tracker.evaluate(
+        observation(
+            at=NOW.replace(hour=10),
+            roof=100,
+            pool_satisfied=True,
+            debt=timedelta(hours=6),
+        )
+    )
+    qualifying = tracker.evaluate(
+        observation(
+            at=NOW.replace(hour=11),
+            roof=130,
+            pool_satisfied=True,
+            debt=timedelta(hours=6),
+        )
+    )
+    active = tracker.evaluate(
+        observation(
+            at=NOW.replace(hour=11, minute=2),
+            roof=130,
+            pool_satisfied=True,
+            debt=timedelta(hours=6),
+        )
+    )
+    assert waiting.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+    assert waiting.heat_source is ThermalHeatSource.NONE
+    assert qualifying.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+    assert active.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
+    assert active.heat_source is ThermalHeatSource.SOLAR
+
+
+def test_pool_demand_has_priority_over_opportunistic_spa() -> None:
+    result = SpaThermalPolicyTracker().evaluate(
+        observation(roof=140, pool_satisfied=False)
+    )
+    assert result.state is SpaPolicyState.IDLE
+    assert result.heat_source is ThermalHeatSource.NONE
