@@ -1030,6 +1030,8 @@ class ThermalAutomaticExecutionDriver:
                             preflight=preflight,
                         )
                     ownership_status = self.orchestrator.ownership.state.status
+                    # Terminal leases may reacquire only at a real fresh
+                    # policy boundary; plain reevaluation must not resurrect them.
                     terminal_reacquisition = ownership_status in {
                         ThermalRuntimeOwnershipStatus.PREEMPTED,
                         ThermalRuntimeOwnershipStatus.SUPERSEDED,
