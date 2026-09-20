@@ -425,17 +425,6 @@ def test_default_kill_switch_and_scope_deny_live_authority() -> None:
     assert "thermal_live_commissioning_scope_disabled" in result.blocking_reasons
 
 
-@pytest.mark.parametrize(
-    ("body", "scope", "authorized"),
-    (
-        (ThermalBody.POOL, ThermalLiveCommissioningScope.POOL, True),
-        (ThermalBody.POOL, ThermalLiveCommissioningScope.HOT_TUB, False),
-        (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.HOT_TUB, True),
-        (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.POOL, False),
-        (ThermalBody.POOL, ThermalLiveCommissioningScope.BOTH, True),
-        (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.BOTH, True),
-    ),
-)
 def test_shared_commissioning_scope_semantics_include_cleanup_body() -> None:
     assert commissioning_scope_allows_body(
         ThermalLiveCommissioningScope.BOTH,
@@ -455,6 +444,17 @@ def test_shared_commissioning_scope_semantics_include_cleanup_body() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("body", "scope", "authorized"),
+    (
+        (ThermalBody.POOL, ThermalLiveCommissioningScope.POOL, True),
+        (ThermalBody.POOL, ThermalLiveCommissioningScope.HOT_TUB, False),
+        (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.HOT_TUB, True),
+        (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.POOL, False),
+        (ThermalBody.POOL, ThermalLiveCommissioningScope.BOTH, True),
+        (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.BOTH, True),
+    ),
+)
 def test_one_body_commissioning_scope_is_exact(
     body: ThermalBody,
     scope: ThermalLiveCommissioningScope,
