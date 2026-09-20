@@ -1029,14 +1029,25 @@ class ThermalAutomaticExecutionDriver:
                             body=body,
                             preflight=preflight,
                         )
-                    if self._filtration_handoff is None:
-                        # An already-active Pool may enter a new thermal purpose
-                        # only through an explicit current BODY origin.  A semantic
-                        # label such as ordinary circulation or solar heating is
-                        # state, not provenance.  Without a typed filtration
-                        # handoff, require a fresh independent PoolOS opportunity
-                        # and prospectively adopt BODY before any Pump/Thermal
-                        # command can be accepted.
+                    ownership_status = self.orchestrator.ownership.state.status
+                    terminal_reacquisition = ownership_status in {
+                        ThermalRuntimeOwnershipStatus.PREEMPTED,
+                        ThermalRuntimeOwnershipStatus.SUPERSEDED,
+                        ThermalRuntimeOwnershipStatus.RELINQUISHED,
+                    }
+                    if (
+                        self._filtration_handoff is None
+                        and (
+                            body.plan.desired.evidence.get("active_operating_purpose")
+                            is None
+                            or terminal_reacquisition
+                        )
+                    ):
+                        # State is not provenance.  A genuinely fresh PoolOS
+                        # thermal opportunity may prospectively adopt the active
+                        # Pool.  In particular, a terminal predecessor lease may
+                        # not restart as Pump/Thermal-only ownership over the same
+                        # still-active body; BODY must be reacquired first.
                         prospective_pool_adoption = bool(
                             frame.pool_opportunity_id
                             and not frame.pool_automatic_control_suppressed
