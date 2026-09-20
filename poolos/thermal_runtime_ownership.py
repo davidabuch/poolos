@@ -1450,7 +1450,7 @@ class ThermalRuntimeOwnershipManager:
                 ),
                 concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
                 intended_value=adopt_pump_rpm,
-                observed_at=pump_observed_at,
+                observed_at=_required_datetime(pump_observed_at),
                 opportunity_id=opportunity_id,
                 reason_code=reason_code,
                 adopted_at=adopted_at,
@@ -1468,7 +1468,7 @@ class ThermalRuntimeOwnershipManager:
                 ),
                 concept=ThermalRuntimeOwnedConcept.HEAT_SOURCE,
                 intended_value=adopt_heat_source,
-                observed_at=source_observed_at,
+                observed_at=_required_datetime(source_observed_at),
                 opportunity_id=opportunity_id,
                 reason_code=reason_code,
                 adopted_at=adopted_at,
@@ -1496,7 +1496,7 @@ class ThermalRuntimeOwnershipManager:
                     health=OwnershipHealth.STABLE,
                     evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
                     command_blocker=None,
-                    target_value=heat_source_adoption.intended_value.value,
+                    target_value=PhysicalHeatMode(adopt_heat_source).value,
                     observed_value=(
                         None
                         if evidence.effective_heat_source is None
@@ -3691,6 +3691,12 @@ def _accepted_boundary(
         return promoted_at
     _require_aware(receipt_accepted_at, "receipt_accepted_at")
     return receipt_accepted_at
+
+
+def _required_datetime(value: datetime | None) -> datetime:
+    if value is None:
+        raise ValueError("required adoption observation timestamp is missing")
+    return value
 
 
 def _require_aware(value: datetime, label: str) -> None:
