@@ -689,6 +689,11 @@ class ThermalAutomaticExecutionDriver:
             # A failed normal execution cannot replay. Its independently
             # authorized residual reduction must still be allowed to finish.
             return self._blocked(frame, "automatic_thermal_reenable_required")
+
+        converged_adoption = self._prospective_converged_pool_adoption(frame)
+        if converged_adoption is not None:
+            return converged_adoption
+
         body = self._session_body(frame)
         if self.active_session is not None:
             if frame.orchestration.lifecycle not in {
@@ -2688,6 +2693,84 @@ class ThermalAutomaticExecutionDriver:
                 retain_termination_entitlement=True,
             )
         self.active_session = None
+
+    def _prospective_converged_pool_adoption(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> ThermalAutomaticDriverAssessment | None:
+        """Adopt a fresh independently justified, already-converged Pool Solar state.
+
+        This is a command-free prospective authority boundary, not restoration of
+        historical receipts. It is deliberately limited to a fully converged,
+        physically active Pool/Solar purpose with fresh exclusive topology and a
+        current unsuppressed semantic opportunity.
+        """
+
+        if (
+            self.active_session is not None
+            or self.orchestrator.ownership.state.status
+            is not ThermalRuntimeOwnershipStatus.UNOWNED
+            or frame.thermal is None
+            or frame.pool_automatic_control_suppressed
+            or not frame.pool_opportunity_id
+        ):
+            return None
+        body = frame.thermal.pool
+        purpose = body.execution_currentness.purpose
+        if (
+            body.body is not ThermalBody.POOL
+            or body.body_active is not True
+            or body.plan.disposition is not ThermalPlanDisposition.ALREADY_CONVERGED
+            or purpose.kind is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+            or purpose.selected_source is not PhysicalHeatMode.SOLAR
+            or body.plan.desired.selected_source is not PhysicalHeatMode.SOLAR
+            or body.plan.desired.required_pump_rpm is None
+            or body.plan.desired.evidence.get("solar_active") is not True
+            or body.plan.desired.evidence.get("solar_opportunity_warranted") is not True
+        ):
+            return None
+
+        safety = body.live_safety_evidence
+        if safety is None:
+            return self._blocked(
+                frame,
+                "automatic_thermal_converged_adoption_safety_evidence_unavailable",
+                body=body,
+            )
+        adoption_evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=frame.observed_at,
+            observations={item.observation_id: item for item in frame.observations},
+            body=body,
+            external_changes=frame.external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+        )
+        context = body.live_execution_context
+        decision = self.orchestrator.ownership.adopt_body(
+            body=ThermalBody.POOL,
+            adopted_at=frame.observed_at,
+            requested_mode=body.requested_mode.value,
+            current_context=context,
+            execution_plan_id=body.execution_currentness.purpose.purpose_id,
+            execution_progress=ThermalExecutionProgress(),
+            evidence=adoption_evidence,
+            opportunity_id=frame.pool_opportunity_id,
+            reason_code="independent_converged_pool_solar_opportunity",
+            adopt_pump_rpm=body.plan.desired.required_pump_rpm,
+            adopt_heat_source=PhysicalHeatMode.SOLAR,
+        )
+        if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
+            return self._blocked(frame, decision.reason_code, body=body)
+
+        return self._publish(
+            state=ThermalAutomaticDriverState.CONVERGED,
+            evaluated_at=frame.observed_at,
+            blocker=None,
+            frame=frame,
+            body=body,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=False,
+        )
 
     def _begin_verified_probe_acquisition(
         self,
