@@ -22,7 +22,6 @@ from .integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
 from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, is_pmpcirc_native_id
 from .native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from .observations import (
-    FreshnessPolicy,
     ObservationFreshness,
     ObservationQuality,
     ObservationSourceKind,
