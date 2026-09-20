@@ -26,6 +26,21 @@ permit it. The obsolete ten-minute activation hold is removed. While active,
 differential below 7°F and target satisfaction each have independent continuous
 ten-minute shutdown debounce.
 
+When native IntelliCenter Solar Active transitions from ON to OFF during a
+PoolOS-owned Pool heating session, that Solar delivery episode has ended.
+PoolOS does not extend active-Solar ownership merely because collector
+differential debounce would otherwise remain eligible. Instead it evaluates a
+bounded circulation successor. A short or abrupt interruption may retain the
+Pool body at ordinary 2600-RPM circulation for up to ten minutes so normal
+Solar eligibility can re-establish without cycling the Pool body. A sustained
+collector decline spanning at least twenty minutes within the prior
+thirty-minute window, dropping at least 8°F with at least 75% non-increasing
+samples and ending at or below 95°F, is treated as an end-of-day pattern and
+skips that recovery hold. Hold expiry falls through to the existing current-world
+filtration/TOU/shutdown decision. Solar re-entry always uses the existing
+activation criteria and must earn fresh Pump/Thermal command provenance; the
+recovery hold never manufactures Solar ownership.
+
 Pool modes are one mutually exclusive enum: Solar Only, Eco Heat, or Gas
 Only. Solar Only never authorizes gas. Eco Heat prefers solar, authorizes gas
 fallback, and bypasses forecast suppression. `Solar Preferred` is reserved for
