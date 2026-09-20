@@ -1736,7 +1736,11 @@ class ThermalAutomaticExecutionDriver:
             )
         if not frame.live_policy.thermal_live_execution_enabled:
             return self._blocked(frame, "thermal_cleanup_thermal_live_disabled")
-        if frame.live_policy.commissioning_scope.value != ThermalBody.POOL.value:
+        allowed_scopes = {
+            ThermalLiveCommissioningScope.BOTH,
+            ThermalLiveCommissioningScope(provenance.body.value),
+        }
+        if frame.live_policy.commissioning_scope not in allowed_scopes:
             return self._blocked(frame, "thermal_cleanup_commissioning_scope_mismatch")
         try:
             delivery = delivery_factory.for_cleanup(
