@@ -343,6 +343,7 @@ def test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump() ->
                 filtration_disposition=FiltrationDisposition.SATISFIED,
                 evaluator=evaluator,
                 driver=driver,
+                pool_opportunity_id="pool:thermal:restart-solar",
             ),
             delivery_factory=factory,
         )
@@ -381,6 +382,7 @@ def test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump() ->
                 filtration_disposition=FiltrationDisposition.SATISFIED,
                 evaluator=evaluator,
                 driver=driver,
+                pool_opportunity_id="pool:thermal:restart-solar",
             ),
             delivery_factory=factory,
         )
@@ -406,6 +408,7 @@ def test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump() ->
                 filtration_disposition=FiltrationDisposition.SATISFIED,
                 evaluator=evaluator,
                 driver=driver,
+                pool_opportunity_id="pool:thermal:restart-solar",
             ),
             delivery_factory=factory,
         )
