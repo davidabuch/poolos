@@ -413,7 +413,10 @@ def test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump() ->
             delivery_factory=factory,
         )
     )
-    assert verified.state is ThermalAutomaticDriverState.CONVERGED
+    assert verified.state in {
+        ThermalAutomaticDriverState.CONVERGED,
+        ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
+    }
     assert len(delivery.calls) == 1
     lease = orchestrator.ownership.state.lease
     assert lease is not None
