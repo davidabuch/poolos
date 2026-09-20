@@ -1496,7 +1496,7 @@ class ThermalRuntimeOwnershipManager:
                     health=OwnershipHealth.STABLE,
                     evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
                     command_blocker=None,
-                    target_value=PhysicalHeatMode(adopt_heat_source).value,
+                    target_value=_required_heat_mode(adopt_heat_source).value,
                     observed_value=(
                         None
                         if evidence.effective_heat_source is None
@@ -3691,6 +3691,12 @@ def _accepted_boundary(
         return promoted_at
     _require_aware(receipt_accepted_at, "receipt_accepted_at")
     return receipt_accepted_at
+
+
+def _required_heat_mode(value: PhysicalHeatMode | None) -> PhysicalHeatMode:
+    if value is None:
+        raise ValueError("required adopted heat source is missing")
+    return value
 
 
 def _required_datetime(value: datetime | None) -> datetime:
