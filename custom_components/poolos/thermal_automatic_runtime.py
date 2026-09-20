@@ -276,6 +276,12 @@ class PoolOSThermalAutomaticRuntime:
     _owned_pump_session_reobservation_task: asyncio.Task[object] | None = field(
         default=None, init=False, repr=False
     )
+    _cleanup_topology_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
+    _cleanup_topology_reobservation_provenance_id: str | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
@@ -668,6 +674,11 @@ class PoolOSThermalAutomaticRuntime:
             probe_task.cancel()
             await asyncio.gather(probe_task, return_exceptions=True)
         self._owned_pump_session_reobservation_task = None
+        cleanup_task = self._cleanup_topology_reobservation_task
+        if cleanup_task is not None and not cleanup_task.done():
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
+        self._cleanup_topology_reobservation_task = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -742,6 +753,52 @@ class PoolOSThermalAutomaticRuntime:
             if asyncio.current_task() is self._owned_pump_session_reobservation_task:
                 self._owned_pump_session_reobservation_task = None
 
+    def _sync_cleanup_topology_reobservation(self) -> None:
+        """Request one post-boundary native topology refresh per cleanup provenance."""
+
+        if self._unloaded or not self.driver.requested_enabled:
+            return
+        provenance = getattr(self.driver, "cleanup_provenance", None)
+        if provenance is None:
+            self._cleanup_topology_reobservation_provenance_id = None
+            return
+        provenance_id = provenance.provenance_id
+        if self._cleanup_topology_reobservation_provenance_id == provenance_id:
+            return
+        task = self._cleanup_topology_reobservation_task
+        if task is not None and not task.done():
+            return
+        self._cleanup_topology_reobservation_provenance_id = provenance_id
+        self._cleanup_topology_reobservation_task = self.hass.async_create_task(
+            self._refresh_cleanup_topology_once(provenance_id),
+            "PoolOS cleanup topology native reobservation",
+        )
+
+    async def _refresh_cleanup_topology_once(self, provenance_id: str) -> None:
+        """Refresh topology once after cleanup establishes a new chronology boundary."""
+
+        try:
+            if self._unloaded:
+                return
+            provenance = getattr(self.driver, "cleanup_provenance", None)
+            if provenance is None or provenance.provenance_id != provenance_id:
+                return
+            refresh = getattr(
+                self.coordinator,
+                "async_refresh_native_cleanup_topology_evidence",
+                None,
+            )
+            if refresh is None:
+                return
+            await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS cleanup topology native reobservation failed")
+        finally:
+            if asyncio.current_task() is self._cleanup_topology_reobservation_task:
+                self._cleanup_topology_reobservation_task = None
+
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
             return
@@ -789,6 +846,7 @@ class PoolOSThermalAutomaticRuntime:
             )
         self.coordinator.async_update_listeners()
         self._sync_owned_pump_session_reobservation()
+        self._sync_cleanup_topology_reobservation()
         if self._unloaded or not self.driver.requested_enabled:
             return
         latest = self._latest_frame
