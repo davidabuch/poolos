@@ -1024,8 +1024,8 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
 
 
 
-def test_active_solar_reacquisition_adopts_body_before_pump_correction() -> None:
-    """Live regression: fresh Solar work cannot own Pump/Thermal without BODY."""
+def test_terminal_active_solar_reacquisition_adopts_body_before_pump_correction() -> None:
+    """Live regression: terminal predecessor must reacquire BODY before Solar work."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -1055,9 +1055,41 @@ def test_active_solar_reacquisition_adopts_body_before_pump_correction() -> None
         current_epoch_identity=baseline.epoch_identity,
     )
 
-    active_solar_wrong_rpm = _frame(
+    first = _frame(
         orchestrator,
         NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        solar_active=True,
+        pool_temperature=83.0,
+        pool_target=90.0,
+        solar_temperature=101.0,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:first",
+    )
+    asyncio.run(driver.process_epoch(first, delivery_factory=factory))
+    first_lease = orchestrator.ownership.state.lease
+    assert first_lease is not None
+
+    # Reproduce the live commissioning failure boundary: the predecessor
+    # generation has ended, but the Pool is still physically active.
+    orchestrator.ownership.relinquish(
+        ended_at=NOW + timedelta(seconds=2),
+        reason_code="test_terminal_predecessor",
+    )
+    assert (
+        orchestrator.ownership.state.status
+        is ThermalRuntimeOwnershipStatus.RELINQUISHED
+    )
+
+    delivery.calls.clear()
+    successor = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=3),
         pool_active=True,
         pump_rpm=2600,
         configured_rpm=2600,
@@ -1074,7 +1106,7 @@ def test_active_solar_reacquisition_adopts_body_before_pump_correction() -> None
 
     result = asyncio.run(
         driver.process_epoch(
-            active_solar_wrong_rpm,
+            successor,
             delivery_factory=factory,
         )
     )
@@ -1082,6 +1114,7 @@ def test_active_solar_reacquisition_adopts_body_before_pump_correction() -> None
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.generation > first_lease.generation
     assert lease.owns_body_adoption
     assert lease.body_adoption is not None
     assert lease.body_adoption.opportunity_id == "pool:thermal:fresh-reacquisition"
