@@ -1078,7 +1078,8 @@ def test_terminal_active_solar_reacquisition_adopts_body_before_pump_correction(
     # Reproduce the live commissioning failure boundary: the predecessor
     # generation has ended, but the Pool is still physically active.
     orchestrator.ownership.relinquish(
-        ended_at=NOW + timedelta(seconds=2),
+        lease_id=first_lease.lease_id,
+        relinquished_at=NOW + timedelta(seconds=2),
         reason_code="test_terminal_predecessor",
     )
     assert (
