@@ -57,6 +57,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
     ThermalLiveExecutionStatus,
+    commissioning_scope_allows_body,
     ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
 )
@@ -435,6 +436,25 @@ def test_default_kill_switch_and_scope_deny_live_authority() -> None:
         (ThermalBody.HOT_TUB, ThermalLiveCommissioningScope.BOTH, True),
     ),
 )
+def test_shared_commissioning_scope_semantics_include_cleanup_body() -> None:
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalBody.POOL,
+    )
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalBody.HOT_TUB,
+    )
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.POOL,
+        ThermalBody.POOL,
+    )
+    assert not commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.HOT_TUB,
+        ThermalBody.POOL,
+    )
+
+
 def test_one_body_commissioning_scope_is_exact(
     body: ThermalBody,
     scope: ThermalLiveCommissioningScope,
