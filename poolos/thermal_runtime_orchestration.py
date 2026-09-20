@@ -21,6 +21,7 @@ from .intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
+from .native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -49,22 +50,11 @@ from .pool_temperature_probe_execution import PoolTemperatureProbeContinuityEvid
 from .operating_baselines import PumpOperatingBaselines
 from .pump_speed_session import PumpSpeedOverrideState
 
-# The independent native transport configures a 90-second keepalive interval
-# and the HA coordinator provides a 30-second reconciliation backstop.  The
-# keepalive is an intended source cadence, not a protocol-level delivery SLA;
-# missing the combined bound therefore still fails closed.
-# Candidate admission and continued ownership therefore permit one complete
-# source cadence plus one scheduling interval. Probe continuity and
-# post-delivery verification deliberately retain the stricter 30-second
-# contract below because they prove a new physical consequence.
-_NATIVE_ORCHESTRATION_SOURCE_CADENCE = timedelta(seconds=90)
-_NATIVE_ORCHESTRATION_SCHEDULING_MARGIN = timedelta(seconds=30)
-NATIVE_ORCHESTRATION_FRESHNESS = FreshnessPolicy(
-    max_age=(
-        _NATIVE_ORCHESTRATION_SOURCE_CADENCE
-        + _NATIVE_ORCHESTRATION_SCHEDULING_MARGIN
-    )
-)
+# Candidate admission and continued ownership share the authoritative native
+# steady-state freshness contract. Probe continuity and post-delivery
+# verification deliberately retain the stricter 30-second contract below
+# because they prove a new physical consequence.
+NATIVE_ORCHESTRATION_FRESHNESS = NATIVE_STEADY_STATE_FRESHNESS
 STRICT_LIVE_FRESHNESS = FreshnessPolicy(max_age=timedelta(seconds=30))
 _LIVE_MINIMUM_CONFIDENCE = 0.5
 _LIVE_ACCEPTED_QUALITIES = frozenset(

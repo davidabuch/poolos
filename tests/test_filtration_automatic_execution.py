@@ -119,7 +119,7 @@ def _frame(
         PoolObservation(
             concept,
             value,
-            observed_at=(at - timedelta(minutes=1) if concept in stale else at),
+            observed_at=(at - timedelta(seconds=121) if concept in stale else at),
             source_kind=(
                 ObservationSourceKind.DERIVED
                 if concept in non_live
@@ -233,6 +233,58 @@ def _verified_filtration_driver(
     assert driver.ownership.filtration_lease is not None
     assert driver.ownership.filtration_lease.verified
     return driver, delivery, factory
+
+
+def test_verified_filtration_tolerates_one_native_keepalive_cadence_without_suspension() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    commands_before = len(delivery.operations)
+    at = NOW + timedelta(minutes=4)
+    frame = _frame(
+        at,
+        pool=True,
+        rpm=2600,
+        configured=2600,
+    )
+    frame = replace(
+        frame,
+        observations=tuple(
+            replace(item, observed_at=at - timedelta(seconds=90))
+            for item in frame.observations
+        ),
+    )
+
+    result = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
+
+    assert result.state is FiltrationAutomaticDriverState.OWNED
+    assert result.blocker is None
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
+    assert len(delivery.operations) == commands_before
+
+
+def test_verified_filtration_suspends_after_native_steady_state_freshness_expires() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    commands_before = len(delivery.operations)
+    at = NOW + timedelta(minutes=4)
+    frame = _frame(
+        at,
+        pool=True,
+        rpm=2600,
+        configured=2600,
+    )
+    frame = replace(
+        frame,
+        observations=tuple(
+            replace(item, observed_at=at - timedelta(seconds=121))
+            for item in frame.observations
+        ),
+    )
+
+    result = asyncio.run(driver.process_epoch(frame, delivery_factory=factory))
+
+    assert result.state is FiltrationAutomaticDriverState.SUSPENDED
+    assert result.blocker == "automatic_filtration_pool_activity_unusable"
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
+    assert len(delivery.operations) == commands_before
 
 
 def test_verified_filtration_transient_pool_evidence_loss_retains_cleanup_provenance() -> None:

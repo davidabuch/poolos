@@ -20,8 +20,8 @@ from .filtration_policy import FiltrationAccountingSnapshot
 from .hal import CommandReceipt
 from .integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
 from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, is_pmpcirc_native_id
+from .native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from .observations import (
-    FreshnessPolicy,
     ObservationFreshness,
     ObservationQuality,
     ObservationSourceKind,
@@ -1254,7 +1254,7 @@ def _live_state(observation: PoolObservation | None, at: datetime) -> _LiveState
         return _LiveState(None, False, None)
     fresh = observation.freshness(
         clock=FixedClock(at),
-        policy=FreshnessPolicy(max_age=timedelta(seconds=30)),
+        policy=NATIVE_STEADY_STATE_FRESHNESS,
     ) is ObservationFreshness.FRESH
     usable = bool(
         fresh
