@@ -1029,11 +1029,14 @@ class ThermalAutomaticExecutionDriver:
                             body=body,
                             preflight=preflight,
                         )
-                    if (
-                        self._filtration_handoff is None
-                        and body.plan.desired.evidence.get("active_operating_purpose")
-                        is None
-                    ):
+                    if self._filtration_handoff is None:
+                        # An already-active Pool may enter a new thermal purpose
+                        # only through an explicit current BODY origin.  A semantic
+                        # label such as ordinary circulation or solar heating is
+                        # state, not provenance.  Without a typed filtration
+                        # handoff, require a fresh independent PoolOS opportunity
+                        # and prospectively adopt BODY before any Pump/Thermal
+                        # command can be accepted.
                         prospective_pool_adoption = bool(
                             frame.pool_opportunity_id
                             and not frame.pool_automatic_control_suppressed
