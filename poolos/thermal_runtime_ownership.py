@@ -155,6 +155,48 @@ class ThermalRuntimeBodyAdoption:
 
 
 @dataclass(frozen=True, slots=True)
+class ThermalRuntimeConceptAdoption:
+    """Fresh prospective Pump/Thermal origin; never a command receipt."""
+
+    adoption_id: str
+    concept: ThermalRuntimeOwnedConcept
+    intended_value: int | PhysicalHeatMode
+    observed_at: datetime
+    opportunity_id: str
+    reason_code: str
+    adopted_at: datetime
+
+    def __post_init__(self) -> None:
+        for name in ("adoption_id", "opportunity_id", "reason_code"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must not be empty")
+        concept = ThermalRuntimeOwnedConcept(self.concept)
+        if concept not in {
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+            ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+        }:
+            raise ValueError("concept adoption is limited to Pump/Thermal")
+        if concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT:
+            if (
+                isinstance(self.intended_value, bool)
+                or not isinstance(self.intended_value, int)
+                or self.intended_value <= 0
+            ):
+                raise ValueError("pump adoption requires a positive integer RPM")
+        else:
+            object.__setattr__(
+                self,
+                "intended_value",
+                PhysicalHeatMode(self.intended_value),
+            )
+        _require_aware(self.observed_at, "observed_at")
+        _require_aware(self.adopted_at, "adopted_at")
+        if self.observed_at > self.adopted_at:
+            raise ValueError("concept adoption evidence cannot follow adoption")
+        object.__setattr__(self, "concept", concept)
+
+
+@dataclass(frozen=True, slots=True)
 class ThermalResidualTerminationEntitlement:
     """Ephemeral proof of PoolOS-created effects eligible only for reduction.
 
@@ -268,7 +310,9 @@ class ThermalRuntimeOwnershipLease:
     body_activation: ThermalRuntimeConceptProvenance | None = None
     body_adoption: ThermalRuntimeBodyAdoption | None = None
     pump_setpoint: ThermalRuntimeConceptProvenance | None = None
+    pump_adoption: ThermalRuntimeConceptAdoption | None = None
     heat_source: ThermalRuntimeConceptProvenance | None = None
+    heat_source_adoption: ThermalRuntimeConceptAdoption | None = None
     predecessor_lease_id: str | None = None
     ended_at: datetime | None = None
     originating_currentness: ThermalExecutionCurrentness | None = None
@@ -363,6 +407,18 @@ class ThermalRuntimeOwnershipLease:
                 )
         if self.body_activation is not None and self.body_adoption is not None:
             raise ValueError("thermal body command provenance and adoption are exclusive")
+        if self.pump_setpoint is not None and self.pump_adoption is not None:
+            raise ValueError("thermal pump command provenance and adoption are exclusive")
+        if self.heat_source is not None and self.heat_source_adoption is not None:
+            raise ValueError("thermal source command provenance and adoption are exclusive")
+        if self.pump_adoption is not None and (
+            self.pump_adoption.concept is not ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+        ):
+            raise ValueError("pump adoption must reference the Pump domain")
+        if self.heat_source_adoption is not None and (
+            self.heat_source_adoption.concept is not ThermalRuntimeOwnedConcept.HEAT_SOURCE
+        ):
+            raise ValueError("source adoption must reference the Thermal domain")
         if self.body_adoption is not None:
             if self.body_adoption.body is not self.body:
                 raise ValueError("thermal body adoption must match lease body")
@@ -397,8 +453,11 @@ class ThermalRuntimeOwnershipLease:
         states = {state.domain: state for state in self.domain_states}
         for domain, origin in (
             (OwnershipDomain.BODY, self.body_activation or self.body_adoption),
-            (OwnershipDomain.PUMP, self.pump_setpoint),
-            (OwnershipDomain.THERMAL, self.heat_source),
+            (OwnershipDomain.PUMP, self.pump_setpoint or self.pump_adoption),
+            (
+                OwnershipDomain.THERMAL,
+                self.heat_source or self.heat_source_adoption,
+            ),
         ):
             if origin is None and domain in states and states[domain].authority is OwnershipAuthority.POOLOS:
                 del states[domain]
@@ -431,13 +490,19 @@ class ThermalRuntimeOwnershipLease:
 
     @property
     def owns_pump_setpoint(self) -> bool:
-        return (self.pump_setpoint is not None
-                and self.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS)
+        return (
+            (self.pump_setpoint is not None or self.pump_adoption is not None)
+            and self.domain_state(OwnershipDomain.PUMP).authority
+            is OwnershipAuthority.POOLOS
+        )
 
     @property
     def owns_heat_source(self) -> bool:
-        return (self.heat_source is not None
-                and self.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS)
+        return (
+            (self.heat_source is not None or self.heat_source_adoption is not None)
+            and self.domain_state(OwnershipDomain.THERMAL).authority
+            is OwnershipAuthority.POOLOS
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1215,6 +1280,8 @@ class ThermalRuntimeOwnershipManager:
         evidence: ThermalRuntimeOwnershipEvidence,
         opportunity_id: str,
         reason_code: str,
+        adopt_pump_rpm: int | None = None,
+        adopt_heat_source: PhysicalHeatMode | None = None,
     ) -> ThermalRuntimeOwnershipDecision:
         """Prospectively adopt an already-active BODY from fresh current policy.
 
@@ -1294,6 +1361,36 @@ class ThermalRuntimeOwnershipManager:
             for item in evidence.shared_hydraulic_circuits
         ):
             return deny("shared_hydraulic_topology_unusable")
+        if adopt_pump_rpm is not None:
+            if isinstance(adopt_pump_rpm, bool) or adopt_pump_rpm <= 0:
+                raise ValueError("adopted pump RPM must be positive")
+            if not (
+                evidence.pump_observation_fresh
+                and evidence.pump_observation_usable
+                and evidence.configured_pump_speed_observation_fresh
+                and evidence.configured_pump_speed_observation_usable
+                and evidence.pump_observed_at is not None
+                and evidence.configured_pump_speed_observed_at is not None
+                and evidence.pump_observed_at <= adopted_at
+                and evidence.configured_pump_speed_observed_at <= adopted_at
+                and type(evidence.pump_rpm) is int
+                and type(evidence.configured_pump_speed_rpm) is int
+                and abs(evidence.pump_rpm - adopt_pump_rpm)
+                <= self.pump_rpm_tolerance
+                and abs(evidence.configured_pump_speed_rpm - adopt_pump_rpm)
+                <= self.pump_rpm_tolerance
+            ):
+                return deny("pump_adoption_evidence_unusable")
+        if adopt_heat_source is not None:
+            adopt_heat_source = PhysicalHeatMode(adopt_heat_source)
+            if not (
+                evidence.heat_source_observation_fresh
+                and evidence.heat_source_observation_usable
+                and evidence.heat_source_observed_at is not None
+                and evidence.heat_source_observed_at <= adopted_at
+                and evidence.effective_heat_source is adopt_heat_source
+            ):
+                return deny("heat_source_adoption_evidence_unusable")
 
         generation = 1 if current is None else current.generation + 1
         lease_id = _lease_id(
@@ -1333,6 +1430,73 @@ class ThermalRuntimeOwnershipManager:
             observed_value=True,
             observed_at=evidence.pool_activity_observed_at,
         )
+        pump_adoption = (
+            None
+            if adopt_pump_rpm is None
+            else ThermalRuntimeConceptAdoption(
+                adoption_id=_concept_adoption_id(
+                    generation=generation,
+                    concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+                    opportunity_id=opportunity_id,
+                    adopted_at=adopted_at,
+                ),
+                concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+                intended_value=adopt_pump_rpm,
+                observed_at=evidence.pump_observed_at,
+                opportunity_id=opportunity_id,
+                reason_code=reason_code,
+                adopted_at=adopted_at,
+            )
+        )
+        heat_source_adoption = (
+            None
+            if adopt_heat_source is None
+            else ThermalRuntimeConceptAdoption(
+                adoption_id=_concept_adoption_id(
+                    generation=generation,
+                    concept=ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+                    opportunity_id=opportunity_id,
+                    adopted_at=adopted_at,
+                ),
+                concept=ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+                intended_value=adopt_heat_source,
+                observed_at=evidence.heat_source_observed_at,
+                opportunity_id=opportunity_id,
+                reason_code=reason_code,
+                adopted_at=adopted_at,
+            )
+        )
+        domain_states = [body_state]
+        if pump_adoption is not None:
+            domain_states.append(
+                DomainOwnershipState(
+                    OwnershipDomain.PUMP,
+                    authority=OwnershipAuthority.POOLOS,
+                    health=OwnershipHealth.STABLE,
+                    evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+                    command_blocker=None,
+                    target_value=adopt_pump_rpm,
+                    observed_value=evidence.pump_rpm,
+                    observed_at=evidence.pump_observed_at,
+                )
+            )
+        if heat_source_adoption is not None:
+            domain_states.append(
+                DomainOwnershipState(
+                    OwnershipDomain.THERMAL,
+                    authority=OwnershipAuthority.POOLOS,
+                    health=OwnershipHealth.STABLE,
+                    evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+                    command_blocker=None,
+                    target_value=adopt_heat_source.value,
+                    observed_value=(
+                        None
+                        if evidence.effective_heat_source is None
+                        else evidence.effective_heat_source.value
+                    ),
+                    observed_at=evidence.heat_source_observed_at,
+                )
+            )
         lease = ThermalRuntimeOwnershipLease(
             lease_id=lease_id,
             generation=generation,
@@ -1344,12 +1508,18 @@ class ThermalRuntimeOwnershipManager:
             established_at=adopted_at,
             last_confirmed_at=adopted_at,
             status=ThermalRuntimeOwnershipStatus.OWNED,
-            reason_code="runtime_ownership_established:prospective_body_adoption",
+            reason_code=(
+                "runtime_ownership_established:prospective_domain_adoption"
+                if pump_adoption is not None or heat_source_adoption is not None
+                else "runtime_ownership_established:prospective_body_adoption"
+            ),
             body_adoption=adoption,
+            pump_adoption=pump_adoption,
+            heat_source_adoption=heat_source_adoption,
             originating_currentness=currentness,
             execution_progress=execution_progress,
             verified_concepts=(),
-            domain_states=(body_state,),
+            domain_states=tuple(domain_states),
             body_session_id=lease_id,
             body_session_generation=generation,
         )
@@ -1643,7 +1813,7 @@ class ThermalRuntimeOwnershipManager:
                 expected = role == "body_activation" and lease.body_activation is not None
                 equipment = lease.body.value
             elif state.domain is OwnershipDomain.PUMP:
-                origin = lease.pump_setpoint
+                origin = lease.pump_setpoint or lease.pump_adoption
                 actual = evidence.pump_rpm
                 observed_at = evidence.pump_observed_at
                 usable = (evidence.pump_observation_fresh and evidence.pump_observation_usable
@@ -1659,7 +1829,7 @@ class ThermalRuntimeOwnershipManager:
                 expected = role in {"priming", "pool_temperature_probe", "thermal_pump_target"}
                 equipment = "pump.rpm"
             else:
-                origin = lease.heat_source
+                origin = lease.heat_source or lease.heat_source_adoption
                 actual = evidence.effective_heat_source
                 observed_at = evidence.heat_source_observed_at
                 usable = evidence.heat_source_observation_fresh and evidence.heat_source_observation_usable
@@ -1679,7 +1849,10 @@ class ThermalRuntimeOwnershipManager:
             ), None)
             origin_id = (
                 origin.adoption_id
-                if isinstance(origin, ThermalRuntimeBodyAdoption)
+                if isinstance(
+                    origin,
+                    (ThermalRuntimeBodyAdoption, ThermalRuntimeConceptAdoption),
+                )
                 else origin.receipt_id
             )
             intended_value = (
@@ -2029,11 +2202,15 @@ class ThermalRuntimeOwnershipManager:
             reason_code="runtime_ownership_promoted:accepted_session_delivery",
             body_activation=activation or lease.body_activation,
             pump_setpoint=pump or lease.pump_setpoint,
+            pump_adoption=(None if pump is not None else lease.pump_adoption),
             pump_session_id=(None if pump is not None else lease.pump_session_id),
             pump_session_effective_rpm=(
                 None if pump is not None else lease.pump_session_effective_rpm
             ),
             heat_source=source or lease.heat_source,
+            heat_source_adoption=(
+                None if source is not None else lease.heat_source_adoption
+            ),
             execution_progress=execution_progress,
             verified_concepts=_promoted_verified_concepts(
                 lease,
@@ -2192,10 +2369,18 @@ class ThermalRuntimeOwnershipManager:
             pump_setpoint=(
                 None if request.replace_pump_setpoint else lease.pump_setpoint
             ),
+            pump_adoption=(
+                None if request.replace_pump_setpoint else lease.pump_adoption
+            ),
             pump_session_id=None,
             pump_session_effective_rpm=None,
             heat_source=(
                 None if request.replace_heat_source else lease.heat_source
+            ),
+            heat_source_adoption=(
+                None
+                if request.replace_heat_source
+                else lease.heat_source_adoption
             ),
             pump_setpoint_accepted_at=(
                 None
@@ -2491,16 +2676,18 @@ class ThermalRuntimeOwnershipManager:
             return prefix + "predecessor_" + continuation.rsplit(":", 1)[-1]
         if lease.body_activation is not None and not request.successor_requires_body_active:
             return prefix + "body_activation_incompatible"
-        if lease.pump_setpoint is not None:
+        pump_origin = lease.pump_setpoint or lease.pump_adoption
+        if pump_origin is not None:
             if (
                 request.successor_required_pump_rpm
-                != lease.pump_setpoint.intended_value
+                != pump_origin.intended_value
                 and not request.replace_pump_setpoint
             ):
                 return prefix + "pump_incompatible"
-        if lease.heat_source is not None:
+        source_origin = lease.heat_source or lease.heat_source_adoption
+        if source_origin is not None:
             if (
-                request.successor_heat_source is not lease.heat_source.intended_value
+                request.successor_heat_source is not source_origin.intended_value
                 and not request.replace_heat_source
             ):
                 return prefix + "source_incompatible"
@@ -2880,6 +3067,26 @@ def _body_adoption_id(
         separators=(",", ":"),
     )
     return "thermal-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
+
+
+def _concept_adoption_id(
+    *,
+    generation: int,
+    concept: ThermalRuntimeOwnedConcept,
+    opportunity_id: str,
+    adopted_at: datetime,
+) -> str:
+    payload = json.dumps(
+        {
+            "generation": generation,
+            "concept": concept.value,
+            "opportunity_id": opportunity_id,
+            "adopted_at": adopted_at.isoformat(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "thermal-concept-adoption-" + sha256(payload.encode()).hexdigest()[:24]
 
 
 def _lease_id(
@@ -3483,6 +3690,7 @@ __all__ = [
     "SharedHydraulicSafetyClass",
     "ThermalResidualTerminationEntitlement",
     "ThermalRuntimeBodyAdoption",
+    "ThermalRuntimeConceptAdoption",
     "ThermalRuntimeConceptProvenance",
     "ThermalRuntimeHandoffRequest",
     "ThermalRuntimeOwnedConcept",
