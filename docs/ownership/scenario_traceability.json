@@ -374,7 +374,7 @@
       {
         "scenario_id": 53,
         "implementation_status": "SATISFIED",
-        "mechanism": "Restart reconstructs no historical command authority. A fresh independent active Pool Solar opportunity may prospectively adopt BODY and THERMAL from current authoritative evidence when Pool is exclusively active and Solar is physically active. If configured/actual pump RPM already match 2900, PUMP may also be prospectively adopted; if RPM is wrong, PUMP remains unowned until the corrective 2900 command is accepted and verified. The fresh generation records adoption provenance rather than fabricated historical receipts.",
+        "mechanism": "Restart reconstructs no historical command authority. A fresh independent active Pool Solar opportunity may prospectively adopt BODY and THERMAL from current authoritative evidence when Pool is exclusively active and Solar is physically active. If configured and actual pump RPM already match the 2900 requirement, PUMP may also be prospectively adopted; if RPM is wrong, PUMP remains unowned until the corrective 2900 command is accepted and verified. The fresh generation records adoption provenance rather than fabricated historical receipts.",
         "regressions": [
           "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump",
           "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_matching_pump_prospectively_adopts_fresh_domains",
@@ -459,13 +459,10 @@
         {
           "id": "OWN-001",
           "behavior": "Cold OFF filtration owns each required domain, earns observed credit and verifies body Off plus pump zero.",
-          "status": "IMPLEMENTED"
+          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
         }
       ],
-      "specific_baseline_test_nodes": [
-        "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump",
-        "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_matching_pump_prospectively_adopts_fresh_domains"
-      ]
+      "specific_baseline_test_nodes": []
     },
     {
       "scenario_id": 2,
@@ -2491,10 +2488,13 @@
         {
           "id": "OWN-053",
           "behavior": "Restart active useful Solar creates a fresh prospective BODY/PUMP/THERMAL grant without OFF/ON.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "IMPLEMENTED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump",
+        "tests/test_solar_reacquisition_currentness.py::test_restart_active_solar_matching_pump_prospectively_adopts_fresh_domains"
+      ]
     },
     {
       "scenario_id": 54,
