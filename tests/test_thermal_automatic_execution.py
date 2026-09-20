@@ -1023,6 +1023,77 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
     assert result.runtime_ownership_summary["owns_body_adoption"] is True
 
 
+
+def test_active_solar_reacquisition_adopts_body_before_pump_correction() -> None:
+    """Live regression: fresh Solar work cannot own Pump/Thermal without BODY."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        pool_heater="00000",
+        solar_active=False,
+        pool_temperature=83.0,
+        pool_target=90.0,
+        solar_temperature=101.0,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    active_solar_wrong_rpm = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        solar_active=True,
+        pool_temperature=83.0,
+        pool_target=90.0,
+        solar_temperature=101.0,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:fresh-reacquisition",
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(
+            active_solar_wrong_rpm,
+            delivery_factory=factory,
+        )
+    )
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.owns_body_adoption
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == "pool:thermal:fresh-reacquisition"
+    assert result.runtime_ownership_summary["owns_body"] is True
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2900
+    assert not any(
+        isinstance(operation, SetBodyActive) and operation.active
+        for operation in delivery.calls
+    )
+
+
 def test_adopted_pool_probe_promotes_source_off_progress_before_probe_rpm() -> None:
     """Live regression: adopted BODY survives source-Off -> probe RPM evolution."""
 
