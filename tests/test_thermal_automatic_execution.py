@@ -1023,6 +1023,59 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
     assert result.runtime_ownership_summary["owns_body_adoption"] is True
 
 
+
+def test_fresh_solar_successor_retires_residual_then_reacquires_body() -> None:
+    """Live regression: stale reduction proof cannot latch a fresh Solar purpose."""
+
+    orchestrator, driver, factory = _driver_with_residual_body_entitlement()
+    delivery = factory.delivery
+    residual = orchestrator.ownership.residual_termination
+    assert residual is not None
+    predecessor_generation = residual.generation
+
+    evaluator = ThermalRuntimeEvaluator()
+    delivery.calls.clear()
+    successor = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=3),
+        pool_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        pool_heater="H0002",
+        solar_active=True,
+        pool_temperature=83.0,
+        pool_target=90.0,
+        solar_temperature=101.0,
+        mode=ThermalRequestedMode.SOLAR,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:fresh-reacquisition",
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(
+            successor,
+            delivery_factory=factory,
+        )
+    )
+
+    assert orchestrator.ownership.residual_termination is None
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.generation > predecessor_generation
+    assert lease.owns_body_adoption
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == "pool:thermal:fresh-reacquisition"
+    assert result.runtime_ownership_summary["owns_body"] is True
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2900
+    assert not any(
+        isinstance(operation, SetBodyActive) and operation.active
+        for operation in delivery.calls
+    )
+
+
 def test_adopted_pool_probe_promotes_source_off_progress_before_probe_rpm() -> None:
     """Live regression: adopted BODY survives source-Off -> probe RPM evolution."""
 

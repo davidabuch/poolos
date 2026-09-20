@@ -668,6 +668,8 @@ class ThermalAutomaticExecutionDriver:
         if engagement_result is not None:
             return engagement_result
 
+        self._retire_obsolete_reduction_for_fresh_successor(frame)
+
         termination_result = await self._process_termination(
             frame,
             delivery_factory=delivery_factory,
@@ -1029,11 +1031,27 @@ class ThermalAutomaticExecutionDriver:
                             body=body,
                             preflight=preflight,
                         )
+                    ownership_status = self.orchestrator.ownership.state.status
+                    # Terminal leases may reacquire only at a real fresh
+                    # policy boundary; plain reevaluation must not resurrect them.
+                    terminal_reacquisition = ownership_status in {
+                        ThermalRuntimeOwnershipStatus.PREEMPTED,
+                        ThermalRuntimeOwnershipStatus.SUPERSEDED,
+                        ThermalRuntimeOwnershipStatus.RELINQUISHED,
+                    }
                     if (
                         self._filtration_handoff is None
-                        and body.plan.desired.evidence.get("active_operating_purpose")
-                        is None
+                        and (
+                            body.plan.desired.evidence.get("active_operating_purpose")
+                            is None
+                            or terminal_reacquisition
+                        )
                     ):
+                        # State is not provenance.  A genuinely fresh PoolOS
+                        # thermal opportunity may prospectively adopt the active
+                        # Pool.  In particular, a terminal predecessor lease may
+                        # not restart as Pump/Thermal-only ownership over the same
+                        # still-active body; BODY must be reacquired first.
                         prospective_pool_adoption = bool(
                             frame.pool_opportunity_id
                             and not frame.pool_automatic_control_suppressed
@@ -1296,6 +1314,76 @@ class ThermalAutomaticExecutionDriver:
             failure=None,
             command_delivery_performed=True,
         )
+
+    def _retire_obsolete_reduction_for_fresh_successor(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> None:
+        """Retire uncommitted reduction proof when fresh Pool thermal work wins.
+
+        Residual/cleanup provenance is authority to reduce an obsolete purpose;
+        it is not a latch that may block a later independently authorized Pool
+        thermal purpose forever.  Accepted physical cleanup work is never
+        canceled here: any source-Off or circulation cleanup attempt already in
+        flight must finish verification before a successor can proceed.
+        """
+
+        if (
+            self.active_session is not None
+            or self._delivery_in_flight
+            or self.termination_attempt is not None
+            or self.cleanup_attempt is not None
+            or frame.thermal is None
+            or frame.pool_automatic_control_suppressed
+            or not frame.pool_opportunity_id
+            or (
+                self._reenable_required
+                and not self._independent_fault_successor(frame)
+            )
+            or frame.orchestration.lifecycle
+            is not ThermalOrchestrationLifecycle.CANDIDATE_READY
+            or frame.orchestration.candidate_body is not ThermalBody.POOL
+        ):
+            return
+
+        body = frame.thermal.pool
+        if (
+            not body.actual_authorization.authorized
+            or body.plan.disposition is not ThermalPlanDisposition.READY
+            or body.plan.desired.selected_source is PhysicalHeatMode.OFF
+        ):
+            return
+
+        residual = self.orchestrator.ownership.residual_termination
+        if residual is not None:
+            assessment = self._termination_assessment(frame)
+            if (
+                residual.body is ThermalBody.POOL
+                and assessment is not None
+                and assessment.disposition
+                is ThermalTerminationDisposition.RELINQUISH_ONLY
+                and assessment.reason_code
+                == "thermal_termination_current_policy_still_requires_heat_source"
+            ):
+                self.orchestrator.ownership.consume_residual_termination(
+                    entitlement_id=residual.entitlement_id
+                )
+                self.circulation_ownership.release_thermal(
+                    thermal_lease_id=residual.lease_id
+                )
+                self.circulation_ownership.reserve_thermal(frame.epoch_identity)
+
+        provenance = self.cleanup_provenance
+        if provenance is not None and provenance.body is ThermalBody.POOL:
+            # No cleanup attempt exists (guarded above), so this token has not
+            # authorized a physical consequence.  Release only the exact old
+            # thermal circulation lease; the fresh candidate will establish a
+            # new generation through normal acquisition below.
+            self.cleanup_provenance = None
+            self.circulation_ownership.release_thermal(
+                thermal_lease_id=provenance.lease_id
+            )
+            self.circulation_ownership.reserve_thermal(frame.epoch_identity)
 
     async def _process_termination(
         self,
@@ -1970,13 +2058,16 @@ class ThermalAutomaticExecutionDriver:
             return _CleanupCaptureDisposition.INVALIDATED
         if (
             entitlement.body_activation is None
+            and entitlement.body_adoption is None
             and (
                 entitlement.pump_setpoint is None
                 or entitlement.body is ThermalBody.HOT_TUB
             )
         ):
             # Source-only residuals have no circulation capability to transfer.
-            # The existing Hot Tub cleanup scope likewise requires body origin.
+            # Prospective Pool BODY adoption is a real fresh BODY origin and
+            # therefore retains bounded cleanup authority after source Off.
+            # Hot Tub cleanup remains limited to its explicit activation path.
             return _CleanupCaptureDisposition.NO_CIRCULATION_CAPABILITY
         if entitlement.body is ThermalBody.POOL and (
             circulation is None or not circulation.body_shutdown_source_safe

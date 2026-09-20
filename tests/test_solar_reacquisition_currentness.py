@@ -472,6 +472,84 @@ def test_restart_active_solar_matching_pump_prospectively_adopts_fresh_domains()
     assert result.runtime_ownership_summary["owns_heat_source"] is True
 
 
+
+
+def test_adopted_converged_solar_supersession_retains_pool_cleanup_authority() -> None:
+    """Commissioning regression: adopted Solar must still unwind Pool circulation."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=driver)
+    evaluator = ThermalRuntimeEvaluator()
+    driver.set_enabled(True, changed_at=NOW, current_epoch_identity=None)
+
+    active = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="H0002",
+        solar_active=True,
+        pool_temperature=83.0,
+        pool_target=90.0,
+        solar_temperature=119.0,
+        mode=ThermalRequestedMode.SOLAR,
+        filtration_remaining=timedelta(hours=5),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id="pool:thermal:commissioning",
+    )
+    asyncio.run(driver.process_epoch(active, delivery_factory=factory))
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.owns_body_adoption
+    assert lease.pump_adoption is not None
+    assert lease.heat_source_adoption is not None
+    assert delivery.calls == []
+
+    ending = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=2),
+        pool_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        pool_heater="00000",
+        solar_active=False,
+        pool_temperature=83.0,
+        pool_target=80.0,
+        solar_temperature=108.0,
+        mode=ThermalRequestedMode.SOLAR,
+        filtration_remaining=timedelta(hours=5),
+        filtration_disposition=FiltrationDisposition.CREDITING,
+        filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        evaluator=evaluator,
+        driver=driver,
+        pool_opportunity_id=None,
+    )
+    asyncio.run(driver.process_epoch(ending, delivery_factory=factory))
+
+    residual = orchestrator.ownership.residual_termination
+    if residual is not None:
+        assert residual.body_adoption == lease.body_adoption
+    if driver.cleanup_provenance is not None:
+        assert driver.cleanup_provenance.body_adoption == lease.body_adoption
+
+    # The adopted BODY origin must never disappear merely because the Solar
+    # purpose ended. It must survive into either residual or cleanup provenance
+    # until exact monotonic cleanup completes.
+    assert (
+        orchestrator.ownership.residual_termination is not None
+        or driver.cleanup_provenance is not None
+        or any(
+            isinstance(operation, SetBodyActive) and operation.active is False
+            for operation in delivery.calls
+        )
+    )
+
 def test_restart_pump_only_provenance_never_grants_body_shutdown_authority() -> None:
     """A prospectively acquired pump receipt cannot widen to BODY cleanup."""
 
