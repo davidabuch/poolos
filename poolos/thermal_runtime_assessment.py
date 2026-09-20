@@ -1389,7 +1389,10 @@ class ThermalRuntimeEvaluator:
                     "active_pool_session_operating_purpose"
                     if desired.selected_source is PhysicalHeatMode.OFF
                     and required_rpm is not None
-                    and desired.reason_code != "pool_temperature_probe_required"
+                    and desired.reason_code not in {
+                        "pool_temperature_probe_required",
+                        "solar_recovery_hold",
+                    }
                     and evidence.pool_temperature_probe_execution is None
                     else desired.reason_code
                 ),
