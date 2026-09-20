@@ -184,6 +184,8 @@ class ThermalRuntimeConceptAdoption:
             ):
                 raise ValueError("pump adoption requires a positive integer RPM")
         else:
+            if isinstance(self.intended_value, int):
+                raise ValueError("source adoption requires a heat mode")
             object.__setattr__(
                 self,
                 "intended_value",
@@ -1430,6 +1432,12 @@ class ThermalRuntimeOwnershipManager:
             observed_value=True,
             observed_at=evidence.pool_activity_observed_at,
         )
+        pump_observed_at = evidence.pump_observed_at
+        source_observed_at = evidence.heat_source_observed_at
+        if adopt_pump_rpm is not None:
+            assert pump_observed_at is not None
+        if adopt_heat_source is not None:
+            assert source_observed_at is not None
         pump_adoption = (
             None
             if adopt_pump_rpm is None
@@ -1442,7 +1450,7 @@ class ThermalRuntimeOwnershipManager:
                 ),
                 concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
                 intended_value=adopt_pump_rpm,
-                observed_at=evidence.pump_observed_at,
+                observed_at=pump_observed_at,
                 opportunity_id=opportunity_id,
                 reason_code=reason_code,
                 adopted_at=adopted_at,
@@ -1460,7 +1468,7 @@ class ThermalRuntimeOwnershipManager:
                 ),
                 concept=ThermalRuntimeOwnedConcept.HEAT_SOURCE,
                 intended_value=adopt_heat_source,
-                observed_at=evidence.heat_source_observed_at,
+                observed_at=source_observed_at,
                 opportunity_id=opportunity_id,
                 reason_code=reason_code,
                 adopted_at=adopted_at,
@@ -1488,7 +1496,7 @@ class ThermalRuntimeOwnershipManager:
                     health=OwnershipHealth.STABLE,
                     evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
                     command_blocker=None,
-                    target_value=adopt_heat_source.value,
+                    target_value=heat_source_adoption.intended_value.value,
                     observed_value=(
                         None
                         if evidence.effective_heat_source is None
@@ -1797,6 +1805,12 @@ class ThermalRuntimeOwnershipManager:
                 else progress.accepted_current.role)
         prefix = "pool" if lease.body is ThermalBody.POOL else "spa"
         states = []
+        origin: (
+            ThermalRuntimeConceptProvenance
+            | ThermalRuntimeBodyAdoption
+            | ThermalRuntimeConceptAdoption
+            | None
+        )
         assert lease.body_session_id is not None
         assert lease.body_session_generation is not None
         for state in lease.domain_states:
