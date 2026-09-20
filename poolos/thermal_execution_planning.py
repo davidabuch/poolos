@@ -94,6 +94,7 @@ class ThermalDesiredState:
                     "six_pm_preserve",
                     "external_spa_session_operating_purpose",
                     "active_pool_session_operating_purpose",
+                    "solar_recovery_hold",
                 }:
                     raise ValueError(
                         "off heat source RPM requires an explicit acquisition or hold purpose"
