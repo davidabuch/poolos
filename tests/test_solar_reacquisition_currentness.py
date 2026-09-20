@@ -315,8 +315,8 @@ def test_fresh_solar_reacquisition_delivers_source_after_slow_compatible_probe_s
     }
 
 
-def test_restart_active_solar_wrong_pump_establishes_only_pump_provenance() -> None:
-    """A fresh accepted correction may prospectively acquire PUMP only."""
+def test_restart_active_solar_wrong_pump_adopts_body_source_then_earns_pump() -> None:
+    """Scenario 53: adopt BODY/THERMAL first; earn PUMP through correction."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -355,8 +355,13 @@ def test_restart_active_solar_wrong_pump_establishes_only_pump_provenance() -> N
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.owns_body_activation is False
+    assert lease.owns_body_adoption is True
     assert lease.owns_pump_setpoint is True
-    assert lease.owns_heat_source is False
+    assert lease.owns_heat_source is True
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id
+    assert lease.heat_source_adoption is not None
+    assert lease.heat_source_adoption.intended_value is PhysicalHeatMode.SOLAR
 
     repeated = asyncio.run(
         driver.process_epoch(
@@ -410,8 +415,11 @@ def test_restart_active_solar_wrong_pump_establishes_only_pump_provenance() -> N
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.owns_body_activation is False
+    assert lease.owns_body_adoption is True
     assert lease.owns_pump_setpoint is True
-    assert lease.owns_heat_source is False
+    assert lease.owns_heat_source is True
+    assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert lease.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
     assert lease.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
     assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.STABLE
 
