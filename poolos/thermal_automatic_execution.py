@@ -1336,6 +1336,10 @@ class ThermalAutomaticExecutionDriver:
             or frame.thermal is None
             or frame.pool_automatic_control_suppressed
             or not frame.pool_opportunity_id
+            or (
+                self._reenable_required
+                and not self._independent_fault_successor(frame)
+            )
             or frame.orchestration.lifecycle
             is not ThermalOrchestrationLifecycle.CANDIDATE_READY
             or frame.orchestration.candidate_body is not ThermalBody.POOL
