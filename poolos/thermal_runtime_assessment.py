@@ -33,6 +33,7 @@ from .pool_temperature_probe_execution import (
     PoolTemperatureProbeExecutionEvidence,
     PoolTemperatureProbeExecutionPhase,
 )
+from .solar_recovery_hold import SolarRecoveryTracker
 from .spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
@@ -578,6 +579,7 @@ class ThermalRuntimeEvaluator:
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     pool_selector: ThermalSourceSelector = field(default_factory=ThermalSourceSelector)
     spa_tracker: SpaThermalPolicyTracker = field(default_factory=SpaThermalPolicyTracker)
+    solar_recovery: SolarRecoveryTracker = field(default_factory=SolarRecoveryTracker)
     water_temperature_tracker: WaterTemperatureTracker = field(
         default_factory=WaterTemperatureTracker
     )
@@ -1226,6 +1228,57 @@ class ThermalRuntimeEvaluator:
                 blockers=blockers,
                 baselines=self.baselines,
             )
+            pool_temperature = source_input.trusted_pool_temperature_f
+            pool_target = source_input.pool_target_f
+            pool_heating_demand = (
+                pool_temperature is not None
+                and pool_target is not None
+                and pool_temperature < pool_target
+            )
+            recovery = self.solar_recovery.evaluate(
+                evaluated_at=evidence.evaluated_at,
+                collector_temperature_f=source_input.collector_temperature_f,
+                solar_active=_bool_or_none(values.get("solar.active")),
+                pool_active=_bool_or_none(values.get("pool.active")),
+                pool_heating_demand=pool_heating_demand,
+            )
+            if (
+                recovery.hold_active
+                and values.get("pool.active") is True
+                and desired.selected_source is PhysicalHeatMode.OFF
+                and desired.required_pump_rpm is None
+            ):
+                desired = replace(
+                    desired,
+                    required_pump_rpm=self.baselines.filtration_rpm,
+                    reason_code="solar_recovery_hold",
+                    rpm_reason_code=(
+                        "operating_purpose:solar_recovery_hold:"
+                        f"{self.baselines.filtration_rpm}_rpm"
+                    ),
+                    rationale=(
+                        "Native Solar delivery stopped without a sustained end-of-day decline.",
+                        "Pool circulation is retained briefly at ordinary filtration speed so Solar can requalify without a body power cycle.",
+                    ),
+                    criteria=(
+                        "native_solar_delivery_off",
+                        "bounded_recovery_hold",
+                        "solar_reentry_requires_normal_eligibility",
+                    ),
+                    evidence={
+                        **dict(desired.evidence),
+                        "solar_recovery_disposition": recovery.disposition.value,
+                        "solar_recovery_reason": recovery.reason_code,
+                        "solar_recovery_hold_until": (
+                            None
+                            if recovery.hold_until is None
+                            else recovery.hold_until.isoformat()
+                        ),
+                        "solar_recovery_trend_span_seconds": recovery.trend_span_seconds,
+                        "solar_recovery_trend_drop_f": recovery.trend_drop_f,
+                        "solar_recovery_declining_fraction": recovery.declining_fraction,
+                    },
+                )
             pool_active = _bool_or_none(values.get("pool.active"))
             spa_active = _bool_or_none(values.get("spa.active"))
             if pool_active is not True:
