@@ -1970,13 +1970,16 @@ class ThermalAutomaticExecutionDriver:
             return _CleanupCaptureDisposition.INVALIDATED
         if (
             entitlement.body_activation is None
+            and entitlement.body_adoption is None
             and (
                 entitlement.pump_setpoint is None
                 or entitlement.body is ThermalBody.HOT_TUB
             )
         ):
             # Source-only residuals have no circulation capability to transfer.
-            # The existing Hot Tub cleanup scope likewise requires body origin.
+            # Prospective Pool BODY adoption is a real fresh BODY origin and
+            # therefore retains bounded cleanup authority after source Off.
+            # Hot Tub cleanup remains limited to its explicit activation path.
             return _CleanupCaptureDisposition.NO_CIRCULATION_CAPABILITY
         if entitlement.body is ThermalBody.POOL and (
             circulation is None or not circulation.body_shutdown_source_safe
