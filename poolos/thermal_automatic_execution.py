@@ -63,6 +63,7 @@ from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionEngine,
+    commissioning_scope_allows_body,
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
     ThermalLiveExecutionStatus,
@@ -1736,7 +1737,10 @@ class ThermalAutomaticExecutionDriver:
             )
         if not frame.live_policy.thermal_live_execution_enabled:
             return self._blocked(frame, "thermal_cleanup_thermal_live_disabled")
-        if frame.live_policy.commissioning_scope.value != ThermalBody.POOL.value:
+        if not commissioning_scope_allows_body(
+            frame.live_policy.commissioning_scope,
+            provenance.body,
+        ):
             return self._blocked(frame, "thermal_cleanup_commissioning_scope_mismatch")
         try:
             delivery = delivery_factory.for_cleanup(

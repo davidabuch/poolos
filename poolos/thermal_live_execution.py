@@ -103,6 +103,18 @@ class ThermalLiveCommissioningScope(StrEnum):
     BOTH = "both"
 
 
+def commissioning_scope_allows_body(
+    scope: ThermalLiveCommissioningScope,
+    body: ThermalBody,
+) -> bool:
+    """Return whether the commissioned live scope includes one thermal body."""
+
+    return scope in {
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalLiveCommissioningScope(body.value),
+    }
+
+
 class ThermalLiveAuthorizationDisposition(StrEnum):
     AUTHORIZED = "authorized"
     BLOCKED = "blocked"
@@ -756,10 +768,10 @@ class ThermalLiveAuthorizationEngine:
                 reasons.append("thermal_live_kill_switch_disabled")
             if policy.commissioning_scope is ThermalLiveCommissioningScope.DISABLED:
                 reasons.append("thermal_live_commissioning_scope_disabled")
-            elif policy.commissioning_scope not in {
-                ThermalLiveCommissioningScope.BOTH,
-                ThermalLiveCommissioningScope(assessment.desired.body.value),
-            }:
+            elif not commissioning_scope_allows_body(
+                policy.commissioning_scope,
+                assessment.desired.body,
+            ):
                 reasons.append("body_outside_commissioning_scope")
         if assessment.disposition is not ThermalPlanDisposition.READY:
             reasons.append("thermal_plan_not_ready")

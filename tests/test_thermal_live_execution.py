@@ -57,6 +57,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
     ThermalLiveExecutionStatus,
+    commissioning_scope_allows_body,
     ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
 )
@@ -422,6 +423,25 @@ def test_default_kill_switch_and_scope_deny_live_authority() -> None:
     assert result.disposition is ThermalLiveAuthorizationDisposition.BLOCKED
     assert "thermal_live_kill_switch_disabled" in result.blocking_reasons
     assert "thermal_live_commissioning_scope_disabled" in result.blocking_reasons
+
+
+def test_shared_commissioning_scope_semantics_include_cleanup_body() -> None:
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalBody.POOL,
+    )
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalBody.HOT_TUB,
+    )
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.POOL,
+        ThermalBody.POOL,
+    )
+    assert not commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.HOT_TUB,
+        ThermalBody.POOL,
+    )
 
 
 @pytest.mark.parametrize(
