@@ -69,6 +69,11 @@ class FakeDriver:
     pump_session_purpose: object | None = None
     probe_evidence: object | None = None
     cleanup_provenance: object | None = None
+    termination_attempt: object | None = None
+    cleanup_attempt: object | None = None
+    verification_required: bool = False
+    assessment: object | None = None
+    processed_at: list[datetime] = field(default_factory=list)
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
         self.requested_enabled = enabled
@@ -84,9 +89,14 @@ class FakeDriver:
 
     async def process_epoch(self, frame: object, **_: object) -> None:
         self.processed.append(frame.epoch_identity)
+        self.processed_at.append(frame.observed_at)
         self.started.set()
         await self.release.wait()
         self.last_epoch_identity = frame.epoch_identity
+        self.assessment = SimpleNamespace(evaluated_at=frame.observed_at)
+
+    def verification_reobservation_required(self) -> bool:
+        return self.verification_required
 
     def fail_closed(self, *, reason: str, **_: object) -> None:
         self.failed.append(reason)
@@ -244,6 +254,82 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
         assert len(hass.tasks) == 2
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
+
+    asyncio.run(scenario())
+
+
+def test_newer_same_epoch_cleanup_evidence_resubmits_without_new_authority_epoch() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+        driver.release.set()
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "epoch-1"),
+        )
+        await hass.tasks[0]
+
+        assert driver.processed_at == [NOW]
+        assert authority.epochs == ["epoch-1"]
+
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=1)),
+            None,
+            _orchestration(NOW + timedelta(seconds=1), "epoch-1"),
+        )
+        await asyncio.sleep(0)
+        assert driver.processed_at == [NOW]
+        assert authority.epochs == ["epoch-1"]
+
+        driver.verification_required = True
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=2)),
+            None,
+            _orchestration(NOW + timedelta(seconds=2), "epoch-1"),
+        )
+        await hass.tasks[-1]
+
+        assert driver.processed_at == [NOW, NOW + timedelta(seconds=2)]
+        assert authority.epochs == ["epoch-1"]
+
+    asyncio.run(scenario())
+
+
+def test_same_epoch_cleanup_evidence_arriving_inflight_is_replayed_after_task() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+        driver.verification_required = True
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "epoch-1"),
+        )
+        first = hass.tasks[0]
+        await driver.started.wait()
+
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=2)),
+            None,
+            _orchestration(NOW + timedelta(seconds=2), "epoch-1"),
+        )
+
+        assert len(hass.tasks) == 1
+        assert authority.epochs == ["epoch-1"]
+
+        driver.release.set()
+        await first
+        await asyncio.sleep(0)
+
+        assert len(hass.tasks) == 2
+        await hass.tasks[1]
+        assert driver.processed_at == [NOW, NOW + timedelta(seconds=2)]
+        assert authority.epochs == ["epoch-1"]
 
     asyncio.run(scenario())
 
