@@ -1816,6 +1816,7 @@ class ThermalAutomaticExecutionDriver:
             not assessment.filtration_immediate_need
             and provenance.pump_setpoint is not None
             and provenance.body_activation is None
+            and provenance.body_adoption is None
         ):
             self.cleanup_provenance = None
             return self._publish(
