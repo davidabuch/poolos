@@ -2061,3 +2061,177 @@ def test_current_frame_continuity_blocker_prevents_probe_trust() -> None:
     assert evaluator.pool_temperature_probe.phase is PoolTemperatureProbePhase.PROBE_REQUIRED
     assert evaluator.pool_temperature_probe.last_assessment is not None
     assert evaluator.pool_temperature_probe.last_assessment.trusted_temperature_f is None
+
+
+
+def test_midday_native_solar_off_holds_pool_at_filtration_rpm_for_recovery() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    active = live_values(
+        pool_active=True,
+        pool_heater="H0002",
+        pump_rpm=2900,
+        solar_temperature=110.0,
+        solar_active=True,
+    )
+    evaluator.evaluate(
+        evidence(
+            at=NOW,
+            native_values=active,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    interrupted = dict(active)
+    interrupted["solar.active"] = False
+    interrupted["solar.temperature"] = 89.0
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=1),
+            native_values=interrupted,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    desired = result.pool.plan.desired
+    assert desired.selected_source is PhysicalHeatMode.OFF
+    assert desired.required_pump_rpm == 2600
+    assert desired.reason_code == "solar_recovery_hold"
+    assert desired.evidence["solar_recovery_disposition"] == "hold"
+
+
+def test_solar_recovery_hold_allows_normal_solar_reentry_when_roof_recovers() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    active = live_values(
+        pool_active=True,
+        pool_heater="H0002",
+        pump_rpm=2900,
+        solar_temperature=110.0,
+        solar_active=True,
+    )
+    evaluator.evaluate(
+        evidence(
+            at=NOW,
+            native_values=active,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    interrupted = dict(active)
+    interrupted["solar.active"] = False
+    interrupted["solar.temperature"] = 89.0
+    interrupted["pump.rpm"] = 2600
+    interrupted["pool.pump_circuit.configured_speed_rpm"] = 2600
+    evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=1),
+            native_values=interrupted,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    recovered = dict(interrupted)
+    recovered["solar.temperature"] = 100.0
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=6),
+            native_values=recovered,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert result.pool.plan.desired.required_pump_rpm == 2900
+
+
+def test_solar_recovery_hold_expiry_returns_to_existing_shutdown_policy() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    active = live_values(
+        pool_active=True,
+        pool_heater="H0002",
+        pump_rpm=2900,
+        solar_temperature=110.0,
+        solar_active=True,
+    )
+    evaluator.evaluate(
+        evidence(
+            at=NOW,
+            native_values=active,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    interrupted = dict(active)
+    interrupted["solar.active"] = False
+    interrupted["solar.temperature"] = 89.0
+    interrupted["pump.rpm"] = 2600
+    interrupted["pool.pump_circuit.configured_speed_rpm"] = 2600
+    evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=1),
+            native_values=interrupted,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=11),
+            native_values=interrupted,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert result.pool.plan.desired.required_pump_rpm is None
+    assert result.pool.plan.desired.reason_code != "solar_recovery_hold"
+
+
+def test_sustained_decline_native_solar_off_skips_recovery_hold() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    for minutes, roof in ((0, 101.0), (10, 98.0), (20, 93.0)):
+        native = live_values(
+            pool_active=True,
+            pool_heater="H0002",
+            pump_rpm=2900,
+            solar_temperature=roof,
+            solar_active=True,
+        )
+        evaluator.evaluate(
+            evidence(
+                at=NOW + timedelta(minutes=minutes),
+                native_values=native,
+                pool_mode=ThermalRequestedMode.SOLAR,
+            ),
+            live_policy=disabled_policy(),
+        )
+
+    ended = live_values(
+        pool_active=True,
+        pool_heater="H0002",
+        pump_rpm=2900,
+        solar_temperature=87.0,
+        solar_active=False,
+    )
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=30),
+            native_values=ended,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            filtration_immediate_circulation_required=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert result.pool.plan.desired.required_pump_rpm is None
+    assert result.pool.plan.desired.reason_code != "solar_recovery_hold"
