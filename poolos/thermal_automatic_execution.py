@@ -1364,6 +1364,10 @@ class ThermalAutomaticExecutionDriver:
                 self.orchestrator.ownership.consume_residual_termination(
                     entitlement_id=residual.entitlement_id
                 )
+                self.circulation_ownership.release_thermal(
+                    thermal_lease_id=residual.lease_id
+                )
+                self.circulation_ownership.reserve_thermal(frame.epoch_identity)
 
         provenance = self.cleanup_provenance
         if provenance is not None and provenance.body is ThermalBody.POOL:
@@ -1375,6 +1379,7 @@ class ThermalAutomaticExecutionDriver:
             self.circulation_ownership.release_thermal(
                 thermal_lease_id=provenance.lease_id
             )
+            self.circulation_ownership.reserve_thermal(frame.epoch_identity)
 
     async def _process_termination(
         self,
