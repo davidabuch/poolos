@@ -416,8 +416,8 @@ def test_restart_active_solar_wrong_pump_establishes_only_pump_provenance() -> N
     assert lease.domain_state(OwnershipDomain.PUMP).health is OwnershipHealth.STABLE
 
 
-def test_restart_active_solar_matching_pump_remains_command_free_and_unowned() -> None:
-    """Matching post-restart hardware cannot manufacture provenance."""
+def test_restart_active_solar_matching_pump_prospectively_adopts_fresh_domains() -> None:
+    """Scenario 53: fresh current Solar policy may adopt converged live domains."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -426,32 +426,50 @@ def test_restart_active_solar_matching_pump_remains_command_free_and_unowned() -
     evaluator = ThermalRuntimeEvaluator()
     driver.set_enabled(True, changed_at=NOW, current_epoch_identity=None)
 
-    for seconds in (1, 2, 3):
-        result = asyncio.run(
-            driver.process_epoch(
-                _frame(
-                    orchestrator,
-                    NOW + timedelta(seconds=seconds),
-                    pool_active=True,
-                    pump_rpm=2900,
-                    configured_rpm=2900,
-                    pool_heater="H0002",
-                    solar_active=True,
-                    pool_temperature=81.0,
-                    pool_target=90.0,
-                    solar_temperature=110.0,
-                    mode=ThermalRequestedMode.SOLAR,
-                    filtration_remaining=timedelta(0),
-                    filtration_disposition=FiltrationDisposition.SATISFIED,
-                    evaluator=evaluator,
-                    driver=driver,
-                ),
-                delivery_factory=factory,
-            )
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                pool_temperature=81.0,
+                pool_target=90.0,
+                solar_temperature=110.0,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(0),
+                filtration_disposition=FiltrationDisposition.SATISFIED,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:restart-solar",
+            ),
+            delivery_factory=factory,
         )
-        assert result.command_delivery_performed is False
-        assert delivery.calls == []
-        assert orchestrator.ownership.state.lease is None
+    )
+
+    assert result.state is ThermalAutomaticDriverState.CONVERGED
+    assert result.command_delivery_performed is False
+    assert delivery.calls == []
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.owns_body_adoption
+    assert lease.owns_pump_setpoint
+    assert lease.owns_heat_source
+    assert lease.body_activation is None
+    assert lease.pump_setpoint is None
+    assert lease.heat_source is None
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == "pool:thermal:restart-solar"
+    assert lease.pump_adoption is not None
+    assert lease.pump_adoption.intended_value == 2900
+    assert lease.heat_source_adoption is not None
+    assert lease.heat_source_adoption.intended_value is PhysicalHeatMode.SOLAR
+    assert result.runtime_ownership_summary["owns_body"] is True
+    assert result.runtime_ownership_summary["owns_pump_setpoint"] is True
+    assert result.runtime_ownership_summary["owns_heat_source"] is True
 
 
 def test_restart_pump_only_provenance_never_grants_body_shutdown_authority() -> None:

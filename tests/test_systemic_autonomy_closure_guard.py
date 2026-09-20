@@ -339,8 +339,8 @@ REASON_SIGNALS = (
 )
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
-REASON_FAMILY_COUNT = 224
-REASON_FAMILY_SHA256 = "787d5ca2a327af8906a3856b6d7014e922c0e470ec2a99f3675efd0279d00ac2"
+REASON_FAMILY_COUNT = 226
+REASON_FAMILY_SHA256 = "a7986bdb0a288323c94c97257e2dff2962a83d2890b57475b89813424da8ea98"
 
 
 @cache
@@ -456,6 +456,7 @@ def _reason_regression(source: str, reason: str) -> str:
         if reason in {
             "runtime_ownership_adoption_denied:",
             "runtime_ownership_established:prospective_body_adoption",
+            "runtime_ownership_established:prospective_domain_adoption",
         }:
             return "test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body"
         if reason == "runtime_ownership_restored:quick_restart":
