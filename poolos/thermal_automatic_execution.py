@@ -1039,12 +1039,22 @@ class ThermalAutomaticExecutionDriver:
                         ThermalRuntimeOwnershipStatus.SUPERSEDED,
                         ThermalRuntimeOwnershipStatus.RELINQUISHED,
                     }
+                    restart_active_solar_adoption = bool(
+                        ownership_status is ThermalRuntimeOwnershipStatus.UNOWNED
+                        and frame.pool_opportunity_id
+                        and not frame.pool_automatic_control_suppressed
+                        and body.plan.disposition is ThermalPlanDisposition.READY
+                        and body.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+                        and body.plan.desired.evidence.get("solar_active") is True
+                        and body.plan.desired.evidence.get("solar_opportunity_warranted") is True
+                    )
                     if (
                         self._filtration_handoff is None
                         and (
                             body.plan.desired.evidence.get("active_operating_purpose")
                             is None
                             or terminal_reacquisition
+                            or restart_active_solar_adoption
                         )
                     ):
                         # State is not provenance.  A genuinely fresh PoolOS
@@ -1116,6 +1126,19 @@ class ThermalAutomaticExecutionDriver:
                             external_changes=frame.external_changes,
                             freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
                         )
+                        adopt_heat_source = (
+                            PhysicalHeatMode.SOLAR
+                            if (
+                                body.plan.desired.selected_source
+                                is PhysicalHeatMode.SOLAR
+                                and body.plan.desired.evidence.get("solar_active") is True
+                                and body.plan.desired.evidence.get(
+                                    "solar_opportunity_warranted"
+                                )
+                                is True
+                            )
+                            else None
+                        )
                         adoption = self.orchestrator.ownership.adopt_body(
                             body=ThermalBody.POOL,
                             adopted_at=frame.observed_at,
@@ -1126,6 +1149,7 @@ class ThermalAutomaticExecutionDriver:
                             evidence=adoption_evidence,
                             opportunity_id=frame.pool_opportunity_id or "",
                             reason_code="independent_pool_thermal_opportunity",
+                            adopt_heat_source=adopt_heat_source,
                         )
                         if (
                             adoption.disposition
