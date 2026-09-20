@@ -564,6 +564,49 @@ def test_adopted_converged_solar_supersession_retains_pool_cleanup_authority() -
         )
     )
 
+    # Once current post-boundary topology evidence is available, adopted BODY
+    # authority is sufficient for monotonic Pool shutdown.  Do not misclassify
+    # this as pump-only provenance merely because no historical body-activation
+    # command receipt exists.
+    for seconds in range(3, 12):
+        before = len(delivery.calls)
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="00000",
+                    solar_active=False,
+                    pool_temperature=83.0,
+                    pool_target=80.0,
+                    solar_temperature=108.0,
+                    mode=ThermalRequestedMode.SOLAR,
+                    filtration_remaining=timedelta(hours=5),
+                    filtration_disposition=FiltrationDisposition.CREDITING,
+                    filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                    evaluator=evaluator,
+                    driver=driver,
+                    pool_opportunity_id=None,
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert result.blocker != "thermal_cleanup_pump_provenance_relinquished"
+        if any(
+            isinstance(operation, SetBodyActive) and operation.active is False
+            for operation in delivery.calls[before:]
+        ):
+            break
+
+    assert any(
+        isinstance(operation, SetBodyActive) and operation.active is False
+        for operation in delivery.calls
+    )
+
+
 def test_restart_pump_only_provenance_never_grants_body_shutdown_authority() -> None:
     """A prospectively acquired pump receipt cannot widen to BODY cleanup."""
 
