@@ -2147,7 +2147,22 @@ def test_solar_recovery_hold_allows_normal_solar_reentry_when_roof_recovers() ->
     )
 
     assert result.pool.plan.desired.selected_source is PhysicalHeatMode.SOLAR
-    assert result.pool.plan.desired.required_pump_rpm == 2900
+    assert result.pool.plan.desired.required_pump_rpm == 2600
+
+    engaged = dict(recovered)
+    engaged["solar.active"] = True
+    engaged["pump.rpm"] = 2600
+    engaged_result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=7),
+            native_values=engaged,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert engaged_result.pool.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert engaged_result.pool.plan.desired.required_pump_rpm == 2900
 
 
 def test_solar_recovery_hold_expiry_returns_to_existing_shutdown_policy() -> None:
