@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from poolos.integration import PhysicalHeatMode, SetBodyActive, ThermalBody, SetHeatMode, SetPumpSpeed
+from poolos.integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed
 from poolos.native_configuration_policy import (
     NativeConfigurationGuard,
     NativeConfigurationInput,
