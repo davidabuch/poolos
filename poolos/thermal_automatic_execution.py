@@ -465,6 +465,18 @@ class ThermalAutomaticExecutionDriver:
             is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
         ):
             return PumpSpeedSessionPurpose.TEMPERATURE_PROBE
+        if (
+            session.originating_currentness.purpose.body is ThermalBody.HOT_TUB
+            and session.originating_currentness.purpose.selected_source
+            is PhysicalHeatMode.OFF
+            and session.originating_currentness.purpose.required_pump_rpm
+            == self.baselines.temperature_probe_rpm
+            and any(
+                step.metadata.get("spa_temperature_acquisition_step") == "true"
+                for step in session.execution_plan.steps
+            )
+        ):
+            return PumpSpeedSessionPurpose.TEMPERATURE_PROBE
         return None
 
     def external_change_owned_intent(self) -> Mapping[str, object]:
