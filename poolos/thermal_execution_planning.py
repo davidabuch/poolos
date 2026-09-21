@@ -304,6 +304,11 @@ def desired_spa_state(
         effective_blockers += ("required_spa_thermal_evidence_unavailable",)
     if permission_blocked:
         effective_blockers += ("heat_source_permission_veto",)
+    if assessment.reason_code == "opportunistic_waiting_for_idle_hydraulics":
+        # Qualification may continue while Pool hydraulics are finishing, but
+        # there must be no dormant-Spa source/body/pump mutation until a fresh
+        # idle frame proves the isolated start boundary.
+        effective_blockers += ("opportunistic_start_waiting_for_idle_hydraulics",)
     session_kind = "user_session" if assessment.spa_in_use else "opportunistic"
     criteria = (
         session_kind,
