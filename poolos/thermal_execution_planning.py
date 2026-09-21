@@ -341,6 +341,7 @@ def desired_spa_state(
             "spa_temperature_trusted": observation.spa_temperature_trusted,
             "active_heat_source": observation.active_heat_source.value,
             "active_heat_source_usable": observation.active_heat_source_usable,
+            "opportunistic_start_ready": observation.opportunistic_start_ready,
             "active_operating_purpose": (
                 "solar_heating"
                 if observation.active_heat_source is ThermalHeatSource.SOLAR
