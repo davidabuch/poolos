@@ -4515,6 +4515,12 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
         evaluator=evaluator,
         driver=driver,
     )
+    assert idle_frame.thermal.hot_tub.actual_authorization.authorized, (
+        idle_frame.thermal.hot_tub.actual_authorization.blocking_reasons
+    )
+    assert idle_frame.thermal.hot_tub.technical_preflight.ready, (
+        idle_frame.thermal.hot_tub.technical_preflight.blocking_reasons
+    )
     idle = asyncio.run(
         driver.process_epoch(
             idle_frame,
