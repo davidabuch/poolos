@@ -230,7 +230,8 @@ class SpaThermalPolicyTracker:
 
         if self._state is SpaPolicyState.OPPORTUNISTIC_ACTIVE:
             if (
-                observation.spa_temperature_f is not None
+                observation.spa_temperature_trusted
+                and observation.spa_temperature_f is not None
                 and observation.spa_target_f is not None
                 and observation.spa_temperature_f >= observation.spa_target_f
             ):
