@@ -22,6 +22,7 @@ from poolos.thermal_live_execution import (
     ThermalLiveCommissioningScope,
     ThermalLiveExecutionPolicy,
 )
+from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_runtime_assessment import (
     PoolTemperatureProbePhase,
     ThermalRequestedMode,
