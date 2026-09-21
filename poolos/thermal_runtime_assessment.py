@@ -1592,6 +1592,12 @@ class ThermalRuntimeEvaluator:
                 and pool_temperature >= pool_target
             ),
             filtration_debt=evidence.filtration_debt,
+            opportunistic_start_baseline_ready=(
+                values.get("pool.active") is False
+                and values.get("spa.active") is False
+                and _number(values.get("pump.rpm")) == 0
+                and values.get("solar.active") is False
+            ),
             session_kind=spa_session_kind,
             spa_temperature_trusted=spa_temperature_trusted,
             active_heat_source=active_heat_source,

@@ -216,6 +216,7 @@ def test_spa_opportunistic_policy_remains_solar_only_and_distinct_from_pool() ->
         100.0,
         130.0,
         pool_demand_satisfied=True,
+        opportunistic_start_baseline_ready=True,
     )
     active = SpaPolicyInput(
         NOW + timedelta(minutes=2),
@@ -225,6 +226,7 @@ def test_spa_opportunistic_policy_remains_solar_only_and_distinct_from_pool() ->
         100.0,
         130.0,
         pool_demand_satisfied=True,
+        opportunistic_start_baseline_ready=True,
     )
     tracker.evaluate(first)
     solar = desired_spa_state(active, tracker.evaluate(active))
@@ -236,6 +238,7 @@ def test_spa_opportunistic_policy_remains_solar_only_and_distinct_from_pool() ->
         100.0,
         110.0,
         pool_demand_satisfied=True,
+        opportunistic_start_baseline_ready=True,
     )
     unavailable = desired_spa_state(
         unavailable_input,

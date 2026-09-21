@@ -337,6 +337,9 @@ def desired_spa_state(
                 else observation.filtration_debt.total_seconds()
             ),
             "higher_priority_conflict": observation.higher_priority_conflict,
+            "opportunistic_start_baseline_ready": (
+                observation.opportunistic_start_baseline_ready
+            ),
             "session_kind": assessment.session_kind.value,
             "spa_temperature_trusted": observation.spa_temperature_trusted,
             "active_heat_source": observation.active_heat_source.value,
@@ -387,6 +390,15 @@ class ThermalExecutionPlanBuilder:
     ) -> ThermalExecutionPlanAssessment:
         if current.body is not desired.body:
             return self._non_ready(desired, current, ("thermal_body_mismatch",))
+        if (
+            desired.body is ThermalBody.HOT_TUB
+            and desired.reason_code == "opportunistic_waiting_for_clean_baseline"
+        ):
+            return self._non_ready(
+                desired,
+                current,
+                ("opportunistic_clean_baseline_required",),
+            )
         blockers = tuple(
             dict.fromkeys(
                 (

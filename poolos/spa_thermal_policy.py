@@ -70,6 +70,7 @@ class SpaPolicyInput:
     pool_demand_satisfied: bool = False
     filtration_debt: timedelta | None = timedelta(0)
     higher_priority_conflict: bool = False
+    opportunistic_start_baseline_ready: bool = False
     session_kind: SpaSessionKind | None = None
     spa_temperature_trusted: bool = True
     active_heat_source: ThermalHeatSource = ThermalHeatSource.NONE
@@ -267,6 +268,18 @@ class SpaThermalPolicyTracker:
             and observation.evaluated_at - self._above_130_since
             >= self._policy.qualification_hold
         )
+        if qualified and not observation.opportunistic_start_baseline_ready:
+            self._state = SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+            self._below_120_since = None
+            return self._result(
+                observation,
+                self._state,
+                ThermalHeatSource.NONE,
+                None,
+                "opportunistic_waiting_for_clean_baseline",
+                preserve=False,
+            )
+
         if qualified:
             self._state = SpaPolicyState.OPPORTUNISTIC_ACTIVE
             self._below_120_since = None

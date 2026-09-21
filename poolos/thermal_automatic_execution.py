@@ -1088,6 +1088,7 @@ class ThermalAutomaticExecutionDriver:
                     )
                     and body.body_active is not True
                     and not _probe_source_precondition_then_activation(body)
+                    and not _opportunistic_spa_source_precondition_then_activation(body)
                     and not filtration_source_off_precondition(body)
                 ):
                     return self._blocked(
@@ -3664,6 +3665,34 @@ def _bind_adopted_probe_hydraulic_contract(
             bound_first,
             *assessment.step_specifications[1:],
         ),
+    )
+
+
+def _opportunistic_spa_source_precondition_then_activation(
+    body: ThermalBodyRuntimeAssessment,
+) -> bool:
+    """Recognize only the canonical Solar-preconditioned opportunistic Spa start."""
+
+    operations = body.plan.operations
+    specifications = body.plan.step_specifications
+    return bool(
+        body.body is ThermalBody.HOT_TUB
+        and body.body_active is False
+        and body.plan.desired.reason_code == "opportunistic_started_or_resumed"
+        and body.plan.desired.evidence.get("session_kind") == "poolos_opportunistic"
+        and body.plan.desired.evidence.get("opportunistic_start_baseline_ready") is True
+        and len(operations) >= 2
+        and len(specifications) >= 2
+        and isinstance(operations[0], SetHeatMode)
+        and operations[0].equipment_id == ThermalBody.HOT_TUB.value
+        and operations[0].mode is PhysicalHeatMode.SOLAR
+        and specifications[0].operation_id == operations[0].operation_id
+        and specifications[0].metadata.get("spa_opportunistic_source_precondition")
+        == "true"
+        and isinstance(operations[1], SetBodyActive)
+        and operations[1].equipment_id == ThermalBody.HOT_TUB.value
+        and operations[1].active is True
+        and specifications[1].operation_id == operations[1].operation_id
     )
 
 
