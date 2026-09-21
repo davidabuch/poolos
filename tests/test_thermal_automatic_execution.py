@@ -4521,7 +4521,12 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
         )
     )
 
-    assert idle.command_delivery_performed
+    assert idle.command_delivery_performed, (
+        idle.state,
+        idle.blocker,
+        idle.candidate_body,
+        idle.runtime_ownership_status,
+    )
     assert len(delivery.calls) == 1
     assert isinstance(delivery.calls[0], SetHeatMode)
     assert delivery.calls[0].mode is PhysicalHeatMode.SOLAR
