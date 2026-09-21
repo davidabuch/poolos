@@ -1069,6 +1069,55 @@ def test_opportunistic_spa_preconditions_solar_before_body_activation() -> None:
     )
 
 
+def test_opportunistic_spa_acquisition_promotes_flow_before_solar() -> None:
+    """After 1500-RPM acquisition, establish 2900 flow before arming Solar."""
+
+    desired_state = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.SOLAR,
+        required_pump_rpm=2900,
+        reason_code="opportunistic_active",
+        rpm_reason_code="operating_purpose:solar_heating:2900_rpm",
+        rationale=("Trusted Spa temperature now permits Solar heating.",),
+        criteria=("poolos_opportunistic", "gas_fallback_forbidden"),
+        evidence={
+            "session_kind": "poolos_opportunistic",
+            "spa_temperature_trusted": True,
+            "active_operating_purpose": "solar_heating",
+        },
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0198",
+        configured_speed_concept="spa.pump_circuit.configured_speed_rpm",
+    ).build(
+        desired_state,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=1500,
+            body_active=True,
+        ),
+    )
+
+    assert [type(operation) for operation in plan.operations] == [
+        SetPumpSpeed,
+        SetHeatMode,
+    ]
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert plan.operations[0].rpm == 2900
+    assert isinstance(plan.operations[1], SetHeatMode)
+    assert plan.operations[1].mode is PhysicalHeatMode.SOLAR
+    assert not any(isinstance(operation, SetBodyActive) for operation in plan.operations)
+    assert not any(
+        isinstance(operation, SetHeatMode)
+        and operation.mode is PhysicalHeatMode.GAS
+        for operation in plan.operations
+    )
+
+
 def test_opportunistic_spa_reasserts_safe_source_for_positive_provenance() -> None:
     desired_state = ThermalDesiredState(
         evaluated_at=NOW,
