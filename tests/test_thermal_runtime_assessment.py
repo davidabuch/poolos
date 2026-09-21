@@ -33,6 +33,7 @@ from poolos.spa_temperature_policy import (
     SpaTemperatureDisposition,
     SpaTemperatureEvidence,
 )
+from poolos.spa_thermal_policy import SpaSessionKind
 
 
 NOW = datetime(2026, 8, 27, 20, 0, tzinfo=UTC)
@@ -81,6 +82,7 @@ def evidence(
     probe_execution: PoolTemperatureProbeExecutionEvidence | None = None,
     probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None,
     trusted_spa: bool = True,
+    spa_session_kind: SpaSessionKind | None = None,
     pump_session_body: PumpSpeedSessionBody | None = None,
     pump_session_purpose: PumpSpeedSessionPurpose | None = None,
     pump_session_pump_circuit_id: str | None = None,
@@ -136,6 +138,7 @@ def evidence(
             if trusted_spa
             else None
         ),
+        spa_session_kind=spa_session_kind,
         pump_session_body=pump_session_body,
         pump_session_purpose=pump_session_purpose,
         pump_session_pump_circuit_id=pump_session_pump_circuit_id,
@@ -895,6 +898,111 @@ def test_authoritative_filtration_debt_does_not_block_opportunistic_spa_policy()
     assert started.hot_tub.plan.desired.reason_code == "opportunistic_started_or_resumed"
     assert started.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
     assert started.hot_tub.plan.desired.evidence["opportunistic_start_ready"] is True
+
+
+def test_opportunistic_spa_requires_real_temperature_acquisition_before_solar() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+    pool_work = live_values(
+        pool_active=True,
+        pool_heater="00000",
+        pump_rpm=2600,
+        solar_temperature=140.0,
+    )
+    pool_work["pool.temperature"] = 90.0
+    pool_work["spa.temperature"] = 90.0
+
+    evaluator.evaluate(
+        evidence(
+            native_values=pool_work,
+            filtration_debt=timedelta(0),
+            trusted_spa=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+    evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2),
+            native_values=pool_work,
+            filtration_debt=timedelta(0),
+            trusted_spa=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    idle = dict(pool_work)
+    idle["pool.active"] = False
+    idle["pump.rpm"] = 0
+    acquiring = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2, seconds=1),
+            native_values=idle,
+            filtration_debt=timedelta(0),
+            trusted_spa=False,
+        ),
+        live_policy=disabled_policy(),
+    )
+    plan = acquiring.hot_tub.plan
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert plan.desired.reason_code == "spa_temperature_acquisition_required"
+    assert plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert plan.desired.required_pump_rpm == 1500
+    assert plan.desired.evidence["session_kind"] == "poolos_opportunistic"
+    assert isinstance(plan.operations[0], SetHeatMode)
+    assert plan.operations[0].mode is PhysicalHeatMode.OFF
+    assert isinstance(plan.operations[1], SetBodyActive)
+    assert not any(
+        isinstance(operation, SetHeatMode)
+        and operation.mode is PhysicalHeatMode.SOLAR
+        for operation in plan.operations
+    )
+
+    spa_running = dict(idle)
+    spa_running["spa.active"] = True
+    spa_running["pump.rpm"] = 1500
+    spa_running["spa.pump_circuit.configured_speed_rpm"] = 1500
+    first_live = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2, seconds=10),
+            native_values=spa_running,
+            observed_at={
+                "spa.temperature": NOW + timedelta(minutes=2, seconds=10)
+            },
+            filtration_debt=timedelta(0),
+            trusted_spa=False,
+            spa_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert first_live.hot_tub.spa_temperature is not None
+    assert (
+        first_live.hot_tub.spa_temperature.disposition
+        is not SpaTemperatureDisposition.TRUSTED
+    )
+    assert (
+        first_live.hot_tub.plan.desired.reason_code
+        == "spa_temperature_acquisition_required"
+    )
+
+    trusted = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2, seconds=11),
+            native_values=spa_running,
+            observed_at={
+                "spa.temperature": NOW + timedelta(minutes=2, seconds=11)
+            },
+            filtration_debt=timedelta(0),
+            trusted_spa=False,
+            spa_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert trusted.hot_tub.spa_temperature is not None
+    assert (
+        trusted.hot_tub.spa_temperature.disposition
+        is SpaTemperatureDisposition.TRUSTED
+    )
+    assert trusted.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert trusted.hot_tub.plan.desired.evidence["spa_temperature_trusted"] is True
 
 
 def test_opportunistic_spa_does_not_build_start_plan_while_pool_is_active() -> None:
