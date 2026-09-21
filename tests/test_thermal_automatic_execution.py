@@ -4515,6 +4515,12 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
         evaluator=evaluator,
         driver=driver,
     )
+    assert idle_frame.thermal.hot_tub.plan.disposition is ThermalPlanDisposition.READY, (
+        idle_frame.thermal.hot_tub.plan.disposition,
+        idle_frame.thermal.hot_tub.plan.blocking_reasons,
+        idle_frame.thermal.hot_tub.plan.desired.required_pump_rpm,
+        idle_frame.thermal.hot_tub.plan.current,
+    )
     assert idle_frame.thermal.hot_tub.actual_authorization.authorized, (
         idle_frame.thermal.hot_tub.actual_authorization.blocking_reasons
     )
