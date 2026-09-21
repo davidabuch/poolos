@@ -1017,7 +1017,7 @@ def test_opportunistic_spa_discovers_later_roof_opportunity_after_pool_shutdown(
     pool_finishing["pool.target_temperature"] = 90.0
     pool_finishing["spa.temperature"] = 90.0
     pool_finishing["spa.target_temperature"] = 98.0
-    first = evaluator.evaluate(
+    evaluator.evaluate(
         evidence(
             native_values=pool_finishing,
             filtration_debt=timedelta(hours=4),
