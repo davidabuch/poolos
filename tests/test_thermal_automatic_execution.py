@@ -4148,6 +4148,117 @@ def test_external_hot_tub_without_proven_circulation_fails_closed() -> None:
     assert hot_tub_delivery.calls == []
 
 
+def test_opportunistic_spa_automatic_driver_waits_for_neutral_pool_then_preconditions_solar() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=driver)
+
+    # Qualification begins while the Pool is still the active hydraulic body.
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=True,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        solar_active=True,
+        solar_temperature=140.0,
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=98.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    # Even after the roof qualification hold matures, the still-active Pool
+    # must keep opportunistic Spa execution completely command-free.
+    waiting = _frame(
+        orchestrator,
+        NOW + timedelta(minutes=2),
+        pool_active=True,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        solar_active=True,
+        solar_temperature=140.0,
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=98.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    waiting_result = asyncio.run(
+        driver.process_epoch(waiting, delivery_factory=factory)
+    )
+    assert not waiting_result.command_delivery_performed
+    assert delivery.calls == []
+    assert waiting.thermal is not None
+    assert (
+        waiting.thermal.hot_tub.plan.desired.reason_code
+        == "opportunistic_waiting_for_clean_baseline"
+    )
+    assert waiting.thermal.hot_tub.plan.operations == ()
+
+    # Pool shutdown is a hard session boundary.  Once authoritative evidence
+    # proves Pool OFF, Spa OFF, pump 0 and Solar inactive, the already-qualified
+    # opportunity may start as a brand-new Hot Tub session.  Its first command
+    # is exact Solar preconditioning while Spa remains inactive.
+    neutral = _frame(
+        orchestrator,
+        NOW + timedelta(minutes=2, seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        solar_active=False,
+        solar_temperature=140.0,
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_heater="H0001",
+        spa_temperature=90.0,
+        spa_target=98.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    started = asyncio.run(
+        driver.process_epoch(neutral, delivery_factory=factory)
+    )
+
+    assert started.command_delivery_performed
+    assert len(delivery.calls) == 1
+    first = delivery.calls[0]
+    assert isinstance(first, SetHeatMode)
+    assert first.equipment_id == ThermalBody.HOT_TUB.value
+    assert first.mode is PhysicalHeatMode.SOLAR
+    assert all(
+        not isinstance(operation, SetHeatMode)
+        or operation.mode is not PhysicalHeatMode.GAS
+        for operation in delivery.calls
+    )
+    assert all(not isinstance(operation, SetBodyActive) for operation in delivery.calls)
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_activation is None
+    assert driver.spa_session_kind() is None
+
+
 def _assert_external_hot_tub_gas_lifecycle(
     *,
     orchestrator: ThermalRuntimeOrchestrator | None = None,
