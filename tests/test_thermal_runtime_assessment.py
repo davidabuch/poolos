@@ -1002,6 +1002,81 @@ def test_opportunistic_spa_starts_only_after_verified_neutral_baseline() -> None
     assert started.hot_tub.plan.operations[1].active is True
 
 
+def test_opportunistic_spa_discovers_later_roof_opportunity_after_pool_shutdown() -> None:
+    evaluator = ThermalRuntimeEvaluator()
+
+    # First establish a trusted same-day Pool bulk-water reference while Pool
+    # circulation is still authoritative and the target has been satisfied.
+    pool_finishing = live_values(
+        pool_active=True,
+        pool_heater="00000",
+        pump_rpm=2600,
+        solar_temperature=100.0,
+    )
+    pool_finishing["pool.temperature"] = 90.0
+    pool_finishing["pool.target_temperature"] = 90.0
+    pool_finishing["spa.temperature"] = 90.0
+    pool_finishing["spa.target_temperature"] = 98.0
+    first = evaluator.evaluate(
+        evidence(
+            native_values=pool_finishing,
+            filtration_debt=timedelta(hours=4),
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert first.pool.water_temperature is not None
+    assert first.pool.water_temperature.trusted_temperature_f == 90.0
+
+    # Pool is now fully quiescent, but the roof is not yet useful.  The retained
+    # same-day Pool reference must keep Pool demand satisfied without a new probe.
+    idle_cool = dict(pool_finishing)
+    idle_cool["pool.active"] = False
+    idle_cool["pump.rpm"] = 0
+    idle_cool["solar.active"] = False
+    idle_cool["solar.temperature"] = 100.0
+    waiting = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=30),
+            native_values=idle_cool,
+            filtration_debt=timedelta(hours=4),
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert waiting.hot_tub.plan.desired.reason_code == "opportunistic_waiting_for_roof"
+    assert waiting.hot_tub.plan.desired.evidence["pool_demand_satisfied"] is True
+    assert waiting.hot_tub.plan.operations == ()
+
+    # A later roof opportunity qualifies independently while Pool remains OFF.
+    warm = dict(idle_cool)
+    warm["solar.temperature"] = 140.0
+    qualifying = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(hours=1),
+            native_values=warm,
+            filtration_debt=timedelta(hours=4),
+        ),
+        live_policy=disabled_policy(),
+    )
+    started = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(hours=1, minutes=2),
+            native_values=warm,
+            filtration_debt=timedelta(hours=4),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert qualifying.hot_tub.plan.desired.reason_code == "opportunistic_waiting_for_roof"
+    assert (
+        started.hot_tub.plan.desired.reason_code
+        == "opportunistic_started_or_resumed"
+    )
+    assert started.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert started.hot_tub.plan.desired.evidence[
+        "opportunistic_start_baseline_ready"
+    ] is True
+
+
 def test_idle_solar_pool_requests_temperature_probe_before_source_selection() -> None:
     native = values(pool_active=False)
     native["pool.raw_heater_id"] = "00000"
