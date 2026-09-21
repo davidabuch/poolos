@@ -30,7 +30,12 @@ from .intellicenter_readonly import (
 )
 from .pump_priming_policy import PumpPrimingPolicy
 from .operating_baselines import PumpOperatingBaselines
-from .spa_thermal_policy import SpaHeatingMode, SpaPolicyAssessment, SpaPolicyInput
+from .spa_thermal_policy import (
+    SpaHeatingMode,
+    SpaPolicyAssessment,
+    SpaPolicyInput,
+    SpaSessionKind,
+)
 from .thermal_source_policy import (
     PoolHeatingMode,
     ThermalHeatSource,
