@@ -1078,9 +1078,25 @@ def test_opportunistic_spa_waits_until_pump_is_stopped_after_pool_off() -> None:
 
     idle = dict(body_off_pump_spinning)
     idle["pump.rpm"] = 0
-    started = evaluator.evaluate(
+    idle["solar.active"] = True
+    solar_still_active = evaluator.evaluate(
         evidence(
             at=NOW + timedelta(minutes=2, seconds=2),
+            native_values=idle,
+            filtration_debt=timedelta(0),
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert (
+        solar_still_active.hot_tub.plan.desired.reason_code
+        == "opportunistic_waiting_for_idle_hydraulics"
+    )
+    assert solar_still_active.hot_tub.plan.operations == ()
+
+    idle["solar.active"] = False
+    started = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2, seconds=3),
             native_values=idle,
             filtration_debt=timedelta(0),
         ),
