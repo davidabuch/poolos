@@ -317,7 +317,10 @@ def desired_spa_state(
 
     opportunistic_temperature_acquisition = (
         assessment.session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
-        and observation.opportunistic_start_ready
+        and (
+            observation.opportunistic_start_ready
+            or observation.spa_active
+        )
         and assessment.heat_source is ThermalHeatSource.SOLAR
         and observation.spa_target_f is not None
         and not spa_temperature_available
