@@ -4550,9 +4550,22 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
         idle_frame.thermal.hot_tub.technical_preflight.blocking_reasons,
     )
     assert len(delivery.calls) == 1
+    assert idle_frame.thermal.hot_tub.plan.desired.reason_code == (
+        "spa_temperature_acquisition_required"
+    )
+    assert idle_frame.thermal.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert idle_frame.thermal.hot_tub.plan.desired.required_pump_rpm == 1500
+    assert idle_frame.thermal.hot_tub.plan.desired.evidence.get(
+        "active_operating_purpose"
+    ) == "temperature_acquisition"
     assert isinstance(delivery.calls[0], SetHeatMode)
-    assert delivery.calls[0].mode is PhysicalHeatMode.SOLAR
+    assert delivery.calls[0].mode is PhysicalHeatMode.OFF
     assert not any(isinstance(operation, SetBodyActive) for operation in delivery.calls)
+    assert not any(
+        isinstance(operation, SetHeatMode)
+        and operation.mode is PhysicalHeatMode.SOLAR
+        for operation in delivery.calls
+    )
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.body is ThermalBody.HOT_TUB
