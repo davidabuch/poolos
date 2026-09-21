@@ -872,11 +872,15 @@ def test_authoritative_filtration_debt_does_not_block_opportunistic_spa_policy()
 
     assert first.hot_tub.plan.desired.reason_code == "opportunistic_waiting_for_roof"
     assert first.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
-    assert later.hot_tub.plan.desired.reason_code == "opportunistic_started_or_resumed"
-    assert later.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert (
+        later.hot_tub.plan.desired.reason_code
+        == "opportunistic_waiting_for_clean_baseline"
+    )
+    assert later.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert later.hot_tub.plan.operations == ()
 
 
-def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> None:
+def test_opportunistic_spa_waits_command_free_for_pool_shutdown() -> None:
     native = live_values(
         pool_active=True,
         pool_heater="00000",
@@ -901,26 +905,101 @@ def test_opportunistic_spa_policy_remains_blocked_when_body_is_inactive() -> Non
 
     assert (
         result.hot_tub.plan.desired.reason_code
+        == "opportunistic_waiting_for_clean_baseline"
+    )
+    assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.OFF
+    assert result.hot_tub.plan.desired.required_pump_rpm is None
+    assert result.hot_tub.plan.desired.evidence[
+        "opportunistic_start_baseline_ready"
+    ] is False
+    assert result.hot_tub.plan.operations == ()
+
+
+def test_opportunistic_spa_waits_while_pool_is_off_but_pump_still_coasting() -> None:
+    native = live_values(
+        pool_active=False,
+        pool_heater="00000",
+        pump_rpm=2600,
+        solar_temperature=140.0,
+    )
+    native["pool.temperature"] = 90.0
+    native["spa.temperature"] = 90.0
+    evaluator = ThermalRuntimeEvaluator()
+    evaluator.evaluate(
+        evidence(native_values=native, filtration_debt=timedelta(0)),
+        live_policy=disabled_policy(),
+    )
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2),
+            native_values=native,
+            filtration_debt=timedelta(0),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert (
+        result.hot_tub.plan.desired.reason_code
+        == "opportunistic_waiting_for_clean_baseline"
+    )
+    assert result.hot_tub.plan.operations == ()
+
+
+def test_opportunistic_spa_starts_only_after_verified_neutral_baseline() -> None:
+    pool_running = live_values(
+        pool_active=True,
+        pool_heater="00000",
+        pump_rpm=2600,
+        solar_temperature=140.0,
+    )
+    pool_running["pool.temperature"] = 90.0
+    pool_running["spa.temperature"] = 90.0
+    evaluator = ThermalRuntimeEvaluator()
+    evaluator.evaluate(
+        evidence(native_values=pool_running, filtration_debt=timedelta(0)),
+        live_policy=disabled_policy(),
+    )
+    waiting = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2),
+            native_values=pool_running,
+            filtration_debt=timedelta(0),
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert (
+        waiting.hot_tub.plan.desired.reason_code
+        == "opportunistic_waiting_for_clean_baseline"
+    )
+
+    neutral = dict(pool_running)
+    neutral["pool.active"] = False
+    neutral["pump.rpm"] = 0
+    neutral["pool.pump_circuit.configured_speed_rpm"] = 2600
+    neutral["spa.pump_circuit.configured_speed_rpm"] = 2600
+    neutral["solar.active"] = False
+    started = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=2, seconds=1),
+            native_values=neutral,
+            filtration_debt=timedelta(0),
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert (
+        started.hot_tub.plan.desired.reason_code
         == "opportunistic_started_or_resumed"
     )
-    assert result.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
-
-    # The plan may describe activation, but shared hydraulics fail closed while
-    # Pool is authoritative active and Hot Tub is inactive.
-    assert result.hot_tub.technical_preflight.ready is False
-    assert "other_body_active" in result.hot_tub.technical_preflight.blocking_reasons
-    assert isinstance(result.hot_tub.plan.operations[0], SetHeatMode)
-    assert result.hot_tub.plan.operations[0].mode is PhysicalHeatMode.SOLAR
-    assert isinstance(result.hot_tub.plan.operations[1], SetBodyActive)
-    assert result.hot_tub.plan.operations[1].equipment_id == ThermalBody.HOT_TUB.value
-    assert result.hot_tub.plan.operations[1].active is True
-
-    # Operator/live authority remains independently gated.
-    assert result.hot_tub.actual_authorization.authorized is False
-    assert (
-        "thermal_live_kill_switch_disabled"
-        in result.hot_tub.actual_authorization.blocking_reasons
-    )
+    assert started.hot_tub.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert started.hot_tub.plan.desired.evidence[
+        "opportunistic_start_baseline_ready"
+    ] is True
+    assert isinstance(started.hot_tub.plan.operations[0], SetHeatMode)
+    assert started.hot_tub.plan.operations[0].mode is PhysicalHeatMode.SOLAR
+    assert isinstance(started.hot_tub.plan.operations[1], SetBodyActive)
+    assert started.hot_tub.plan.operations[1].equipment_id == ThermalBody.HOT_TUB.value
+    assert started.hot_tub.plan.operations[1].active is True
 
 
 def test_idle_solar_pool_requests_temperature_probe_before_source_selection() -> None:
