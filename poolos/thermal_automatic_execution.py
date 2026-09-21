@@ -3680,12 +3680,22 @@ def _opportunistic_spa_source_precondition_then_activation(
         and body.plan.desired.evidence.get("session_kind")
         == SpaSessionKind.POOLOS_OPPORTUNISTIC.value
         and body.plan.desired.evidence.get("opportunistic_start_ready") is True
-        and body.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+        and (
+            body.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+            or (
+                body.plan.desired.selected_source is PhysicalHeatMode.OFF
+                and body.plan.desired.reason_code
+                == "spa_temperature_acquisition_required"
+                and body.plan.desired.required_pump_rpm == 1500
+                and body.plan.desired.evidence.get("active_operating_purpose")
+                == "temperature_acquisition"
+            )
+        )
         and len(operations) >= 2
         and len(specifications) == len(operations)
         and isinstance(operations[0], SetHeatMode)
         and operations[0].equipment_id == ThermalBody.HOT_TUB.value
-        and operations[0].mode is PhysicalHeatMode.SOLAR
+        and operations[0].mode is body.plan.desired.selected_source
         and specifications[0].operation_id == operations[0].operation_id
         and specifications[0].metadata.get(
             "spa_opportunistic_source_precondition"
