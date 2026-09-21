@@ -566,11 +566,28 @@ class PoolOSThermalAutomaticRuntime:
                 self.spa_automatic_control.state.suppressed
             ),
         )
-        if (
+        same_epoch_reobservation = bool(
             self._latest_frame is not None
             and self._latest_frame.epoch_identity == frame.epoch_identity
-        ):
+        )
+        if same_epoch_reobservation:
+            if (
+                frame.observed_at <= self._latest_frame.observed_at
+                or not self.driver.verification_reobservation_required()
+            ):
+                return
+            # Newer verification evidence may advance an accepted
+            # termination/cleanup consequence without creating a new semantic
+            # authority epoch.  State/policy identity is unchanged; only the
+            # authoritative chronology has advanced.
+            self._latest_frame = frame
+            if not self.driver.requested_enabled:
+                self.driver.note_disabled_epoch(frame)
+                self.coordinator.async_update_listeners()
+                return
+            self._schedule_if_idle()
             return
+
         self._latest_frame = frame
         self.circulation_ownership.begin_epoch(frame.epoch_identity)
         self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
@@ -850,9 +867,13 @@ class PoolOSThermalAutomaticRuntime:
         if self._unloaded or not self.driver.requested_enabled:
             return
         latest = self._latest_frame
-        if (
-            latest is not None
-            and latest.epoch_identity != self.driver.last_epoch_identity
+        if latest is not None and (
+            latest.epoch_identity != self.driver.last_epoch_identity
+            or (
+                self.driver.verification_reobservation_required()
+                and self.driver.assessment is not None
+                and latest.observed_at > self.driver.assessment.evaluated_at
+            )
         ):
             self._schedule_if_idle()
 

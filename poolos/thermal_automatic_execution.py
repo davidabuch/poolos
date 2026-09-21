@@ -393,6 +393,15 @@ class ThermalAutomaticExecutionDriver:
     def last_epoch_identity(self) -> str | None:
         return self._last_epoch_identity
 
+    def verification_reobservation_required(self) -> bool:
+        """Return whether newer same-epoch evidence may advance bounded cleanup."""
+
+        return (
+            self.termination_attempt is not None
+            or self.cleanup_provenance is not None
+            or self.cleanup_attempt is not None
+        )
+
     def probe_execution_evidence(self) -> PoolTemperatureProbeExecutionEvidence | None:
         """Return positive in-memory probe provenance for the evaluator."""
 
@@ -619,8 +628,13 @@ class ThermalAutomaticExecutionDriver:
                 command_delivery_performed=False,
             )
         if frame.epoch_identity == self._last_epoch_identity:
-            assert self.assessment is not None
-            return self.assessment
+            if (
+                self._last_epoch_at is None
+                or frame.observed_at <= self._last_epoch_at
+                or not self.verification_reobservation_required()
+            ):
+                assert self.assessment is not None
+                return self.assessment
         if self._last_epoch_at is not None and frame.observed_at < self._last_epoch_at:
             assert self.assessment is not None
             return self.assessment

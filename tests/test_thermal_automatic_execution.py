@@ -5263,6 +5263,33 @@ def test_accepted_termination_delivery_needs_a_later_authoritative_epoch() -> No
     assert len(factory.delivery.calls) == 4
 
 
+def test_newer_same_epoch_source_off_evidence_advances_termination_verification() -> None:
+    orchestrator, driver, factory, ending, _ = (
+        _driver_awaiting_source_off_verification()
+    )
+    confirmed = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=66),
+        pool_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        pool_heater="00000",
+        mode=ThermalRequestedMode.OFF,
+    )
+    same_epoch_confirmed = replace(
+        confirmed,
+        epoch_identity=ending.epoch_identity,
+    )
+
+    result = asyncio.run(
+        driver.process_epoch(same_epoch_confirmed, delivery_factory=factory)
+    )
+
+    assert result.state is ThermalAutomaticDriverState.CONVERGED
+    assert driver.termination_attempt is None
+    assert len(factory.delivery.calls) == 4
+
+
 def test_native_gas_does_not_verify_accepted_source_off_delivery() -> None:
     orchestrator, driver, factory, _, _ = _driver_awaiting_source_off_verification()
     still_gas = _frame(
