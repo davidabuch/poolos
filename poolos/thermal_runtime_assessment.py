@@ -1596,6 +1596,18 @@ class ThermalRuntimeEvaluator:
             spa_temperature_trusted=spa_temperature_trusted,
             active_heat_source=active_heat_source,
             active_heat_source_usable=active_purpose.evidence_usable,
+            opportunistic_start_ready=(
+                values.get("pool.active") is False
+                and values.get("spa.active") is False
+                and _number(values.get("pump.rpm")) == 0
+                and not bool(
+                    {"pool.active", "spa.active", "pump.rpm"}
+                    & (
+                        set(evidence.missing_native_concepts)
+                        | set(evidence.stale_native_concepts)
+                    )
+                )
+            ),
         )
         spa_desired = desired_spa_state(
             spa_input,
