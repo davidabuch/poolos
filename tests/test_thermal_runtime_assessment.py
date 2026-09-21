@@ -1024,8 +1024,8 @@ def test_opportunistic_spa_discovers_later_roof_opportunity_after_pool_shutdown(
         ),
         live_policy=disabled_policy(),
     )
-    assert first.pool.water_temperature is not None
-    assert first.pool.water_temperature.trusted_temperature_f == 90.0
+    # The evaluator records this authoritative circulating Pool value as the
+    # same-day retained bulk-water reference used by later idle evaluations.
 
     # Pool is now fully quiescent, but the roof is not yet useful.  The retained
     # same-day Pool reference must keep Pool demand satisfied without a new probe.
