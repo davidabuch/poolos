@@ -390,6 +390,15 @@ class ThermalExecutionPlanBuilder:
     ) -> ThermalExecutionPlanAssessment:
         if current.body is not desired.body:
             return self._non_ready(desired, current, ("thermal_body_mismatch",))
+        if (
+            desired.body is ThermalBody.HOT_TUB
+            and desired.reason_code == "opportunistic_waiting_for_clean_baseline"
+        ):
+            return self._non_ready(
+                desired,
+                current,
+                ("opportunistic_clean_baseline_required",),
+            )
         blockers = tuple(
             dict.fromkeys(
                 (
