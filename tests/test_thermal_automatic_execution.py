@@ -4496,27 +4496,28 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
 
     # Only a later clean idle epoch may begin the new Spa session. Source
     # preconditioning remains first, so even this epoch cannot turn Spa on yet.
+    idle_frame = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=123),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0198",
+        spa_heater="00000",
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=100.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        evaluator=evaluator,
+        driver=driver,
+    )
     idle = asyncio.run(
         driver.process_epoch(
-            _frame(
-                orchestrator,
-                NOW + timedelta(seconds=123),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                spa_active=False,
-                pump_rpm=0,
-                configured_rpm=2600,
-                spa_pump_circuit_id="p0198",
-                spa_heater="00000",
-                pool_temperature=90.0,
-                pool_target=90.0,
-                spa_temperature=90.0,
-                spa_target=100.0,
-                solar_temperature=140.0,
-                mode=ThermalRequestedMode.SOLAR_PREFERRED,
-                evaluator=evaluator,
-                driver=driver,
-            ),
+            idle_frame,
             delivery_factory=factory,
         )
     )
@@ -4526,6 +4527,15 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
         idle.blocker,
         idle.candidate_body,
         idle.runtime_ownership_status,
+        idle_frame.thermal.hot_tub.plan.desired.reason_code,
+        idle_frame.thermal.hot_tub.plan.desired.evidence.get("session_kind"),
+        tuple(type(item).__name__ for item in idle_frame.thermal.hot_tub.plan.operations),
+        tuple(
+            dict(item.metadata)
+            for item in idle_frame.thermal.hot_tub.plan.step_specifications
+        ),
+        idle_frame.thermal.hot_tub.actual_authorization.blocking_reasons,
+        idle_frame.thermal.hot_tub.technical_preflight.blocking_reasons,
     )
     assert len(delivery.calls) == 1
     assert isinstance(delivery.calls[0], SetHeatMode)
