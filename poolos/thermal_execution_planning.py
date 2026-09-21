@@ -337,6 +337,9 @@ def desired_spa_state(
                 else observation.filtration_debt.total_seconds()
             ),
             "higher_priority_conflict": observation.higher_priority_conflict,
+            "opportunistic_start_baseline_ready": (
+                observation.opportunistic_start_baseline_ready
+            ),
             "session_kind": assessment.session_kind.value,
             "spa_temperature_trusted": observation.spa_temperature_trusted,
             "active_heat_source": observation.active_heat_source.value,
