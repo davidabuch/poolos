@@ -309,6 +309,59 @@ def desired_spa_state(
         # there must be no dormant-Spa source/body/pump mutation until a fresh
         # idle frame proves the isolated start boundary.
         effective_blockers += ("opportunistic_start_waiting_for_idle_hydraulics",)
+
+    opportunistic_temperature_acquisition = (
+        assessment.session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+        and observation.opportunistic_start_ready
+        and assessment.heat_source is ThermalHeatSource.SOLAR
+        and observation.spa_target_f is not None
+        and not spa_temperature_available
+    )
+    if opportunistic_temperature_acquisition:
+        # Dormant Spa temperature is deliberately untrusted.  A qualified
+        # Solar opportunity may therefore establish only an isolated,
+        # provenance-bound temperature-acquisition purpose first.  Heating
+        # remains forbidden until a later exclusive-Spa circulation frame
+        # supplies trusted temperature evidence.
+        return ThermalDesiredState(
+            evaluated_at=assessment.evaluated_at,
+            body=ThermalBody.HOT_TUB,
+            requested_mode=observation.heating_mode.value,
+            selected_source=PhysicalHeatMode.OFF,
+            required_pump_rpm=1500,
+            reason_code="spa_temperature_acquisition_required",
+            rpm_reason_code="spa_temperature_acquisition_required",
+            rationale=(
+                "Acquire trusted Spa bulk-water temperature before opportunistic heating.",
+            ),
+            criteria=(
+                "poolos_opportunistic",
+                "commissioned_spa_temperature_acquisition",
+                "gas_fallback_forbidden",
+            ),
+            evidence={
+                "spa_temperature_f": observation.spa_temperature_f,
+                "spa_target_f": observation.spa_target_f,
+                "collector_temperature_f": observation.collector_temperature_f,
+                "spa_active": observation.spa_active,
+                "spa_in_use": False,
+                "pool_demand_satisfied": observation.pool_demand_satisfied,
+                "higher_priority_conflict": observation.higher_priority_conflict,
+                "session_kind": SpaSessionKind.POOLOS_OPPORTUNISTIC.value,
+                "spa_temperature_trusted": False,
+                "opportunistic_start_ready": True,
+                "active_heat_source": observation.active_heat_source.value,
+                "active_heat_source_usable": observation.active_heat_source_usable,
+                "active_operating_purpose": "temperature_acquisition",
+            },
+            evidence_usable=evidence_usable and not permission_blocked,
+            blockers=tuple(
+                blocker
+                for blocker in effective_blockers
+                if blocker != "required_spa_thermal_evidence_unavailable"
+            ),
+        )
+
     session_kind = "user_session" if assessment.spa_in_use else "opportunistic"
     criteria = (
         session_kind,
