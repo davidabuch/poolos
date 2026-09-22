@@ -1118,13 +1118,41 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     assert lease.pump_setpoint is not None
     assert lease.pump_setpoint.intended_value == 2900
 
-    # The real house held adopted Solar past the five-minute engagement
-    # confirmation window before the target was lowered.
+    # The live runtime receives repeated authoritative Solar-active epochs
+    # during the bounded engagement observation. Reproduce that chronology
+    # rather than jumping past the deadline in one synthetic frame.
+    for offset in (30, 60, 120, 180, 240, 299):
+        holding = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=offset),
+                    pool_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    pool_heater="H0002",
+                    solar_active=True,
+                    pool_temperature=80.0,
+                    pool_target=90.0,
+                    solar_temperature=125.0,
+                    mode=ThermalRequestedMode.SOLAR,
+                    evaluator=evaluator,
+                    driver=driver,
+                    pool_opportunity_id="pool:thermal:adopted-shutdown",
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert holding.state in {
+            ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
+            ThermalAutomaticDriverState.CONVERGED,
+        }
+
     stable_solar = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(minutes=5, seconds=3),
+                NOW + timedelta(seconds=300),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1154,7 +1182,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(minutes=5, seconds=4),
+                NOW + timedelta(seconds=301),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1191,7 +1219,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(minutes=5, seconds=5),
+                NOW + timedelta(seconds=302),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1226,7 +1254,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(minutes=5, seconds=6),
+                NOW + timedelta(seconds=303),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1260,7 +1288,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(minutes=5, seconds=7),
+                NOW + timedelta(seconds=304),
                 pool_active=False,
                 pump_rpm=0,
                 configured_rpm=2900,
