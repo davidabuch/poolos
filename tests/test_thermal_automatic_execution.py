@@ -1318,20 +1318,20 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     # Opportunistic Spa admission retains the source-Off prerequisite even
     # though native truth is already Off; it must never jump directly from old
     # Pool provenance into a Spa BODY command.
-    assert isinstance(delivery.calls[-1], SetHeatMode), tuple(
-        (
-            frame.thermal.hot_tub.plan.desired.reason_code,
-            frame.thermal.hot_tub.plan.desired.selected_source.value,
-            frame.thermal.hot_tub.plan.desired.required_pump_rpm,
-            frame.thermal.hot_tub.plan.disposition.value,
-            frame.thermal.hot_tub.actual_authorization.authorized,
-            frame.thermal.hot_tub.actual_authorization.blocking_reasons,
-            frame.thermal.hot_tub.technical_preflight.ready,
-            frame.thermal.hot_tub.technical_preflight.blocking_reasons,
-            dict(frame.thermal.hot_tub.plan.desired.evidence),
-        )
-        for frame in spa_successor_frames
-        if frame.thermal is not None
+    final_successor = spa_successor_assessments[-1]
+    final_frame = spa_successor_frames[-1]
+    assert final_successor.command_delivery_performed, (
+        final_successor.state,
+        final_successor.blocker,
+        final_successor.candidate_body,
+        final_successor.runtime_ownership_status,
+        final_frame.orchestration.lifecycle,
+        final_frame.orchestration.blocking_reason,
+        final_frame.thermal.hot_tub.plan.desired.reason_code,
+        final_frame.thermal.hot_tub.plan.disposition,
+        final_frame.thermal.hot_tub.actual_authorization.authorized,
+        final_frame.thermal.hot_tub.actual_authorization.blocking_reasons,
+        final_frame.thermal.hot_tub.technical_preflight.blocking_reasons,
     )
 
     assert delivery.calls[-1].equipment_id == ThermalBody.HOT_TUB.value
