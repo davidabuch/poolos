@@ -4667,6 +4667,19 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
     )
     assert not verified_source_off.command_delivery_performed
     assert len(delivery.calls) == 1
+    assert verified_source_off.blocker is None, (
+        verified_source_off.state,
+        verified_source_off.blocker,
+        verified_source_off.runtime_ownership_status,
+        verified_source_off.current_step_sequence,
+        verified_source_off.current_step_operation_id,
+    )
+    assert driver.active_session is not None, verified_source_off
+    assert driver.active_session.status is ThermalLiveExecutionStatus.READY, (
+        driver.active_session.status,
+        driver.active_session.failure_reason,
+        driver.active_session.execution_progress,
+    )
 
     # The following fresh epoch may deliver the now-current Spa BODY activation.
     asyncio.run(
