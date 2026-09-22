@@ -1824,12 +1824,16 @@ class ThermalLiveExecutionEngine:
             and item.reason == "observation_not_later_than_delivery"
             for item in unusable_evidence
         )
-        if chronology_only_pending:
-            # Immediately after an accepted command, the native observer can
-            # legitimately still expose the last pre-command value.  That is
-            # not contradictory evidence; it simply is not yet eligible to
-            # verify the command.  Keep the session fail-closed and wait for a
-            # fresh post-delivery observation until the bounded deadline.
+        opportunistic_spa_start_step = (
+            attempt.step.metadata.get("spa_opportunistic_source_precondition") == "true"
+            or attempt.step.metadata.get("spa_opportunistic_body_activation") == "true"
+        )
+        if chronology_only_pending and opportunistic_spa_start_step:
+            # The dormant Spa startup path deliberately requires a fresh
+            # post-command native frame.  The first evaluator epoch can race
+            # the native refresh and still expose the pre-command value.  For
+            # these two exact startup steps only, keep authority fail-closed
+            # and wait within the existing bounded verification deadline.
             if verification.status is VerificationStatus.TIMED_OUT:
                 return self._terminal(
                     updated,
