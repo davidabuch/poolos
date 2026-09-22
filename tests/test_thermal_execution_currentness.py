@@ -40,6 +40,7 @@ def _assessment(
     body_active: bool | None = True,
     body: ThermalBody = ThermalBody.POOL,
     pump_equipment_id: str = "p0102",
+    evidence_extra: dict[str, object] | None = None,
 ) -> ThermalExecutionPlanAssessment:
     desired = ThermalDesiredState(
         evaluated_at=evaluated_at,
@@ -52,7 +53,8 @@ def _assessment(
         rationale=("Current policy result.",),
         criteria=("authoritative_evidence",),
         evidence={
-            "pool_target_f" if body is ThermalBody.POOL else "spa_target_f": target_f
+            "pool_target_f" if body is ThermalBody.POOL else "spa_target_f": target_f,
+            **({} if evidence_extra is None else evidence_extra),
         },
     )
     current = ThermalCurrentState(
@@ -442,6 +444,7 @@ def test_verified_opportunistic_spa_source_off_prefix_may_continue_to_body() -> 
         current_rpm=0,
         body_active=False,
         pump_equipment_id="p0198",
+        evidence_extra={"session_kind": "poolos_opportunistic"},
     )
     originating = _currentness(original_assessment, "evaluation-origin")
     repeated = _currentness(
@@ -456,6 +459,7 @@ def test_verified_opportunistic_spa_source_off_prefix_may_continue_to_body() -> 
             current_rpm=0,
             body_active=False,
             pump_equipment_id="p0198",
+            evidence_extra={"session_kind": "poolos_opportunistic"},
         ),
         "evaluation-repeated",
     )
