@@ -442,6 +442,25 @@ class ThermalAutomaticExecutionDriver:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
         return None
 
+    def opportunistic_spa_topology_reobservation_token(self) -> str | None:
+        """Expose one accepted Spa-startup command that needs fresh BODY topology."""
+
+        session = self.active_session
+        if (
+            session is None
+            or session.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+            or session.current_attempt is None
+            or session.current_attempt.receipt is None
+        ):
+            return None
+        step = session.current_attempt.step
+        if not (
+            step.metadata.get("spa_opportunistic_source_precondition") == "true"
+            or step.metadata.get("spa_opportunistic_body_activation") == "true"
+        ):
+            return None
+        return session.current_attempt.receipt.command_id
+
     def active_pump_session_purpose(self) -> PumpSpeedSessionPurpose | None:
         """Expose only explicit probe/priming execution-purpose boundaries."""
 

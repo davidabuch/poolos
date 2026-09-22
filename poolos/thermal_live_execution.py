@@ -1603,6 +1603,36 @@ class ThermalLiveExecutionEngine:
                 source_id=source_id,
             )
         if hydraulic_failure is not None:
+            spa_startup_topology_refresh_pending = (
+                _opportunistic_spa_startup_step(attempt.step)
+                and hydraulic_failure.startswith(
+                    "hydraulic_activity_evidence_stale:"
+                )
+            )
+            if spa_startup_topology_refresh_pending:
+                deadline = attempt.receipt.issued_at + policy.verification_timeout
+                if evaluated_at >= deadline:
+                    return self._terminal(
+                        replace(
+                            session,
+                            current_attempt=replace(attempt, lifecycle=lifecycle),
+                        ),
+                        ThermalLiveExecutionStatus.TIMED_OUT,
+                        "spa_startup_hydraulic_reobservation_timed_out",
+                        evaluated_at,
+                    )
+                # A stable inactive BODY can legitimately emit no native
+                # transition while PoolOS moves from clean Pool idle into the
+                # opportunistic Spa successor.  For these two exact startup
+                # steps only, stale activity evidence is neither positive
+                # topology proof nor a contradiction.  Remain fail-closed and
+                # wait for the HA bridge's bounded read-only native refresh.
+                return replace(
+                    session,
+                    status=ThermalLiveExecutionStatus.AWAITING_VERIFICATION,
+                    updated_at=evaluated_at,
+                    current_attempt=replace(attempt, lifecycle=lifecycle),
+                )
             reason = f"hydraulic_continuity_lost:{hydraulic_failure}"
             failed = self.step_state_machine.transition(
                 lifecycle,
@@ -2157,6 +2187,15 @@ def _hydraulic_verification_contract(
     if target is not assessment.desired.body:
         return None, "hydraulic_continuity_contract_body_mismatch"
     return target, None
+
+
+def _opportunistic_spa_startup_step(step: ExecutionStep) -> bool:
+    """Return whether one step is an exact PoolOS opportunistic Spa startup boundary."""
+
+    return (
+        step.metadata.get("spa_opportunistic_source_precondition") == "true"
+        or step.metadata.get("spa_opportunistic_body_activation") == "true"
+    )
 
 
 def _required_target_active_for_step(

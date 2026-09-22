@@ -2195,6 +2195,7 @@ def test_opportunistic_spa_start_waits_for_fresh_native_frames() -> None:
         at=source_issued_at,
         pool_active=False,
         spa_active=False,
+        stale=("pool.active",),
     )
     precommand_source_store.put(
         PoolObservation(
@@ -2269,6 +2270,7 @@ def test_opportunistic_spa_start_waits_for_fresh_native_frames() -> None:
             at=body_issued_at,
             pool_active=False,
             spa_active=False,
+            stale=("pool.active",),
         ),
         current_context=body_waiting.originating_context,
         policy=live_policy,
