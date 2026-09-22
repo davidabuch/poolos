@@ -1461,6 +1461,74 @@ def test_manual_off_suppression_is_scoped_to_its_body(
 
     assert result.blocker != forbidden_blocker
 
+def test_manual_spa_restraint_forbids_qualified_opportunistic_start() -> None:
+    """A qualified Solar opportunity cannot override manual Spa restraint."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=driver)
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_heater="00000",
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=100.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    result = None
+    for seconds in (1, 121, 122):
+        frame = replace(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=seconds),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                spa_heater="00000",
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            spa_automatic_control_suppressed=True,
+        )
+        result = asyncio.run(
+            driver.process_epoch(frame, delivery_factory=factory)
+        )
+
+    assert result is not None
+    assert result.blocker == "automatic_thermal_manual_spa_off_preempted"
+    assert delivery.calls == []
+    assert orchestrator.ownership.state.lease is None
+    assert driver.active_session is None
+
+
 def test_warmed_collector_exposes_command_free_probe_candidate_at_native_cadence() -> None:
     """Model the v0.10.6 Pool-off commissioning sequence without delivery."""
 
