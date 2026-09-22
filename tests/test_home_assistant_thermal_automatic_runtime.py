@@ -68,6 +68,7 @@ class FakeDriver:
     started: asyncio.Event = field(default_factory=asyncio.Event)
     pump_session_purpose: object | None = None
     probe_evidence: object | None = None
+    spa_topology_token: str | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
         self.requested_enabled = enabled
@@ -99,6 +100,9 @@ class FakeDriver:
 
     def active_pump_session_purpose(self) -> object | None:
         return self.pump_session_purpose
+
+    def opportunistic_spa_topology_reobservation_token(self) -> str | None:
+        return self.spa_topology_token
 
     def diagnostics(self) -> dict[str, object]:
         return {"state": "test", "requested_enabled": self.requested_enabled}
@@ -143,6 +147,7 @@ class FakeHass:
         assert name in {
             "PoolOS automatic thermal execution epoch",
             "PoolOS owned pump-session native reobservation",
+            "PoolOS Spa startup native topology reobservation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -158,11 +163,19 @@ def _runtime(module: ModuleType):
         coordinator.pump_session_refresh_event.set()
         return True
 
+    async def refresh_thermal_topology_evidence() -> bool:
+        coordinator.thermal_topology_refresh_count += 1
+        coordinator.thermal_topology_refresh_event.set()
+        return True
+
     coordinator = SimpleNamespace(
         listener_updates=0,
         pump_session_refresh_count=0,
         pump_session_refresh_event=asyncio.Event(),
+        thermal_topology_refresh_count=0,
+        thermal_topology_refresh_event=asyncio.Event(),
         async_refresh_native_owned_pump_session_evidence=refresh_owned_pump_session_evidence,
+        async_refresh_native_thermal_topology_evidence=refresh_thermal_topology_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -234,6 +247,37 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
         assert len(hass.tasks) == 2
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
+
+    asyncio.run(scenario())
+
+
+def test_spa_startup_requests_one_immediate_native_topology_reobservation() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, _, coordinator, driver = _runtime(module)
+        runtime.set_enabled(True)
+        driver.spa_topology_token = "receipt-spa-startup-1"
+
+        started = runtime._sync_spa_startup_topology_reobservation()
+
+        assert started is True
+        assert len(hass.tasks) == 1
+        await asyncio.wait_for(
+            coordinator.thermal_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await hass.tasks[0]
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        duplicate = runtime._sync_spa_startup_topology_reobservation()
+        assert duplicate is False
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        driver.spa_topology_token = "receipt-spa-startup-2"
+        restarted = runtime._sync_spa_startup_topology_reobservation()
+        assert restarted is True
+        await asyncio.wait_for(hass.tasks[-1], timeout=1)
+        assert coordinator.thermal_topology_refresh_count == 2
 
     asyncio.run(scenario())
 
