@@ -1318,34 +1318,22 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     # Opportunistic Spa admission retains the source-Off prerequisite even
     # though native truth is already Off; it must never jump directly from old
     # Pool provenance into a Spa BODY command.
-    assert isinstance(delivery.calls[-1], SetHeatMode), (
-        tuple(
-            (
-                item.state,
-                item.blocker,
-                item.candidate_body,
-                item.runtime_ownership_status,
-                dict(item.runtime_ownership_summary),
-            )
-            for item in spa_successor_assessments
-        ),
-        tuple(
-            {
-                "reason": frame.thermal.hot_tub.plan.desired.reason_code,
-                "planned_source": frame.thermal.hot_tub.plan.desired.selected_source.value,
-                "planned_rpm": frame.thermal.hot_tub.plan.desired.required_pump_rpm,
-                "plan_disposition": frame.thermal.hot_tub.plan.disposition.value,
-                "actual_authorized": frame.thermal.hot_tub.actual_authorization.authorized,
-                "actual_blockers": frame.thermal.hot_tub.actual_authorization.blocking_reasons,
-                "preflight_ready": frame.thermal.hot_tub.technical_preflight.ready,
-                "preflight_blockers": frame.thermal.hot_tub.technical_preflight.blocking_reasons,
-                "evidence": dict(frame.thermal.hot_tub.plan.desired.evidence),
-            }
-            for frame in spa_successor_frames
-            if frame.thermal is not None
-        ),
-        delivery.calls[-1],
+    assert isinstance(delivery.calls[-1], SetHeatMode), tuple(
+        (
+            frame.thermal.hot_tub.plan.desired.reason_code,
+            frame.thermal.hot_tub.plan.desired.selected_source.value,
+            frame.thermal.hot_tub.plan.desired.required_pump_rpm,
+            frame.thermal.hot_tub.plan.disposition.value,
+            frame.thermal.hot_tub.actual_authorization.authorized,
+            frame.thermal.hot_tub.actual_authorization.blocking_reasons,
+            frame.thermal.hot_tub.technical_preflight.ready,
+            frame.thermal.hot_tub.technical_preflight.blocking_reasons,
+            dict(frame.thermal.hot_tub.plan.desired.evidence),
+        )
+        for frame in spa_successor_frames
+        if frame.thermal is not None
     )
+
     assert delivery.calls[-1].equipment_id == ThermalBody.HOT_TUB.value
     assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
     lease = orchestrator.ownership.state.lease
