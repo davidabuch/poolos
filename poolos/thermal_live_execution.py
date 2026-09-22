@@ -1814,7 +1814,31 @@ class ThermalLiveExecutionEngine:
                 "priming_verified_hold_continuity_lost",
                 evaluated_at,
             )
-        if unusable & {item.disposition for item in verification.evidence}:
+        unusable_evidence = tuple(
+            item
+            for item in verification.evidence
+            if item.disposition in unusable
+        )
+        chronology_only_pending = bool(unusable_evidence) and all(
+            item.disposition is VerificationEvidenceDisposition.UNUSABLE
+            and item.reason == "observation_not_later_than_delivery"
+            for item in unusable_evidence
+        )
+        if chronology_only_pending:
+            # Immediately after an accepted command, the native observer can
+            # legitimately still expose the last pre-command value.  That is
+            # not contradictory evidence; it simply is not yet eligible to
+            # verify the command.  Keep the session fail-closed and wait for a
+            # fresh post-delivery observation until the bounded deadline.
+            if verification.status is VerificationStatus.TIMED_OUT:
+                return self._terminal(
+                    updated,
+                    ThermalLiveExecutionStatus.TIMED_OUT,
+                    verification.reason,
+                    evaluated_at,
+                )
+            return updated
+        if unusable_evidence:
             return self._terminal(
                 updated,
                 ThermalLiveExecutionStatus.FAILED,
