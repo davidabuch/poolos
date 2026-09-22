@@ -2795,21 +2795,33 @@ def compatible_thermal_body_successor(
     predecessor: ThermalExecutionCurrentness,
     successor: ThermalExecutionCurrentness,
 ) -> bool:
-    """Potential typed Pool successor, never permission for an old execution."""
+    """Potential typed same-BODY successor, never permission for an old execution."""
     before, after = predecessor.purpose, successor.purpose
     before_pumps = {op.equipment_id for op in predecessor.residual_plan.operations
                     if op.operation_type == "SetPumpSpeed"}
     after_pumps = {op.equipment_id for op in successor.residual_plan.operations
                    if op.operation_type == "SetPumpSpeed"}
-    return (
-        before.body is ThermalBody.POOL and after.body is ThermalBody.POOL
-        and before.kind in {ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
-                            ThermalExecutionPurposeKind.THERMAL_CONTROL}
+    shared = (
+        before.body is after.body
         and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
         and after.selected_source is not PhysicalHeatMode.OFF
         and before.requested_mode == after.requested_mode
         and before.target_temperature_f == after.target_temperature_f
         and (not before_pumps or not after_pumps or before_pumps == after_pumps)
+    )
+    if not shared:
+        return False
+    if before.body is ThermalBody.POOL:
+        return before.kind in {
+            ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+            ThermalExecutionPurposeKind.THERMAL_CONTROL,
+        }
+    return (
+        before.body is ThermalBody.HOT_TUB
+        and before.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and before.selected_source is PhysicalHeatMode.OFF
+        and before.required_pump_rpm == 1500
+        and after.selected_source is PhysicalHeatMode.SOLAR
     )
 
 
