@@ -1118,13 +1118,13 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     assert lease.pump_setpoint is not None
     assert lease.pump_setpoint.intended_value == 2900
 
-    # The real house held adopted Solar well beyond the 30-second engagement
+    # The real house held adopted Solar past the five-minute engagement
     # confirmation window before the target was lowered.
     stable_solar = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=33),
+                NOW + timedelta(minutes=5, seconds=3),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1154,7 +1154,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=34),
+                NOW + timedelta(minutes=5, seconds=4),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1191,7 +1191,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=35),
+                NOW + timedelta(minutes=5, seconds=5),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1226,7 +1226,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=36),
+                NOW + timedelta(minutes=5, seconds=6),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1260,7 +1260,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=37),
+                NOW + timedelta(minutes=5, seconds=7),
                 pool_active=False,
                 pump_rpm=0,
                 configured_rpm=2900,
