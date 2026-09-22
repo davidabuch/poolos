@@ -4753,8 +4753,10 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
     assert not priming_hold_started.command_delivery_performed
     assert len(delivery.calls) == 3
 
-    # After the verified hold expires, the same owned Spa session may advance
-    # to the 1500-RPM temperature-acquisition purpose.
+    # By the end of verified priming, active exclusive Spa circulation has
+    # already made the Spa temperature trustworthy. The acquisition purpose is
+    # therefore superseded by a reviewed same-BODY Solar successor rather than
+    # commanding an unnecessary 1500-RPM step.
     priming_complete = asyncio.run(
         driver.process_epoch(
             _frame(
@@ -4778,10 +4780,41 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
             delivery_factory=factory,
         )
     )
-    assert priming_complete.command_delivery_performed
+    assert not priming_complete.command_delivery_performed
+    assert driver.active_session is not None, priming_complete
+    assert driver.active_session.status is ThermalLiveExecutionStatus.READY
+    assert len(delivery.calls) == 3
+
+    solar_flow = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=186),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_heater="00000",
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert solar_flow.command_delivery_performed, (
+        solar_flow.state,
+        solar_flow.blocker,
+    )
     assert len(delivery.calls) == 4
     assert isinstance(delivery.calls[3], SetPumpSpeed)
-    assert delivery.calls[3].rpm == 1500
+    assert delivery.calls[3].rpm == 2900
 
     lease = orchestrator.ownership.state.lease
     assert lease is not None
