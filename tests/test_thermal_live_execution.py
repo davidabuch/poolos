@@ -2111,6 +2111,90 @@ def test_unrelated_off_source_1500_rpm_is_rejected_by_canonical_model() -> None:
         )
 
 
+def test_post_delivery_precommand_body_observation_waits_for_fresh_native_frame() -> None:
+    """A pre-command body observation is pending evidence, not a terminal fault."""
+
+    acquisition = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="spa_temperature_acquisition_required",
+        rpm_reason_code="spa_temperature_acquisition_required",
+        rationale=("Acquire Spa bulk-water temperature.",),
+        criteria=("commissioned_spa_temperature_acquisition",),
+        evidence={
+            "session_kind": "poolos_opportunistic",
+            "active_operating_purpose": "temperature_acquisition",
+        },
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_SPA_PUMP_ID,
+        configured_speed_concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        acquisition,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=0,
+            body_active=False,
+        ),
+    )
+    assert isinstance(plan.operations[0], SetBodyActive)
+
+    engine = ThermalLiveExecutionEngine()
+    live_policy = policy(ThermalLiveCommissioningScope.HOT_TUB)
+    session = engine.begin(plan, policy=live_policy, evidence=evidence(plan, body_active=False))
+    delivered_at = NOW + timedelta(seconds=1)
+    session = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=live_policy,
+            evidence=evidence(plan, at=delivered_at, body_active=False),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert session.current_attempt is not None
+    issued_at = session.current_attempt.receipt.issued_at
+
+    stale_native = hydraulic_store(
+        at=issued_at,
+        pool_active=False,
+        spa_active=False,
+    )
+    pending = engine.verify_current_step(
+        session,
+        stale_native,
+        current_context=session.originating_context,
+        policy=live_policy,
+        evaluated_at=issued_at + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert pending.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert pending.failure_reason is None
+
+    fresh_at = issued_at + timedelta(seconds=2)
+    verified = engine.verify_current_step(
+        pending,
+        hydraulic_store(
+            at=fresh_at,
+            pool_active=False,
+            spa_active=True,
+        ),
+        current_context=pending.originating_context,
+        policy=live_policy,
+        evaluated_at=fresh_at,
+        source_id="native-intellicenter",
+    )
+
+    assert verified.status is ThermalLiveExecutionStatus.READY
+    assert verified.current_attempt is None
+
+
 def test_hot_tub_1500_requires_exact_temperature_acquisition_provenance() -> None:
     acquisition = ThermalDesiredState(
         evaluated_at=NOW,
