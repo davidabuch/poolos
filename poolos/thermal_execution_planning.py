@@ -617,6 +617,11 @@ class ThermalExecutionPlanBuilder:
                 }
                 metadata = {
                     "verification_truth": "authoritative_native_body_active",
+                    **(
+                        {"spa_opportunistic_body_activation": "true"}
+                        if opportunistic_spa_start
+                        else {}
+                    ),
                 }
             elif kind == "prime":
                 assert self.pump_equipment_id is not None
