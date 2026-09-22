@@ -61,6 +61,7 @@ from poolos.pump_speed_session import (
     PumpSpeedSessionBody,
     PumpSpeedSessionPurpose,
 )
+from poolos.spa_thermal_policy import SpaSessionKind
 from poolos.thermal_execution_currentness import ThermalExecutionProgress
 from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_automatic_execution import (
