@@ -4574,8 +4574,11 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
 
 
 
-def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None:
-    """Idle Spa admission must become a PoolOS-owned Spa BODY generation."""
+@pytest.mark.parametrize("shutdown_case", ("target_reached", "solar_loss"))
+def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
+    shutdown_case: str,
+) -> None:
+    """Idle Spa admission must own startup and autonomous completion."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -4889,13 +4892,50 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         for operation in delivery.calls
     )
 
-    # Reaching the opportunistic target is autonomous session completion, not
-    # homeowner-style maintenance. First reduce the thermal source to Off.
-    target_reached = asyncio.run(
+    if shutdown_case == "target_reached":
+        shutdown_at = 189
+        shutdown_temperature = 100.0
+        shutdown_roof = 140.0
+    else:
+        # A transient low-roof frame starts the bounded Solar-loss timer but
+        # must not prematurely terminate an otherwise healthy Spa session.
+        low_roof_started = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=189),
+                    pool_active=False,
+                    body=ThermalBody.HOT_TUB,
+                    spa_active=True,
+                    pump_rpm=2900,
+                    configured_rpm=2900,
+                    spa_heater="H0002",
+                    solar_active=True,
+                    pool_temperature=90.0,
+                    pool_target=90.0,
+                    spa_temperature=90.0,
+                    spa_target=100.0,
+                    solar_temperature=110.0,
+                    mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert not low_roof_started.command_delivery_performed
+        assert len(delivery.calls) == 5
+        shutdown_at = 310
+        shutdown_temperature = 90.0
+        shutdown_roof = 110.0
+
+    # Target completion is immediate; Solar loss must first remain below the
+    # hysteresis threshold for the policy's two-minute qualification hold.
+    shutdown = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=189),
+                NOW + timedelta(seconds=shutdown_at),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
@@ -4905,9 +4945,9 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
                 solar_active=True,
                 pool_temperature=90.0,
                 pool_target=90.0,
-                spa_temperature=100.0,
+                spa_temperature=shutdown_temperature,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=shutdown_roof,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
@@ -4915,9 +4955,10 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
             delivery_factory=factory,
         )
     )
-    assert target_reached.command_delivery_performed, (
-        target_reached.state,
-        target_reached.blocker,
+    assert shutdown.command_delivery_performed, (
+        shutdown_case,
+        shutdown.state,
+        shutdown.blocker,
     )
     assert isinstance(delivery.calls[-1], SetHeatMode)
     assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
@@ -4927,7 +4968,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=190),
+                NOW + timedelta(seconds=shutdown_at + 1),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
@@ -4937,9 +4978,9 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
                 solar_active=False,
                 pool_temperature=90.0,
                 pool_target=90.0,
-                spa_temperature=100.0,
+                spa_temperature=shutdown_temperature,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=shutdown_roof,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
@@ -4957,7 +4998,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=191),
+                NOW + timedelta(seconds=shutdown_at + 2),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
@@ -4967,9 +5008,9 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
                 solar_active=False,
                 pool_temperature=90.0,
                 pool_target=90.0,
-                spa_temperature=100.0,
+                spa_temperature=shutdown_temperature,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=shutdown_roof,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
@@ -4977,7 +5018,11 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
             delivery_factory=factory,
         )
     )
-    assert spa_off.command_delivery_performed, (spa_off.state, spa_off.blocker)
+    assert spa_off.command_delivery_performed, (
+        shutdown_case,
+        spa_off.state,
+        spa_off.blocker,
+    )
     assert isinstance(delivery.calls[-1], SetBodyActive)
     assert delivery.calls[-1].equipment_id == ThermalBody.HOT_TUB.value
     assert delivery.calls[-1].active is False
@@ -4986,7 +5031,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=192),
+                NOW + timedelta(seconds=shutdown_at + 3),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=False,
@@ -4996,9 +5041,9 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
                 solar_active=False,
                 pool_temperature=90.0,
                 pool_target=90.0,
-                spa_temperature=100.0,
+                spa_temperature=shutdown_temperature,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=shutdown_roof,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
