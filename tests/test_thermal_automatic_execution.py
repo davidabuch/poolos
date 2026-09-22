@@ -1089,7 +1089,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     assert delivery.calls[-1].rpm == 2900
 
     # Fresh 2900 observation verifies PoolOS's adopted Solar pump purpose.
-    solar_2900 = asyncio.run(
+    asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
