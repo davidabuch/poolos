@@ -61,7 +61,6 @@ from .thermal_execution_planning import (
 )
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
-    ThermalLiveCommissioningScope,
     ThermalLiveExecutionEngine,
     commissioning_scope_allows_body,
     ThermalLiveExecutionPolicy,
@@ -315,6 +314,12 @@ class ThermalAutomaticExecutionDriver:
     solar_engagement_attempt: SolarEngagementAttempt | None = None
     _last_epoch_identity: str | None = field(default=None, init=False, repr=False)
     _last_epoch_at: datetime | None = field(default=None, init=False, repr=False)
+    _spa_off_observed_since_start: bool = field(
+        default=False, init=False, repr=False
+    )
+    _active_spa_restart_ambiguity: bool = field(
+        default=False, init=False, repr=False
+    )
     _enabled_after_epoch_identity: str | None = field(
         default=None, init=False, repr=False
     )
@@ -465,6 +470,18 @@ class ThermalAutomaticExecutionDriver:
             is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
         ):
             return PumpSpeedSessionPurpose.TEMPERATURE_PROBE
+        if (
+            session.originating_currentness.purpose.body is ThermalBody.HOT_TUB
+            and session.originating_currentness.purpose.selected_source
+            is PhysicalHeatMode.OFF
+            and session.originating_currentness.purpose.required_pump_rpm
+            == self.baselines.temperature_probe_rpm
+            and any(
+                step.metadata.get("spa_temperature_acquisition_step") == "true"
+                for step in session.execution_plan.steps
+            )
+        ):
+            return PumpSpeedSessionPurpose.TEMPERATURE_PROBE
         return None
 
     def external_change_owned_intent(self) -> Mapping[str, object]:
@@ -550,6 +567,15 @@ class ThermalAutomaticExecutionDriver:
         """Record current truth without creating async work while disabled."""
 
         self._accept_epoch(frame)
+        if (
+            frame.thermal is not None
+            and frame.thermal.hot_tub.body_active is True
+            and not self._spa_off_observed_since_start
+        ):
+            # A process/reload that first observes Spa already active cannot
+            # distinguish a homeowner session from a pre-restart PoolOS
+            # opportunistic session whose volatile provenance was lost.
+            self._active_spa_restart_ambiguity = True
         return self._publish(
             state=ThermalAutomaticDriverState.DISABLED,
             evaluated_at=frame.observed_at,
@@ -972,6 +998,17 @@ class ThermalAutomaticExecutionDriver:
                         frame,
                         "automatic_thermal_candidate_unavailable",
                     )
+                if (
+                    body.body is ThermalBody.HOT_TUB
+                    and body.body_active is True
+                    and self.orchestrator.ownership.state.lease is None
+                    and self._active_spa_restart_ambiguity
+                ):
+                    return self._blocked(
+                        frame,
+                        "automatic_thermal_active_spa_unproven_after_restart",
+                        body=body,
+                    )
                 if self._solar_retry_suppressed(body, at=frame.observed_at):
                     return self._blocked(
                         frame,
@@ -1088,6 +1125,7 @@ class ThermalAutomaticExecutionDriver:
                     )
                     and body.body_active is not True
                     and not _probe_source_precondition_then_activation(body)
+                    and not _opportunistic_spa_source_precondition_then_activation(body)
                     and not filtration_source_off_precondition(body)
                 ):
                     return self._blocked(
@@ -2225,7 +2263,10 @@ class ThermalAutomaticExecutionDriver:
             return self._blocked(frame, "hot_tub_cleanup_activation_provenance_unavailable")
         if not frame.live_policy.thermal_live_execution_enabled:
             return self._blocked(frame, "hot_tub_cleanup_thermal_live_disabled")
-        if frame.live_policy.commissioning_scope is not ThermalLiveCommissioningScope.HOT_TUB:
+        if not commissioning_scope_allows_body(
+            frame.live_policy.commissioning_scope,
+            ThermalBody.HOT_TUB,
+        ):
             return self._blocked(frame, "hot_tub_cleanup_commissioning_scope_mismatch")
         try:
             delivery = delivery_factory.for_cleanup(
@@ -2571,6 +2612,14 @@ class ThermalAutomaticExecutionDriver:
     def _accept_epoch(self, frame: ThermalAutomaticExecutionFrame) -> None:
         self._last_epoch_identity = frame.epoch_identity
         self._last_epoch_at = frame.observed_at
+        if (
+            frame.thermal is not None
+            and frame.thermal.hot_tub.body_active is False
+        ):
+            # Observing Spa OFF creates a new in-process body boundary; a later
+            # Spa ON is then a session this driver actually witnessed.
+            self._spa_off_observed_since_start = True
+            self._active_spa_restart_ambiguity = False
 
     def _session_body(
         self,
@@ -2596,23 +2645,37 @@ class ThermalAutomaticExecutionDriver:
         existing_same_session_body_origin = bool(
             lease is not None
             and lease.status is ThermalRuntimeOwnershipStatus.OWNED
-            and lease.body is ThermalBody.POOL
+            and lease.body is session.originating_currentness.purpose.body
             and lease.owns_body
             and lease.execution_plan_id == session.execution_plan.plan_id
             and lease.originating_currentness == session.originating_currentness
         )
+        source_off_prerequisite_without_body = bool(
+            ownership.body_activation_operation_id is None
+            and session.originating_currentness.purpose.selected_source
+            is PhysicalHeatMode.OFF
+            and (
+                session.originating_currentness.purpose.kind
+                is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+                or (
+                    session.originating_currentness.purpose.body
+                    is ThermalBody.HOT_TUB
+                    and session.assessment.desired.reason_code
+                    == "spa_temperature_acquisition_required"
+                )
+            )
+        )
         if (
-            session.originating_currentness.purpose.kind
-            is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
-            and ownership.body_activation_operation_id is None
+            source_off_prerequisite_without_body
             and not existing_same_session_body_origin
         ):
             # Source-Off is a prerequisite, not proof that PoolOS owns
-            # circulation. Keep its accepted provenance on the live session
-            # until the body-activation operation is itself accepted. A
-            # prospectively adopted BODY is different: BODY provenance already
-            # exists, so accepted source-Off progress must be promoted or the
-            # next residual probe plan becomes falsely incompatible.
+            # circulation. Keep its accepted/verified provenance on the live
+            # session until BODY activation is itself accepted. This applies
+            # both to Pool temperature probing and to isolated opportunistic
+            # Spa temperature acquisition. A pre-existing PoolOS-owned BODY is
+            # different: BODY provenance already exists, so accepted source-Off
+            # progress may be promoted without manufacturing ownership.
             return None
         if (
             lease is not None
@@ -2652,17 +2715,37 @@ class ThermalAutomaticExecutionDriver:
         body: ThermalBodyRuntimeAssessment,
         preflight: ThermalLiveStructuralPreflightResult,
     ) -> str | None:
-        """Bind a fresh Pool thermal session while retaining only body provenance."""
+        """Bind a reviewed same-BODY thermal successor while retaining BODY provenance."""
 
         lease = self.orchestrator.ownership.state.lease
+        predecessor = None if lease is None else lease.originating_currentness
+        reviewed_predecessor = bool(
+            predecessor is not None
+            and (
+                (
+                    body.body is ThermalBody.POOL
+                    and predecessor.purpose.kind
+                    in {
+                        ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+                        ThermalExecutionPurposeKind.THERMAL_CONTROL,
+                    }
+                )
+                or (
+                    body.body is ThermalBody.HOT_TUB
+                    and predecessor.purpose.kind
+                    is ThermalExecutionPurposeKind.THERMAL_CONTROL
+                    and predecessor.purpose.selected_source is PhysicalHeatMode.OFF
+                    and predecessor.purpose.required_pump_rpm
+                    == self.baselines.temperature_probe_rpm
+                )
+            )
+        )
         if (
             lease is None
             or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
-            or lease.originating_currentness is None
-            or lease.originating_currentness.purpose.kind
-            not in {ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
-                    ThermalExecutionPurposeKind.THERMAL_CONTROL}
-            or body.body is not ThermalBody.POOL
+            or predecessor is None
+            or not reviewed_predecessor
+            or lease.body is not body.body
         ):
             return "automatic_thermal_owned_successor_requires_explicit_handoff"
         converged_successor = (
@@ -3663,6 +3746,47 @@ def _bind_adopted_probe_hydraulic_contract(
             bound_first,
             *assessment.step_specifications[1:],
         ),
+    )
+
+
+def _opportunistic_spa_source_precondition_then_activation(
+    body: ThermalBodyRuntimeAssessment,
+) -> bool:
+    """Recognize only the canonical isolated Spa Solar cold-start prefix."""
+
+    operations = body.plan.operations
+    specifications = body.plan.step_specifications
+    return bool(
+        body.body is ThermalBody.HOT_TUB
+        and body.body_active is False
+        and body.plan.desired.evidence.get("session_kind")
+        == SpaSessionKind.POOLOS_OPPORTUNISTIC.value
+        and body.plan.desired.evidence.get("opportunistic_start_ready") is True
+        and (
+            body.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+            or (
+                body.plan.desired.selected_source is PhysicalHeatMode.OFF
+                and body.plan.desired.reason_code
+                == "spa_temperature_acquisition_required"
+                and body.plan.desired.required_pump_rpm == 1500
+                and body.plan.desired.evidence.get("active_operating_purpose")
+                == "temperature_acquisition"
+            )
+        )
+        and len(operations) >= 2
+        and len(specifications) == len(operations)
+        and isinstance(operations[0], SetHeatMode)
+        and operations[0].equipment_id == ThermalBody.HOT_TUB.value
+        and operations[0].mode is body.plan.desired.selected_source
+        and specifications[0].operation_id == operations[0].operation_id
+        and specifications[0].metadata.get(
+            "spa_opportunistic_source_precondition"
+        )
+        == "true"
+        and isinstance(operations[1], SetBodyActive)
+        and operations[1].equipment_id == ThermalBody.HOT_TUB.value
+        and operations[1].active is True
+        and specifications[1].operation_id == operations[1].operation_id
     )
 
 

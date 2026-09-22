@@ -139,6 +139,23 @@ def policy(
     )
 
 
+def test_commissioning_scope_both_includes_pool_and_hot_tub() -> None:
+    """Combined commissioning scope must authorize either thermal body."""
+
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalBody.POOL,
+    )
+    assert commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.BOTH,
+        ThermalBody.HOT_TUB,
+    )
+    assert not commissioning_scope_allows_body(
+        ThermalLiveCommissioningScope.POOL,
+        ThermalBody.HOT_TUB,
+    )
+
+
 def evidence(
     plan: ThermalExecutionPlanAssessment,
     *,

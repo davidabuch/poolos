@@ -40,6 +40,7 @@ def _assessment(
     body_active: bool | None = True,
     body: ThermalBody = ThermalBody.POOL,
     pump_equipment_id: str = "p0102",
+    evidence_extra: dict[str, object] | None = None,
 ) -> ThermalExecutionPlanAssessment:
     desired = ThermalDesiredState(
         evaluated_at=evaluated_at,
@@ -52,7 +53,8 @@ def _assessment(
         rationale=("Current policy result.",),
         criteria=("authoritative_evidence",),
         evidence={
-            "pool_target_f" if body is ThermalBody.POOL else "spa_target_f": target_f
+            "pool_target_f" if body is ThermalBody.POOL else "spa_target_f": target_f,
+            **({} if evidence_extra is None else evidence_extra),
         },
     )
     current = ThermalCurrentState(
@@ -427,6 +429,60 @@ def test_cold_start_progress_and_convergence_keep_one_purpose(
         is ThermalExecutionCompatibilityDisposition.CONVERGED
     )
     assert originating.purpose == converged.purpose
+
+
+def test_verified_opportunistic_spa_source_off_prefix_may_continue_to_body() -> None:
+    """Verified Spa source-Off progress must not restart the precondition."""
+
+    original_assessment = _assessment(
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        source=PhysicalHeatMode.OFF,
+        rpm=1500,
+        reason="spa_temperature_acquisition_required",
+        current_source=PhysicalHeatMode.OFF,
+        current_rpm=0,
+        body_active=False,
+        pump_equipment_id="p0198",
+        evidence_extra={"session_kind": "poolos_opportunistic"},
+    )
+    originating = _currentness(original_assessment, "evaluation-origin")
+    repeated = _currentness(
+        _assessment(
+            evaluated_at=NOW + timedelta(seconds=1),
+            body=ThermalBody.HOT_TUB,
+            requested_mode="solar_preferred",
+            source=PhysicalHeatMode.OFF,
+            rpm=1500,
+            reason="spa_temperature_acquisition_required",
+            current_source=PhysicalHeatMode.OFF,
+            current_rpm=0,
+            body_active=False,
+            pump_equipment_id="p0198",
+            evidence_extra={"session_kind": "poolos_opportunistic"},
+        ),
+        "evaluation-repeated",
+    )
+    assert len(original_assessment.operations) >= 2
+    assert original_assessment.operations[0].__class__.__name__ == "SetHeatMode"
+    assert original_assessment.operations[1].__class__.__name__ == "SetBodyActive"
+
+    decision = assess_execution_compatibility(
+        originating,
+        repeated,
+        progress=ThermalExecutionProgress(
+            verified_prefix=(_signature(original_assessment, 0),),
+        ),
+    )
+
+    assert (
+        decision.disposition
+        is ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE
+    )
+    assert (
+        decision.reason_code
+        == "thermal_execution_verified_spa_source_precondition_repeated"
+    )
 
 
 def test_manual_matching_prefix_removal_does_not_manufacture_progress() -> None:

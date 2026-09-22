@@ -2150,6 +2150,11 @@ def _required_target_active_for_step(
             == "true"
             else False
         )
+    if step.metadata.get("spa_opportunistic_source_precondition") == "true":
+        # The dormant Spa source must be proven Off before PoolOS activates
+        # the Spa body. Verification therefore requires the target body to
+        # remain inactive during this prerequisite step.
+        return False
     return True
 
 
