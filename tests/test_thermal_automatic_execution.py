@@ -4689,7 +4689,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
 
     # The authoritative Spa-On consequence must preserve that same autonomous
     # BODY provenance rather than reclassifying the session as homeowner-owned.
-    asyncio.run(
+    spa_on_verified = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
@@ -4712,6 +4712,76 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
             delivery_factory=factory,
         )
     )
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_activation is not None
+    assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
+
+    # A cold-start Spa acquisition must retain the canonical priming invariant.
+    assert spa_on_verified.command_delivery_performed
+    assert len(delivery.calls) == 3
+    assert isinstance(delivery.calls[2], SetPumpSpeed)
+    assert delivery.calls[2].rpm == 3000
+
+    # First authoritative 3000-RPM observation starts, but does not complete,
+    # the required verified 60-second priming hold.
+    priming_hold_started = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=124),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_heater="00000",
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert not priming_hold_started.command_delivery_performed
+    assert len(delivery.calls) == 3
+
+    # After the verified hold expires, the same owned Spa session may advance
+    # to the 1500-RPM temperature-acquisition purpose.
+    priming_complete = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=185),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_heater="00000",
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert priming_complete.command_delivery_performed
+    assert len(delivery.calls) == 4
+    assert isinstance(delivery.calls[3], SetPumpSpeed)
+    assert delivery.calls[3].rpm == 1500
 
     lease = orchestrator.ownership.state.lease
     assert lease is not None
