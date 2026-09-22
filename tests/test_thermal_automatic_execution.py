@@ -1118,8 +1118,8 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     assert lease.pump_setpoint is not None
     assert lease.pump_setpoint.intended_value == 2900
 
-    # The real house had already held a stable adopted Solar session well past
-    # the 30-second Solar-engagement confirmation window before target change.
+    # The real house held adopted Solar well beyond the 30-second engagement
+    # confirmation window before the target was lowered.
     stable_solar = asyncio.run(
         driver.process_epoch(
             _frame(
@@ -1302,7 +1302,7 @@ def test_fresh_solar_successor_retires_residual_then_reacquires_body() -> None:
     delivery.calls.clear()
     successor = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=True,
         pump_rpm=2600,
         configured_rpm=2600,
@@ -1940,7 +1940,7 @@ def test_priming_hold_uses_later_epochs_and_never_chains_delivery() -> None:
 
     holding = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=True,
         pump_rpm=3000,
         configured_rpm=3000,
@@ -2137,7 +2137,7 @@ def test_accepted_pump_step_allows_bounded_controller_settling(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=34),
+                NOW + timedelta(seconds=3),
                 pool_active=True,
                 pump_rpm=first_actual_rpm,
                 configured_rpm=first_configured_rpm,
@@ -2153,7 +2153,7 @@ def test_accepted_pump_step_allows_bounded_controller_settling(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=35),
+                NOW + timedelta(seconds=4),
                 pool_active=True,
                 pump_rpm=3000,
                 configured_rpm=3000,
@@ -2165,7 +2165,7 @@ def test_accepted_pump_step_allows_bounded_controller_settling(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=35),
+                NOW + timedelta(seconds=4),
                 pool_active=True,
                 pump_rpm=3000,
                 configured_rpm=3000,
@@ -2529,7 +2529,7 @@ def test_retained_prime_event_is_replaced_before_solar_termination_and_cleanup(
         native_object_id="PMP01",
         previous_value=2900,
         new_value=3000,
-        observed_at=NOW + timedelta(seconds=34),
+        observed_at=NOW + timedelta(seconds=3),
         external_policy="reconcile",
         action_taken="reconciliation_required",
         notification_recommended=True,
@@ -5824,7 +5824,7 @@ def test_external_spa_off_preempts_accepted_pump_work_without_retry() -> None:
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=34),
+                NOW + timedelta(seconds=3),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=False,
@@ -5955,7 +5955,7 @@ def test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adop
 
     source_verified = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=True,
         pump_rpm=expected_rpm,
         configured_rpm=expected_rpm,
@@ -6166,7 +6166,7 @@ def test_verified_body_origin_survives_unattributed_pump_drift() -> None:
         native_object_id="PMP01",
         previous_value=0,
         new_value=2600,
-        observed_at=NOW + timedelta(seconds=34),
+        observed_at=NOW + timedelta(seconds=3),
         external_policy="accept",
         action_taken="observe",
         notification_recommended=True,
@@ -6174,7 +6174,7 @@ def test_verified_body_origin_survives_unattributed_pump_drift() -> None:
     )
     frame = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=True,
         pump_rpm=2600,
         configured_rpm=2600,
@@ -6240,7 +6240,7 @@ def test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=34),
+                NOW + timedelta(seconds=3),
                 pool_active=False,
                 pump_rpm=0,
                 configured_rpm=3000,
@@ -6253,7 +6253,7 @@ def test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=35),
+                NOW + timedelta(seconds=4),
                 pool_active=True,
                 pump_rpm=3000,
                 configured_rpm=3000,
@@ -6364,7 +6364,7 @@ def test_diagnostic_publication_cannot_invalidate_residual_entitlement() -> None
     orchestrator, driver, _ = _driver_with_residual_body_entitlement()
     invalid = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=False,
         mode=ThermalRequestedMode.OFF,
     )
@@ -6387,7 +6387,7 @@ def test_explicit_invalidated_termination_processing_discards_entitlement() -> N
     orchestrator, driver, factory = _driver_with_residual_body_entitlement()
     invalid = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=False,
         mode=ThermalRequestedMode.OFF,
     )
@@ -7366,7 +7366,7 @@ def test_driver_gate_loss_does_not_promote_unverified_cleanup_proof() -> None:
     assert orchestrator.ownership.residual_termination is None
     later = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=True,
         mode=ThermalRequestedMode.OFF,
     )
@@ -7394,7 +7394,7 @@ def test_disable_relinquishes_session_and_never_replays_it() -> None:
     )
     later = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=True,
     )
     replay = asyncio.run(driver.process_epoch(later, delivery_factory=factory))
@@ -7580,7 +7580,7 @@ def test_preempted_thermal_session_allows_genuinely_fresh_successor_session() ->
         native_object_id="B1101",
         previous_value=True,
         new_value=False,
-        observed_at=NOW + timedelta(seconds=34),
+        observed_at=NOW + timedelta(seconds=3),
         external_policy="accept",
         action_taken="observe",
         notification_recommended=True,
@@ -7589,7 +7589,7 @@ def test_preempted_thermal_session_allows_genuinely_fresh_successor_session() ->
 
     preempted_frame = _frame(
         orchestrator,
-        NOW + timedelta(seconds=34),
+        NOW + timedelta(seconds=3),
         pool_active=False,
     )
 
@@ -7621,7 +7621,7 @@ def test_preempted_thermal_session_allows_genuinely_fresh_successor_session() ->
 
     off_epoch = _frame(
         orchestrator,
-        NOW + timedelta(seconds=35),
+        NOW + timedelta(seconds=4),
         pool_active=False,
     )
 
@@ -7651,7 +7651,7 @@ def test_preempted_thermal_session_allows_genuinely_fresh_successor_session() ->
 
     successor_confirmed = _frame(
         orchestrator,
-        NOW + timedelta(seconds=36),
+        NOW + timedelta(seconds=5),
         pool_active=True,
     )
     asyncio.run(
@@ -7727,7 +7727,7 @@ def test_preempted_session_successor_completes_solar_and_defers_filtration() -> 
         native_object_id="B1101",
         previous_value=True,
         new_value=False,
-        observed_at=NOW + timedelta(seconds=34),
+        observed_at=NOW + timedelta(seconds=3),
         external_policy="accept",
         action_taken="observe",
         notification_recommended=True,
@@ -7739,7 +7739,7 @@ def test_preempted_session_successor_completes_solar_and_defers_filtration() -> 
             replace(
                 _frame(
                     orchestrator,
-                    NOW + timedelta(seconds=34),
+                    NOW + timedelta(seconds=3),
                     pool_active=False,
                 ),
                 external_changes=ExternalChangeBatch((native_off,)),
