@@ -4567,10 +4567,10 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
         and operation.mode is PhysicalHeatMode.SOLAR
         for operation in delivery.calls
     )
+    # Source-Off is only a verified prerequisite. It must not manufacture
+    # Hot Tub runtime ownership before PoolOS accepts Spa BODY activation.
     lease = orchestrator.ownership.state.lease
-    assert lease is not None
-    assert lease.body is ThermalBody.HOT_TUB
-    assert lease.body_activation is None
+    assert lease is None
 
 
 
