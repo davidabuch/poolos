@@ -2014,7 +2014,10 @@ class ThermalRuntimeOwnershipManager:
     ) -> str | None:
         """Additional denial only; existing exact execution authorization still applies."""
         lease = self._state.lease
-        if lease is None:
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            # Terminal leases are historical once their separately typed
+            # residual reduction has been consumed. They cannot veto the first
+            # command of a fresh independently authorized generation.
             return None
         domain = (OwnershipDomain.BODY if isinstance(operation, SetBodyActive)
                   else OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed)
@@ -2037,7 +2040,9 @@ class ThermalRuntimeOwnershipManager:
     ) -> str | None:
         """Debit one bounded attempt before invoking the existing delivery engine."""
         lease = self._state.lease
-        if lease is None:
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            # Reconciliation budgets belong to one active ownership generation.
+            # Never debit a terminal predecessor for a fresh successor command.
             return None
         domain = (OwnershipDomain.BODY if isinstance(operation, SetBodyActive)
                   else OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed)
