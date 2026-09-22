@@ -2238,7 +2238,10 @@ class ThermalAutomaticExecutionDriver:
             return self._blocked(frame, "hot_tub_cleanup_activation_provenance_unavailable")
         if not frame.live_policy.thermal_live_execution_enabled:
             return self._blocked(frame, "hot_tub_cleanup_thermal_live_disabled")
-        if frame.live_policy.commissioning_scope is not ThermalLiveCommissioningScope.HOT_TUB:
+        if not commissioning_scope_allows_body(
+            frame.live_policy.commissioning_scope,
+            ThermalBody.HOT_TUB,
+        ):
             return self._blocked(frame, "hot_tub_cleanup_commissioning_scope_mismatch")
         try:
             delivery = delivery_factory.for_cleanup(
