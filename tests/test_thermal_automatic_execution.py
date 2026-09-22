@@ -4639,12 +4639,41 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
     assert isinstance(delivery.calls[0], SetHeatMode)
     assert delivery.calls[0].mode is PhysicalHeatMode.OFF
 
-    # Fresh source-Off evidence admits the BODY activation step.
-    asyncio.run(
+    # Fresh source-Off evidence verifies the accepted precondition. The live
+    # driver intentionally submits at most one new physical operation per
+    # authoritative epoch, so verification does not chain Spa ON immediately.
+    verified_source_off = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
                 NOW + timedelta(seconds=122),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                spa_heater="00000",
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert not verified_source_off.command_delivery_performed
+    assert len(delivery.calls) == 1
+
+    # The following fresh epoch may deliver the now-current Spa BODY activation.
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=123),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=False,
@@ -4681,7 +4710,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=123),
+                NOW + timedelta(seconds=124),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
