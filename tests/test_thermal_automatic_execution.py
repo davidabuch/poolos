@@ -1284,35 +1284,50 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     # The clean adopted-Pool completion must be a real successor boundary, not
     # merely an isolated shutdown success. From the same driver/runtime, a new
     # opportunistic Spa opportunity may now qualify independently.
+    spa_successor_assessments = []
     for seconds in (304, 424):
-        asyncio.run(
-            driver.process_epoch(
-                _frame(
-                    orchestrator,
-                    NOW + timedelta(seconds=seconds),
-                    pool_active=False,
-                    body=ThermalBody.HOT_TUB,
-                    spa_active=False,
-                    pump_rpm=0,
-                    configured_rpm=2900,
-                    spa_heater="00000",
-                    pool_temperature=80.0,
-                    pool_target=78.0,
-                    spa_temperature=90.0,
-                    spa_target=100.0,
-                    solar_temperature=140.0,
-                    mode=ThermalRequestedMode.SOLAR_PREFERRED,
-                    evaluator=evaluator,
-                    driver=driver,
-                ),
-                delivery_factory=factory,
+        spa_successor_assessments.append(
+            asyncio.run(
+                driver.process_epoch(
+                    _frame(
+                        orchestrator,
+                        NOW + timedelta(seconds=seconds),
+                        pool_active=False,
+                        body=ThermalBody.HOT_TUB,
+                        spa_active=False,
+                        pump_rpm=0,
+                        configured_rpm=2900,
+                        spa_heater="00000",
+                        pool_temperature=80.0,
+                        pool_target=78.0,
+                        spa_temperature=90.0,
+                        spa_target=100.0,
+                        solar_temperature=140.0,
+                        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                        evaluator=evaluator,
+                        driver=driver,
+                    ),
+                    delivery_factory=factory,
+                )
             )
         )
 
     # Opportunistic Spa admission retains the source-Off prerequisite even
     # though native truth is already Off; it must never jump directly from old
     # Pool provenance into a Spa BODY command.
-    assert isinstance(delivery.calls[-1], SetHeatMode)
+    assert isinstance(delivery.calls[-1], SetHeatMode), (
+        tuple(
+            (
+                item.state,
+                item.blocker,
+                item.candidate_body,
+                item.runtime_ownership_status,
+                dict(item.runtime_ownership_summary),
+            )
+            for item in spa_successor_assessments
+        ),
+        delivery.calls[-1],
+    )
     assert delivery.calls[-1].equipment_id == ThermalBody.HOT_TUB.value
     assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
     lease = orchestrator.ownership.state.lease
