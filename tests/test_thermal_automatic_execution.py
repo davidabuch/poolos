@@ -4574,7 +4574,10 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
 
 
 
-@pytest.mark.parametrize("shutdown_case", ("target_reached", "solar_loss"))
+@pytest.mark.parametrize(
+    "shutdown_case",
+    ("target_reached", "solar_loss", "pool_priority_return"),
+)
 def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
     shutdown_case: str,
 ) -> None:
@@ -4892,11 +4895,13 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         for operation in delivery.calls
     )
 
+    shutdown_pool_temperature = 90.0
+    shutdown_pool_target = 90.0
     if shutdown_case == "target_reached":
         shutdown_at = 189
         shutdown_temperature = 100.0
         shutdown_roof = 140.0
-    else:
+    elif shutdown_case == "solar_loss":
         # A transient low-roof frame starts the bounded Solar-loss timer but
         # must not prematurely terminate an otherwise healthy Spa session.
         low_roof_started = asyncio.run(
@@ -4928,6 +4933,15 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         shutdown_at = 310
         shutdown_temperature = 90.0
         shutdown_roof = 110.0
+    else:
+        # Returning Pool demand is a higher-priority eligibility boundary.
+        # The Spa session must reduce itself; it must not transfer Hot Tub
+        # BODY provenance into a Pool command.
+        shutdown_at = 189
+        shutdown_temperature = 90.0
+        shutdown_roof = 140.0
+        shutdown_pool_temperature = 89.0
+        shutdown_pool_target = 90.0
 
     # Target completion is immediate; Solar loss must first remain below the
     # hysteresis threshold for the policy's two-minute qualification hold.
@@ -4943,8 +4957,8 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
                 configured_rpm=2900,
                 spa_heater="H0002",
                 solar_active=True,
-                pool_temperature=90.0,
-                pool_target=90.0,
+                pool_temperature=shutdown_pool_temperature,
+                pool_target=shutdown_pool_target,
                 spa_temperature=shutdown_temperature,
                 spa_target=100.0,
                 solar_temperature=shutdown_roof,
@@ -4976,8 +4990,8 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
                 configured_rpm=2900,
                 spa_heater="00000",
                 solar_active=False,
-                pool_temperature=90.0,
-                pool_target=90.0,
+                pool_temperature=shutdown_pool_temperature,
+                pool_target=shutdown_pool_target,
                 spa_temperature=shutdown_temperature,
                 spa_target=100.0,
                 solar_temperature=shutdown_roof,
@@ -5006,8 +5020,8 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
                 configured_rpm=2900,
                 spa_heater="00000",
                 solar_active=False,
-                pool_temperature=90.0,
-                pool_target=90.0,
+                pool_temperature=shutdown_pool_temperature,
+                pool_target=shutdown_pool_target,
                 spa_temperature=shutdown_temperature,
                 spa_target=100.0,
                 solar_temperature=shutdown_roof,
@@ -5039,8 +5053,8 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
                 configured_rpm=2900,
                 spa_heater="00000",
                 solar_active=False,
-                pool_temperature=90.0,
-                pool_target=90.0,
+                pool_temperature=shutdown_pool_temperature,
+                pool_target=shutdown_pool_target,
                 spa_temperature=shutdown_temperature,
                 spa_target=100.0,
                 solar_temperature=shutdown_roof,
@@ -5059,6 +5073,12 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         and operation.mode is PhysicalHeatMode.GAS
         for operation in delivery.calls
     )
+    if shutdown_case == "pool_priority_return":
+        assert not any(
+            isinstance(operation, SetBodyActive)
+            and operation.equipment_id == ThermalBody.POOL.value
+            for operation in delivery.calls
+        )
 
 
 def test_external_hot_tub_session_governs_dynamic_spa_pump_without_body_ownership() -> None:
