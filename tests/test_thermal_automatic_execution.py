@@ -1176,50 +1176,15 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     )
     assert driver.solar_engagement_attempt is None
 
-    # Pool demand then becomes satisfied while filtration remains debt-bearing
-    # but explicitly TOU-deferred. The adopted Solar session must terminate.
-    satisfied = asyncio.run(
-        driver.process_epoch(
-            _frame(
-                orchestrator,
-                NOW + timedelta(seconds=301),
-                pool_active=True,
-                pump_rpm=2900,
-                configured_rpm=2900,
-                pool_heater="H0002",
-                solar_active=True,
-                pool_temperature=80.0,
-                pool_target=78.0,
-                solar_temperature=125.0,
-                mode=ThermalRequestedMode.SOLAR,
-                filtration_remaining=timedelta(hours=4),
-                filtration_disposition=FiltrationDisposition.CREDITING,
-                filtration_independent_disposition=(
-                    FiltrationDisposition.DEFERRED_OPTIMIZATION
-                ),
-                evaluator=evaluator,
-                driver=driver,
-                pool_opportunity_id="pool:thermal:adopted-shutdown",
-            ),
-            delivery_factory=factory,
-        )
-    )
-    assert satisfied.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION, (
-        satisfied.state,
-        satisfied.blocker,
-        satisfied.runtime_ownership_summary,
-    )
-    assert satisfied.command_delivery_performed
-    assert isinstance(delivery.calls[-1], SetHeatMode)
-    assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
-
-    # This is today's exact failure boundary: after source-Off is positively
-    # reobserved, adopted BODY/PUMP provenance must remain available for cleanup.
+    # Live 2026-09-22 chronology: once the Pool target was lowered below
+    # current temperature, IntelliCenter had already de-selected Solar. PoolOS
+    # therefore first sees the cleanup boundary as source OFF while the adopted
+    # Pool BODY is still ON at the old 2900-RPM Solar setpoint.
     source_off = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=302),
+                NOW + timedelta(seconds=301),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1254,7 +1219,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=303),
+                NOW + timedelta(seconds=302),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1288,7 +1253,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=304),
+                NOW + timedelta(seconds=303),
                 pool_active=False,
                 pump_rpm=0,
                 configured_rpm=2900,
