@@ -1025,7 +1025,7 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
 
 
 
-def test_converged_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> None:
+def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> None:
     """Live 2026-09-22 regression: adopted Solar must still own Pool OFF/pump0."""
 
     orchestrator = ThermalRuntimeOrchestrator()
@@ -1056,15 +1056,14 @@ def test_converged_prospectively_adopted_pool_solar_owns_target_satisfied_shutdo
         current_epoch_identity=baseline.epoch_identity,
     )
 
-    # Model the pool-guy path: BODY was externally started, then a later,
-    # independently valid Solar purpose is already physically converged when
-    # PoolOS first prospectively adopts it.
-    converged_solar = _frame(
+    # Model the real pool-guy path: Pool is already externally active at the
+    # Pentair baseline when a new independent Solar opportunity appears.
+    adopted_start = _frame(
         orchestrator,
         NOW + timedelta(seconds=1),
         pool_active=True,
-        pump_rpm=2900,
-        configured_rpm=2900,
+        pump_rpm=2600,
+        configured_rpm=2600,
         pool_heater="H0002",
         solar_active=True,
         pool_temperature=80.0,
@@ -1076,27 +1075,56 @@ def test_converged_prospectively_adopted_pool_solar_owns_target_satisfied_shutdo
         pool_opportunity_id="pool:thermal:adopted-shutdown",
     )
     adopted = asyncio.run(
-        driver.process_epoch(converged_solar, delivery_factory=factory)
+        driver.process_epoch(adopted_start, delivery_factory=factory)
     )
 
     lease = orchestrator.ownership.state.lease
-    assert adopted.state is ThermalAutomaticDriverState.CONVERGED
-    assert not adopted.command_delivery_performed
     assert lease is not None
     assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
     assert lease.owns_body
     assert lease.owns_body_adoption
-    assert lease.owns_pump_setpoint
-    assert lease.owns_heat_source
+    assert adopted.runtime_ownership_summary["owns_body"] is True
+    assert adopted.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2900
 
-    # Pool demand then becomes satisfied while filtration remains debt-bearing
-    # but is explicitly TOU-deferred. PoolOS must terminate the adopted Solar
-    # purpose rather than strand the adopted BODY at Solar RPM.
-    satisfied = asyncio.run(
+    # Fresh 2900 observation verifies PoolOS's adopted Solar pump purpose.
+    solar_2900 = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
                 NOW + timedelta(seconds=2),
+                pool_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                pool_temperature=80.0,
+                pool_target=90.0,
+                solar_temperature=125.0,
+                mode=ThermalRequestedMode.SOLAR,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:adopted-shutdown",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.owns_body_adoption
+    assert lease.owns_pump_setpoint
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+
+    # Pool demand then becomes satisfied while filtration remains debt-bearing
+    # but explicitly TOU-deferred. The adopted Solar session must terminate.
+    satisfied = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=3),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1118,19 +1146,22 @@ def test_converged_prospectively_adopted_pool_solar_owns_target_satisfied_shutdo
             delivery_factory=factory,
         )
     )
-    assert satisfied.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION
+    assert satisfied.state is ThermalAutomaticDriverState.AWAITING_TERMINATION_VERIFICATION, (
+        satisfied.state,
+        satisfied.blocker,
+        satisfied.runtime_ownership_summary,
+    )
     assert satisfied.command_delivery_performed
     assert isinstance(delivery.calls[-1], SetHeatMode)
     assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
 
-    # Positive source-Off truth must retain enough adopted BODY/PUMP provenance
-    # to authorize the eventual BODY shutdown. This is the exact boundary that
-    # failed physically with thermal_cleanup_pump_provenance_relinquished.
+    # This is today's exact failure boundary: after source-Off is positively
+    # reobserved, adopted BODY/PUMP provenance must remain available for cleanup.
     source_off = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=3),
+                NOW + timedelta(seconds=4),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1165,7 +1196,7 @@ def test_converged_prospectively_adopted_pool_solar_owns_target_satisfied_shutdo
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=4),
+                NOW + timedelta(seconds=5),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -1199,7 +1230,7 @@ def test_converged_prospectively_adopted_pool_solar_owns_target_satisfied_shutdo
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=5),
+                NOW + timedelta(seconds=6),
                 pool_active=False,
                 pump_rpm=0,
                 configured_rpm=2900,
