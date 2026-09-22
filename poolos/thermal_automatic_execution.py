@@ -317,6 +317,9 @@ class ThermalAutomaticExecutionDriver:
     _spa_off_observed_since_start: bool = field(
         default=False, init=False, repr=False
     )
+    _active_spa_restart_ambiguity: bool = field(
+        default=False, init=False, repr=False
+    )
     _enabled_after_epoch_identity: str | None = field(
         default=None, init=False, repr=False
     )
@@ -564,6 +567,15 @@ class ThermalAutomaticExecutionDriver:
         """Record current truth without creating async work while disabled."""
 
         self._accept_epoch(frame)
+        if (
+            frame.thermal is not None
+            and frame.thermal.hot_tub.body_active is True
+            and not self._spa_off_observed_since_start
+        ):
+            # A process/reload that first observes Spa already active cannot
+            # distinguish a homeowner session from a pre-restart PoolOS
+            # opportunistic session whose volatile provenance was lost.
+            self._active_spa_restart_ambiguity = True
         return self._publish(
             state=ThermalAutomaticDriverState.DISABLED,
             evaluated_at=frame.observed_at,
@@ -990,7 +1002,7 @@ class ThermalAutomaticExecutionDriver:
                     body.body is ThermalBody.HOT_TUB
                     and body.body_active is True
                     and self.orchestrator.ownership.state.lease is None
-                    and not self._spa_off_observed_since_start
+                    and self._active_spa_restart_ambiguity
                 ):
                     return self._blocked(
                         frame,
@@ -2604,12 +2616,10 @@ class ThermalAutomaticExecutionDriver:
             frame.thermal is not None
             and frame.thermal.hot_tub.body_active is False
         ):
-            # A fresh process may observe an already-active Spa without knowing
-            # whether it is a homeowner session or a pre-restart PoolOS session
-            # whose volatile provenance was lost. Observing Spa OFF creates a
-            # new in-process body boundary; a later Spa ON is then a session
-            # this driver actually witnessed.
+            # Observing Spa OFF creates a new in-process body boundary; a later
+            # Spa ON is then a session this driver actually witnessed.
             self._spa_off_observed_since_start = True
+            self._active_spa_restart_ambiguity = False
 
     def _session_body(
         self,
