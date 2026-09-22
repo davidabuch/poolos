@@ -2611,23 +2611,37 @@ class ThermalAutomaticExecutionDriver:
         existing_same_session_body_origin = bool(
             lease is not None
             and lease.status is ThermalRuntimeOwnershipStatus.OWNED
-            and lease.body is ThermalBody.POOL
+            and lease.body is session.originating_currentness.purpose.body
             and lease.owns_body
             and lease.execution_plan_id == session.execution_plan.plan_id
             and lease.originating_currentness == session.originating_currentness
         )
+        source_off_prerequisite_without_body = bool(
+            ownership.body_activation_operation_id is None
+            and session.originating_currentness.purpose.selected_source
+            is PhysicalHeatMode.OFF
+            and (
+                session.originating_currentness.purpose.kind
+                is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
+                or (
+                    session.originating_currentness.purpose.body
+                    is ThermalBody.HOT_TUB
+                    and session.assessment.desired.reason_code
+                    == "spa_temperature_acquisition_required"
+                )
+            )
+        )
         if (
-            session.originating_currentness.purpose.kind
-            is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE
-            and ownership.body_activation_operation_id is None
+            source_off_prerequisite_without_body
             and not existing_same_session_body_origin
         ):
             # Source-Off is a prerequisite, not proof that PoolOS owns
-            # circulation. Keep its accepted provenance on the live session
-            # until the body-activation operation is itself accepted. A
-            # prospectively adopted BODY is different: BODY provenance already
-            # exists, so accepted source-Off progress must be promoted or the
-            # next residual probe plan becomes falsely incompatible.
+            # circulation. Keep its accepted/verified provenance on the live
+            # session until BODY activation is itself accepted. This applies
+            # both to Pool temperature probing and to isolated opportunistic
+            # Spa temperature acquisition. A pre-existing PoolOS-owned BODY is
+            # different: BODY provenance already exists, so accepted source-Off
+            # progress may be promoted without manufacturing ownership.
             return None
         if (
             lease is not None
