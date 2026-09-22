@@ -1285,28 +1285,31 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     # merely an isolated shutdown success. From the same driver/runtime, a new
     # opportunistic Spa opportunity may now qualify independently.
     spa_successor_assessments = []
+    spa_successor_frames = []
     for seconds in (304, 424):
+        successor_frame = _frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=False,
+            body=ThermalBody.HOT_TUB,
+            spa_active=False,
+            pump_rpm=0,
+            configured_rpm=2900,
+            spa_heater="00000",
+            pool_temperature=80.0,
+            pool_target=78.0,
+            spa_temperature=90.0,
+            spa_target=100.0,
+            solar_temperature=140.0,
+            mode=ThermalRequestedMode.SOLAR_PREFERRED,
+            evaluator=evaluator,
+            driver=driver,
+        )
+        spa_successor_frames.append(successor_frame)
         spa_successor_assessments.append(
             asyncio.run(
                 driver.process_epoch(
-                    _frame(
-                        orchestrator,
-                        NOW + timedelta(seconds=seconds),
-                        pool_active=False,
-                        body=ThermalBody.HOT_TUB,
-                        spa_active=False,
-                        pump_rpm=0,
-                        configured_rpm=2900,
-                        spa_heater="00000",
-                        pool_temperature=80.0,
-                        pool_target=78.0,
-                        spa_temperature=90.0,
-                        spa_target=100.0,
-                        solar_temperature=140.0,
-                        mode=ThermalRequestedMode.SOLAR_PREFERRED,
-                        evaluator=evaluator,
-                        driver=driver,
-                    ),
+                    successor_frame,
                     delivery_factory=factory,
                 )
             )
@@ -1325,6 +1328,21 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
                 dict(item.runtime_ownership_summary),
             )
             for item in spa_successor_assessments
+        ),
+        tuple(
+            {
+                "reason": frame.thermal.hot_tub.plan.desired.reason_code,
+                "planned_source": frame.thermal.hot_tub.plan.desired.selected_source.value,
+                "planned_rpm": frame.thermal.hot_tub.plan.desired.required_pump_rpm,
+                "plan_disposition": frame.thermal.hot_tub.plan.disposition.value,
+                "actual_authorized": frame.thermal.hot_tub.actual_authorization.authorized,
+                "actual_blockers": frame.thermal.hot_tub.actual_authorization.blocking_reasons,
+                "preflight_ready": frame.thermal.hot_tub.technical_preflight.ready,
+                "preflight_blockers": frame.thermal.hot_tub.technical_preflight.blocking_reasons,
+                "evidence": dict(frame.thermal.hot_tub.plan.desired.evidence),
+            }
+            for frame in spa_successor_frames
+            if frame.thermal is not None
         ),
         delivery.calls[-1],
     )
