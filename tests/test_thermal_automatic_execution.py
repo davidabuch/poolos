@@ -4678,7 +4678,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
     )
     assert len(delivery.calls) == 2
     assert isinstance(delivery.calls[1], SetBodyActive)
-    assert delivery.calls[1].body is ThermalBody.HOT_TUB
+    assert delivery.calls[1].equipment_id == ThermalBody.HOT_TUB.value
     assert delivery.calls[1].active
 
     lease = orchestrator.ownership.state.lease
