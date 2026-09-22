@@ -4665,8 +4665,10 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
             delivery_factory=factory,
         )
     )
-    assert not verified_source_off.command_delivery_performed
-    assert len(delivery.calls) == 1
+    # Verification of the prior source-Off consequence may advance the
+    # existing execution and submit exactly one new operation in this fresh
+    # epoch. That next operation must be Spa BODY activation.
+    assert verified_source_off.command_delivery_performed
     assert verified_source_off.blocker is None, (
         verified_source_off.state,
         verified_source_off.blocker,
@@ -4674,38 +4676,6 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         verified_source_off.current_step_sequence,
         verified_source_off.current_step_operation_id,
     )
-    assert driver.active_session is not None, verified_source_off
-    assert driver.active_session.status is ThermalLiveExecutionStatus.READY, (
-        driver.active_session.status,
-        driver.active_session.failure_reason,
-        driver.active_session.execution_progress,
-    )
-
-    # The following fresh epoch may deliver the now-current Spa BODY activation.
-    asyncio.run(
-        driver.process_epoch(
-            _frame(
-                orchestrator,
-                NOW + timedelta(seconds=123),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                spa_active=False,
-                pump_rpm=0,
-                configured_rpm=2600,
-                spa_heater="00000",
-                pool_temperature=90.0,
-                pool_target=90.0,
-                spa_temperature=90.0,
-                spa_target=100.0,
-                solar_temperature=140.0,
-                mode=ThermalRequestedMode.SOLAR_PREFERRED,
-                evaluator=evaluator,
-                driver=driver,
-            ),
-            delivery_factory=factory,
-        )
-    )
-
     assert len(delivery.calls) == 2
     assert isinstance(delivery.calls[1], SetBodyActive)
     assert delivery.calls[1].body is ThermalBody.HOT_TUB
@@ -4723,7 +4693,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=124),
+                NOW + timedelta(seconds=123),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
