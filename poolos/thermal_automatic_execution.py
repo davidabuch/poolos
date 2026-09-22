@@ -314,6 +314,9 @@ class ThermalAutomaticExecutionDriver:
     solar_engagement_attempt: SolarEngagementAttempt | None = None
     _last_epoch_identity: str | None = field(default=None, init=False, repr=False)
     _last_epoch_at: datetime | None = field(default=None, init=False, repr=False)
+    _spa_off_observed_since_start: bool = field(
+        default=False, init=False, repr=False
+    )
     _enabled_after_epoch_identity: str | None = field(
         default=None, init=False, repr=False
     )
@@ -982,6 +985,17 @@ class ThermalAutomaticExecutionDriver:
                     return self._blocked(
                         frame,
                         "automatic_thermal_candidate_unavailable",
+                    )
+                if (
+                    body.body is ThermalBody.HOT_TUB
+                    and body.body_active is True
+                    and self.orchestrator.ownership.state.lease is None
+                    and not self._spa_off_observed_since_start
+                ):
+                    return self._blocked(
+                        frame,
+                        "automatic_thermal_active_spa_unproven_after_restart",
+                        body=body,
                     )
                 if self._solar_retry_suppressed(body, at=frame.observed_at):
                     return self._blocked(
@@ -2586,6 +2600,16 @@ class ThermalAutomaticExecutionDriver:
     def _accept_epoch(self, frame: ThermalAutomaticExecutionFrame) -> None:
         self._last_epoch_identity = frame.epoch_identity
         self._last_epoch_at = frame.observed_at
+        if (
+            frame.thermal is not None
+            and frame.thermal.hot_tub.body_active is False
+        ):
+            # A fresh process may observe an already-active Spa without knowing
+            # whether it is a homeowner session or a pre-restart PoolOS session
+            # whose volatile provenance was lost. Observing Spa OFF creates a
+            # new in-process body boundary; a later Spa ON is then a session
+            # this driver actually witnessed.
+            self._spa_off_observed_since_start = True
 
     def _session_body(
         self,
