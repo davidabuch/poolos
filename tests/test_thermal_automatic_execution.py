@@ -4816,10 +4816,72 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance() -> None
     assert isinstance(delivery.calls[3], SetPumpSpeed)
     assert delivery.calls[3].rpm == 2900
 
+    # The verified Solar-flow prerequisite may then select Solar, never Gas.
+    solar_selected = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=187),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                spa_heater="00000",
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert solar_selected.command_delivery_performed, (
+        solar_selected.state,
+        solar_selected.blocker,
+    )
+    assert len(delivery.calls) == 5
+    assert isinstance(delivery.calls[4], SetHeatMode)
+    assert delivery.calls[4].mode is PhysicalHeatMode.SOLAR
+
+    solar_verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=188),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                spa_heater="H0002",
+                solar_active=True,
+                pool_temperature=90.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert not solar_verified.command_delivery_performed
+
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.body is ThermalBody.HOT_TUB
     assert lease.body_activation is not None
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+    assert lease.heat_source is not None
+    assert lease.heat_source.intended_value is PhysicalHeatMode.SOLAR
     assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
     assert not any(
         isinstance(operation, SetHeatMode)
