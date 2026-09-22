@@ -2681,17 +2681,37 @@ class ThermalAutomaticExecutionDriver:
         body: ThermalBodyRuntimeAssessment,
         preflight: ThermalLiveStructuralPreflightResult,
     ) -> str | None:
-        """Bind a fresh Pool thermal session while retaining only body provenance."""
+        """Bind a reviewed same-BODY thermal successor while retaining BODY provenance."""
 
         lease = self.orchestrator.ownership.state.lease
+        predecessor = None if lease is None else lease.originating_currentness
+        reviewed_predecessor = bool(
+            predecessor is not None
+            and (
+                (
+                    body.body is ThermalBody.POOL
+                    and predecessor.purpose.kind
+                    in {
+                        ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+                        ThermalExecutionPurposeKind.THERMAL_CONTROL,
+                    }
+                )
+                or (
+                    body.body is ThermalBody.HOT_TUB
+                    and predecessor.purpose.kind
+                    is ThermalExecutionPurposeKind.THERMAL_CONTROL
+                    and predecessor.purpose.selected_source is PhysicalHeatMode.OFF
+                    and predecessor.purpose.required_pump_rpm
+                    == self.baselines.temperature_probe_rpm
+                )
+            )
+        )
         if (
             lease is None
             or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
-            or lease.originating_currentness is None
-            or lease.originating_currentness.purpose.kind
-            not in {ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
-                    ThermalExecutionPurposeKind.THERMAL_CONTROL}
-            or body.body is not ThermalBody.POOL
+            or predecessor is None
+            or not reviewed_predecessor
+            or lease.body is not body.body
         ):
             return "automatic_thermal_owned_successor_requires_explicit_handoff"
         converged_successor = (
