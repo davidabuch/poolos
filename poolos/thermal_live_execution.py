@@ -1814,7 +1814,35 @@ class ThermalLiveExecutionEngine:
                 "priming_verified_hold_continuity_lost",
                 evaluated_at,
             )
-        if unusable & {item.disposition for item in verification.evidence}:
+        unusable_evidence = tuple(
+            item
+            for item in verification.evidence
+            if item.disposition in unusable
+        )
+        chronology_only_pending = bool(unusable_evidence) and all(
+            item.disposition is VerificationEvidenceDisposition.UNUSABLE
+            and item.reason == "observation_not_later_than_delivery"
+            for item in unusable_evidence
+        )
+        opportunistic_spa_start_step = (
+            attempt.step.metadata.get("spa_opportunistic_source_precondition") == "true"
+            or attempt.step.metadata.get("spa_opportunistic_body_activation") == "true"
+        )
+        if chronology_only_pending and opportunistic_spa_start_step:
+            # The dormant Spa startup path deliberately requires a fresh
+            # post-command native frame.  The first evaluator epoch can race
+            # the native refresh and still expose the pre-command value.  For
+            # these two exact startup steps only, keep authority fail-closed
+            # and wait within the existing bounded verification deadline.
+            if verification.status is VerificationStatus.TIMED_OUT:
+                return self._terminal(
+                    updated,
+                    ThermalLiveExecutionStatus.TIMED_OUT,
+                    verification.reason,
+                    evaluated_at,
+                )
+            return updated
+        if unusable_evidence:
             return self._terminal(
                 updated,
                 ThermalLiveExecutionStatus.FAILED,
