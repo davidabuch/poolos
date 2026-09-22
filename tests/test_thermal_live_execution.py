@@ -2151,9 +2151,27 @@ def test_opportunistic_spa_start_waits_for_fresh_native_frames() -> None:
         "spa_opportunistic_body_activation"
     ] == "true"
 
+    @dataclass
+    class TimedDelivery(FakeThermalDelivery):
+        issued_at: datetime = NOW
+
+        async def deliver(
+            self,
+            operation: PoolOperation,
+            *,
+            correlation_id: str,
+        ) -> CommandReceipt:
+            self.calls.append((operation, correlation_id))
+            return CommandReceipt(
+                status=CommandStatus.ACKNOWLEDGED,
+                command_id=f"receipt-{len(self.calls)}",
+                issued_at=self.issued_at,
+                acknowledged_at=self.issued_at,
+                verification_required=True,
+            )
+
     engine = ThermalLiveExecutionEngine()
     live_policy = policy(ThermalLiveCommissioningScope.HOT_TUB)
-    delivery = FakeThermalDelivery()
     session = engine.begin(
         plan,
         policy=live_policy,
@@ -2166,7 +2184,7 @@ def test_opportunistic_spa_start_waits_for_fresh_native_frames() -> None:
             session,
             policy=live_policy,
             evidence=evidence(plan, at=source_delivered_at, body_active=False),
-            delivery=delivery,
+            delivery=TimedDelivery(issued_at=source_delivered_at),
         )
     )
     assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
@@ -2238,7 +2256,7 @@ def test_opportunistic_spa_start_waits_for_fresh_native_frames() -> None:
                 body_active=False,
                 execution_currentness=ready_for_body.originating_currentness,
             ),
-            delivery=delivery,
+            delivery=TimedDelivery(issued_at=body_delivered_at),
         )
     )
     assert body_waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
