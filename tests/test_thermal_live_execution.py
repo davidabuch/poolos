@@ -2173,13 +2173,25 @@ def test_opportunistic_spa_start_waits_for_fresh_native_frames() -> None:
     assert session.current_attempt is not None
     source_issued_at = session.current_attempt.receipt.issued_at
 
+    precommand_source_store = hydraulic_store(
+        at=source_issued_at,
+        pool_active=False,
+        spa_active=False,
+    )
+    precommand_source_store.put(
+        PoolObservation(
+            observation_id="spa.raw_heater_id",
+            value="00000",
+            observed_at=source_issued_at,
+            source_kind=ObservationSourceKind.LIVE,
+            source_id="native-intellicenter",
+            quality=ObservationQuality.GOOD,
+            confidence=1.0,
+        )
+    )
     pending_source = engine.verify_current_step(
         session,
-        hydraulic_store(
-            at=source_issued_at,
-            pool_active=False,
-            spa_active=False,
-        ),
+        precommand_source_store,
         current_context=session.originating_context,
         policy=live_policy,
         evaluated_at=source_issued_at + timedelta(seconds=1),
