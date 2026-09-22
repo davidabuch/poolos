@@ -1335,10 +1335,25 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
             delivery_factory=factory,
         )
     )
+    lease_after_spa_admission = orchestrator.ownership.state.lease
     assert qualified.command_delivery_performed, (
         qualified.state,
         qualified.blocker,
         qualified.runtime_ownership_summary,
+        None if lease_after_spa_admission is None else lease_after_spa_admission.body,
+        None if lease_after_spa_admission is None else lease_after_spa_admission.generation,
+        None if lease_after_spa_admission is None else lease_after_spa_admission.status,
+        None if lease_after_spa_admission is None else tuple(
+            (
+                state.domain,
+                state.authority,
+                state.command_blocker,
+                None if state.episode is None else state.episode.corrections_reserved,
+                None if state.episode is None else state.episode.correction_budget,
+                None if state.episode is None else state.episode.verified_at,
+            )
+            for state in lease_after_spa_admission.domain_states
+        ),
     )
     assert isinstance(delivery.calls[-1], SetHeatMode)
 
