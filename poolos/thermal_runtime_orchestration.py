@@ -653,9 +653,8 @@ def _probe_successor_handoff_pending(
     return bool(
         predecessor is not None
         and successor is not None
+        and lease.body is body.body
         and compatible_thermal_body_successor(predecessor, successor)
-        and lease.body is ThermalBody.POOL
-        and body.body is ThermalBody.POOL
         and predecessor.purpose.requested_mode == successor.purpose.requested_mode
     )
 
