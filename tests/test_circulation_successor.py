@@ -241,6 +241,33 @@ def _evaluate(
     )
 
 
+def test_same_snapshot_body_evidence_just_before_entitlement_remains_current() -> None:
+    evidence = _evidence(observed_at=NOW - timedelta(milliseconds=500))
+    result = _evaluate(
+        entitlement=_entitlement(source_owned=False),
+        evidence=evidence,
+    )
+
+    assert result.pool_activity_current
+    assert result.spa_activity_current
+    assert result.body_provenance_current
+    assert result.disposition is CirculationArbitrationDisposition.EXCLUSIVE_THERMAL
+    assert result.body_deactivation_eligible
+
+
+def test_preboundary_body_evidence_outside_snapshot_skew_remains_blocked() -> None:
+    evidence = _evidence(observed_at=NOW - timedelta(seconds=2))
+    result = _evaluate(
+        entitlement=_entitlement(source_owned=False),
+        evidence=evidence,
+    )
+
+    assert not result.pool_activity_current
+    assert not result.spa_activity_current
+    assert result.disposition is CirculationArbitrationDisposition.BLOCKED
+    assert result.reason_code == "circulation_body_activity_evidence_not_current"
+
+
 def test_poolos_cold_start_can_be_command_free_future_eligible() -> None:
     result = _evaluate()
 
