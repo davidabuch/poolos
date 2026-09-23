@@ -239,6 +239,9 @@ class CirculationSuccessorAssessment:
         )
 
 
+_ENTITLEMENT_OBSERVATION_SKEW = timedelta(seconds=1)
+
+
 class CirculationSuccessorArbitrator:
     """Answer whether Pool thermal circulation has a current successor."""
 
@@ -648,7 +651,11 @@ def _current(
         and usable
         and observed_at is not None
         and observed_at <= at
-        and (retained_at is None or observed_at >= retained_at)
+        and (
+            retained_at is None
+            or observed_at >= retained_at
+            or retained_at - observed_at <= _ENTITLEMENT_OBSERVATION_SKEW
+        )
     )
 
 
