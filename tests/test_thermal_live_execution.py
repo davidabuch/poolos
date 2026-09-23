@@ -227,6 +227,7 @@ def evidence(
 class FakeThermalDelivery:
     available: bool = True
     statuses: list[CommandStatus] = field(default_factory=list)
+    authority_reasons: list[str | None] = field(default_factory=list)
     calls: list[tuple[PoolOperation, str]] = field(default_factory=list)
 
     async def deliver(
@@ -237,12 +238,18 @@ class FakeThermalDelivery:
     ) -> CommandReceipt:
         self.calls.append((operation, correlation_id))
         status = self.statuses.pop(0) if self.statuses else CommandStatus.ACKNOWLEDGED
+        authority_reason = (
+            self.authority_reasons.pop(0)
+            if self.authority_reasons
+            else None
+        )
         return CommandReceipt(
             status=status,
             command_id=f"receipt-{len(self.calls)}",
             issued_at=NOW,
             acknowledged_at=NOW if status is CommandStatus.ACKNOWLEDGED else None,
             verification_required=True,
+            details={"authority_reason": authority_reason},
         )
 
 
@@ -1276,6 +1283,39 @@ def test_delivery_failure_stops_without_advancing(status: CommandStatus) -> None
         ThermalLiveExecutionStatus.FAILED,
         ThermalLiveExecutionStatus.TIMED_OUT,
     }
+    assert len(delivery.calls) == 1
+
+
+def test_predispatch_authority_denial_preserves_exact_failure_reason() -> None:
+    """Final-gateway authority denial is not an uncertain physical delivery."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery(
+        statuses=[CommandStatus.FAILED],
+        authority_reasons=["controller_mode_unresolved"],
+    )
+
+    result = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=delivery,
+        )
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.FAILED
+    assert result.failure_reason == "physical_authority:controller_mode_unresolved"
+    assert result.current_attempt is not None
+    assert result.current_attempt.receipt is not None
+    assert result.current_attempt.receipt.accepted is False
     assert len(delivery.calls) == 1
 
 
