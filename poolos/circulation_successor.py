@@ -16,7 +16,6 @@ from .ownership_evidence import OwnershipDomain
 from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
 from .integration import ThermalBody
-from .native_observation_freshness import NATIVE_SNAPSHOT_CAPTURE_SKEW
 from .thermal_runtime_ownership import (
     SHARED_HYDRAULIC_SAFETY_BY_CONCEPT,
     SharedHydraulicCircuitEvidence,
@@ -649,11 +648,7 @@ def _current(
         and usable
         and observed_at is not None
         and observed_at <= at
-        and (
-            retained_at is None
-            or observed_at >= retained_at
-            or retained_at - observed_at <= NATIVE_SNAPSHOT_CAPTURE_SKEW
-        )
+        and (retained_at is None or observed_at >= retained_at)
     )
 
 
