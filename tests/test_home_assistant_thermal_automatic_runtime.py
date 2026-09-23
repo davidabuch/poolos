@@ -68,6 +68,7 @@ class FakeDriver:
     started: asyncio.Event = field(default_factory=asyncio.Event)
     pump_session_purpose: object | None = None
     probe_evidence: object | None = None
+    cleanup_provenance: object | None = None
     spa_topology_token: str | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
@@ -147,6 +148,7 @@ class FakeHass:
         assert name in {
             "PoolOS automatic thermal execution epoch",
             "PoolOS owned pump-session native reobservation",
+            "PoolOS cleanup topology native reobservation",
             "PoolOS Spa startup native topology reobservation",
         }
         task = asyncio.create_task(coroutine)
@@ -163,6 +165,11 @@ def _runtime(module: ModuleType):
         coordinator.pump_session_refresh_event.set()
         return True
 
+    async def refresh_cleanup_topology_evidence() -> bool:
+        coordinator.cleanup_topology_refresh_count += 1
+        coordinator.cleanup_topology_refresh_event.set()
+        return True
+
     async def refresh_thermal_topology_evidence() -> bool:
         coordinator.thermal_topology_refresh_count += 1
         coordinator.thermal_topology_refresh_event.set()
@@ -172,9 +179,12 @@ def _runtime(module: ModuleType):
         listener_updates=0,
         pump_session_refresh_count=0,
         pump_session_refresh_event=asyncio.Event(),
+        cleanup_topology_refresh_count=0,
+        cleanup_topology_refresh_event=asyncio.Event(),
         thermal_topology_refresh_count=0,
         thermal_topology_refresh_event=asyncio.Event(),
         async_refresh_native_owned_pump_session_evidence=refresh_owned_pump_session_evidence,
+        async_refresh_native_cleanup_topology_evidence=refresh_cleanup_topology_evidence,
         async_refresh_native_thermal_topology_evidence=refresh_thermal_topology_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
@@ -247,6 +257,47 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
         assert len(hass.tasks) == 2
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
+
+    asyncio.run(scenario())
+
+
+def test_cleanup_provenance_triggers_one_post_boundary_native_refresh() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, _, _, coordinator, driver = _runtime(module)
+        driver.requested_enabled = True
+        driver.cleanup_provenance = SimpleNamespace(provenance_id="cleanup-1")
+
+        runtime._sync_cleanup_topology_reobservation()
+        await asyncio.wait_for(
+            coordinator.cleanup_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        task = runtime._cleanup_topology_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+
+        assert coordinator.cleanup_topology_refresh_count == 1
+        assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-1"
+
+        coordinator.cleanup_topology_refresh_event.clear()
+        runtime._sync_cleanup_topology_reobservation()
+        await asyncio.sleep(0)
+        assert coordinator.cleanup_topology_refresh_count == 1
+        assert not coordinator.cleanup_topology_refresh_event.is_set()
+
+        driver.cleanup_provenance = SimpleNamespace(provenance_id="cleanup-2")
+        runtime._sync_cleanup_topology_reobservation()
+        await asyncio.wait_for(
+            coordinator.cleanup_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        task = runtime._cleanup_topology_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+
+        assert coordinator.cleanup_topology_refresh_count == 2
+        assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-2"
 
     asyncio.run(scenario())
 
