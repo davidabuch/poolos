@@ -1298,7 +1298,8 @@ def test_poolos_opportunistic_spa_preserves_pre_spa_pool_reference() -> None:
 
     assert pool_priority_returns.pool.water_temperature is not None
     assert pool_priority_returns.pool.water_temperature.trusted_temperature_f == 80.0
-    assert pool_priority_returns.pool.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+    assert pool_priority_returns.pool.plan.desired.evidence["pool_temperature_f"] == 80.0
+    assert pool_priority_returns.pool.plan.desired.evidence["pool_target_f"] == 90.0
     assert pool_priority_returns.pool.plan.desired.reason_code != "pool_temperature_probe_required"
 
 
