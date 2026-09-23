@@ -209,6 +209,27 @@ def test_prior_operator_solar_event_cannot_preserve_later_unattributed_gas_selec
     )
 
 
+def test_same_snapshot_selected_off_just_before_entitlement_is_current_for_cleanup():
+    entitlement = _entitlement(source=None)
+    evidence = _circulation_evidence(source=PhysicalHeatMode.OFF)
+    evidence = replace(
+        evidence,
+        heat_source_observation_fresh=True,
+        heat_source_observation_usable=True,
+        heat_source_observed_at=NOW - timedelta(milliseconds=500),
+    )
+    result = ThermalTerminationPolicy().evaluate(
+        entitlement,
+        evidence,
+        desired_source=PhysicalHeatMode.OFF,
+    )
+
+    assert result.source_cleanup is not None
+    assert result.source_cleanup.disposition is ThermalSourceCleanupDisposition.SELECTED_OFF
+    assert result.source_cleanup.source_cleanup_complete
+    assert result.source_cleanup.body_shutdown_source_safe
+
+
 @pytest.mark.parametrize(
     "fresh,usable,observed_offset",
     (
