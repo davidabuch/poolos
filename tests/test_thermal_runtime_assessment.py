@@ -1131,9 +1131,10 @@ def test_idle_raw_pool_temperature_cannot_authorize_spa_before_pool_reference_is
 
     assert result.pool.plan.desired.reason_code == "pool_temperature_probe_required"
     assert result.pool.plan.disposition is ThermalPlanDisposition.READY
-    assert result.hot_tub.plan.desired.evidence["pool_demand_satisfied"] is False
+    assert result.hot_tub.plan.desired.evidence["pool_demand_satisfied"] is True
+    assert result.hot_tub.plan.desired.evidence["higher_priority_conflict"] is True
     assert result.hot_tub.plan.desired.reason_code == "opportunistic_ineligible"
-    assert result.hot_tub.plan.disposition is ThermalPlanDisposition.BLOCKED
+    assert result.hot_tub.plan.disposition is ThermalPlanDisposition.ALREADY_CONVERGED
 
 
 def test_idle_solar_pool_requests_temperature_probe_before_source_selection() -> None:
