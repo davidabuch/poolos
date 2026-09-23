@@ -638,6 +638,34 @@ class ThermalRuntimeEvaluator:
         }:
             self.pool_temperature_probe.reset()
         evaluation_id = _evaluation_id(evidence)
+        if evidence.pool_requested_mode not in {
+            ThermalRequestedMode.SOLAR,
+            ThermalRequestedMode.SOLAR_PREFERRED,
+        }:
+            values = evidence.native_values
+            pool_temperature_concept_usable = (
+                "pool.temperature" not in evidence.missing_native_concepts
+                and "pool.temperature" not in evidence.stale_native_concepts
+            )
+            pool_only_circulating = (
+                values.get("pool.active") is True
+                and values.get("spa.active") is False
+                and (_number(values.get("pump.rpm")) or 0) > 0
+            )
+            if pool_only_circulating and pool_temperature_concept_usable:
+                # Bulk-water truth belongs to hydraulic evidence, not to the
+                # requested heat mode. Ordinary Pool circulation can therefore
+                # establish the same retained reference later consumed by
+                # opportunistic Spa policy.
+                self.water_temperature_tracker.evaluate(
+                    evaluated_at=evidence.evaluated_at,
+                    observed_temperature_f=_number(values.get("pool.temperature")),
+                    pool_circulating=True,
+                    probe_active=False,
+                    probe_started_at=None,
+                    collector_temperature_f=_number(values.get("solar.temperature")),
+                    thermal_decision_requested=False,
+                )
         pool = self._evaluate_body(
             evidence,
             body=ThermalBody.POOL,
