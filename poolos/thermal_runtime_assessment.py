@@ -1431,7 +1431,12 @@ class ThermalRuntimeEvaluator:
             gas_allowed=requested_mode
             in {ThermalRequestedMode.GAS, ThermalRequestedMode.SOLAR_PREFERRED},
         )
-        pool_temperature = _number(values.get("pool.temperature"))
+        # Opportunistic Spa may only treat Pool demand as satisfied from the
+        # same proven bulk-water reference used by Pool thermal policy.  A raw
+        # idle Pool sensor value is not authoritative and may coexist with a
+        # Pool temperature-probe requirement; using it here can authorize both
+        # Pool acquisition and Spa acquisition in the same epoch.
+        pool_temperature = self.water_temperature_tracker.retained_temperature_f
         pool_target = _number(values.get("pool.target_temperature"))
         spa_active = values.get("spa.active") is True
         spa_session_kind = (
