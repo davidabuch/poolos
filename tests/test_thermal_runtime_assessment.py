@@ -1240,6 +1240,110 @@ def test_successful_pool_temperature_is_retained_for_current_operational_day() -
     assert result.pool.plan.desired.required_pump_rpm == 2600
 
 
+def test_poolos_opportunistic_spa_preserves_pre_spa_pool_reference() -> None:
+    """Owned Spa routing must not manufacture a competing Pool probe opportunity."""
+
+    evaluator = ThermalRuntimeEvaluator()
+    circulating = values(pool_active=True)
+    circulating["pool.raw_heater_id"] = "H0002"
+    circulating["pump.rpm"] = 2900
+    circulating["pool.temperature"] = 80.0
+    circulating["pool.target_temperature"] = 78.0
+    circulating["solar.temperature"] = 126.0
+
+    baseline = evaluator.evaluate(
+        evidence(
+            at=NOW,
+            native_values=circulating,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+    assert baseline.pool.water_temperature is not None
+    assert baseline.pool.water_temperature.trusted_temperature_f == 80.0
+
+    spa = dict(circulating)
+    spa["pool.active"] = False
+    spa["spa.active"] = True
+    spa["pump.rpm"] = 2600
+    spa["pool.raw_heater_id"] = "00000"
+    spa["spa.raw_heater_id"] = "00000"
+
+    during_spa = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=3),
+            native_values=spa,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            spa_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert during_spa.pool.water_temperature is not None
+    assert during_spa.pool.water_temperature.disposition.value == "reused"
+    assert during_spa.pool.plan.desired.reason_code != "pool_temperature_probe_required"
+    assert during_spa.pool.plan.desired.selected_source is PhysicalHeatMode.OFF
+
+    raised = dict(spa)
+    raised["pool.target_temperature"] = 90.0
+    pool_priority_returns = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=3, seconds=1),
+            native_values=raised,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            spa_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert pool_priority_returns.pool.water_temperature is not None
+    assert pool_priority_returns.pool.water_temperature.trusted_temperature_f == 80.0
+    assert pool_priority_returns.pool.plan.desired.evidence["pool_temperature_f"] == 80.0
+    assert pool_priority_returns.pool.plan.desired.evidence["pool_target_f"] == 90.0
+    assert pool_priority_returns.pool.plan.desired.reason_code != "pool_temperature_probe_required"
+
+
+def test_external_spa_routing_still_invalidates_retained_pool_reference() -> None:
+    """User Spa routing keeps the original fail-closed Pool evidence boundary."""
+
+    evaluator = ThermalRuntimeEvaluator()
+    circulating = values(pool_active=True)
+    circulating["pool.raw_heater_id"] = "H0002"
+    circulating["pump.rpm"] = 2900
+    circulating["pool.temperature"] = 80.0
+    circulating["pool.target_temperature"] = 78.0
+    circulating["solar.temperature"] = 126.0
+
+    evaluator.evaluate(
+        evidence(
+            at=NOW,
+            native_values=circulating,
+            pool_mode=ThermalRequestedMode.SOLAR,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    external_spa = dict(circulating)
+    external_spa["pool.active"] = False
+    external_spa["spa.active"] = True
+    external_spa["pump.rpm"] = 2600
+    external_spa["pool.raw_heater_id"] = "00000"
+
+    result = evaluator.evaluate(
+        evidence(
+            at=NOW + timedelta(minutes=3),
+            native_values=external_spa,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            spa_session_kind=SpaSessionKind.EXTERNAL_USER,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.water_temperature is not None
+    assert result.pool.water_temperature.disposition.value == "probe_required"
+    assert result.pool.plan.desired.reason_code == "pool_temperature_probe_required"
+
+
 def _probe_values(
     *,
     active: bool,

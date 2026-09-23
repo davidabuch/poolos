@@ -745,7 +745,10 @@ class ThermalRuntimeEvaluator:
                 and "solar.temperature" not in stale
             )
             spa_active = _bool_or_none(values.get("spa.active"))
-            if spa_active is True or (active is True and spa_active is True):
+            if (
+                spa_active is True
+                and evidence.spa_session_kind is not SpaSessionKind.POOLOS_OPPORTUNISTIC
+            ):
                 self.water_temperature_tracker.invalidate_retained_reference()
             probe_hydraulic_concepts = {
                 "pool.active",
