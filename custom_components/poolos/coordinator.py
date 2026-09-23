@@ -194,18 +194,28 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             await self.hass.async_add_executor_job(load_and_summarize)
         )
 
-    async def async_refresh_native_owned_pump_session_evidence(self) -> bool:
-        """Request one bounded read-only refresh for owned pump-session evidence."""
+    async def _async_refresh_native_runtime_evidence(self) -> bool:
+        """Request one bounded read-only native refresh without equipment mutation."""
 
         transport = self.independent_intellicenter_transport
         if transport is None or self._unloading:
             return False
         return await transport._async_refresh_owned_pump_session_evidence()
 
+    async def async_refresh_native_owned_pump_session_evidence(self) -> bool:
+        """Refresh unchanged evidence required by an owned pump session."""
+
+        return await self._async_refresh_native_runtime_evidence()
+
+    async def async_refresh_native_cleanup_topology_evidence(self) -> bool:
+        """Refresh post-boundary Pool/Spa topology for bounded cleanup."""
+
+        return await self._async_refresh_native_runtime_evidence()
+
     async def async_refresh_native_thermal_topology_evidence(self) -> bool:
         """Refresh BODY topology through the existing bounded read-only native path."""
 
-        return await self.async_refresh_native_owned_pump_session_evidence()
+        return await self._async_refresh_native_runtime_evidence()
 
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run the periodic reconciliation/backstop observation refresh."""
