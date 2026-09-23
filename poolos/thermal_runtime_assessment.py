@@ -57,6 +57,7 @@ from .thermal_execution_planning import (
     ThermalDesiredState,
     ThermalExecutionPlanAssessment,
     ThermalExecutionPlanBuilder,
+    ThermalPlanDisposition,
     desired_pool_state,
     desired_spa_state,
 )
@@ -645,12 +646,17 @@ class ThermalRuntimeEvaluator:
             evaluation_id=evaluation_id,
             live_policy=live_policy,
         )
+        pool_probe_has_priority = (
+            pool.plan.disposition is ThermalPlanDisposition.READY
+            and pool.plan.desired.reason_code == "pool_temperature_probe_required"
+        )
         hot_tub = self._evaluate_body(
             evidence,
             body=ThermalBody.HOT_TUB,
             requested_mode=evidence.hot_tub_requested_mode,
             evaluation_id=evaluation_id,
             live_policy=live_policy,
+            higher_priority_conflict=pool_probe_has_priority,
         )
         return ThermalRuntimeAssessment(
             generated_at=evidence.evaluated_at,
@@ -681,6 +687,7 @@ class ThermalRuntimeEvaluator:
         requested_mode: ThermalRequestedMode,
         evaluation_id: str,
         live_policy: ThermalLiveExecutionPolicy,
+        higher_priority_conflict: bool = False,
     ) -> ThermalBodyRuntimeAssessment:
         values = evidence.native_values
         prefix = "pool" if body is ThermalBody.POOL else "spa"
@@ -939,6 +946,7 @@ class ThermalRuntimeEvaluator:
             blockers=blockers,
             water_temperature=water_temperature,
             spa_temperature=spa_temperature,
+            higher_priority_conflict=higher_priority_conflict,
         )
         if body is ThermalBody.POOL:
             desired = replace(
@@ -1150,6 +1158,7 @@ class ThermalRuntimeEvaluator:
         blockers: tuple[str, ...],
         water_temperature: WaterTemperatureAssessment | None = None,
         spa_temperature: SpaTemperatureEvidence | None = None,
+        higher_priority_conflict: bool = False,
     ) -> ThermalDesiredState:
         if requested_mode is ThermalRequestedMode.OFF:
             return _off_desired(
@@ -1595,6 +1604,7 @@ class ThermalRuntimeEvaluator:
                 and pool_temperature >= pool_target
             ),
             filtration_debt=evidence.filtration_debt,
+            higher_priority_conflict=higher_priority_conflict,
             session_kind=spa_session_kind,
             spa_temperature_trusted=spa_temperature_trusted,
             active_heat_source=active_heat_source,
