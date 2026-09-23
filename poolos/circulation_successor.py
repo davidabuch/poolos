@@ -16,6 +16,7 @@ from .ownership_evidence import OwnershipDomain
 from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
 from .integration import ThermalBody
+from .native_observation_freshness import NATIVE_SNAPSHOT_CAPTURE_SKEW
 from .thermal_runtime_ownership import (
     SHARED_HYDRAULIC_SAFETY_BY_CONCEPT,
     SharedHydraulicCircuitEvidence,
@@ -237,9 +238,6 @@ class CirculationSuccessorAssessment:
                 "circulation_command_delivery_enabled": False,
             }
         )
-
-
-_ENTITLEMENT_OBSERVATION_SKEW = timedelta(seconds=1)
 
 
 class CirculationSuccessorArbitrator:
@@ -654,7 +652,7 @@ def _current(
         and (
             retained_at is None
             or observed_at >= retained_at
-            or retained_at - observed_at <= _ENTITLEMENT_OBSERVATION_SKEW
+            or retained_at - observed_at <= NATIVE_SNAPSHOT_CAPTURE_SKEW
         )
     )
 
