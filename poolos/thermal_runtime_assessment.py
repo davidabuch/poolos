@@ -57,6 +57,7 @@ from .thermal_execution_planning import (
     ThermalDesiredState,
     ThermalExecutionPlanAssessment,
     ThermalExecutionPlanBuilder,
+    ThermalPlanDisposition,
     desired_pool_state,
     desired_spa_state,
 )
@@ -945,6 +946,7 @@ class ThermalRuntimeEvaluator:
             blockers=blockers,
             water_temperature=water_temperature,
             spa_temperature=spa_temperature,
+            higher_priority_conflict=higher_priority_conflict,
         )
         if body is ThermalBody.POOL:
             desired = replace(
@@ -1156,6 +1158,7 @@ class ThermalRuntimeEvaluator:
         blockers: tuple[str, ...],
         water_temperature: WaterTemperatureAssessment | None = None,
         spa_temperature: SpaTemperatureEvidence | None = None,
+        higher_priority_conflict: bool = False,
     ) -> ThermalDesiredState:
         if requested_mode is ThermalRequestedMode.OFF:
             return _off_desired(
