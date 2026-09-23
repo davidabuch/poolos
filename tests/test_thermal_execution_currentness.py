@@ -485,6 +485,79 @@ def test_verified_opportunistic_spa_source_off_prefix_may_continue_to_body() -> 
     )
 
 
+def test_verified_opportunistic_spa_activation_may_skip_only_unissued_priming() -> None:
+    """Native Spa circulation may remove only the never-issued priming step."""
+
+    original_assessment = _assessment(
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        source=PhysicalHeatMode.OFF,
+        rpm=1500,
+        reason="spa_temperature_acquisition_required",
+        current_source=PhysicalHeatMode.OFF,
+        current_rpm=0,
+        body_active=False,
+        pump_equipment_id="p0198",
+        evidence_extra={"session_kind": "poolos_opportunistic"},
+    )
+    current_assessment = _assessment(
+        evaluated_at=NOW + timedelta(seconds=2),
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        source=PhysicalHeatMode.OFF,
+        rpm=1500,
+        reason="spa_temperature_acquisition_required",
+        current_source=PhysicalHeatMode.OFF,
+        current_rpm=2600,
+        body_active=True,
+        pump_equipment_id="p0198",
+        evidence_extra={"session_kind": "poolos_opportunistic"},
+    )
+    originating = _currentness(original_assessment, "evaluation-origin")
+    current = _currentness(current_assessment, "evaluation-current")
+    signatures = tuple(
+        _signature(original_assessment, index)
+        for index in range(len(original_assessment.operations))
+    )
+
+    assert tuple(item.role for item in signatures) == (
+        "heat_source",
+        "body_activation",
+        "priming",
+        "thermal_pump_target",
+    )
+    assert tuple(item.role for item in current.residual_plan.operations) == (
+        "thermal_pump_target",
+    )
+
+    decision = assess_execution_compatibility(
+        originating,
+        current,
+        progress=ThermalExecutionProgress(
+            verified_prefix=signatures[:2],
+        ),
+    )
+
+    assert (
+        decision.disposition
+        is ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE
+    )
+    assert (
+        decision.reason_code
+        == "thermal_execution_verified_spa_activation_native_circulation_supersedes_unissued_priming"
+    )
+
+    source_only = assess_execution_compatibility(
+        originating,
+        current,
+        progress=ThermalExecutionProgress(
+            verified_prefix=signatures[:1],
+        ),
+    )
+    assert source_only.disposition is ThermalExecutionCompatibilityDisposition.UNKNOWN
+    assert source_only.reason_code == "thermal_execution_residual_plan_incompatible"
+
+
 def test_manual_matching_prefix_removal_does_not_manufacture_progress() -> None:
     original = _currentness(
         _assessment(current_rpm=0, body_active=False),
