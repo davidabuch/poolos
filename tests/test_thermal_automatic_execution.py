@@ -822,6 +822,14 @@ def test_terminal_verification_failures_require_reenable_before_same_opportunity
     ):
         assert _terminal_execution_failure_requires_reenable(reason) is True
 
+    assert (
+        _terminal_execution_failure_requires_reenable(
+            "physical_authority:controller_mode_unresolved"
+        )
+        is False
+    )
+    assert _terminal_execution_failure_requires_reenable("delivery_failed") is True
+
 
 def test_driver_defaults_off_and_enable_requires_a_new_epoch() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
