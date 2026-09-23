@@ -1313,9 +1313,10 @@ def test_predispatch_authority_denial_preserves_exact_failure_reason() -> None:
 
     assert result.status is ThermalLiveExecutionStatus.FAILED
     assert result.failure_reason == "physical_authority:controller_mode_unresolved"
-    assert result.current_attempt is not None
-    assert result.current_attempt.receipt is not None
-    assert result.current_attempt.receipt.accepted is False
+    assert result.current_attempt is None
+    assert not result.ownership.owns_body_activation
+    assert not result.ownership.owns_pump_setpoint
+    assert not result.ownership.owns_heat_source
     assert len(delivery.calls) == 1
 
 
