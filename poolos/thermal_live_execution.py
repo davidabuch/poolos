@@ -1443,6 +1443,12 @@ class ThermalLiveExecutionEngine:
                 evidence.evaluated_at,
             )
         if not receipt.accepted:
+            authority_reason = receipt.details.get("authority_reason")
+            failure_reason = (
+                f"physical_authority:{authority_reason}"
+                if isinstance(authority_reason, str) and authority_reason
+                else f"delivery_{receipt.status.value}"
+            )
             status = (
                 ThermalLiveExecutionStatus.TIMED_OUT
                 if receipt.status is CommandStatus.TIMED_OUT
@@ -1457,7 +1463,7 @@ class ThermalLiveExecutionEngine:
                 delivering.lifecycle,
                 to_status=step_status,
                 occurred_at=evidence.evaluated_at,
-                reason=f"delivery_{receipt.status.value}",
+                reason=failure_reason,
                 actor="thermal-live-execution",
                 metadata={"command_id": receipt.command_id},
             )
@@ -1467,12 +1473,12 @@ class ThermalLiveExecutionEngine:
                 lifecycle=failed.lifecycle,
                 correlation_id=correlation_id,
                 receipt=receipt,
-                failure_reason=f"delivery_{receipt.status.value}",
+                failure_reason=failure_reason,
             )
             return self._terminal(
                 replace(session, current_attempt=attempt),
                 status,
-                f"delivery_{receipt.status.value}",
+                failure_reason,
                 evidence.evaluated_at,
             )
         delivered = self.step_state_machine.transition(
