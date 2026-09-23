@@ -638,34 +638,6 @@ class ThermalRuntimeEvaluator:
         }:
             self.pool_temperature_probe.reset()
         evaluation_id = _evaluation_id(evidence)
-        if evidence.pool_requested_mode not in {
-            ThermalRequestedMode.SOLAR,
-            ThermalRequestedMode.SOLAR_PREFERRED,
-        }:
-            values = evidence.native_values
-            pool_temperature_concept_usable = (
-                "pool.temperature" not in evidence.missing_native_concepts
-                and "pool.temperature" not in evidence.stale_native_concepts
-            )
-            pool_only_circulating = (
-                values.get("pool.active") is True
-                and values.get("spa.active") is False
-                and (_number(values.get("pump.rpm")) or 0) > 0
-            )
-            if pool_only_circulating and pool_temperature_concept_usable:
-                # Bulk-water truth belongs to hydraulic evidence, not to the
-                # requested heat mode. Ordinary Pool circulation can therefore
-                # establish the same retained reference later consumed by
-                # opportunistic Spa policy.
-                self.water_temperature_tracker.evaluate(
-                    evaluated_at=evidence.evaluated_at,
-                    observed_temperature_f=_number(values.get("pool.temperature")),
-                    pool_circulating=True,
-                    probe_active=False,
-                    probe_started_at=None,
-                    collector_temperature_f=_number(values.get("solar.temperature")),
-                    thermal_decision_requested=False,
-                )
         pool = self._evaluate_body(
             evidence,
             body=ThermalBody.POOL,
@@ -673,12 +645,17 @@ class ThermalRuntimeEvaluator:
             evaluation_id=evaluation_id,
             live_policy=live_policy,
         )
+        pool_probe_has_priority = (
+            pool.plan.disposition is ThermalPlanDisposition.READY
+            and pool.plan.desired.reason_code == "pool_temperature_probe_required"
+        )
         hot_tub = self._evaluate_body(
             evidence,
             body=ThermalBody.HOT_TUB,
             requested_mode=evidence.hot_tub_requested_mode,
             evaluation_id=evaluation_id,
             live_policy=live_policy,
+            higher_priority_conflict=pool_probe_has_priority,
         )
         return ThermalRuntimeAssessment(
             generated_at=evidence.evaluated_at,
@@ -709,6 +686,7 @@ class ThermalRuntimeEvaluator:
         requested_mode: ThermalRequestedMode,
         evaluation_id: str,
         live_policy: ThermalLiveExecutionPolicy,
+        higher_priority_conflict: bool = False,
     ) -> ThermalBodyRuntimeAssessment:
         values = evidence.native_values
         prefix = "pool" if body is ThermalBody.POOL else "spa"
@@ -1459,12 +1437,7 @@ class ThermalRuntimeEvaluator:
             gas_allowed=requested_mode
             in {ThermalRequestedMode.GAS, ThermalRequestedMode.SOLAR_PREFERRED},
         )
-        # Opportunistic Spa may only treat Pool demand as satisfied from the
-        # same proven bulk-water reference used by Pool thermal policy.  A raw
-        # idle Pool sensor value is not authoritative and may coexist with a
-        # Pool temperature-probe requirement; using it here can authorize both
-        # Pool acquisition and Spa acquisition in the same epoch.
-        pool_temperature = self.water_temperature_tracker.retained_temperature_f
+        pool_temperature = _number(values.get("pool.temperature"))
         pool_target = _number(values.get("pool.target_temperature"))
         spa_active = values.get("spa.active") is True
         spa_session_kind = (
@@ -1628,6 +1601,7 @@ class ThermalRuntimeEvaluator:
                 and pool_temperature >= pool_target
             ),
             filtration_debt=evidence.filtration_debt,
+            higher_priority_conflict=higher_priority_conflict,
             session_kind=spa_session_kind,
             spa_temperature_trusted=spa_temperature_trusted,
             active_heat_source=active_heat_source,
