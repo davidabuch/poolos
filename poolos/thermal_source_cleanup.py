@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .integration import PhysicalHeatMode, ThermalBody
+from .native_observation_freshness import NATIVE_SNAPSHOT_CAPTURE_SKEW
 from .ownership_evidence import OwnershipDomain
 from .thermal_runtime_ownership import (
     ThermalResidualTerminationEntitlement,
@@ -76,7 +77,11 @@ class ThermalSourceCleanupPolicy:
         assert source is not None
         assert evidence.heat_source_observed_at is not None
         if source is PhysicalHeatMode.OFF:
-            if evidence.heat_source_observed_at < entitlement.retained_at:
+            if (
+                evidence.heat_source_observed_at < entitlement.retained_at
+                and entitlement.retained_at - evidence.heat_source_observed_at
+                > NATIVE_SNAPSHOT_CAPTURE_SKEW
+            ):
                 return _assessment(
                     ThermalSourceCleanupDisposition.SELECTED_OFF_NOT_CURRENT_FOR_CLEANUP,
                     "thermal_source_cleanup_selected_off_not_current_for_cleanup",
