@@ -1107,6 +1107,35 @@ def test_opportunistic_spa_waits_until_pump_is_stopped_after_pool_off() -> None:
     assert any(isinstance(operation, SetBodyActive) for operation in started.hot_tub.plan.operations)
 
 
+def test_idle_raw_pool_temperature_cannot_authorize_spa_before_pool_reference_is_trusted() -> None:
+    """Raw idle Pool temperature cannot race the required Pool probe."""
+
+    native = values(pool_active=False)
+    native["pool.raw_heater_id"] = "00000"
+    native["pump.rpm"] = 0
+    native["pool.temperature"] = 81.0
+    native["pool.target_temperature"] = 78.0
+    native["spa.temperature"] = 80.0
+    native["spa.target_temperature"] = 98.0
+    native["solar.temperature"] = 130.0
+    native["solar.active"] = False
+
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            spa_mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        ),
+        live_policy=disabled_policy(),
+    )
+
+    assert result.pool.plan.desired.reason_code == "pool_temperature_probe_required"
+    assert result.pool.actual_authorization.authorized is True
+    assert result.hot_tub.plan.desired.evidence["pool_demand_satisfied"] is False
+    assert result.hot_tub.plan.desired.reason_code == "opportunistic_ineligible"
+    assert result.hot_tub.actual_authorization.authorized is False
+
+
 def test_idle_solar_pool_requests_temperature_probe_before_source_selection() -> None:
     native = values(pool_active=False)
     native["pool.raw_heater_id"] = "00000"
