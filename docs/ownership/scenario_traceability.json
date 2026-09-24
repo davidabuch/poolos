@@ -1930,7 +1930,7 @@
         "tests/test_thermal_runtime_ownership.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Pool yields to Spa; externally active Spa can gain pump/source receipts but no body adoption.",
+      "current_behavior_and_gap": "Witnessed user Spa OFF -> ON can now create a prospectively adopted Hot Tub BODY with separately proven Pump/Thermal domains; the Pool-to-user-Spa takeover scenario still lacks its own named contract regression.",
       "implementation_status": "PARTIALLY SATISFIED",
       "required_future_regressions": [
         {
@@ -2006,17 +2006,21 @@
         "tests/test_pool_circulation_ownership.py",
         "tests/test_thermal_runtime_ownership.py"
       ],
-      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "User Spa request is treated as external body, not prospectively adopted execution.",
-      "implementation_status": "MISSING IMPLEMENTATION",
+      "current_test_evidence_scope": "Dedicated automatic-execution regressions now prove witnessed Spa OFF -> ON prospective BODY adoption, no fabricated BODY command receipt, dynamic Pump/Thermal provenance, Eco Heat Gas -> Solar transition, and user Spa OFF as the session lifetime boundary.",
+      "current_behavior_and_gap": "Witnessed user Spa OFF -> ON is prospectively adopted as Hot Tub BODY authority without fabricating a historical BODY command; PoolOS may then govern Pump/Thermal through freshly accepted commands while the user OFF boundary ends the session.",
+      "implementation_status": "SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-041",
           "behavior": "Explicit Spa ON with no source override adopts requested session and manages Pump/Thermal with user lifetime.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "IMPLEMENTED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_thermal_automatic_execution.py::test_user_hot_tub_session_governs_dynamic_spa_pump_with_body_adoption",
+        "tests/test_thermal_automatic_execution.py::test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains",
+        "tests/test_thermal_automatic_execution.py::test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart"
+      ]
     },
     {
       "scenario_id": 42,
@@ -2051,7 +2055,7 @@
         "tests/test_systemic_autonomy_closure_guard.py"
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Spa body adoption and independent Thermal override record are missing.",
+      "current_behavior_and_gap": "Witnessed user Spa BODY adoption now exists, but simultaneous explicit Gas selection still requires independent positive operator evidence so THERMAL can remain External while BODY/PUMP remain PoolOS.",
       "implementation_status": "ARCHITECTURAL MISMATCH",
       "required_future_regressions": [
         {
