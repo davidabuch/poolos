@@ -4781,8 +4781,9 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    if target_transition.command_delivery_performed:
-        assert not isinstance(delivery.calls[-1], SetBodyActive)
+    assert target_transition.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
     assert orchestrator.ownership.state.lease is not None
     assert orchestrator.ownership.state.lease.body_adoption is not None
 
@@ -4793,8 +4794,8 @@ def _assert_external_hot_tub_gas_lifecycle(
                 start_at + timedelta(seconds=7),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
-                pump_rpm=3000,
-                configured_rpm=3000,
+                pump_rpm=2600,
+                configured_rpm=2600,
                 spa_heater="H0001",
                 spa_temperature=97.0,
                 spa_target=97.0,
@@ -4804,9 +4805,8 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert downshift.command_delivery_performed
-    assert isinstance(delivery.calls[-1], SetPumpSpeed)
-    assert delivery.calls[-1].rpm == 2600
+    assert not downshift.command_delivery_performed
+    assert downshift.state is ThermalAutomaticDriverState.CONVERGED
 
     settled = asyncio.run(
         driver.process_epoch(
