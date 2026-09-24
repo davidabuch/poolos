@@ -4665,19 +4665,31 @@ def _assert_external_hot_tub_gas_lifecycle(
         )
     )
     normalized_lease = orchestrator.ownership.state.lease
-    assert normalized.state is not ThermalAutomaticDriverState.TERMINATING, (
-        normalized.state,
-        normalized.blocker,
-        normalized.runtime_ownership_status,
-        None
-        if normalized_lease is None or normalized_lease.originating_currentness is None
-        else normalized_lease.originating_currentness.purpose,
-        normalized_frame.thermal.hot_tub.execution_currentness.purpose,
-        normalized_frame.thermal.hot_tub.plan.desired.evidence,
-        driver.active_session,
-        orchestrator.ownership.state,
-        orchestrator.ownership.residual_termination,
-    )
+    if normalized.state is ThermalAutomaticDriverState.TERMINATING:
+        predecessor = (
+            None
+            if normalized_lease is None
+            or normalized_lease.originating_currentness is None
+            else normalized_lease.originating_currentness.purpose
+        )
+        successor = normalized_frame.thermal.hot_tub.execution_currentness.purpose
+        adoption = None if normalized_lease is None else normalized_lease.body_adoption
+        raise AssertionError(
+            "unexpected user Spa termination: "
+            f"blocker={normalized.blocker}; "
+            f"lease_status={None if normalized_lease is None else normalized_lease.status}; "
+            f"adoption_reason={None if adoption is None else adoption.reason_code}; "
+            f"pred_kind={None if predecessor is None else predecessor.kind}; "
+            f"pred_source={None if predecessor is None else predecessor.selected_source}; "
+            f"pred_rpm={None if predecessor is None else predecessor.required_pump_rpm}; "
+            f"pred_mode={None if predecessor is None else predecessor.requested_mode}; "
+            f"pred_target={None if predecessor is None else predecessor.target_temperature_f}; "
+            f"succ_kind={successor.kind}; succ_source={successor.selected_source}; "
+            f"succ_rpm={successor.required_pump_rpm}; succ_mode={successor.requested_mode}; "
+            f"succ_target={successor.target_temperature_f}; "
+            f"session_kind={normalized_frame.thermal.hot_tub.plan.desired.evidence.get('session_kind')}; "
+            f"ownership_reason={orchestrator.ownership.state.reason_code}"
+        )
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.body is ThermalBody.HOT_TUB
