@@ -2483,6 +2483,8 @@ class ThermalRuntimeOwnershipManager:
     def evaluate_pending_successor(
         self,
         evidence: ThermalRuntimeOwnershipEvidence,
+        *,
+        check_requested_mode: bool = True,
     ) -> ThermalRuntimeOwnershipDecision:
         """Retain a predecessor only while an explicit successor may be handed off.
 
@@ -2512,7 +2514,7 @@ class ThermalRuntimeOwnershipManager:
             lease,
             evidence,
             check_identity=False,
-            check_requested_mode=True,
+            check_requested_mode=check_requested_mode,
         )
         if failure is not None:
             return self._terminate(
@@ -2861,8 +2863,6 @@ def _compatible_adopted_user_hot_tub_successor(
         and after.body is ThermalBody.HOT_TUB
         and before.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
         and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
-        and before.requested_mode == after.requested_mode
-        and before.target_temperature_f == after.target_temperature_f
     )
 
 
