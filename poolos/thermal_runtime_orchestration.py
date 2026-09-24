@@ -463,7 +463,16 @@ class ThermalRuntimeOrchestrator:
             freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
         )
         if _probe_successor_handoff_pending(lease, body):
-            return self.ownership.evaluate_pending_successor(evidence)
+            adopted_user_spa = bool(
+                lease.body is ThermalBody.HOT_TUB
+                and lease.body_adoption is not None
+                and lease.body_adoption.reason_code
+                == "witnessed_user_hot_tub_session"
+            )
+            return self.ownership.evaluate_pending_successor(
+                evidence,
+                check_requested_mode=not adopted_user_spa,
+            )
         return self.ownership.evaluate(evidence)
 
 
@@ -663,9 +672,6 @@ def _probe_successor_handoff_pending(
         is ThermalExecutionPurposeKind.THERMAL_CONTROL
         and successor.purpose.kind
         is ThermalExecutionPurposeKind.THERMAL_CONTROL
-        and predecessor.purpose.requested_mode == successor.purpose.requested_mode
-        and predecessor.purpose.target_temperature_f
-        == successor.purpose.target_temperature_f
     )
     return bool(
         predecessor is not None
@@ -675,7 +681,10 @@ def _probe_successor_handoff_pending(
             compatible_thermal_body_successor(predecessor, successor)
             or adopted_user_spa_successor
         )
-        and predecessor.purpose.requested_mode == successor.purpose.requested_mode
+        and (
+            adopted_user_spa_successor
+            or predecessor.purpose.requested_mode == successor.purpose.requested_mode
+        )
     )
 
 
