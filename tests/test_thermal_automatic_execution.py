@@ -5952,6 +5952,41 @@ def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> No
     assert lease.pump_setpoint is not None
     assert lease.pump_setpoint.intended_value == 2900
 
+    # The homeowner remains the lifetime boundary.  Their physical Spa OFF
+    # retires the adopted BODY session and must not provoke a PoolOS BODY-OFF
+    # command or replay any stale Eco Heat command.
+    calls_before_off = len(delivery.calls)
+    user_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=129),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                spa_pump_circuit_id="p0102",
+                spa_heater="00000",
+                solar_active=False,
+                heater_active=False,
+                spa_heating_demand_active=False,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert not user_off.command_delivery_performed
+    assert len(delivery.calls) == calls_before_off
+    assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
+    ended = orchestrator.ownership.state.lease
+    assert ended is None or ended.status is not ThermalRuntimeOwnershipStatus.OWNED
+
 
 def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
