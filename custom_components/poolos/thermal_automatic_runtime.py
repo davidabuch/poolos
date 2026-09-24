@@ -764,16 +764,33 @@ class PoolOSThermalAutomaticRuntime:
             if asyncio.current_task() is self._owned_pump_session_reobservation_task:
                 self._owned_pump_session_reobservation_task = None
 
+    def _cleanup_topology_reobservation_identity(self) -> str | None:
+        """Identify either cleanup boundary without granting command authority.
+
+        Source-Off evidence can block transfer out of the residual. Waiting for
+        captured cleanup provenance before requesting that evidence deadlocks
+        unchanged native BODY/source values. Each transfer has its own fixed
+        chronology boundary and therefore needs its own read-only observation.
+        """
+
+        provenance = getattr(self.driver, "cleanup_provenance", None)
+        if provenance is not None:
+            return provenance.provenance_id
+        ownership = getattr(self.orchestrator, "ownership", None)
+        residual = getattr(ownership, "residual_termination", None)
+        if residual is not None:
+            return residual.entitlement_id
+        return None
+
     def _sync_cleanup_topology_reobservation(self) -> None:
         """Request one post-boundary native topology refresh per cleanup provenance."""
 
         if self._unloaded or not self.driver.requested_enabled:
             return
-        provenance = getattr(self.driver, "cleanup_provenance", None)
-        if provenance is None:
+        provenance_id = self._cleanup_topology_reobservation_identity()
+        if provenance_id is None:
             self._cleanup_topology_reobservation_provenance_id = None
             return
-        provenance_id = provenance.provenance_id
         if self._cleanup_topology_reobservation_provenance_id == provenance_id:
             return
         task = self._cleanup_topology_reobservation_task
@@ -791,8 +808,7 @@ class PoolOSThermalAutomaticRuntime:
         try:
             if self._unloaded:
                 return
-            provenance = getattr(self.driver, "cleanup_provenance", None)
-            if provenance is None or provenance.provenance_id != provenance_id:
+            if self._cleanup_topology_reobservation_identity() != provenance_id:
                 return
             refresh = getattr(
                 self.coordinator,
