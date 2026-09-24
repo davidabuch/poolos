@@ -30,6 +30,7 @@ from .observations import (
     PoolObservation,
 )
 from .thermal_live_execution import ThermalLiveExecutionContext
+from .thermal_execution_currentness import ThermalExecutionPurposeKind
 from .thermal_runtime_assessment import (
     ThermalBodyRuntimeAssessment,
     ThermalRuntimeAssessment,
@@ -650,11 +651,30 @@ def _probe_successor_handoff_pending(
 
     predecessor = lease.originating_currentness
     successor = getattr(body, "execution_currentness", None)
+    adopted_user_spa_successor = bool(
+        predecessor is not None
+        and successor is not None
+        and lease.body is ThermalBody.HOT_TUB
+        and body.body is ThermalBody.HOT_TUB
+        and lease.body_adoption is not None
+        and lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+        and body.plan.desired.evidence.get("session_kind") == "external_user"
+        and predecessor.purpose.kind
+        is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and successor.purpose.kind
+        is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and predecessor.purpose.requested_mode == successor.purpose.requested_mode
+        and predecessor.purpose.target_temperature_f
+        == successor.purpose.target_temperature_f
+    )
     return bool(
         predecessor is not None
         and successor is not None
         and lease.body is body.body
-        and compatible_thermal_body_successor(predecessor, successor)
+        and (
+            compatible_thermal_body_successor(predecessor, successor)
+            or adopted_user_spa_successor
+        )
         and predecessor.purpose.requested_mode == successor.purpose.requested_mode
     )
 
