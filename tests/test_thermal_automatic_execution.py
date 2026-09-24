@@ -4646,28 +4646,34 @@ def _assert_external_hot_tub_gas_lifecycle(
     )
     assert driver.active_session.ownership.body_activation_operation_id is None
 
+    normalized_frame = _frame(
+        orchestrator,
+        start_at + timedelta(seconds=2),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        spa_temperature=80.0,
+        spa_target=97.0,
+        driver=driver,
+        evaluator=evaluator,
+    )
     normalized = asyncio.run(
         driver.process_epoch(
-            _frame(
-                orchestrator,
-                start_at + timedelta(seconds=2),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                pump_rpm=2600,
-                configured_rpm=2600,
-                spa_temperature=80.0,
-                spa_target=97.0,
-                driver=driver,
-                evaluator=evaluator,
-            ),
+            normalized_frame,
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
+    normalized_lease = orchestrator.ownership.state.lease
     assert normalized.state is not ThermalAutomaticDriverState.TERMINATING, (
         normalized.state,
         normalized.blocker,
         normalized.runtime_ownership_status,
-        normalized.runtime_ownership_summary,
+        None
+        if normalized_lease is None or normalized_lease.originating_currentness is None
+        else normalized_lease.originating_currentness.purpose,
+        normalized_frame.thermal.hot_tub.execution_currentness.purpose,
+        normalized_frame.thermal.hot_tub.plan.desired.evidence,
         driver.active_session,
         orchestrator.ownership.state,
         orchestrator.ownership.residual_termination,
