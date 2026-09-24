@@ -1305,7 +1305,7 @@ class ThermalRuntimeOwnershipManager:
                 adopted_at,
             )
 
-        if body is not ThermalBody.POOL:
+        if body not in {ThermalBody.POOL, ThermalBody.HOT_TUB}:
             return deny("body_not_commissioned")
         if not requested_mode.strip() or not execution_plan_id.strip():
             return deny("identity_incomplete")
@@ -1323,34 +1323,77 @@ class ThermalRuntimeOwnershipManager:
         ):
             return deny("currentness_mismatch")
         currentness = current_context.execution_currentness
-        if (
-            currentness is None
-            or currentness.purpose.body is not body
-            or currentness.purpose.kind
-            not in {
+        if currentness is None or currentness.purpose.body is not body:
+            return deny("independent_current_purpose_unavailable")
+        allowed_purposes = (
+            {
                 ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
                 ThermalExecutionPurposeKind.THERMAL_CONTROL,
             }
-        ):
+            if body is ThermalBody.POOL
+            else {ThermalExecutionPurposeKind.THERMAL_CONTROL}
+        )
+        if currentness.purpose.kind not in allowed_purposes:
             return deny("independent_current_purpose_unavailable")
         if evidence.requested_mode != requested_mode:
             return deny("requested_mode_changed")
+        target_active = (
+            evidence.pool_active if body is ThermalBody.POOL else evidence.spa_active
+        )
+        target_fresh = (
+            evidence.pool_activity_fresh
+            if body is ThermalBody.POOL
+            else evidence.spa_activity_fresh
+        )
+        target_usable = (
+            evidence.pool_activity_usable
+            if body is ThermalBody.POOL
+            else evidence.spa_activity_usable
+        )
+        target_observed_at = (
+            evidence.pool_activity_observed_at
+            if body is ThermalBody.POOL
+            else evidence.spa_activity_observed_at
+        )
+        other_active = (
+            evidence.spa_active if body is ThermalBody.POOL else evidence.pool_active
+        )
+        other_fresh = (
+            evidence.spa_activity_fresh
+            if body is ThermalBody.POOL
+            else evidence.pool_activity_fresh
+        )
+        other_usable = (
+            evidence.spa_activity_usable
+            if body is ThermalBody.POOL
+            else evidence.pool_activity_usable
+        )
+        other_observed_at = (
+            evidence.spa_activity_observed_at
+            if body is ThermalBody.POOL
+            else evidence.pool_activity_observed_at
+        )
         if not (
-            evidence.pool_active is True
-            and evidence.pool_activity_fresh
-            and evidence.pool_activity_usable
-            and evidence.pool_activity_observed_at is not None
-            and evidence.pool_activity_observed_at <= adopted_at
+            target_active is True
+            and target_fresh
+            and target_usable
+            and target_observed_at is not None
+            and target_observed_at <= adopted_at
         ):
-            return deny("pool_activity_unusable")
+            return deny(f"{body.value}_activity_unusable")
+        other_name = (
+            ThermalBody.HOT_TUB.value
+            if body is ThermalBody.POOL
+            else ThermalBody.POOL.value
+        )
         if not (
-            evidence.spa_active is False
-            and evidence.spa_activity_fresh
-            and evidence.spa_activity_usable
-            and evidence.spa_activity_observed_at is not None
-            and evidence.spa_activity_observed_at <= adopted_at
+            other_active is False
+            and other_fresh
+            and other_usable
+            and other_observed_at is not None
+            and other_observed_at <= adopted_at
         ):
-            return deny("spa_activity_unusable")
+            return deny(f"{other_name}_activity_unusable")
         if not evidence.shared_hydraulic_inventory_complete:
             return deny("shared_hydraulic_inventory_incomplete")
         if any(
@@ -1430,7 +1473,7 @@ class ThermalRuntimeOwnershipManager:
             command_blocker=None,
             target_value=True,
             observed_value=True,
-            observed_at=evidence.pool_activity_observed_at,
+            observed_at=target_observed_at,
         )
         pump_observed_at = evidence.pump_observed_at
         source_observed_at = evidence.heat_source_observed_at
@@ -2440,6 +2483,8 @@ class ThermalRuntimeOwnershipManager:
     def evaluate_pending_successor(
         self,
         evidence: ThermalRuntimeOwnershipEvidence,
+        *,
+        check_requested_mode: bool = True,
     ) -> ThermalRuntimeOwnershipDecision:
         """Retain a predecessor only while an explicit successor may be handed off.
 
@@ -2469,7 +2514,7 @@ class ThermalRuntimeOwnershipManager:
             lease,
             evidence,
             check_identity=False,
-            check_requested_mode=True,
+            check_requested_mode=check_requested_mode,
         )
         if failure is not None:
             return self._terminate(
@@ -2713,12 +2758,17 @@ class ThermalRuntimeOwnershipManager:
         if request.replace_pump_setpoint or request.replace_heat_source:
             predecessor = lease.originating_currentness
             successor = request.successor_context.execution_currentness
-            if (
-                predecessor is None
-                or successor is None
-                or not compatible_thermal_body_successor(predecessor, successor)
-                or not request.successor_requires_body_active
-            ):
+            compatible_successor = bool(
+                predecessor is not None
+                and successor is not None
+                and (
+                    compatible_thermal_body_successor(predecessor, successor)
+                    or _compatible_adopted_user_hot_tub_successor(
+                        lease, predecessor, successor
+                    )
+                )
+            )
+            if not compatible_successor or not request.successor_requires_body_active:
                 return prefix + "replacement_not_compatible_body_successor"
         return None
 
@@ -2794,6 +2844,26 @@ class ThermalRuntimeOwnershipManager:
             current_state=self._state,
             evaluated_at=at,
         )
+
+
+def _compatible_adopted_user_hot_tub_successor(
+    lease: ThermalRuntimeOwnershipLease,
+    predecessor: ThermalExecutionCurrentness,
+    successor: ThermalExecutionCurrentness,
+) -> bool:
+    """Keep one witnessed user Spa BODY across reviewed Eco Heat purposes."""
+
+    adoption = lease.body_adoption
+    before, after = predecessor.purpose, successor.purpose
+    return bool(
+        adoption is not None
+        and adoption.reason_code == "witnessed_user_hot_tub_session"
+        and lease.body is ThermalBody.HOT_TUB
+        and before.body is ThermalBody.HOT_TUB
+        and after.body is ThermalBody.HOT_TUB
+        and before.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+    )
 
 
 def compatible_thermal_body_successor(

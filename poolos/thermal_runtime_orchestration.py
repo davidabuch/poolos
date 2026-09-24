@@ -30,6 +30,7 @@ from .observations import (
     PoolObservation,
 )
 from .thermal_live_execution import ThermalLiveExecutionContext
+from .thermal_execution_currentness import ThermalExecutionPurposeKind
 from .thermal_runtime_assessment import (
     ThermalBodyRuntimeAssessment,
     ThermalRuntimeAssessment,
@@ -462,7 +463,16 @@ class ThermalRuntimeOrchestrator:
             freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
         )
         if _probe_successor_handoff_pending(lease, body):
-            return self.ownership.evaluate_pending_successor(evidence)
+            adopted_user_spa = bool(
+                lease.body is ThermalBody.HOT_TUB
+                and lease.body_adoption is not None
+                and lease.body_adoption.reason_code
+                == "witnessed_user_hot_tub_session"
+            )
+            return self.ownership.evaluate_pending_successor(
+                evidence,
+                check_requested_mode=not adopted_user_spa,
+            )
         return self.ownership.evaluate(evidence)
 
 
@@ -650,12 +660,31 @@ def _probe_successor_handoff_pending(
 
     predecessor = lease.originating_currentness
     successor = getattr(body, "execution_currentness", None)
+    adopted_user_spa_successor = bool(
+        predecessor is not None
+        and successor is not None
+        and lease.body is ThermalBody.HOT_TUB
+        and body.body is ThermalBody.HOT_TUB
+        and lease.body_adoption is not None
+        and lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+        and body.plan.desired.evidence.get("session_kind") == "external_user"
+        and predecessor.purpose.kind
+        is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and successor.purpose.kind
+        is ThermalExecutionPurposeKind.THERMAL_CONTROL
+    )
     return bool(
         predecessor is not None
         and successor is not None
         and lease.body is body.body
-        and compatible_thermal_body_successor(predecessor, successor)
-        and predecessor.purpose.requested_mode == successor.purpose.requested_mode
+        and (
+            compatible_thermal_body_successor(predecessor, successor)
+            or adopted_user_spa_successor
+        )
+        and (
+            adopted_user_spa_successor
+            or predecessor.purpose.requested_mode == successor.purpose.requested_mode
+        )
     )
 
 

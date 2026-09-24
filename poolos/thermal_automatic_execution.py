@@ -317,6 +317,10 @@ class ThermalAutomaticExecutionDriver:
     _spa_off_observed_since_start: bool = field(
         default=False, init=False, repr=False
     )
+    _last_spa_active: bool | None = field(default=None, init=False, repr=False)
+    _spa_user_session_opportunity_id: str | None = field(
+        default=None, init=False, repr=False
+    )
     _active_spa_restart_ambiguity: bool = field(
         default=False, init=False, repr=False
     )
@@ -740,6 +744,9 @@ class ThermalAutomaticExecutionDriver:
         converged_adoption = self._prospective_converged_pool_adoption(frame)
         if converged_adoption is not None:
             return converged_adoption
+        converged_spa_adoption = self._prospective_converged_user_spa_adoption(frame)
+        if converged_spa_adoption is not None:
+            return converged_spa_adoption
 
         body = self._session_body(frame)
         if self.active_session is not None:
@@ -1071,6 +1078,19 @@ class ThermalAutomaticExecutionDriver:
                         body=body,
                         preflight=preflight,
                     )
+                prospective_spa_adoption = bool(
+                    body.body is ThermalBody.HOT_TUB
+                    and body.body_active is True
+                    and body.plan.desired.evidence.get("session_kind")
+                    == SpaSessionKind.EXTERNAL_USER.value
+                    and self._spa_user_session_opportunity_id
+                    and self._spa_off_observed_since_start
+                    and not self._active_spa_restart_ambiguity
+                    and not frame.spa_automatic_control_suppressed
+                    and self.orchestrator.ownership.state.status
+                    is not ThermalRuntimeOwnershipStatus.OWNED
+                    and body.plan.disposition is ThermalPlanDisposition.READY
+                )
                 if (
                     body.body is ThermalBody.HOT_TUB
                     and body.body_active is True
@@ -1078,6 +1098,7 @@ class ThermalAutomaticExecutionDriver:
                         step.metadata.get("priming_step") == "true"
                         for step in body.plan.step_specifications
                     )
+                    and not prospective_spa_adoption
                 ):
                     return self._blocked(
                         frame,
@@ -1232,6 +1253,39 @@ class ThermalAutomaticExecutionDriver:
                             opportunity_id=frame.pool_opportunity_id or "",
                             reason_code="independent_pool_thermal_opportunity",
                             adopt_heat_source=adopt_heat_source,
+                        )
+                        if (
+                            adoption.disposition
+                            is not ThermalRuntimeOwnershipDisposition.ESTABLISHED
+                        ):
+                            self.active_session = None
+                            return self._blocked(
+                                frame,
+                                adoption.reason_code,
+                                body=body,
+                                preflight=preflight,
+                            )
+                    if prospective_spa_adoption:
+                        adoption_evidence = build_thermal_runtime_ownership_evidence(
+                            generated_at=frame.observed_at,
+                            observations={
+                                item.observation_id: item
+                                for item in frame.observations
+                            },
+                            body=body,
+                            external_changes=frame.external_changes,
+                            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+                        )
+                        adoption = self.orchestrator.ownership.adopt_body(
+                            body=ThermalBody.HOT_TUB,
+                            adopted_at=frame.observed_at,
+                            requested_mode=body.requested_mode.value,
+                            current_context=self.active_session.originating_context,
+                            execution_plan_id=self.active_session.execution_plan.plan_id,
+                            execution_progress=self.active_session.execution_progress,
+                            evidence=adoption_evidence,
+                            opportunity_id=self._spa_user_session_opportunity_id or "",
+                            reason_code="witnessed_user_hot_tub_session",
                         )
                         if (
                             adoption.disposition
@@ -2674,14 +2728,36 @@ class ThermalAutomaticExecutionDriver:
     def _accept_epoch(self, frame: ThermalAutomaticExecutionFrame) -> None:
         self._last_epoch_identity = frame.epoch_identity
         self._last_epoch_at = frame.observed_at
-        if (
-            frame.thermal is not None
-            and frame.thermal.hot_tub.body_active is False
-        ):
+        if frame.thermal is None:
+            return
+        spa_active = frame.thermal.hot_tub.body_active
+        if spa_active is False:
             # Observing Spa OFF creates a new in-process body boundary; a later
             # Spa ON is then a session this driver actually witnessed.
             self._spa_off_observed_since_start = True
             self._active_spa_restart_ambiguity = False
+            self._spa_user_session_opportunity_id = None
+        elif (
+            spa_active is True
+            and self._last_spa_active is False
+            and self._spa_off_observed_since_start
+        ):
+            lease = self.orchestrator.ownership.state.lease
+            poolos_started_spa = bool(
+                lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and lease.body is ThermalBody.HOT_TUB
+                and lease.body_activation is not None
+            )
+            if not poolos_started_spa:
+                # This process observed the physical OFF -> ON boundary without
+                # PoolOS BODY-start provenance.  That is a fresh user-session
+                # opportunity from which BODY may be prospectively adopted.
+                # The token remains stable for this physical Spa session.
+                self._spa_user_session_opportunity_id = (
+                    f"spa-user-session:{frame.epoch_identity}"
+                )
+        self._last_spa_active = spa_active
 
     def _session_body(
         self,
@@ -2796,9 +2872,21 @@ class ThermalAutomaticExecutionDriver:
                     body.body is ThermalBody.HOT_TUB
                     and predecessor.purpose.kind
                     is ThermalExecutionPurposeKind.THERMAL_CONTROL
-                    and predecessor.purpose.selected_source is PhysicalHeatMode.OFF
-                    and predecessor.purpose.required_pump_rpm
-                    == self.baselines.temperature_probe_rpm
+                    and (
+                        (
+                            predecessor.purpose.selected_source is PhysicalHeatMode.OFF
+                            and predecessor.purpose.required_pump_rpm
+                            == self.baselines.temperature_probe_rpm
+                        )
+                        or (
+                            lease is not None
+                            and lease.body_adoption is not None
+                            and lease.body_adoption.reason_code
+                            == "witnessed_user_hot_tub_session"
+                            and body.plan.desired.evidence.get("session_kind")
+                            == SpaSessionKind.EXTERNAL_USER.value
+                        )
+                    )
                 )
             )
         )
@@ -3017,6 +3105,75 @@ class ThermalAutomaticExecutionDriver:
             reason_code="independent_converged_pool_solar_opportunity",
             adopt_pump_rpm=body.plan.desired.required_pump_rpm,
             adopt_heat_source=PhysicalHeatMode.SOLAR,
+        )
+        if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
+            return self._blocked(frame, decision.reason_code, body=body)
+
+        return self._publish(
+            state=ThermalAutomaticDriverState.CONVERGED,
+            evaluated_at=frame.observed_at,
+            blocker=None,
+            frame=frame,
+            body=body,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=False,
+        )
+
+    def _prospective_converged_user_spa_adoption(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> ThermalAutomaticDriverAssessment | None:
+        """Adopt a witnessed user Spa BODY without inventing command history.
+
+        This boundary is deliberately narrower than generic state adoption.  The
+        running Spa must belong to an OFF -> ON body session witnessed by this
+        process, the semantic session must remain user-originated, topology must
+        be exclusive and fresh, and current Eco Heat policy must already be
+        converged.  Only BODY is adopted here; Pump/Thermal provenance is never
+        inferred from matching hardware state.
+        """
+
+        if (
+            self.active_session is not None
+            or self.orchestrator.ownership.state.status
+            is ThermalRuntimeOwnershipStatus.OWNED
+            or frame.thermal is None
+            or frame.spa_automatic_control_suppressed
+            or not self._spa_user_session_opportunity_id
+            or not self._spa_off_observed_since_start
+            or self._active_spa_restart_ambiguity
+        ):
+            return None
+        body = frame.thermal.hot_tub
+        purpose = body.execution_currentness.purpose
+        if (
+            body.body is not ThermalBody.HOT_TUB
+            or body.body_active is not True
+            or body.plan.desired.evidence.get("session_kind")
+            != SpaSessionKind.EXTERNAL_USER.value
+            or body.plan.disposition is not ThermalPlanDisposition.ALREADY_CONVERGED
+            or purpose.kind is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+        ):
+            return None
+
+        adoption_evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=frame.observed_at,
+            observations={item.observation_id: item for item in frame.observations},
+            body=body,
+            external_changes=frame.external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+        )
+        decision = self.orchestrator.ownership.adopt_body(
+            body=ThermalBody.HOT_TUB,
+            adopted_at=frame.observed_at,
+            requested_mode=body.requested_mode.value,
+            current_context=body.live_execution_context,
+            execution_plan_id=purpose.purpose_id,
+            execution_progress=ThermalExecutionProgress(),
+            evidence=adoption_evidence,
+            opportunity_id=self._spa_user_session_opportunity_id,
+            reason_code="witnessed_user_hot_tub_session",
         )
         if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
             return self._blocked(frame, decision.reason_code, body=body)

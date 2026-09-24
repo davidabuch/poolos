@@ -4646,49 +4646,62 @@ def _assert_external_hot_tub_gas_lifecycle(
     )
     assert driver.active_session.ownership.body_activation_operation_id is None
 
+    normalized_frame = _frame(
+        orchestrator,
+        start_at + timedelta(seconds=2),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        spa_temperature=80.0,
+        spa_target=97.0,
+        driver=driver,
+        evaluator=evaluator,
+    )
     normalized = asyncio.run(
         driver.process_epoch(
-            _frame(
-                orchestrator,
-                start_at + timedelta(seconds=2),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                pump_rpm=2600,
-                configured_rpm=2600,
-                spa_temperature=80.0,
-                spa_target=97.0,
-                driver=driver,
-                evaluator=evaluator,
-            ),
+            normalized_frame,
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert normalized.state is ThermalAutomaticDriverState.TERMINATING
-
-    relinquished = asyncio.run(
-        driver.process_epoch(
-            _frame(
-                orchestrator,
-                start_at + timedelta(seconds=3),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                pump_rpm=2600,
-                configured_rpm=2600,
-                spa_temperature=80.0,
-                spa_target=97.0,
-                driver=driver,
-                evaluator=evaluator,
-            ),
-            delivery_factory=FakeDeliveryFactory(delivery),
+    normalized_lease = orchestrator.ownership.state.lease
+    if normalized.state is ThermalAutomaticDriverState.TERMINATING:
+        predecessor = (
+            None
+            if normalized_lease is None
+            or normalized_lease.originating_currentness is None
+            else normalized_lease.originating_currentness.purpose
         )
-    )
-    assert relinquished.state is ThermalAutomaticDriverState.CONVERGED
+        successor = normalized_frame.thermal.hot_tub.execution_currentness.purpose
+        adoption = None if normalized_lease is None else normalized_lease.body_adoption
+        raise AssertionError(
+            "unexpected user Spa termination: "
+            f"blocker={normalized.blocker}; "
+            f"lease_status={None if normalized_lease is None else normalized_lease.status}; "
+            f"adoption_reason={None if adoption is None else adoption.reason_code}; "
+            f"pred_kind={None if predecessor is None else predecessor.kind}; "
+            f"pred_source={None if predecessor is None else predecessor.selected_source}; "
+            f"pred_rpm={None if predecessor is None else predecessor.required_pump_rpm}; "
+            f"pred_mode={None if predecessor is None else predecessor.requested_mode}; "
+            f"pred_target={None if predecessor is None else predecessor.target_temperature_f}; "
+            f"succ_kind={successor.kind}; succ_source={successor.selected_source}; "
+            f"succ_rpm={successor.required_pump_rpm}; succ_mode={successor.requested_mode}; "
+            f"succ_target={successor.target_temperature_f}; "
+            f"session_kind={normalized_frame.thermal.hot_tub.plan.desired.evidence.get('session_kind')}; "
+            f"ownership_reason={orchestrator.ownership.state.reason_code}"
+        )
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_adoption is not None
+    assert lease.body_activation is None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
 
     preparing = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=4),
+                start_at + timedelta(seconds=3),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=2600,
@@ -4711,7 +4724,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=5),
+                start_at + timedelta(seconds=4),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4732,7 +4745,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=6),
+                start_at + timedelta(seconds=5),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4754,7 +4767,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=7),
+                start_at + timedelta(seconds=6),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4768,17 +4781,21 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert not target_transition.command_delivery_performed
+    assert target_transition.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+    assert orchestrator.ownership.state.lease is not None
+    assert orchestrator.ownership.state.lease.body_adoption is not None
 
     downshift = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=8),
+                start_at + timedelta(seconds=7),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
-                pump_rpm=3000,
-                configured_rpm=3000,
+                pump_rpm=2600,
+                configured_rpm=2600,
                 spa_heater="H0001",
                 spa_temperature=97.0,
                 spa_target=97.0,
@@ -4788,15 +4805,14 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert downshift.command_delivery_performed
-    assert isinstance(delivery.calls[-1], SetPumpSpeed)
-    assert delivery.calls[-1].rpm == 2600
+    assert not downshift.command_delivery_performed
+    assert downshift.state is ThermalAutomaticDriverState.CONVERGED
 
     settled = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=9),
+                start_at + timedelta(seconds=8),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=2600,
@@ -4818,7 +4834,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=10),
+                start_at + timedelta(seconds=9),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=False,
@@ -5656,7 +5672,7 @@ def test_restart_does_not_reconstruct_opportunistic_spa_ownership_from_state() -
     )
 
 
-def test_external_hot_tub_session_governs_dynamic_spa_pump_without_body_ownership() -> None:
+def test_user_hot_tub_session_governs_dynamic_spa_pump_with_body_adoption() -> None:
     _assert_external_hot_tub_gas_lifecycle()
 
 
@@ -5712,8 +5728,8 @@ def test_external_hot_tub_already_gas_active_reconciles_directly_to_3000() -> No
     assert driver.active_session.ownership.body_activation_operation_id is None
 
 
-def test_live_external_spa_gas_uses_exact_dynamic_pump_without_body_ownership() -> None:
-    """Reproduce the commissioned external Spa Gas frame at the core lifecycle."""
+def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
+    """A witnessed user Spa keeps BODY while PoolOS governs dynamic Gas pump work."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -5798,15 +5814,181 @@ def test_live_external_spa_gas_uses_exact_dynamic_pump_without_body_ownership() 
         )
     )
 
-    assert verified.state is ThermalAutomaticDriverState.TERMINATING
+    assert verified.state is ThermalAutomaticDriverState.CONVERGED
     lease = orchestrator.ownership.state.lease
     assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
     assert lease.body_activation is None
     assert lease.pump_setpoint is not None
-    assert driver.active_session is None
 
 
-def test_external_spa_already_at_gas_rpm_creates_no_operation_or_ownership() -> None:
+def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> None:
+    """Witnessed user Spa BODY survives Eco Heat Gas -> Solar transition."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0102",
+        spa_heater="00000",
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    delivery = FakeDelivery()
+    pump_rpm = 2500
+    spa_heater = "00000"
+    solar_active = False
+    heater_active = False
+    adopted_opportunity_id: str | None = None
+    gas_seen = False
+    solar_seen = False
+
+    # The first frames establish the user-started session and normal Gas
+    # fallback.  Jumping beyond the two-minute qualification hold then drives
+    # the same BODY session through the Eco Heat Solar successor.
+    for seconds in (1, 2, 3, 4, 5, 121, 122, 123, 124, 125, 126, 127, 128):
+        before = len(delivery.calls)
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=False,
+                    body=ThermalBody.HOT_TUB,
+                    spa_active=True,
+                    pump_rpm=pump_rpm,
+                    configured_rpm=pump_rpm,
+                    spa_pump_circuit_id="p0102",
+                    spa_heater=spa_heater,
+                    solar_active=solar_active,
+                    heater_active=heater_active,
+                    spa_heating_demand_active=True,
+                    spa_temperature=80.0,
+                    spa_target=97.0,
+                    solar_temperature=140.0,
+                    mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                    driver=driver,
+                    evaluator=evaluator,
+                ),
+                delivery_factory=FakeDeliveryFactory(delivery),
+            )
+        )
+
+        lease = orchestrator.ownership.state.lease
+        if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
+            assert lease.body is ThermalBody.HOT_TUB
+            assert lease.body_activation is None
+            assert lease.body_adoption is not None
+            assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+            if adopted_opportunity_id is None:
+                adopted_opportunity_id = lease.body_adoption.opportunity_id
+            assert lease.body_adoption.opportunity_id == adopted_opportunity_id
+
+        for operation in delivery.calls[before:]:
+            assert not isinstance(operation, SetBodyActive), (
+                "Eco Heat must never restart a user-owned Spa BODY",
+                operation,
+                result,
+            )
+            if isinstance(operation, SetPumpSpeed):
+                pump_rpm = operation.rpm
+            elif isinstance(operation, SetHeatMode):
+                if operation.mode is PhysicalHeatMode.GAS:
+                    spa_heater = "H0001"
+                    heater_active = True
+                    solar_active = False
+                    gas_seen = True
+                elif operation.mode is PhysicalHeatMode.SOLAR:
+                    spa_heater = "H0002"
+                    heater_active = False
+                    solar_active = True
+                    solar_seen = True
+                elif operation.mode is PhysicalHeatMode.OFF:
+                    spa_heater = "00000"
+                    heater_active = False
+                    solar_active = False
+
+        if solar_active and pump_rpm == 2900 and result.state in {
+            ThermalAutomaticDriverState.CONVERGED,
+            ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
+        }:
+            break
+
+    assert adopted_opportunity_id is not None
+    assert gas_seen, delivery.calls
+    assert solar_seen, delivery.calls
+    assert spa_heater == "H0002"
+    assert solar_active
+    assert pump_rpm == 2900
+    assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_activation is None
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == adopted_opportunity_id
+    assert lease.heat_source is not None
+    assert lease.heat_source.intended_value is PhysicalHeatMode.SOLAR
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+
+    # The homeowner remains the lifetime boundary.  Their physical Spa OFF
+    # retires the adopted BODY session and must not provoke a PoolOS BODY-OFF
+    # command or replay any stale Eco Heat command.
+    calls_before_off = len(delivery.calls)
+    user_off = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=129),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2600,
+                spa_pump_circuit_id="p0102",
+                spa_heater="00000",
+                solar_active=False,
+                heater_active=False,
+                spa_heating_demand_active=False,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                solar_temperature=140.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    assert not user_off.command_delivery_performed
+    assert len(delivery.calls) == calls_before_off
+    assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
+    ended = orchestrator.ownership.state.lease
+    assert ended is None or ended.status is not ThermalRuntimeOwnershipStatus.OWNED
+
+
+def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
     evaluator = ThermalRuntimeEvaluator()
@@ -5856,7 +6038,16 @@ def test_external_spa_already_at_gas_rpm_creates_no_operation_or_ownership() -> 
     assert not result.command_delivery_performed
     assert delivery.calls == []
     assert driver.active_session is None
-    assert orchestrator.ownership.state.lease is None
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+    assert lease.body_activation is None
+    assert lease.pump_setpoint is None
+    assert lease.pump_adoption is None
+    assert lease.heat_source is None
+    assert lease.heat_source_adoption is None
 
 
 def test_external_spa_off_preempts_accepted_pump_work_without_retry() -> None:
