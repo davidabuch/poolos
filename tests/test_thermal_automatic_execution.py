@@ -5824,6 +5824,135 @@ def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
     assert lease.pump_setpoint is not None
 
 
+def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> None:
+    """Witnessed user Spa BODY survives Eco Heat Gas -> Solar transition."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0102",
+        spa_heater="00000",
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    delivery = FakeDelivery()
+    pump_rpm = 2500
+    spa_heater = "00000"
+    solar_active = False
+    heater_active = False
+    adopted_opportunity_id: str | None = None
+    gas_seen = False
+    solar_seen = False
+
+    # The first frames establish the user-started session and normal Gas
+    # fallback.  Jumping beyond the two-minute qualification hold then drives
+    # the same BODY session through the Eco Heat Solar successor.
+    for seconds in (1, 2, 3, 4, 5, 121, 122, 123, 124, 125, 126, 127, 128):
+        before = len(delivery.calls)
+        result = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=seconds),
+                    pool_active=False,
+                    body=ThermalBody.HOT_TUB,
+                    spa_active=True,
+                    pump_rpm=pump_rpm,
+                    configured_rpm=pump_rpm,
+                    spa_pump_circuit_id="p0102",
+                    spa_heater=spa_heater,
+                    solar_active=solar_active,
+                    heater_active=heater_active,
+                    spa_heating_demand_active=True,
+                    spa_temperature=80.0,
+                    spa_target=97.0,
+                    solar_temperature=140.0,
+                    mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                    driver=driver,
+                    evaluator=evaluator,
+                ),
+                delivery_factory=FakeDeliveryFactory(delivery),
+            )
+        )
+
+        lease = orchestrator.ownership.state.lease
+        if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
+            assert lease.body is ThermalBody.HOT_TUB
+            assert lease.body_activation is None
+            assert lease.body_adoption is not None
+            assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+            if adopted_opportunity_id is None:
+                adopted_opportunity_id = lease.body_adoption.opportunity_id
+            assert lease.body_adoption.opportunity_id == adopted_opportunity_id
+
+        for operation in delivery.calls[before:]:
+            assert not isinstance(operation, SetBodyActive), (
+                "Eco Heat must never restart a user-owned Spa BODY",
+                operation,
+                result,
+            )
+            if isinstance(operation, SetPumpSpeed):
+                pump_rpm = operation.rpm
+            elif isinstance(operation, SetHeatMode):
+                if operation.mode is PhysicalHeatMode.GAS:
+                    spa_heater = "H0001"
+                    heater_active = True
+                    solar_active = False
+                    gas_seen = True
+                elif operation.mode is PhysicalHeatMode.SOLAR:
+                    spa_heater = "H0002"
+                    heater_active = False
+                    solar_active = True
+                    solar_seen = True
+                elif operation.mode is PhysicalHeatMode.OFF:
+                    spa_heater = "00000"
+                    heater_active = False
+                    solar_active = False
+
+        if solar_active and pump_rpm == 2900 and result.state in {
+            ThermalAutomaticDriverState.CONVERGED,
+            ThermalAutomaticDriverState.OBSERVING_SOLAR_ENGAGEMENT,
+        }:
+            break
+
+    assert adopted_opportunity_id is not None
+    assert gas_seen, delivery.calls
+    assert solar_seen, delivery.calls
+    assert spa_heater == "H0002"
+    assert solar_active
+    assert pump_rpm == 2900
+    assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
+
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_activation is None
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == adopted_opportunity_id
+    assert lease.heat_source is not None
+    assert lease.heat_source.intended_value is PhysicalHeatMode.SOLAR
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+
+
 def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
