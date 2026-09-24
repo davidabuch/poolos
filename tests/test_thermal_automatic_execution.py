@@ -4781,7 +4781,10 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert not target_transition.command_delivery_performed
+    if target_transition.command_delivery_performed:
+        assert not isinstance(delivery.calls[-1], SetBodyActive)
+    assert orchestrator.ownership.state.lease is not None
+    assert orchestrator.ownership.state.lease.body_adoption is not None
 
     downshift = asyncio.run(
         driver.process_epoch(
@@ -5669,7 +5672,7 @@ def test_restart_does_not_reconstruct_opportunistic_spa_ownership_from_state() -
     )
 
 
-def test_external_hot_tub_session_governs_dynamic_spa_pump_without_body_ownership() -> None:
+def test_user_hot_tub_session_governs_dynamic_spa_pump_with_body_adoption() -> None:
     _assert_external_hot_tub_gas_lifecycle()
 
 
@@ -5725,8 +5728,8 @@ def test_external_hot_tub_already_gas_active_reconciles_directly_to_3000() -> No
     assert driver.active_session.ownership.body_activation_operation_id is None
 
 
-def test_live_external_spa_gas_uses_exact_dynamic_pump_without_body_ownership() -> None:
-    """Reproduce the commissioned external Spa Gas frame at the core lifecycle."""
+def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
+    """A witnessed user Spa keeps BODY while PoolOS governs dynamic Gas pump work."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -5811,12 +5814,14 @@ def test_live_external_spa_gas_uses_exact_dynamic_pump_without_body_ownership() 
         )
     )
 
-    assert verified.state is ThermalAutomaticDriverState.TERMINATING
+    assert verified.state is ThermalAutomaticDriverState.CONVERGED
     lease = orchestrator.ownership.state.lease
     assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
     assert lease.body_activation is None
     assert lease.pump_setpoint is not None
-    assert driver.active_session is None
 
 
 def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
