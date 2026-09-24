@@ -4663,7 +4663,15 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert normalized.state is not ThermalAutomaticDriverState.TERMINATING, normalized
+    assert normalized.state is not ThermalAutomaticDriverState.TERMINATING, (
+        normalized.state,
+        normalized.blocker,
+        normalized.runtime_ownership_status,
+        normalized.runtime_ownership_summary,
+        driver.active_session,
+        orchestrator.ownership.state,
+        orchestrator.ownership.residual_termination,
+    )
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.body is ThermalBody.HOT_TUB
