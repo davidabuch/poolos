@@ -2756,12 +2756,17 @@ class ThermalRuntimeOwnershipManager:
         if request.replace_pump_setpoint or request.replace_heat_source:
             predecessor = lease.originating_currentness
             successor = request.successor_context.execution_currentness
-            if (
-                predecessor is None
-                or successor is None
-                or not compatible_thermal_body_successor(predecessor, successor)
-                or not request.successor_requires_body_active
-            ):
+            compatible_successor = bool(
+                predecessor is not None
+                and successor is not None
+                and (
+                    compatible_thermal_body_successor(predecessor, successor)
+                    or _compatible_adopted_user_hot_tub_successor(
+                        lease, predecessor, successor
+                    )
+                )
+            )
+            if not compatible_successor or not request.successor_requires_body_active:
                 return prefix + "replacement_not_compatible_body_successor"
         return None
 
@@ -2837,6 +2842,28 @@ class ThermalRuntimeOwnershipManager:
             current_state=self._state,
             evaluated_at=at,
         )
+
+
+def _compatible_adopted_user_hot_tub_successor(
+    lease: ThermalRuntimeOwnershipLease,
+    predecessor: ThermalExecutionCurrentness,
+    successor: ThermalExecutionCurrentness,
+) -> bool:
+    """Keep one witnessed user Spa BODY across reviewed Eco Heat purposes."""
+
+    adoption = lease.body_adoption
+    before, after = predecessor.purpose, successor.purpose
+    return bool(
+        adoption is not None
+        and adoption.reason_code == "witnessed_user_hot_tub_session"
+        and lease.body is ThermalBody.HOT_TUB
+        and before.body is ThermalBody.HOT_TUB
+        and after.body is ThermalBody.HOT_TUB
+        and before.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and before.requested_mode == after.requested_mode
+        and before.target_temperature_f == after.target_temperature_f
+    )
 
 
 def compatible_thermal_body_successor(
