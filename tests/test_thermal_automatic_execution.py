@@ -4663,32 +4663,19 @@ def _assert_external_hot_tub_gas_lifecycle(
             delivery_factory=FakeDeliveryFactory(delivery),
         )
     )
-    assert normalized.state is ThermalAutomaticDriverState.TERMINATING
-
-    relinquished = asyncio.run(
-        driver.process_epoch(
-            _frame(
-                orchestrator,
-                start_at + timedelta(seconds=3),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                pump_rpm=2600,
-                configured_rpm=2600,
-                spa_temperature=80.0,
-                spa_target=97.0,
-                driver=driver,
-                evaluator=evaluator,
-            ),
-            delivery_factory=FakeDeliveryFactory(delivery),
-        )
-    )
-    assert relinquished.state is ThermalAutomaticDriverState.CONVERGED
+    assert normalized.state is not ThermalAutomaticDriverState.TERMINATING, normalized
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_adoption is not None
+    assert lease.body_activation is None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
 
     preparing = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=4),
+                start_at + timedelta(seconds=3),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=2600,
@@ -4711,7 +4698,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=5),
+                start_at + timedelta(seconds=4),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4732,7 +4719,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=6),
+                start_at + timedelta(seconds=5),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4754,7 +4741,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=7),
+                start_at + timedelta(seconds=6),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4774,7 +4761,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=8),
+                start_at + timedelta(seconds=7),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=3000,
@@ -4796,7 +4783,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=9),
+                start_at + timedelta(seconds=8),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 pump_rpm=2600,
@@ -4818,7 +4805,7 @@ def _assert_external_hot_tub_gas_lifecycle(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                start_at + timedelta(seconds=10),
+                start_at + timedelta(seconds=9),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=False,
@@ -5806,7 +5793,7 @@ def test_live_external_spa_gas_uses_exact_dynamic_pump_without_body_ownership() 
     assert driver.active_session is None
 
 
-def test_external_spa_already_at_gas_rpm_creates_no_operation_or_ownership() -> None:
+def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
     evaluator = ThermalRuntimeEvaluator()
@@ -5856,7 +5843,16 @@ def test_external_spa_already_at_gas_rpm_creates_no_operation_or_ownership() -> 
     assert not result.command_delivery_performed
     assert delivery.calls == []
     assert driver.active_session is None
-    assert orchestrator.ownership.state.lease is None
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+    assert lease.body_activation is None
+    assert lease.pump_setpoint is None
+    assert lease.pump_adoption is None
+    assert lease.heat_source is None
+    assert lease.heat_source_adoption is None
 
 
 def test_external_spa_off_preempts_accepted_pump_work_without_retry() -> None:
