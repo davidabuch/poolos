@@ -208,9 +208,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         return await self._async_refresh_native_runtime_evidence()
 
     async def async_refresh_native_cleanup_topology_evidence(self) -> bool:
-        """Refresh post-boundary Pool/Spa topology for bounded cleanup."""
+        """Read post-boundary topology AND source selection before cleanup."""
 
-        return await self._async_refresh_native_runtime_evidence()
+        transport = self.independent_intellicenter_transport
+        if transport is None or self._unloading:
+            return False
+        return await transport._async_refresh_owned_pump_session_evidence(
+            cleanup_topology=True
+        )
 
     async def async_refresh_native_thermal_topology_evidence(self) -> bool:
         """Refresh BODY topology through the existing bounded read-only native path."""

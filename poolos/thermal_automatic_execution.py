@@ -863,6 +863,31 @@ class ThermalAutomaticExecutionDriver:
                         command_delivery_performed=False,
                     )
 
+        if (
+            self.active_session is not None
+            and self.active_session.status is ThermalLiveExecutionStatus.READY
+            and body is not None
+            and body.execution_currentness is not None
+        ):
+            lease = self.orchestrator.ownership.state.lease
+            if (
+                lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and lease.owns_body
+                and lease.originating_currentness is not None
+                and compatible_thermal_body_successor(
+                    lease.originating_currentness, body.execution_currentness
+                )
+                and self.active_session.originating_currentness.purpose
+                != body.execution_currentness.purpose
+            ):
+                # Acquisition can become trusted between commands, including
+                # when native BODY circulation removed an unissued prime. The
+                # obsolete READY execution has no in-flight consequence. Route
+                # its proven BODY origin through the existing typed handoff;
+                # never deliver its old next operation or copy fresh authority.
+                self.active_session = None
+
         if self.active_session is None:
             if frame.orchestration.lifecycle is ThermalOrchestrationLifecycle.OWNED:
                 body = _candidate_body(frame)
@@ -2195,7 +2220,10 @@ class ThermalAutomaticExecutionDriver:
         )
         attempt = self.cleanup_attempt
         if attempt is not None:
-            if (
+            # The accepted Spa-Off consequence ends the active-body topology.
+            # Retain only its bounded verification attempt while the native
+            # pump coasts down; this grants no further command permission.
+            commanded_body_off = (
                 evidence.pool_active is False
                 and evidence.pool_activity_fresh
                 and evidence.pool_activity_usable
@@ -2204,6 +2232,14 @@ class ThermalAutomaticExecutionDriver:
                 and evidence.spa_activity_usable
                 and evidence.spa_activity_observed_at is not None
                 and evidence.spa_activity_observed_at > attempt.delivered_at
+            )
+            if (
+                commanded_body_off
+                and evidence.pump_rpm == 0
+                and evidence.pump_observation_fresh
+                and evidence.pump_observation_usable
+                and evidence.pump_observed_at is not None
+                and evidence.pump_observed_at > attempt.delivered_at
             ):
                 self._clear_cleanup()
                 self.circulation_ownership.release_thermal(
@@ -2219,7 +2255,13 @@ class ThermalAutomaticExecutionDriver:
                     failure=None,
                     command_delivery_performed=False,
                 )
-            if external_reason.disposition is ThermalTerminationDisposition.INVALIDATED:
+            if (
+                external_reason.disposition is ThermalTerminationDisposition.INVALIDATED
+                and not (
+                    commanded_body_off
+                    and external_reason.reason_code == "thermal_termination_hot_tub_topology_lost"
+                )
+            ):
                 self._clear_cleanup()
                 self.circulation_ownership.release_thermal(
                     thermal_lease_id=provenance.lease_id

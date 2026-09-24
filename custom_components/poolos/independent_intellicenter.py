@@ -246,6 +246,7 @@ class _ReadOnlyModelController(ICModelController):
         self,
         *,
         generation_is_current: Callable[[], bool],
+        cleanup_topology: bool = False,
     ) -> None:
         """Actively re-read native evidence required by an owned pump session.
 
@@ -263,7 +264,8 @@ class _ReadOnlyModelController(ICModelController):
             ),
             (
                 "OBJTYP = PUMP",
-                (RPM_ATTR, STATUS_ATTR),
+                ((RPM_ATTR, STATUS_ATTR, GPM_ATTR, PWR_ATTR, MIN_ATTR, MAX_ATTR)
+                 if cleanup_topology else (RPM_ATTR, STATUS_ATTR)),
             ),
             (
                 "OBJTYP = SENSE",
@@ -271,9 +273,16 @@ class _ReadOnlyModelController(ICModelController):
             ),
             (
                 "OBJTYP = BODY",
-                (STATUS_ATTR, SUBTYP_ATTR, SNAME_ATTR),
+                (tuple(dict.fromkeys((*_BODY_MONITOR_ATTRIBUTES, SUBTYP_ATTR)))
+                 if cleanup_topology else (STATUS_ATTR, SUBTYP_ATTR, SNAME_ATTR)),
             ),
         )
+        if cleanup_topology:
+            requests += (
+                ("OBJTYP = CIRCUIT", (STATUS_ATTR, SNAME_ATTR, SUBTYP_ATTR, "USE")),
+                ("OBJTYP = SYSTEM", (SERVICE_ATTR, VER_ATTR)),
+            )
+        cleanup_updates: list[dict[str, Any]] = []
         for condition, keys in requests:
             if not generation_is_current():
                 return
@@ -292,8 +301,43 @@ class _ReadOnlyModelController(ICModelController):
             if not generation_is_current():
                 return
             object_list = response.get("objectList")
-            if isinstance(object_list, list):
+            if cleanup_topology:
+                # Do not publish cached source/topology as newly observed when
+                # any required reply is missing. Apply one complete read batch;
+                # unchanged replies need no pyintellicenter change callback.
+                object_type = condition.removeprefix("OBJTYP = ")
+                expected = tuple(self.model.get_by_type(object_type))
+                if not isinstance(object_list, list):
+                    raise NativeIntelliCenterReadError("CLEANUP_NATIVE_READ_INCOMPLETE")
+                received = {
+                    entry.get("objnam"): entry.get("params")
+                    for entry in object_list if isinstance(entry, dict)
+                }
+                if set(received) != {obj.objnam for obj in expected}:
+                    raise NativeIntelliCenterReadError("CLEANUP_NATIVE_IDENTITY_CHANGED")
+                for obj in expected:
+                    params = received.get(obj.objnam)
+                    required = {key for key in keys if obj[key] is not None}
+                    if object_type == BODY_TYPE:
+                        required.update((STATUS_ATTR, HEATER_ATTR, HTMODE_ATTR))
+                    if object_type == PUMP_TYPE:
+                        required.update((STATUS_ATTR, RPM_ATTR))
+                    if not isinstance(params, dict) or any(
+                        key not in params or params[key] is None for key in required
+                    ):
+                        raise NativeIntelliCenterReadError("CLEANUP_NATIVE_READ_INCOMPLETE")
+                cleanup_updates.extend(object_list)
+            elif isinstance(object_list, list):
                 self._apply_updates(object_list)
+        if cleanup_topology and generation_is_current():
+            # Publish only once, from the transport after the complete batch.
+            # This synchronous section cannot hide an unrelated notification.
+            callback = self._updated_callback
+            self._updated_callback = None
+            try:
+                self._apply_updates(cleanup_updates)
+            finally:
+                self._updated_callback = callback
 
     async def refresh_body_metadata(
         self,
@@ -553,24 +597,37 @@ class IndependentIntelliCenterReadOnlyTransport:
             await self._controller.stop()
         self._state = IndependentIntelliCenterTransportState.UNAVAILABLE
 
-    async def _async_refresh_owned_pump_session_evidence(self) -> bool:
+    async def _async_refresh_owned_pump_session_evidence(
+        self, *, cleanup_topology: bool = False
+    ) -> bool:
         """Refresh unchanged owned pump-session evidence without commands."""
 
         if not self.connected:
             return False
         generation = self._discovery_generation
-        try:
-            await self._controller.refresh_owned_pump_session_evidence(
-                generation_is_current=lambda: self._refresh_generation_is_current(
-                    generation
-                )
+        read_started_at = datetime.now(UTC)
+        originating_snapshot = self._latest_snapshot
+
+        def read_is_current() -> bool:
+            return self._refresh_generation_is_current(generation) and (
+                not cleanup_topology or self._latest_snapshot is originating_snapshot
             )
-        except (ICConnectionError, ICTimeoutError) as exc:
+
+        try:
+            arguments = {"cleanup_topology": True} if cleanup_topology else {}
+            await self._controller.refresh_owned_pump_session_evidence(
+                generation_is_current=read_is_current,
+                **arguments,
+            )
+        except (ICConnectionError, ICTimeoutError, NativeIntelliCenterReadError) as exc:
             self._last_error_code = type(exc).__name__.upper()
             return False
-        if not self._refresh_generation_is_current(generation):
+        if not read_is_current():
             return False
-        observed_at = datetime.now(UTC)
+        # A cleanup batch uses the conservative start-of-read boundary. A
+        # command or new entitlement created while queries are in flight cannot
+        # be verified by an earlier reply merely because the batch finished later.
+        observed_at = read_started_at if cleanup_topology else datetime.now(UTC)
         self._last_native_update = observed_at
         self._last_error_code = None
         self._latest_snapshot = self._copy_snapshot(
