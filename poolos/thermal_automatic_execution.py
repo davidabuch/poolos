@@ -2872,9 +2872,20 @@ class ThermalAutomaticExecutionDriver:
                     body.body is ThermalBody.HOT_TUB
                     and predecessor.purpose.kind
                     is ThermalExecutionPurposeKind.THERMAL_CONTROL
-                    and predecessor.purpose.selected_source is PhysicalHeatMode.OFF
-                    and predecessor.purpose.required_pump_rpm
-                    == self.baselines.temperature_probe_rpm
+                    and (
+                        (
+                            predecessor.purpose.selected_source is PhysicalHeatMode.OFF
+                            and predecessor.purpose.required_pump_rpm
+                            == self.baselines.temperature_probe_rpm
+                        )
+                        or (
+                            lease.body_adoption is not None
+                            and lease.body_adoption.reason_code
+                            == "witnessed_user_hot_tub_session"
+                            and body.plan.desired.evidence.get("session_kind")
+                            == SpaSessionKind.EXTERNAL_USER.value
+                        )
+                    )
                 )
             )
         )
