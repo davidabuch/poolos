@@ -5825,7 +5825,7 @@ def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
 
 
 def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> None:
-    """Witnessed user Spa BODY survives Eco Heat Gas -> Solar transition."""
+    """Witnessed user Spa BODY reaches Eco Heat Solar without transient Gas."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -5861,9 +5861,10 @@ def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> No
     gas_seen = False
     solar_seen = False
 
-    # The first frames establish the user-started session and normal Gas
-    # fallback.  Jumping beyond the two-minute qualification hold then drives
-    # the same BODY session through the Eco Heat Solar successor.
+    # The first frames establish the user-started session and ordinary
+    # circulation while already-qualified roof evidence accrues. Jumping beyond
+    # the two-minute hold then drives the same BODY session into Eco Heat Solar
+    # without firing Gas merely as an intermediate source.
     for seconds in (1, 2, 3, 4, 5, 121, 122, 123, 124, 125, 126, 127, 128):
         before = len(delivery.calls)
         result = asyncio.run(
@@ -5933,7 +5934,7 @@ def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> No
             break
 
     assert adopted_opportunity_id is not None
-    assert gas_seen, delivery.calls
+    assert not gas_seen, delivery.calls
     assert solar_seen, delivery.calls
     assert spa_heater == "H0002"
     assert solar_active
