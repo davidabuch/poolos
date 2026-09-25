@@ -236,7 +236,7 @@ def test_startup_mismatch_is_anchor_not_override_and_repetition_does_not_adopt()
     assert second.effective_rpm == 2650
 
 
-def test_new_unattributed_transition_does_not_manufacture_override() -> None:
+def test_established_configured_speed_transition_establishes_override() -> None:
     runtime = PumpSpeedSessionRuntime(BASELINES)
     runtime.observe(evidence())
     runtime.apply_transition(
@@ -250,9 +250,9 @@ def test_new_unattributed_transition_does_not_manufacture_override() -> None:
     )
 
     state = runtime.snapshot
-    assert state.override_state is PumpSpeedOverrideState.NONE
-    assert state.override_source is PumpSpeedOverrideSource.NONE
-    assert state.effective_rpm == 2650
+    assert state.override_state is PumpSpeedOverrideState.VERIFIED
+    assert state.override_source is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
+    assert state.effective_rpm == 3200
 
 
 def test_external_return_to_baseline_cancels_override_without_mutating_policy() -> None:
