@@ -216,7 +216,7 @@ def test_user_spa_on_to_off_ends_session_without_disabling_future_opportunistic_
         ),
         pool_automatic_control=pool,
         spa_automatic_control=spa,
-        spa_session_kind_provider=lambda: SpaSessionKind.EXTERNAL_USER,
+        spa_session_kind_provider=lambda: None,
     )
     now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
     transport = _transport(now)
