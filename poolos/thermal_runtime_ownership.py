@@ -2201,7 +2201,8 @@ class ThermalRuntimeOwnershipManager:
         ):
             return False
 
-        intended_value: int | str | None = None
+        intended_value: int | PhysicalHeatMode | None = None
+        matches_prior_target = False
         if operator.domain is OwnershipDomain.PUMP:
             if (
                 event.concept
@@ -2214,18 +2215,23 @@ class ThermalRuntimeOwnershipManager:
             ):
                 return False
             intended_value = int(event.new_value)
+            matches_prior_target = intended_value == prior.target_value
         elif operator.domain is OwnershipDomain.THERMAL:
             if event.concept not in {"pool.raw_heater_id", "spa.raw_heater_id"}:
                 return False
             intended_value = {
-                "00000": PhysicalHeatMode.OFF.value,
-                "H0001": PhysicalHeatMode.GAS.value,
-                "H0002": PhysicalHeatMode.SOLAR.value,
+                "00000": PhysicalHeatMode.OFF,
+                "H0001": PhysicalHeatMode.GAS,
+                "H0002": PhysicalHeatMode.SOLAR,
             }.get(str(event.new_value))
+            matches_prior_target = (
+                intended_value is not None
+                and intended_value.value == prior.target_value
+            )
         else:
             return False
 
-        if intended_value is None or intended_value != prior.target_value:
+        if intended_value is None or not matches_prior_target:
             return False
 
         concept = (
