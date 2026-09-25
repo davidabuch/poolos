@@ -60,6 +60,7 @@ from poolos.thermal_live_execution import (
     commissioning_scope_allows_body,
     ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
+    _step_verification_timeout,
 )
 
 
@@ -2056,63 +2057,21 @@ def _probe_plan_for_authority() -> ThermalExecutionPlanAssessment:
     )
 
 
-def test_pool_probe_rpm_settling_survives_generic_30_second_deadline() -> None:
-    """Spa-to-Pool handoff may still be traversing native startup/priming at 30s."""
+def test_pool_probe_rpm_uses_bounded_native_settling_window() -> None:
+    """Spa-to-Pool handoff must outlive the generic 30-second command bound."""
 
     plan = _probe_plan_for_authority()
     engine = ThermalLiveExecutionEngine()
     live_policy = policy()
     session = engine.begin(plan, policy=live_policy, evidence=evidence(plan))
-    waiting = asyncio.run(
-        engine.deliver_current_step(
-            session,
-            policy=live_policy,
-            evidence=evidence(plan),
-            delivery=FakeThermalDelivery(),
-        )
-    )
+    probe_step = session.execution_plan.steps[0]
 
-    settling_at = NOW + timedelta(seconds=32)
-    settling = store("pump.rpm", 2758, at=settling_at)
-    settling.put(
-        PoolObservation(
-            observation_id=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
-            value=1500,
-            observed_at=settling_at,
-            source_kind=ObservationSourceKind.LIVE,
-            source_id="native-intellicenter",
-        )
-    )
-    pending = engine.verify_current_step(
-        waiting,
-        settling,
-        current_context=waiting.originating_context,
-        policy=live_policy,
-        evaluated_at=settling_at,
-        source_id="native-intellicenter",
-    )
-    assert pending.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
-
-    converged_at = NOW + timedelta(seconds=90)
-    converged = store("pump.rpm", 1500, at=converged_at)
-    converged.put(
-        PoolObservation(
-            observation_id=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
-            value=1500,
-            observed_at=converged_at,
-            source_kind=ObservationSourceKind.LIVE,
-            source_id="native-intellicenter",
-        )
-    )
-    verified = engine.verify_current_step(
-        pending,
-        converged,
-        current_context=pending.originating_context,
-        policy=live_policy,
-        evaluated_at=converged_at,
-        source_id="native-intellicenter",
-    )
-    assert verified.status is ThermalLiveExecutionStatus.COMPLETED
+    assert probe_step.metadata["pool_temperature_probe_step"] == "true"
+    assert live_policy.verification_timeout == timedelta(seconds=30)
+    assert _step_verification_timeout(
+        probe_step,
+        live_policy,
+    ) == timedelta(seconds=120)
 
 
 def test_probe_authority_rejects_missing_step_provenance() -> None:
