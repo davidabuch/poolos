@@ -11,6 +11,12 @@ from typing import Any
 
 import pytest
 
+from poolos.external_change import (
+    ExternalChangeBatch,
+    ExternalChangeEvent,
+    ExternalChangePolicy,
+    ExternalSemanticEventType,
+)
 from poolos.integration import PhysicalHeatMode
 from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
@@ -18,6 +24,7 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.observations import ObservationQuality, PoolObservation
+from poolos.ownership_evidence import OwnershipDomain
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchPurpose,
     ExpectedNativeConsequence,
@@ -1212,3 +1219,63 @@ def test_restored_heat_policy_waits_for_execution_provenance_not_native_baseline
     )
     no_baseline_runtime.refresh_ownership()
     assert no_baseline_runtime.diagnostics()["active_drift_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("concept", "native_object_id", "before", "after", "expected_domain", "equipment_id"),
+    (
+        ("spa.raw_heater_id", "B1202", "H0002", "H0001", OwnershipDomain.THERMAL, "spa.raw_heater_id"),
+        ("spa.pump_circuit.configured_speed_rpm", "p0102", 2900, 3200, OwnershipDomain.PUMP, "pump.rpm"),
+    ),
+)
+def test_established_spa_controller_intent_is_bound_to_exact_operator_domain(
+    concept: str,
+    native_object_id: str,
+    before: object,
+    after: object,
+    expected_domain: OwnershipDomain,
+    equipment_id: str,
+) -> None:
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        operator_context_provider=lambda: {
+            "body": "hot_tub",
+            "generation": 7,
+            "session_id": "spa-session-7",
+            "established_at": datetime(2026, 9, 25, 21, 0, tzinfo=UTC),
+        },
+    )
+    event = ExternalChangeEvent(
+        concept=concept,
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id=native_object_id,
+        previous_value=before,
+        new_value=after,
+        observed_at=datetime(2026, 9, 25, 21, 1, tzinfo=UTC),
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+    )
+
+    attributed = runtime._attribute_operator_intent(ExternalChangeBatch((event,)))
+    operator = attributed.events[0].positive_operator_evidence
+
+    assert operator is not None
+    assert operator.authority_generation == 7
+    assert operator.body_session_id == "spa-session-7"
+    assert operator.domain is expected_domain
+    assert operator.equipment_id == equipment_id
+    assert attributed.events[0].reason_code == "positive_operator_controller_intent"
+
+
