@@ -1140,6 +1140,118 @@ def test_true_external_pump_change_still_preempts_after_owned_prime_model() -> N
     assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
     assert current.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
 
+@pytest.mark.parametrize(
+    ("domain", "concept", "equipment_id", "override_value", "handback_value"),
+    (
+        (
+            OwnershipDomain.PUMP,
+            "pool.pump_circuit.configured_speed_rpm",
+            "pump.rpm",
+            3200,
+            2900,
+        ),
+        (
+            OwnershipDomain.THERMAL,
+            "pool.raw_heater_id",
+            "pool.raw_heater_id",
+            "H0001",
+            "H0002",
+        ),
+    ),
+)
+def test_exact_operator_return_to_poolos_target_hands_back_only_that_domain(
+    domain: OwnershipDomain,
+    concept: str,
+    equipment_id: str,
+    override_value: object,
+    handback_value: object,
+) -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(
+        manager,
+        execution_ownership(
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+        ),
+    )
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.body_session_generation is not None
+    assert lease.body_session_id is not None
+
+    override_at = NOW + timedelta(seconds=1)
+    override = replace(
+        external_event(
+            concept,
+            2900 if domain is OwnershipDomain.PUMP else "H0002",
+            override_value,
+            observed_at=override_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "operator-override",
+            lease.body_session_generation,
+            lease.body_session_id,
+            domain,
+            equipment_id,
+            override_at,
+        ),
+    )
+    manager.evaluate(
+        evidence(
+            at=override_at,
+            changes=ExternalChangeBatch((override,)),
+            pump_rpm=3200 if domain is OwnershipDomain.PUMP else 2900,
+            configured_pump_rpm=3200 if domain is OwnershipDomain.PUMP else 2900,
+            heat_source=(
+                PhysicalHeatMode.GAS
+                if domain is OwnershipDomain.THERMAL
+                else PhysicalHeatMode.SOLAR
+            ),
+        )
+    )
+    overridden = manager.state.lease
+    assert overridden is not None
+    assert overridden.domain_state(domain).authority is OwnershipAuthority.OPERATOR
+
+    handback_at = NOW + timedelta(seconds=2)
+    handback = replace(
+        external_event(
+            concept,
+            override_value,
+            handback_value,
+            observed_at=handback_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "operator-handback",
+            lease.body_session_generation,
+            lease.body_session_id,
+            domain,
+            equipment_id,
+            handback_at,
+        ),
+    )
+    manager.evaluate(
+        evidence(
+            at=handback_at,
+            changes=ExternalChangeBatch((handback,)),
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+        )
+    )
+    current = manager.state.lease
+    assert current is not None
+    assert current.domain_state(domain).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    other = (
+        OwnershipDomain.THERMAL
+        if domain is OwnershipDomain.PUMP
+        else OwnershipDomain.PUMP
+    )
+    assert current.domain_state(other).authority is OwnershipAuthority.POOLOS
+
+
 def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     manager = full_manager()
     predecessor = manager.state.lease

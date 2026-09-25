@@ -79,6 +79,7 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment  # noqa: E402
+from poolos.spa_thermal_policy import SpaSessionKind  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     spa_automatic_control = SpaAutomaticControlSuppression()
+    spa_session_kind_provider = lambda: None
 
     def arm_manual_pool_off(suppressed_at: datetime) -> None:
         pool_automatic_control.suppress(
@@ -175,6 +177,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
 
     def arm_manual_spa_off(suppressed_at: datetime) -> None:
+        # OFF ends a homeowner-started/adopted Spa BODY session.  It must not
+        # globally disable a later independent opportunistic Spa opportunity.
+        # A PoolOS-started opportunistic Spa still needs the pre-delivery
+        # restraint so an explicit operator OFF cannot be immediately replayed.
+        if spa_session_kind_provider() is SpaSessionKind.EXTERNAL_USER:
+            return
         spa_automatic_control.suppress(
             source=SpaAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
             suppressed_at=suppressed_at,
@@ -226,9 +234,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     external_change_runtime.owned_intent_provider = (
         thermal_automatic_runtime.driver.external_change_owned_intent
     )
-    external_change_runtime.spa_session_kind_provider = (
-        thermal_automatic_runtime.driver.spa_session_kind
-    )
+    spa_session_kind_provider = thermal_automatic_runtime.driver.spa_session_kind
+    external_change_runtime.spa_session_kind_provider = spa_session_kind_provider
+
+    def current_operator_context() -> dict[str, object] | None:
+        lease = thermal_runtime_orchestrator.ownership.state.lease
+        if lease is None or lease.status.value != "owned":
+            return None
+        return {
+            "body": lease.body.value,
+            "generation": (
+                lease.body_session_generation
+                if lease.body_session_generation is not None
+                else lease.generation
+            ),
+            "session_id": lease.body_session_id or lease.lease_id,
+            "established_at": lease.established_at,
+        }
+
+    external_change_runtime.operator_context_provider = current_operator_context
     filtration_automatic_runtime = PoolOSFiltrationAutomaticRuntime(
         hass=hass,
         coordinator=coordinator,

@@ -424,10 +424,31 @@ class PumpSpeedSessionRuntime:
                         "correlated_manual_configured_speed_verified",
                     )
             return
-        # Configured-speed telemetry identifies a value, not an operator.
-        # Neither mismatch nor a return to baseline may create/clear an
-        # override. Explicit requests above retain their causal hand-back path.
-        self._last_override_reason = "unattributed_configured_speed_requires_reconciliation"
+        if (
+            self._override.state is PumpSpeedOverrideState.PENDING
+            and self._override.source is PumpSpeedOverrideSource.POOLOS_MANUAL
+        ) or self._baseline_cancellation_request is not None:
+            # An unrelated controller transition cannot steal correlation from
+            # an explicit PoolOS manual request that is still awaiting its own
+            # accepted consequence.
+            self._last_override_reason = (
+                "unattributed_configured_speed_ignored_during_pending_manual_request"
+            )
+            return
+        # An uncorrelated configured PMPCIRC SPEED transition inside an
+        # already-established semantic session is the controller's explicit
+        # operator-intent surface.  Actual motor RPM remains verification only.
+        # Same-frame body/purpose startup consequences are excluded above by
+        # the session-established chronology guard.
+        baseline = self.configured_baseline_rpm
+        if transition.new_rpm == baseline:
+            self._clear_override("external_configured_speed_returned_to_baseline")
+        else:
+            self._verify_override(
+                transition.new_rpm,
+                PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED,
+                "external_configured_speed_override_verified",
+            )
 
     @property
     def configured_baseline_rpm(self) -> int | None:

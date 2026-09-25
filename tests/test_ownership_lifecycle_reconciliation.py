@@ -33,7 +33,9 @@ from poolos.pool_circulation_ownership import PoolCirculationOwner
 
 
 @pytest.mark.parametrize("manual_override", [False, True])
-def test_unattributed_configured_speed_neither_adopts_nor_hands_back(manual_override: bool) -> None:
+def test_established_configured_speed_override_and_exact_baseline_handback(
+    manual_override: bool,
+) -> None:
     runtime = PumpSpeedSessionRuntime(PUMP_BASELINES)
     runtime.observe(pump_evidence())
     if manual_override:
@@ -44,10 +46,12 @@ def test_unattributed_configured_speed_neither_adopts_nor_hands_back(manual_over
         previous_rpm=before.effective_rpm, new_rpm=2650 if manual_override else 3200,
         observed_at=PUMP_NOW + timedelta(seconds=4),
     ))
-    assert runtime.snapshot.override_state is (
-        PumpSpeedOverrideState.VERIFIED if manual_override else PumpSpeedOverrideState.NONE
-    )
-    assert runtime.snapshot.effective_rpm == before.effective_rpm
+    if manual_override:
+        assert runtime.snapshot.override_state is PumpSpeedOverrideState.NONE
+        assert runtime.snapshot.effective_rpm == 2650
+    else:
+        assert runtime.snapshot.override_state is PumpSpeedOverrideState.VERIFIED
+        assert runtime.snapshot.effective_rpm == 3200
 
 
 def test_solar_preparation_and_actual_engagement_have_distinct_rpm_requirements() -> None:

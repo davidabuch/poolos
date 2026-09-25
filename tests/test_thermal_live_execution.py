@@ -60,6 +60,7 @@ from poolos.thermal_live_execution import (
     commissioning_scope_allows_body,
     ThermalHydraulicSafetyEvidence,
     ThermalLiveSafetyEvidence,
+    _step_verification_timeout,
 )
 
 
@@ -2054,6 +2055,23 @@ def _probe_plan_for_authority() -> ThermalExecutionPlanAssessment:
             body_active=True,
         ),
     )
+
+
+def test_pool_probe_rpm_uses_bounded_native_settling_window() -> None:
+    """Spa-to-Pool handoff must outlive the generic 30-second command bound."""
+
+    plan = _probe_plan_for_authority()
+    engine = ThermalLiveExecutionEngine()
+    live_policy = policy()
+    session = engine.begin(plan, policy=live_policy, evidence=evidence(plan))
+    probe_step = session.execution_plan.steps[0]
+
+    assert probe_step.metadata["pool_temperature_probe_step"] == "true"
+    assert live_policy.verification_timeout == timedelta(seconds=30)
+    assert _step_verification_timeout(
+        probe_step,
+        live_policy,
+    ) == timedelta(seconds=120)
 
 
 def test_probe_authority_rejects_missing_step_provenance() -> None:

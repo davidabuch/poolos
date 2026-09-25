@@ -1678,7 +1678,7 @@ class ThermalLiveExecutionEngine:
                 # native event on every epoch.
                 verification_started_at=attempt.receipt.issued_at,
                 evaluated_at=evaluated_at,
-                timeout=policy.verification_timeout,
+                timeout=_step_verification_timeout(attempt.step, policy),
                 freshness_policy=FreshnessPolicy(
                     max_age=policy.observation_freshness
                 ),
@@ -2307,6 +2307,24 @@ def _session_effective_rpm(
     ):
         return None
     return policy.pump_session_effective_rpm
+
+
+def _step_verification_timeout(
+    step: ExecutionStep,
+    policy: ThermalLiveExecutionPolicy,
+) -> timedelta:
+    """Give Pool temperature-probe RPM convergence its commissioned native bound.
+
+    IntelliCenter can legitimately traverse body-switch/startup pump settling
+    before the configured and actual probe RPM both reach 1500.  The generic
+    30-second thermal command bound is intentionally retained everywhere else;
+    only the explicitly typed Pool probe RPM step shares the existing
+    two-minute ownership reconciliation bound.
+    """
+
+    if step.metadata.get("pool_temperature_probe_step") == "true":
+        return max(policy.verification_timeout, timedelta(seconds=120))
+    return policy.verification_timeout
 
 
 def _minimum_verified_hold(step: ExecutionStep) -> timedelta:

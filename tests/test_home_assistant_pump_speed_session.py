@@ -199,7 +199,7 @@ def _spa_transport(*, at: datetime = NOW, configured: int = 2600) -> NativeIntel
     return replace(_transport(at=at, configured=configured), raw_inventory=(raw,))
 
 
-def test_ha_adapter_startup_anchor_then_unattributed_transition_reconciliation() -> None:
+def test_ha_adapter_established_configured_speed_transition_is_manual_override() -> None:
     baselines = PumpOperatingBaselines(filtration_rpm=2650)
     authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
     runtime = PoolOSPumpSpeedSessionRuntime(
@@ -217,11 +217,33 @@ def test_ha_adapter_startup_anchor_then_unattributed_transition_reconciliation()
         ExternalChangeBatch((_event(at=at, before=2900, after=3200),)),
         changed,
     )
+    assert runtime.session.snapshot.override_state is PumpSpeedOverrideState.VERIFIED
+    assert (
+        runtime.session.snapshot.override_source
+        is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
+    )
+    assert runtime.session.snapshot.effective_rpm == 3200
+    assert runtime.session.snapshot.last_override_transition_reason == (
+        "external_configured_speed_override_verified"
+    )
+
+    handback_at = NOW + timedelta(seconds=2)
+    baseline = _native(at=handback_at, configured=2650)
+    runtime.synchronize(
+        baseline,
+        _transport(at=handback_at, configured=2650),
+        connection_generation=1,
+    )
+    runtime.apply_external_changes(
+        ExternalChangeBatch(
+            (_event(at=handback_at, before=3200, after=2650),)
+        ),
+        baseline,
+    )
     assert runtime.session.snapshot.override_state is PumpSpeedOverrideState.NONE
-    assert runtime.session.snapshot.override_source is PumpSpeedOverrideSource.NONE
     assert runtime.session.snapshot.effective_rpm == 2650
     assert runtime.session.snapshot.last_override_transition_reason == (
-        "unattributed_configured_speed_requires_reconciliation"
+        "external_configured_speed_returned_to_baseline"
     )
 
 
@@ -322,7 +344,7 @@ def test_reconnect_generation_reanchors_matching_hardware_without_override() -> 
         ExternalChangeBatch((_event(at=at, before=3200, after=3300),)),
         _native(at=at, configured=3300),
     )
-    assert runtime.session.snapshot.effective_rpm == 2650
+    assert runtime.session.snapshot.effective_rpm == 3300
 
     later = NOW + timedelta(seconds=2)
     runtime.synchronize(

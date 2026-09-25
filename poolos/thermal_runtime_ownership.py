@@ -1903,6 +1903,7 @@ class ThermalRuntimeOwnershipManager:
                 and event.positive_operator_evidence.domain is state.domain
                 and lease.established_at <= event.positive_operator_evidence.requested_at
                 <= evidence.evaluated_at
+                and not _operator_event_is_exact_poolos_handback(event, state)
             ), None)
             origin_id = (
                 origin.adoption_id
@@ -2164,11 +2165,138 @@ class ThermalRuntimeOwnershipManager:
         """Apply trusted domain intent to the current exact body generation."""
 
         for event in events.events:
-            if event.positive_operator_evidence is not None:
-                self.record_operator_intent(
-                    event.positive_operator_evidence,
-                    evaluated_at=evaluated_at,
-                )
+            if event.positive_operator_evidence is None:
+                continue
+            if self._record_exact_operator_handback(
+                event,
+                evaluated_at=evaluated_at,
+            ):
+                continue
+            self.record_operator_intent(
+                event.positive_operator_evidence,
+                evaluated_at=evaluated_at,
+            )
+
+    def _record_exact_operator_handback(
+        self,
+        event: ExternalChangeEvent,
+        *,
+        evaluated_at: datetime,
+    ) -> bool:
+        """Reclaim only the exact concept deliberately returned by the operator."""
+
+        operator = event.positive_operator_evidence
+        lease = self._state.lease
+        if operator is None or lease is None:
+            return False
+        prior = lease.domain_state(operator.domain)
+        if prior.authority is not OwnershipAuthority.OPERATOR:
+            return False
+        if not operator.applies(
+            generation=lease.body_session_generation or lease.generation,
+            session_id=lease.body_session_id or lease.lease_id,
+            domain=operator.domain,
+            equipment_id=operator.equipment_id,
+            established_at=lease.established_at,
+            evaluated_at=evaluated_at,
+        ):
+            return False
+
+        intended_value: int | PhysicalHeatMode | None = None
+        matches_prior_target = False
+        if operator.domain is OwnershipDomain.PUMP:
+            if (
+                event.concept
+                not in {
+                    "pool.pump_circuit.configured_speed_rpm",
+                    "spa.pump_circuit.configured_speed_rpm",
+                }
+                or type(event.new_value) not in {int, float}
+                or isinstance(event.new_value, bool)
+            ):
+                return False
+            intended_value = int(event.new_value)
+            matches_prior_target = intended_value == prior.target_value
+        elif operator.domain is OwnershipDomain.THERMAL:
+            if event.concept not in {"pool.raw_heater_id", "spa.raw_heater_id"}:
+                return False
+            intended_value = {
+                "00000": PhysicalHeatMode.OFF,
+                "H0001": PhysicalHeatMode.GAS,
+                "H0002": PhysicalHeatMode.SOLAR,
+            }.get(str(event.new_value))
+            matches_prior_target = (
+                intended_value is not None
+                and prior.target_value in {intended_value, intended_value.value}
+            )
+        else:
+            return False
+
+        if intended_value is None or not matches_prior_target:
+            return False
+
+        concept = (
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+            if operator.domain is OwnershipDomain.PUMP
+            else ThermalRuntimeOwnedConcept.HEAT_SOURCE
+        )
+        opportunity_id = "operator-handback:" + event.event_id
+        adoption = ThermalRuntimeConceptAdoption(
+            adoption_id=_concept_adoption_id(
+                generation=lease.generation,
+                concept=concept,
+                opportunity_id=opportunity_id,
+                adopted_at=event.observed_at,
+            ),
+            concept=concept,
+            intended_value=intended_value,
+            observed_at=event.observed_at,
+            opportunity_id=opportunity_id,
+            reason_code="operator_exact_desired_state_handback",
+            adopted_at=event.observed_at,
+        )
+        states = {state.domain: state for state in lease.domain_states}
+        states[operator.domain] = replace(
+            prior,
+            authority=OwnershipAuthority.POOLOS,
+            health=OwnershipHealth.STABLE,
+            evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+            positive_operator_evidence=None,
+            command_blocker=None,
+            observed_value=intended_value,
+            observed_at=event.observed_at,
+        )
+        verified = tuple(item for item in lease.verified_concepts if item is not concept)
+        if operator.domain is OwnershipDomain.PUMP:
+            updated = replace(
+                lease,
+                last_confirmed_at=max(lease.last_confirmed_at, event.observed_at),
+                reason_code="runtime_ownership_operator_handback:pump",
+                pump_setpoint=None,
+                pump_setpoint_accepted_at=None,
+                pump_adoption=adoption,
+                pump_session_id=None,
+                pump_session_effective_rpm=None,
+                verified_concepts=verified,
+                domain_states=tuple(states.values()),
+            )
+        else:
+            updated = replace(
+                lease,
+                last_confirmed_at=max(lease.last_confirmed_at, event.observed_at),
+                reason_code="runtime_ownership_operator_handback:thermal",
+                heat_source=None,
+                heat_source_accepted_at=None,
+                heat_source_adoption=adoption,
+                verified_concepts=verified,
+                domain_states=tuple(states.values()),
+            )
+        self._state = replace(
+            self._state,
+            lease=updated,
+            reason_code=updated.reason_code,
+        )
+        return True
 
     def promote_session_provenance(
         self,
@@ -3168,6 +3296,36 @@ def _body_adoption_id(
         separators=(",", ":"),
     )
     return "thermal-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
+
+
+def _operator_event_is_exact_poolos_handback(
+    event: ExternalChangeEvent,
+    state: DomainOwnershipState,
+) -> bool:
+    """Return whether an operator event exactly restores PoolOS's current target."""
+
+    if state.authority is not OwnershipAuthority.POOLOS:
+        return False
+    target = state.target_value
+    if state.domain is OwnershipDomain.PUMP:
+        return (
+            event.concept
+            in {
+                "pool.pump_circuit.configured_speed_rpm",
+                "spa.pump_circuit.configured_speed_rpm",
+            }
+            and type(event.new_value) in {int, float}
+            and not isinstance(event.new_value, bool)
+            and int(event.new_value) == target
+        )
+    if state.domain is OwnershipDomain.THERMAL:
+        mode = {
+            "00000": PhysicalHeatMode.OFF,
+            "H0001": PhysicalHeatMode.GAS,
+            "H0002": PhysicalHeatMode.SOLAR,
+        }.get(str(event.new_value))
+        return mode is not None and target in {mode, mode.value}
+    return False
 
 
 def _concept_adoption_id(
