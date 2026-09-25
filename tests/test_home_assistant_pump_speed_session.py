@@ -344,7 +344,7 @@ def test_reconnect_generation_reanchors_matching_hardware_without_override() -> 
         ExternalChangeBatch((_event(at=at, before=3200, after=3300),)),
         _native(at=at, configured=3300),
     )
-    assert runtime.session.snapshot.effective_rpm == 2650
+    assert runtime.session.snapshot.effective_rpm == 3300
 
     later = NOW + timedelta(seconds=2)
     runtime.synchronize(
