@@ -434,16 +434,22 @@ class ThermalAutomaticExecutionDriver:
         )
 
     def spa_session_kind(self) -> SpaSessionKind | None:
-        """Return only positively proven PoolOS opportunistic Spa ownership."""
+        """Return the positively proven origin of the current owned Spa BODY."""
 
         lease = self.orchestrator.ownership.state.lease
         if (
-            lease is not None
-            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
-            and lease.body is ThermalBody.HOT_TUB
-            and lease.body_activation is not None
+            lease is None
+            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+            or lease.body is not ThermalBody.HOT_TUB
         ):
+            return None
+        if lease.body_activation is not None:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
+        if (
+            lease.body_adoption is not None
+            and lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+        ):
+            return SpaSessionKind.EXTERNAL_USER
         return None
 
     def opportunistic_spa_topology_reobservation_token(self) -> str | None:

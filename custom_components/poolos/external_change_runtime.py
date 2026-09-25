@@ -205,10 +205,12 @@ class PoolOSExternalChangeRuntime:
     ) -> ExternalChangeBatch:
         """Bind controller intent changes to the exact current ownership epoch.
 
-        Configured PMPCIRC SPEED and body raw-heater selection are operator
-        intent surfaces.  Actual motor RPM remains verification evidence only.
-        PoolOS-correlated consequences are absent from batch.events before this
-        boundary, so they cannot be reclassified as operator intervention.
+        Configured PMPCIRC SPEED and body raw-heater selection are commissioned
+        controller intent surfaces. Actual motor RPM remains verification evidence
+        only. PoolOS-correlated consequences are absent from batch.events before
+        this boundary, so they cannot be reclassified as operator intervention.
+        A transition must also be strictly newer than the ownership boundary;
+        same-frame startup/native consequences cannot manufacture manual intent.
         """
 
         if self.operator_context_provider is None:
@@ -247,7 +249,7 @@ class PoolOSExternalChangeRuntime:
                 equipment_id = f"{prefix}.raw_heater_id"
             if (
                 domain is None
-                or event.observed_at < established_at
+                or event.observed_at <= established_at
                 or event.positive_operator_evidence is not None
             ):
                 attributed.append(event)

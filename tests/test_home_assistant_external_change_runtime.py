@@ -1221,6 +1221,44 @@ def test_restored_heat_policy_waits_for_execution_provenance_not_native_baseline
     assert no_baseline_runtime.diagnostics()["active_drift_count"] == 0
 
 
+def test_controller_intent_at_ownership_boundary_is_not_operator_takeover() -> None:
+    module = _load_module()
+    boundary = datetime(2026, 9, 25, 21, 0, tzinfo=UTC)
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=PoolOSPhysicalCommandAuthority(),
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        operator_context_provider=lambda: {
+            "body": "hot_tub",
+            "generation": 7,
+            "session_id": "spa-session-7",
+            "established_at": boundary,
+        },
+    )
+    event = ExternalChangeEvent(
+        concept="spa.pump_circuit.configured_speed_rpm",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="p0102",
+        previous_value=2600,
+        new_value=2900,
+        observed_at=boundary,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+    )
+
+    attributed = runtime._attribute_operator_intent(ExternalChangeBatch((event,)))
+
+    assert attributed.events[0].positive_operator_evidence is None
+    assert attributed.events[0].reason_code == "external_unattributed_native_change"
+
+
 @pytest.mark.parametrize(
     ("concept", "native_object_id", "before", "after", "expected_domain", "equipment_id"),
     (
