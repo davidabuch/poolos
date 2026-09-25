@@ -31,6 +31,7 @@ from poolos.pool_automatic_control_suppression import (
     SpaAutomaticControlSuppression,
     SpaAutomaticControlSuppressionSource,
 )
+from poolos.spa_thermal_policy import SpaSessionKind
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -200,7 +201,7 @@ def test_baseline_off_does_not_suppress_but_external_on_to_off_does() -> None:
     assert runtime.latest_batch.events[0].concept == "pool.active"
 
 
-def test_spa_on_to_off_suppression_is_independent_from_pool() -> None:
+def test_user_spa_on_to_off_ends_session_without_disabling_future_opportunistic_spa() -> None:
     module = _load_module()
     pool = PoolAutomaticControlSuppression()
     spa = SpaAutomaticControlSuppression()
@@ -215,6 +216,7 @@ def test_spa_on_to_off_suppression_is_independent_from_pool() -> None:
         ),
         pool_automatic_control=pool,
         spa_automatic_control=spa,
+        spa_session_kind_provider=lambda: SpaSessionKind.EXTERNAL_USER,
     )
     now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
     transport = _transport(now)
@@ -241,9 +243,43 @@ def test_spa_on_to_off_suppression_is_independent_from_pool() -> None:
         1,
     )
 
+    assert not spa.state.suppressed
+    assert not pool.state.suppressed
+
+
+def test_operator_off_during_poolos_opportunistic_spa_suppresses_recreation() -> None:
+    module = _load_module()
+    spa = SpaAutomaticControlSuppression()
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=PoolOSPhysicalCommandAuthority(),
+        thermal_runtime=_thermal_runtime(
+            module,
+            assessment=None,
+            pool_resolved=False,
+            hot_tub_resolved=False,
+        ),
+        spa_automatic_control=spa,
+        spa_session_kind_provider=lambda: SpaSessionKind.POOLOS_OPPORTUNISTIC,
+    )
+    now = datetime(2026, 9, 8, 16, 0, tzinfo=UTC)
+    transport = _transport(now)
+
+    runtime.process(
+        _native(now, pool_active=False, spa_active=True), transport, 1
+    )
+    runtime.process(
+        _native(
+            now + timedelta(seconds=1),
+            pool_active=False,
+            spa_active=False,
+        ),
+        transport,
+        1,
+    )
+
     assert spa.state.suppressed
     assert spa.state.source is SpaAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
-    assert not pool.state.suppressed
 
 
 def test_spa_takeover_does_not_misclassify_routed_pool_off_as_manual_off() -> None:
