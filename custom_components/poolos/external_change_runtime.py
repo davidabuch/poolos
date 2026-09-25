@@ -27,6 +27,7 @@ from poolos.pool_automatic_control_suppression import (
 )
 from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
+from poolos.spa_thermal_policy import SpaSessionKind
 
 from .thermal_runtime import PoolOSThermalRuntime
 
@@ -45,6 +46,7 @@ class PoolOSExternalChangeRuntime:
     pool_automatic_control: PoolAutomaticControlSuppression | None = None
     spa_automatic_control: SpaAutomaticControlSuppression | None = None
     owned_intent_provider: Callable[[], Mapping[str, object]] | None = None
+    spa_session_kind_provider: Callable[[], SpaSessionKind | None] | None = None
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
@@ -155,12 +157,27 @@ class PoolOSExternalChangeRuntime:
                         reason="external_authoritative_pool_on_to_off",
                     )
         if self.spa_automatic_control is not None:
+            spa_session_kind = (
+                None
+                if self.spa_session_kind_provider is None
+                else self.spa_session_kind_provider()
+            )
             for event in batch.events:
-                if (
+                if not (
                     event.concept == "spa.active"
                     and event.previous_value is True
                     and event.new_value is False
                 ):
+                    continue
+                if (
+                    self.spa_session_kind_provider is None
+                    or spa_session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+                ):
+                    # Operator OFF during a PoolOS-started opportunistic Spa
+                    # must cancel recreation of that autonomous session.  An
+                    # operator ending their own adopted Spa BODY session is
+                    # already the session boundary and must not globally
+                    # disable a later independent opportunistic opportunity.
                     self.spa_automatic_control.suppress(
                         source=SpaAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
                         suppressed_at=event.observed_at,

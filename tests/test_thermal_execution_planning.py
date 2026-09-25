@@ -175,16 +175,16 @@ def test_pool_permission_veto_and_missing_evidence_block_actuation_plan() -> Non
     assert missing.operations == ()
 
 
-def test_spa_user_session_preserves_solar_qualification_and_gas_fallback() -> None:
+def test_spa_user_session_qualifies_solar_without_transient_gas_and_keeps_gas_fallback() -> None:
     tracker = SpaThermalPolicyTracker()
-    first_input = SpaPolicyInput(
+    qualifying_input = SpaPolicyInput(
         NOW,
         True,
         SpaUserSource.HOME_ASSISTANT,
         90.0,
         100.0,
         130.0,
-        active_heat_source=ThermalHeatSource.GAS,
+        active_heat_source=ThermalHeatSource.NONE,
     )
     qualified_input = SpaPolicyInput(
         NOW + timedelta(minutes=2),
@@ -195,15 +195,39 @@ def test_spa_user_session_preserves_solar_qualification_and_gas_fallback() -> No
         130.0,
         active_heat_source=ThermalHeatSource.SOLAR,
     )
-    gas = desired_spa_state(first_input, tracker.evaluate(first_input))
-    solar = desired_spa_state(qualified_input, tracker.evaluate(qualified_input))
+    qualifying = desired_spa_state(
+        qualifying_input,
+        tracker.evaluate(qualifying_input),
+    )
+    solar = desired_spa_state(
+        qualified_input,
+        tracker.evaluate(qualified_input),
+    )
 
-    assert gas.selected_source is PhysicalHeatMode.GAS
-    assert gas.required_pump_rpm == 3000
-    assert gas.fallback_reason == "spa_heat_up_gas"
+    assert qualifying.selected_source is PhysicalHeatMode.OFF
+    assert qualifying.required_pump_rpm == 2600
+    assert qualifying.reason_code == "spa_heat_up_solar_qualifying"
     assert solar.selected_source is PhysicalHeatMode.SOLAR
     assert solar.required_pump_rpm == 2900
     assert "user_session" in solar.criteria
+
+    low_roof_tracker = SpaThermalPolicyTracker()
+    low_roof_input = SpaPolicyInput(
+        NOW,
+        True,
+        SpaUserSource.HOME_ASSISTANT,
+        90.0,
+        100.0,
+        129.0,
+        active_heat_source=ThermalHeatSource.NONE,
+    )
+    gas = desired_spa_state(
+        low_roof_input,
+        low_roof_tracker.evaluate(low_roof_input),
+    )
+    assert gas.selected_source is PhysicalHeatMode.GAS
+    assert gas.required_pump_rpm == 2600
+    assert gas.fallback_reason == "spa_heat_up_gas"
 
 
 def test_spa_opportunistic_policy_remains_solar_only_and_distinct_from_pool() -> None:

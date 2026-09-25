@@ -44,25 +44,39 @@ def test_all_user_sources_create_and_end_one_spa_in_use_session(source: SpaUserS
     assert not off.spa_in_use
 
 
-def test_user_spa_uses_gas_immediately_without_pool_probe() -> None:
-    result = SpaThermalPolicyTracker().evaluate(observation(active=True, source=SpaUserSource.ICP, roof=129))
+def test_user_spa_uses_gas_immediately_when_roof_is_below_solar_threshold() -> None:
+    result = SpaThermalPolicyTracker().evaluate(
+        observation(active=True, source=SpaUserSource.ICP, roof=129)
+    )
     assert result.heat_source is ThermalHeatSource.GAS
     assert result.recommended_pump_rpm == 3000
     assert not result.pool_reprobe_allowed
 
 
-def test_heat_up_switches_gas_to_solar_after_130_for_two_minutes() -> None:
-    tracker = SpaThermalPolicyTracker()
-    first = tracker.evaluate(observation(active=True, source=SpaUserSource.HOME_ASSISTANT, roof=130))
+def test_user_spa_above_solar_threshold_waits_without_firing_gas_then_uses_solar() -> None:
+    tracker = SpaThermalPolicyTracker(
+        SpaPolicyConfig(spa_solar_roof_f=110.0)
+    )
+    first = tracker.evaluate(
+        observation(
+            active=True,
+            source=SpaUserSource.HOME_ASSISTANT,
+            roof=118,
+            active_heat_source=ThermalHeatSource.NONE,
+        )
+    )
     solar = tracker.evaluate(
         observation(
             at=NOW + timedelta(minutes=2),
             active=True,
-            roof=130,
+            roof=118,
             active_heat_source=ThermalHeatSource.SOLAR,
         )
     )
-    assert first.heat_source is ThermalHeatSource.GAS
+
+    assert first.heat_source is ThermalHeatSource.NONE
+    assert first.recommended_pump_rpm == 2600
+    assert first.reason_code == "spa_heat_up_solar_qualifying"
     assert solar.heat_source is ThermalHeatSource.SOLAR
     assert solar.recommended_pump_rpm == 2900
 
