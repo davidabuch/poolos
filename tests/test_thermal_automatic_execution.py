@@ -5822,6 +5822,7 @@ def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
     assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
     assert lease.body_activation is None
     assert lease.pump_setpoint is not None
+    assert driver.spa_session_kind() is SpaSessionKind.EXTERNAL_USER
 
 
 def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> None:
