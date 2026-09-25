@@ -424,6 +424,17 @@ class PumpSpeedSessionRuntime:
                         "correlated_manual_configured_speed_verified",
                     )
             return
+        if (
+            self._override.state is PumpSpeedOverrideState.PENDING
+            and self._override.source is PumpSpeedOverrideSource.POOLOS_MANUAL
+        ) or self._baseline_cancellation_request is not None:
+            # An unrelated controller transition cannot steal correlation from
+            # an explicit PoolOS manual request that is still awaiting its own
+            # accepted consequence.
+            self._last_override_reason = (
+                "unattributed_configured_speed_ignored_during_pending_manual_request"
+            )
+            return
         # An uncorrelated configured PMPCIRC SPEED transition inside an
         # already-established semantic session is the controller's explicit
         # operator-intent surface.  Actual motor RPM remains verification only.
