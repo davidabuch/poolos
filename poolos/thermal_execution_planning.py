@@ -94,6 +94,7 @@ class ThermalDesiredState:
                 if self.reason_code not in {
                     "pool_temperature_probe_required",
                     "spa_temperature_acquisition_required",
+                    "spa_heat_up_solar_qualifying",
                     "opportunistic_target_cap_reached",
                     "opportunistic_roof_low_hold",
                     "six_pm_preserve",
