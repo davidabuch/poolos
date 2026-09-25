@@ -1903,6 +1903,7 @@ class ThermalRuntimeOwnershipManager:
                 and event.positive_operator_evidence.domain is state.domain
                 and lease.established_at <= event.positive_operator_evidence.requested_at
                 <= evidence.evaluated_at
+                and not _operator_event_is_exact_poolos_handback(event, state)
             ), None)
             origin_id = (
                 origin.adoption_id
@@ -2226,7 +2227,7 @@ class ThermalRuntimeOwnershipManager:
             }.get(str(event.new_value))
             matches_prior_target = (
                 intended_value is not None
-                and intended_value.value == prior.target_value
+                and prior.target_value in {intended_value, intended_value.value}
             )
         else:
             return False
@@ -3295,6 +3296,36 @@ def _body_adoption_id(
         separators=(",", ":"),
     )
     return "thermal-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
+
+
+def _operator_event_is_exact_poolos_handback(
+    event: ExternalChangeEvent,
+    state: DomainOwnershipState,
+) -> bool:
+    """Return whether an operator event exactly restores PoolOS's current target."""
+
+    if state.authority is not OwnershipAuthority.POOLOS:
+        return False
+    target = state.target_value
+    if state.domain is OwnershipDomain.PUMP:
+        return (
+            event.concept
+            in {
+                "pool.pump_circuit.configured_speed_rpm",
+                "spa.pump_circuit.configured_speed_rpm",
+            }
+            and type(event.new_value) in {int, float}
+            and not isinstance(event.new_value, bool)
+            and int(event.new_value) == target
+        )
+    if state.domain is OwnershipDomain.THERMAL:
+        mode = {
+            "00000": PhysicalHeatMode.OFF,
+            "H0001": PhysicalHeatMode.GAS,
+            "H0002": PhysicalHeatMode.SOLAR,
+        }.get(str(event.new_value))
+        return mode is not None and target in {mode, mode.value}
+    return False
 
 
 def _concept_adoption_id(
