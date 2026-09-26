@@ -1252,6 +1252,98 @@ def test_exact_operator_return_to_poolos_target_hands_back_only_that_domain(
     assert current.domain_state(other).authority is OwnershipAuthority.POOLOS
 
 
+def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_provenance() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(
+        manager,
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            activation=False,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+        ),
+        requested_mode="Solar Preferred",
+    )
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.body_session_generation is not None
+    assert lease.body_session_id is not None
+
+    override_at = NOW + timedelta(seconds=1)
+    gas_override = replace(
+        external_event(
+            "spa.raw_heater_id",
+            "H0002",
+            "H0001",
+            observed_at=override_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-gas-override",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.THERMAL,
+            "spa.raw_heater_id",
+            override_at,
+        ),
+    )
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=override_at,
+            requested_mode="Solar Preferred",
+            changes=ExternalChangeBatch((gas_override,)),
+            heat_source=PhysicalHeatMode.GAS,
+        )
+    )
+    overridden = manager.state.lease
+    assert overridden is not None
+    assert (
+        overridden.domain_state(OwnershipDomain.THERMAL).authority
+        is OwnershipAuthority.OPERATOR
+    )
+
+    handback_at = NOW + timedelta(seconds=2)
+    policy_handback = replace(
+        external_event(
+            "spa.raw_heater_id",
+            "H0001",
+            "HXSLR",
+            observed_at=handback_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-solar-preferred-handback",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.THERMAL,
+            "spa.raw_heater_id",
+            handback_at,
+        ),
+    )
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=handback_at,
+            requested_mode="Solar Preferred",
+            changes=ExternalChangeBatch((policy_handback,)),
+            heat_source=PhysicalHeatMode.GAS,
+            source_usable=False,
+        )
+    )
+
+    current = manager.state.lease
+    assert current is not None
+    thermal = current.domain_state(OwnershipDomain.THERMAL)
+    assert thermal.authority is OwnershipAuthority.POOLOS
+    assert thermal.health is OwnershipHealth.PENDING
+    assert thermal.observed_value == "HXSLR"
+    assert current.heat_source is None
+    assert current.heat_source_adoption is None
+    assert ThermalRuntimeOwnedConcept.HEAT_SOURCE not in current.verified_concepts
+    assert current.reason_code == "runtime_ownership_retained:current_evidence_confirmed"
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+
+
 def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     manager = full_manager()
     predecessor = manager.state.lease
