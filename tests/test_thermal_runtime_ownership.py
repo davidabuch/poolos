@@ -2145,6 +2145,136 @@ def test_hot_tub_manual_pmpcirc_takeover_is_pump_only_and_never_terminal() -> No
     assert manager.last_terminal_transition is None
 
 
+def test_hot_tub_pump_handback_is_idempotent_before_priming_successor() -> None:
+    """Native-boundary hand-back must survive replay during later orchestration."""
+
+    plan = thermal_assessment(
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=2900,
+    )
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        plan,
+        evaluation_id="spa-handback-evaluation-1",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    manager.establish(
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+            evaluation_id=currentness.evaluation_id,
+            plan_id=currentness.plan_id,
+            execution_plan_id="spa-handback-execution-plan-1",
+        ),
+        established_at=NOW,
+        requested_mode="Solar Preferred",
+        current_context=ThermalLiveExecutionContext(
+            currentness.evaluation_id,
+            currentness.plan_id,
+            currentness,
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.body_session_generation is not None
+    assert lease.body_session_id is not None
+
+    # Mirror the live commissioned session: ownership has already observed a
+    # stable Solar/2900 frame, so Pump carries PoolOS's exact desired target
+    # before the operator takeover.
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=NOW + timedelta(milliseconds=500),
+            evaluation_id=currentness.evaluation_id,
+            plan_id=currentness.plan_id,
+            requested_mode="Solar Preferred",
+            execution_currentness=currentness,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+        )
+    )
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.PUMP).target_value == 2900
+
+    override_at = NOW + timedelta(seconds=1)
+    override = replace(
+        external_event(
+            "spa.pump_circuit.configured_speed_rpm",
+            2900,
+            3200,
+            observed_at=override_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-pmpcirc-3200-native-boundary",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.PUMP,
+            "pump.rpm",
+            override_at,
+        ),
+    )
+    manager.record_operator_events(
+        ExternalChangeBatch((override,)),
+        evaluated_at=override_at,
+    )
+    overridden = manager.state.lease
+    assert overridden is not None
+    assert overridden.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.OPERATOR
+    assert overridden.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert overridden.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
+
+    handback_at = NOW + timedelta(seconds=2)
+    handback = replace(
+        external_event(
+            "spa.pump_circuit.configured_speed_rpm",
+            3200,
+            2900,
+            observed_at=handback_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-pmpcirc-2900-native-boundary",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.PUMP,
+            "pump.rpm",
+            handback_at,
+        ),
+    )
+    batch = ExternalChangeBatch((handback,))
+    manager.record_operator_events(batch, evaluated_at=handback_at)
+
+    restored = manager.state.lease
+    assert restored is not None
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert restored.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert restored.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert restored.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
+    assert restored.pump_adoption is not None
+    assert restored.pump_adoption.intended_value == 2900
+
+    # The orchestration pass may consume the same external-change batch again.
+    # It must not reinterpret the already-applied hand-back as a fresh takeover.
+    manager.record_operator_events(
+        batch,
+        evaluated_at=handback_at + timedelta(milliseconds=1),
+    )
+    replayed = manager.state.lease
+    assert replayed is not None
+    assert replayed.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert replayed.pump_adoption == restored.pump_adoption
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert manager.last_terminal_transition is None
+
+
 def test_return_to_baseline_preserves_body_and_source_after_override() -> None:
     original_plan = thermal_assessment()
     originating = ThermalExecutionCurrentness.from_assessment(

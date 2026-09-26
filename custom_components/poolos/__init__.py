@@ -61,6 +61,7 @@ from poolos.physical_command_authority import (  # noqa: E402
 )
 from poolos.operating_baselines import PumpOperatingBaselines  # noqa: E402
 from poolos.ownership_evidence import OwnershipDomain  # noqa: E402
+from poolos.external_change import ExternalChangeBatch  # noqa: E402
 from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
@@ -417,6 +418,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
 
         synchronize_pump_session(native, transport, connection_generation)
         external_change_runtime.process(native, transport, connection_generation)
+
+        # Configured PMPCIRC SPEED is a commissioned operator-intent surface.
+        # Consume fresh Pump intent at the native snapshot boundary so an
+        # IntelliCenter stop/priming transition in the same frame cannot move
+        # execution purpose ahead of the exact 3200->baseline hand-back.
+        pump_operator_events = tuple(
+            event
+            for event in external_change_runtime.latest_batch.events
+            if event.positive_operator_evidence is not None
+            and event.positive_operator_evidence.domain is OwnershipDomain.PUMP
+        )
+        if pump_operator_events:
+            thermal_runtime_orchestrator.ownership.record_operator_events(
+                ExternalChangeBatch(pump_operator_events),
+                evaluated_at=native.generated_at,
+            )
+
         pump_speed_session.apply_external_changes(
             external_change_runtime.latest_batch,
             native,

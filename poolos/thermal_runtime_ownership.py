@@ -2167,6 +2167,21 @@ class ThermalRuntimeOwnershipManager:
         for event in events.events:
             if event.positive_operator_evidence is None:
                 continue
+            lease = self._state.lease
+            if lease is not None:
+                opportunity_id = "operator-handback:" + event.event_id
+                if (
+                    lease.pump_adoption is not None
+                    and lease.pump_adoption.opportunity_id == opportunity_id
+                ) or (
+                    lease.heat_source_adoption is not None
+                    and lease.heat_source_adoption.opportunity_id == opportunity_id
+                ):
+                    # The native snapshot boundary may apply the same trusted
+                    # operator event before orchestration consumes that frame.
+                    # Once an exact hand-back adoption exists, replaying the
+                    # same event must not yield the domain back to Operator.
+                    continue
             if self._record_exact_operator_handback(
                 event,
                 evaluated_at=evaluated_at,
