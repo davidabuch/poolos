@@ -182,24 +182,20 @@ class PoolOSResetControlButton(
                         "B1101", False, reset_recovery=True
                     )
 
-                await self.coordinator.async_request_refresh()
-                safe_baseline_verified = self._safe_reset_baseline()
+                safe_baseline_verified = await self._async_verify_reset_baseline()
                 if not safe_baseline_verified:
                     raise RuntimeError(
-                        "Reset shutdown dispatched but safe baseline is not yet verified"
+                        "Reset shutdown dispatched but safe baseline was not verified "
+                        "within the bounded recovery window"
                     )
             finally:
                 if not safe_baseline_verified:
                     # An exception can occur after Reset authority opens but
-                    # before the normal verification point. Reobserve once so
-                    # a physically completed safe reduction cannot leave Reset
-                    # authority latched forever.
-                    try:
-                        await self.coordinator.async_request_refresh()
-                    except Exception:
-                        pass
-                    else:
-                        safe_baseline_verified = self._safe_reset_baseline()
+                    # before the normal verification point. Keep the Reset
+                    # safety fence active while IntelliCenter finishes its
+                    # asynchronous source/body/pump reduction, and reobserve
+                    # through the same bounded verification window.
+                    safe_baseline_verified = await self._async_verify_reset_baseline()
 
                 if safe_baseline_verified:
                     # Closing Reset never restores an old session. The next
@@ -207,6 +203,25 @@ class PoolOSResetControlButton(
                     # only and may establish fresh ownership.
                     authority.finish_reset_recovery()
                     await self.coordinator.async_request_refresh()
+
+    async def _async_verify_reset_baseline(self) -> bool:
+        # IntelliCenter body/source shutdown is asynchronous and the pump can
+        # remain in a native transition for tens of seconds after the command
+        # has been accepted. Do not strand Reset authority merely because the
+        # first one or two coordinator snapshots arrive before that transition
+        # settles. Keep the Reset fence active and bound the wait.
+        for attempt in range(16):
+            try:
+                await self.coordinator.async_request_refresh()
+            except Exception:
+                if attempt == 15:
+                    return False
+            else:
+                if self._safe_reset_baseline():
+                    return True
+            if attempt != 15:
+                await asyncio.sleep(2)
+        return False
 
     def _safe_reset_baseline(self) -> bool:
         native = self.coordinator.native_intellicenter_snapshot
