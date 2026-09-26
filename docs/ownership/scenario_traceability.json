@@ -2326,19 +2326,23 @@
         "tests/test_thermal_runtime_assessment.py",
         "tests/test_thermal_automatic_execution.py",
         "tests/test_pool_automatic_control_suppression.py",
-        "tests/test_home_assistant_external_change_runtime.py"
+        "tests/test_home_assistant_external_change_runtime.py",
+        "tests/test_commissioned_behavior_invariants.py"
       ],
-      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Manual Spa OFF suppression exists but independent future opportunity identity is incomplete.",
+      "current_test_evidence_scope": "Permanent commissioned-behavior regression now proves that homeowner/adopted Hot Tub OFF ends the current user session without persistent Autonomous Hot Tub suppression even after BODY-adoption provenance retires; negative controls preserve same-opportunity suppression for PoolOS-started opportunistic Spa. The broader OWN-049 future-opportunity lifecycle remains only partially represented.",
+      "current_behavior_and_gap": "The user-visible no-global-suppression invariant is now permanently release-gated across ownership-refactor shapes. Broader explicit proof of a genuinely new later autonomous Hot Tub opportunity remains incomplete.",
       "implementation_status": "PARTIALLY SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-049",
           "behavior": "Cancel current Spa session, prevent refresh restart, permit genuinely new later opportunity.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "PARTIALLY IMPLEMENTED — USER-SESSION OFF AUTONOMY PRESERVATION PERMANENTLY GATED"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_commissioned_behavior_invariants.py::test_own_049a_user_hot_tub_off_preserves_future_autonomy_after_body_adoption_retires",
+        "tests/test_commissioned_behavior_invariants.py::test_own_049a_stale_or_opportunistic_evidence_does_not_bypass_restraint"
+      ]
     },
     {
       "scenario_id": 50,
