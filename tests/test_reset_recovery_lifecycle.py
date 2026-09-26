@@ -168,6 +168,69 @@ def test_reset_safe_native_update_closes_fence_after_button_exits(monkeypatch, e
     asyncio.run(run())
 
 
+def test_reset_refresh_timeout_accepts_fresh_safe_native_truth(monkeypatch):
+    """A timed-out explicit refresh may use independently arrived safe native truth."""
+    module = _button_module(monkeypatch)
+
+    async def run():
+        authority = PoolOSPhysicalCommandAuthority()
+        runtime = SimpleNamespace(
+            physical_command_authority=authority,
+            manual_intellicenter=SimpleNamespace(
+                async_set_body_heat_source=AsyncMock(),
+                async_set_body_active=AsyncMock(),
+            ),
+            thermal_automatic_runtime=SimpleNamespace(
+                driver=Mock(), circulation_ownership=Mock()
+            ),
+            thermal_runtime_orchestrator=Mock(),
+            pool_automatic_control=Mock(),
+            spa_automatic_control=Mock(),
+        )
+        listeners = []
+
+        async def refresh():
+            return None
+
+        coordinator = SimpleNamespace(
+            native_intellicenter_snapshot=_snapshot(active=True, rpm=2900),
+            async_request_refresh=refresh,
+            async_add_listener=lambda listener: (
+                listeners.append(listener) or (lambda: listeners.remove(listener))
+            ),
+        )
+
+        async def timeout_with_safe_native_truth(awaitable, *, timeout):
+            assert timeout == module._RESET_REFRESH_TIMEOUT_SECONDS
+            awaitable.close()
+            coordinator.native_intellicenter_snapshot = _snapshot(
+                active=False, rpm=0
+            )
+            for listener in tuple(listeners):
+                listener()
+            raise TimeoutError
+
+        entry = SimpleNamespace(
+            runtime_data=runtime, entry_id="test", async_on_unload=Mock()
+        )
+        button = module.PoolOSResetControlButton(coordinator, entry)
+        monkeypatch.setattr(module.asyncio, "wait_for", timeout_with_safe_native_truth)
+        monkeypatch.setattr(module.asyncio, "sleep", AsyncMock())
+
+        await button.async_press()
+
+        assert not authority.reset_recovery_active
+        assert button._reset_running is False
+        runtime.manual_intellicenter.async_set_body_heat_source.assert_awaited_once_with(
+            "B1101", "00000", reset_recovery=True
+        )
+        runtime.manual_intellicenter.async_set_body_active.assert_awaited_once_with(
+            "B1101", False, reset_recovery=True
+        )
+
+    asyncio.run(run())
+
+
 def test_reset_owned_solar_reduces_then_acquires_fresh_solar_without_restart(monkeypatch):
     from test_thermal_automatic_execution import (
         NOW, FakeDelivery, FakeDeliveryFactory, _frame,

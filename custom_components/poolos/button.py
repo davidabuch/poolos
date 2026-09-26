@@ -19,6 +19,9 @@ from .const import DOMAIN
 from .coordinator import PoolOSCoordinator
 
 
+_RESET_REFRESH_TIMEOUT_SECONDS = 5.0
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry[PoolOSRuntimeData],
@@ -248,7 +251,19 @@ class PoolOSResetControlButton(
         # settles. Keep the Reset fence active and bound the wait.
         for attempt in range(16):
             try:
-                await self.coordinator.async_request_refresh()
+                await asyncio.wait_for(
+                    self.coordinator.async_request_refresh(),
+                    timeout=_RESET_REFRESH_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                # A coordinator refresh can stall even while the normal native
+                # event stream continues to publish fresh authoritative truth.
+                # Do not strand Reset merely because this awaited refresh did
+                # not return; accept only the same strict safe-baseline proof.
+                if self._safe_reset_baseline():
+                    return True
+                if attempt == 15:
+                    return False
             except Exception:
                 if attempt == 15:
                     return False

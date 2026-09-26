@@ -195,7 +195,9 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     assert "safe_baseline_verified = await self._async_verify_reset_baseline()" in reset
     verifier = reset[reset.index("async def _async_verify_reset_baseline"):]
     assert "for attempt in range(16):" in verifier
-    assert "await self.coordinator.async_request_refresh()" in verifier
+    assert "asyncio.wait_for(" in verifier
+    assert "self.coordinator.async_request_refresh()" in verifier
+    assert "_RESET_REFRESH_TIMEOUT_SECONDS" in verifier
     assert "await asyncio.sleep(2)" in verifier
     assert "if self._safe_reset_baseline():" in verifier
 
