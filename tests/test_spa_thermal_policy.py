@@ -3,7 +3,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from poolos.spa_thermal_policy import (\n    SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState,\n    SpaSessionKind, SpaThermalPolicyTracker, SpaUserSource,\n    spa_manual_off_requires_autonomy_suppression,\n)
+from poolos.spa_thermal_policy import (
+    SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState,
+    SpaSessionKind, SpaThermalPolicyTracker, SpaUserSource,
+    spa_manual_off_requires_autonomy_suppression,
+)
 from poolos.thermal_source_policy import HeatSourcePermissions, ThermalHeatSource
 
 
