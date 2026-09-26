@@ -2211,13 +2211,14 @@ class ThermalRuntimeOwnershipManager:
             in {"solar preferred", "eco heat"}
         ):
             # Pentair Solar Preferred is a policy-selection surface, not proof
-            # that Solar is physically active.  A fresh HXSLR transition from
-            # an operator-owned THERMAL domain therefore delegates source
-            # selection back to PoolOS without manufacturing H0002 provenance.
+            # that Solar is physically active. A fresh HXSLR transition ends
+            # operator THERMAL ownership, but PoolOS must earn new THERMAL
+            # ownership from an accepted/verified source command. Keep the
+            # domain open (NONE) here rather than manufacturing H0002 provenance.
             states = {state.domain: state for state in lease.domain_states}
             states[OwnershipDomain.THERMAL] = replace(
                 prior,
-                authority=OwnershipAuthority.POOLOS,
+                authority=OwnershipAuthority.NONE,
                 health=OwnershipHealth.PENDING,
                 evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
                 episode=None,
