@@ -949,6 +949,24 @@ class ThermalRuntimeEvaluator:
             spa_temperature=spa_temperature,
             higher_priority_conflict=higher_priority_conflict,
         )
+        policy_source_neutralization = (
+            body is ThermalBody.HOT_TUB
+            and desired.reason_code
+            == "external_spa_solar_preferred_policy_handback"
+            and heater_id == "HXSLR"
+        )
+        if policy_source_neutralization:
+            # HXSLR is a known Pentair policy-selection state, not a physical
+            # heat-source observation.  Permit only this reducing OFF plan to
+            # proceed; do not make HXSLR usable as Solar/Gas evidence.
+            blockers = tuple(
+                item for item in blockers if item != "native_heater_unknown"
+            )
+            desired = replace(
+                desired,
+                evidence_usable=not blockers,
+                blockers=blockers,
+            )
         if body is ThermalBody.POOL:
             desired = replace(
                 desired,
@@ -985,7 +1003,10 @@ class ThermalRuntimeEvaluator:
             selected_source=current_source,
             pump_rpm=pump_rpm,
             body_active=active if isinstance(active, bool) else None,
-            source_evidence_usable=heater_id in {"00000", "H0001", "H0002"},
+            source_evidence_usable=(
+                heater_id in {"00000", "H0001", "H0002"}
+                or policy_source_neutralization
+            ),
             pump_evidence_usable="pump.rpm" not in missing and "pump.rpm" not in stale,
             blockers=blockers,
             htmode=_string_or_none(values.get(f"{prefix}.raw_htmode")),
