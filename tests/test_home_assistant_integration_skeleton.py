@@ -179,3 +179,20 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     reset = button[button.index("class PoolOSResetControlButton"):]
     assert "pool_automatic_control.resume" in reset
     assert "spa_automatic_control.resume" in reset
+
+    # Once Reset authority opens, every subsequent lifecycle operation must be
+    # inside the protected region. A setup/session exception before the old
+    # try block was able to strand reset_recovery_active forever.
+    begin = reset.index("authority.begin_reset_recovery()")
+    protected = reset.index("try:", begin)
+    restrictive = reset.index("restrictive_authority_changed(", begin)
+    assert begin < protected < restrictive
+
+    # Reset closes only after a verified safe baseline. If the normal path
+    # raises early, finally performs one fresh verification opportunity before
+    # deciding whether to close or preserve the safety fence.
+    finally_block = reset[reset.index("finally:", protected):]
+    assert "if not safe_baseline_verified:" in finally_block
+    assert "await self.coordinator.async_request_refresh()" in finally_block
+    assert "if safe_baseline_verified:" in finally_block
+    assert "authority.finish_reset_recovery()" in finally_block
