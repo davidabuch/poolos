@@ -1333,7 +1333,7 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
     current = manager.state.lease
     assert current is not None
     thermal = current.domain_state(OwnershipDomain.THERMAL)
-    assert thermal.authority is OwnershipAuthority.POOLOS
+    assert thermal.authority is OwnershipAuthority.NONE
     assert thermal.health is OwnershipHealth.PENDING
     assert thermal.observed_value == "HXSLR"
     assert current.heat_source is None
