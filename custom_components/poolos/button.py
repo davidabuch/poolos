@@ -142,21 +142,23 @@ class PoolOSResetControlButton(
 
             reset_at = datetime.now(UTC)
             authority.begin_reset_recovery()
-            runtime.thermal_automatic_runtime.driver.restrictive_authority_changed(
-                changed_at=reset_at
-            )
-            runtime.thermal_runtime_orchestrator.reset_session_authority(
-                reset_at=reset_at
-            )
-            runtime.thermal_automatic_runtime.circulation_ownership.unload()
-            runtime.thermal_runtime_orchestrator.ownership.invalidate_residual_termination()
-            # Reset clears session-scoped operator restraints but preserves
-            # durable policy/accounting. It must not leave future autonomy
-            # suppressed after reaching the safe baseline.
-            runtime.pool_automatic_control.resume(resumed_at=reset_at)
-            runtime.spa_automatic_control.resume(resumed_at=reset_at)
+            safe_baseline_verified = False
 
             try:
+                runtime.thermal_automatic_runtime.driver.restrictive_authority_changed(
+                    changed_at=reset_at
+                )
+                runtime.thermal_runtime_orchestrator.reset_session_authority(
+                    reset_at=reset_at
+                )
+                runtime.thermal_automatic_runtime.circulation_ownership.unload()
+                runtime.thermal_runtime_orchestrator.ownership.invalidate_residual_termination()
+                # Reset clears session-scoped operator restraints but preserves
+                # durable policy/accounting. It must not leave future autonomy
+                # suppressed after reaching the safe baseline.
+                runtime.pool_automatic_control.resume(resumed_at=reset_at)
+                runtime.spa_automatic_control.resume(resumed_at=reset_at)
+
                 native = self.coordinator.native_intellicenter_snapshot
                 values = {} if native is None else {
                     item.observation_id: item.value for item in native.observations
@@ -181,23 +183,40 @@ class PoolOSResetControlButton(
                     )
 
                 await self.coordinator.async_request_refresh()
-                native = self.coordinator.native_intellicenter_snapshot
-                values = {} if native is None else {
-                    item.observation_id: item.value for item in native.observations
-                }
-                safe = (
-                    values.get("pool.active") is False
-                    and values.get("spa.active") is False
-                    and values.get("pump.rpm") in {0, 0.0}
-                    and values.get("pool.raw_heater_id") in {None, "00000"}
-                    and values.get("spa.raw_heater_id") in {None, "00000"}
-                )
-                if not safe:
+                safe_baseline_verified = self._safe_reset_baseline()
+                if not safe_baseline_verified:
                     raise RuntimeError(
                         "Reset shutdown dispatched but safe baseline is not yet verified"
                     )
             finally:
-                # Closing Reset never restores an old session. The next native
-                # epoch is evaluated from durable policy/accounting only.
-                authority.finish_reset_recovery()
-                await self.coordinator.async_request_refresh()
+                if not safe_baseline_verified:
+                    # An exception can occur after Reset authority opens but
+                    # before the normal verification point. Reobserve once so
+                    # a physically completed safe reduction cannot leave Reset
+                    # authority latched forever.
+                    try:
+                        await self.coordinator.async_request_refresh()
+                    except Exception:
+                        pass
+                    else:
+                        safe_baseline_verified = self._safe_reset_baseline()
+
+                if safe_baseline_verified:
+                    # Closing Reset never restores an old session. The next
+                    # native epoch is evaluated from durable policy/accounting
+                    # only and may establish fresh ownership.
+                    authority.finish_reset_recovery()
+                    await self.coordinator.async_request_refresh()
+
+    def _safe_reset_baseline(self) -> bool:
+        native = self.coordinator.native_intellicenter_snapshot
+        values = {} if native is None else {
+            item.observation_id: item.value for item in native.observations
+        }
+        return (
+            values.get("pool.active") is False
+            and values.get("spa.active") is False
+            and values.get("pump.rpm") in {0, 0.0}
+            and values.get("pool.raw_heater_id") in {None, "00000"}
+            and values.get("spa.raw_heater_id") in {None, "00000"}
+        )
