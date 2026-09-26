@@ -15,6 +15,7 @@ from poolos.intellicenter_readonly import (
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     resolve_body_pump_circuit,
 )
+from poolos.ownership_evidence import OwnershipDomain
 from poolos.observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -164,6 +165,13 @@ class PoolOSPumpSpeedSessionRuntime:
                     previous_rpm=int(round(float(event.previous_value))),
                     new_rpm=int(round(float(event.new_value))),
                     observed_at=event.observed_at,
+                    positive_operator_intent=bool(
+                        event.positive_operator_evidence is not None
+                        and event.positive_operator_evidence.domain is OwnershipDomain.PUMP
+                        and event.positive_operator_evidence.equipment_id == "pump.rpm"
+                        and event.positive_operator_evidence.requested_at
+                        == event.observed_at
+                    ),
                 )
             )
         current = next(
