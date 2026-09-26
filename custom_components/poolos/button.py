@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+
+from poolos.observations import ObservationQuality, ObservationSourceKind
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -118,6 +120,30 @@ class PoolOSResetControlButton(
             "model": "Operational Commissioning Runtime",
         }
         self._reset_lock = asyncio.Lock()
+        self._reset_generation: int | None = None
+        self._reset_observation_after: datetime | None = None
+        self._reset_running = False
+        self._reset_sessions_invalidated = False
+        entry.async_on_unload(
+            coordinator.async_add_listener(self._observe_reset_completion)
+        )
+
+    def _observe_reset_completion(self) -> None:
+        """Continue verification after service cancellation/timeout, never delivery."""
+
+        authority = self._runtime.physical_command_authority
+        if (
+            self._reset_running
+            or not self._reset_sessions_invalidated
+            or self._reset_generation != authority.reset_recovery_generation
+            or not authority.reset_recovery_active
+        ):
+            return
+        if self._safe_reset_baseline():
+            authority.finish_reset_recovery()
+            # The current coordinator publication is already notifying normal
+            # runtime consumers. Closing Reset invalidates their old contexts;
+            # only a fresh normal evaluation may acquire command permission.
 
     @property
     def available(self) -> bool:
@@ -141,7 +167,10 @@ class PoolOSResetControlButton(
                 raise RuntimeError("Reset PoolOS Control requires IntelliCenter delivery")
 
             reset_at = datetime.now(UTC)
-            authority.begin_reset_recovery()
+            self._reset_generation = authority.begin_reset_recovery()
+            self._reset_observation_after = reset_at
+            self._reset_running = True
+            self._reset_sessions_invalidated = False
             safe_baseline_verified = False
 
             try:
@@ -158,6 +187,7 @@ class PoolOSResetControlButton(
                 # suppressed after reaching the safe baseline.
                 runtime.pool_automatic_control.resume(resumed_at=reset_at)
                 runtime.spa_automatic_control.resume(resumed_at=reset_at)
+                self._reset_sessions_invalidated = True
 
                 native = self.coordinator.native_intellicenter_snapshot
                 values = {} if native is None else {
@@ -166,18 +196,22 @@ class PoolOSResetControlButton(
 
                 # Source Off precedes body Off whenever a source is selected.
                 if values.get("spa.raw_heater_id") not in {None, "00000"}:
+                    self._reset_observation_after = datetime.now(UTC)
                     await manual.async_set_body_heat_source(
                         "B1202", "00000", reset_recovery=True
                     )
                 if values.get("pool.raw_heater_id") not in {None, "00000"}:
+                    self._reset_observation_after = datetime.now(UTC)
                     await manual.async_set_body_heat_source(
                         "B1101", "00000", reset_recovery=True
                     )
                 if values.get("spa.active") is True:
+                    self._reset_observation_after = datetime.now(UTC)
                     await manual.async_set_body_active(
                         "B1202", False, reset_recovery=True
                     )
                 if values.get("pool.active") is True:
+                    self._reset_observation_after = datetime.now(UTC)
                     await manual.async_set_body_active(
                         "B1101", False, reset_recovery=True
                     )
@@ -189,19 +223,21 @@ class PoolOSResetControlButton(
                         "within the bounded recovery window"
                     )
             finally:
-                if not safe_baseline_verified:
-                    # An exception can occur after Reset authority opens but
-                    # before the normal verification point. Keep the Reset
-                    # safety fence active while IntelliCenter finishes its
-                    # asynchronous source/body/pump reduction, and reobserve
-                    # through the same bounded verification window.
-                    safe_baseline_verified = await self._async_verify_reset_baseline()
-
-                if safe_baseline_verified:
-                    # Closing Reset never restores an old session. The next
-                    # native epoch is evaluated from durable policy/accounting
-                    # only and may establish fresh ownership.
-                    authority.finish_reset_recovery()
+                try:
+                    if not safe_baseline_verified:
+                        safe_baseline_verified = await self._async_verify_reset_baseline()
+                finally:
+                    # This synchronous continuation is installed even when the
+                    # awaited final refresh itself is cancelled or raises. The
+                    # same Reset epoch remains fenced until real native evidence
+                    # verifies completion; no command is retried by observation.
+                    self._reset_running = False
+                    authority.wait_for_reset_evidence(
+                        generation=self._reset_generation,
+                        invalidated=self._reset_sessions_invalidated,
+                    )
+                    self._observe_reset_completion()
+                if not authority.reset_recovery_active:
                     await self.coordinator.async_request_refresh()
 
     async def _async_verify_reset_baseline(self) -> bool:
@@ -225,13 +261,26 @@ class PoolOSResetControlButton(
 
     def _safe_reset_baseline(self) -> bool:
         native = self.coordinator.native_intellicenter_snapshot
-        values = {} if native is None else {
-            item.observation_id: item.value for item in native.observations
+        observations = {} if native is None else {
+            item.observation_id: item for item in native.observations
         }
-        return (
-            values.get("pool.active") is False
-            and values.get("spa.active") is False
-            and values.get("pump.rpm") in {0, 0.0}
-            and values.get("pool.raw_heater_id") in {None, "00000"}
-            and values.get("spa.raw_heater_id") in {None, "00000"}
-        )
+        required = {
+            "pool.active": False, "spa.active": False, "pump.rpm": 0,
+            "pool.raw_heater_id": "00000", "spa.raw_heater_id": "00000",
+            "solar.active": False, "heater.active": False,
+        }
+        now = datetime.now(UTC)
+        boundary = self._reset_observation_after
+        for concept, expected in required.items():
+            item = observations.get(concept)
+            if (
+                boundary is None or item is None
+                or item.value != expected
+                or item.quality != ObservationQuality.GOOD
+                or item.source_kind != ObservationSourceKind.LIVE
+                or not item.source_id.startswith("intellicenter_native:")
+                or not boundary < item.observed_at <= now
+                or now - item.observed_at > timedelta(seconds=30)
+            ):
+                return False
+        return True

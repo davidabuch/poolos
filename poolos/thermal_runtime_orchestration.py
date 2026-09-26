@@ -462,7 +462,7 @@ class ThermalRuntimeOrchestrator:
             external_changes=external_changes,
             freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
         )
-        if _probe_successor_handoff_pending(lease, body):
+        if thermal_body_successor_pending(lease, body):
             adopted_user_spa = bool(
                 lease.body is ThermalBody.HOT_TUB
                 and lease.body_adoption is not None
@@ -647,7 +647,7 @@ def build_thermal_runtime_ownership_evidence(
     )
 
 
-def _probe_successor_handoff_pending(
+def thermal_body_successor_pending(
     lease: ThermalRuntimeOwnershipLease,
     body: ThermalBodyRuntimeAssessment,
 ) -> bool:

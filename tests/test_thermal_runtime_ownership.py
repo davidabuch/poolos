@@ -1252,17 +1252,26 @@ def test_exact_operator_return_to_poolos_target_hands_back_only_that_domain(
     assert current.domain_state(other).authority is OwnershipAuthority.POOLOS
 
 
-def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_provenance() -> None:
+@pytest.mark.parametrize("receipt_second", [None, 1, 3])
+def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_provenance(receipt_second) -> None:
     manager = ThermalRuntimeOwnershipManager()
-    establish(
-        manager,
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        thermal_assessment(body=ThermalBody.HOT_TUB, requested_mode="Solar Preferred"),
+        evaluation_id="evaluation-1",
+    )
+    context = ThermalLiveExecutionContext("evaluation-1", currentness.plan_id, currentness)
+    manager.establish(
         execution_ownership(
             body=ThermalBody.HOT_TUB,
             activation=True,
             pump_rpm=2900,
             source=PhysicalHeatMode.SOLAR,
+            plan_id=currentness.plan_id,
         ),
+        established_at=NOW,
         requested_mode="Solar Preferred",
+        current_context=context,
+        execution_progress=ThermalExecutionProgress(),
     )
     lease = manager.state.lease
     assert lease is not None
@@ -1290,6 +1299,8 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
         evidence(
             body=ThermalBody.HOT_TUB,
             at=override_at,
+            plan_id=currentness.plan_id,
+            execution_currentness=currentness,
             requested_mode="Solar Preferred",
             changes=ExternalChangeBatch((gas_override,)),
             heat_source=PhysicalHeatMode.GAS,
@@ -1323,6 +1334,8 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
         evidence(
             body=ThermalBody.HOT_TUB,
             at=handback_at,
+            plan_id=currentness.plan_id,
+            execution_currentness=currentness,
             requested_mode="Solar Preferred",
             changes=ExternalChangeBatch((policy_handback,)),
             heat_source=PhysicalHeatMode.GAS,
@@ -1342,6 +1355,34 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
     assert current.reason_code == "runtime_ownership_retained:current_evidence_confirmed"
     assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
     assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+
+    manager.record_operator_events(
+        ExternalChangeBatch((policy_handback,)),
+        evaluated_at=handback_at + timedelta(seconds=1),
+    )
+    replayed = manager.state.lease
+    assert replayed.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.NONE
+    assert replayed.heat_source is None
+    assert replayed.heat_source_adoption is None
+    assert replayed.body_session_id == current.body_session_id
+
+    # Delayed promotion is not a fresh command. Only an accepted receipt after
+    # the policy hand-back may acquire THERMAL authority from NONE.
+    manager.promote_session_provenance(
+        replace(
+            execution_ownership(body=ThermalBody.HOT_TUB, source=PhysicalHeatMode.SOLAR, plan_id=currentness.plan_id),
+            heat_source_accepted_at=(
+                None if receipt_second is None else NOW + timedelta(seconds=receipt_second)
+            ),
+        ),
+        promoted_at=NOW + timedelta(seconds=4),
+        requested_mode="Solar Preferred",
+        originating_context=context,
+        execution_progress=ThermalExecutionProgress(),
+    )
+    assert manager.state.lease.domain_state(OwnershipDomain.THERMAL).authority is (
+        OwnershipAuthority.POOLOS if receipt_second == 3 else OwnershipAuthority.NONE
+    )
 
 
 def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:

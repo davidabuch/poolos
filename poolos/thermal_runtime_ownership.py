@@ -1884,6 +1884,11 @@ class ThermalRuntimeOwnershipManager:
                     and abs(evidence.configured_pump_speed_rpm - origin.intended_value) <= self.pump_rpm_tolerance
                 )
                 expected = role in {"priming", "pool_temperature_probe", "thermal_pump_target"}
+                expected = expected or bool(
+                    lease.pump_adoption is not None
+                    and state.last_handback_evidence is not None
+                    and evidence.configured_pump_speed_rpm == lease.pump_adoption.intended_value
+                )
                 equipment = "pump.rpm"
             else:
                 origin = lease.heat_source or lease.heat_source_adoption
@@ -1903,6 +1908,7 @@ class ThermalRuntimeOwnershipManager:
                 and event.positive_operator_evidence.domain is state.domain
                 and lease.established_at <= event.positive_operator_evidence.requested_at
                 <= evidence.evaluated_at
+                and not _operator_event_consumed_by_handback(event, state)
                 and not _operator_event_is_exact_poolos_handback(event, state)
             ), None)
             origin_id = (
@@ -2169,6 +2175,10 @@ class ThermalRuntimeOwnershipManager:
                 continue
             lease = self._state.lease
             if lease is not None:
+                if _operator_event_consumed_by_handback(
+                    event, lease.domain_state(event.positive_operator_evidence.domain)
+                ):
+                    continue
                 opportunity_id = "operator-handback:" + event.event_id
                 if (
                     lease.pump_adoption is not None
@@ -2242,6 +2252,7 @@ class ThermalRuntimeOwnershipManager:
                 target_value=None,
                 observed_value="HXSLR",
                 observed_at=event.observed_at,
+                last_handback_evidence=operator,
             )
             policy_verified = tuple(
                 item
@@ -2328,6 +2339,7 @@ class ThermalRuntimeOwnershipManager:
             command_blocker=None,
             observed_value=intended_value,
             observed_at=event.observed_at,
+            last_handback_evidence=operator,
         )
         verified = tuple(item for item in lease.verified_concepts if item is not concept)
         if operator.domain is OwnershipDomain.PUMP:
@@ -2449,8 +2461,37 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 promoted_at,
             )
+        states = list(lease.domain_states)
+        for index, state in enumerate(states):
+            new_origin = {
+                OwnershipDomain.BODY: activation,
+                OwnershipDomain.PUMP: pump,
+                OwnershipDomain.THERMAL: source,
+            }[state.domain]
+            previous_origin = {
+                OwnershipDomain.BODY: lease.body_activation,
+                OwnershipDomain.PUMP: lease.pump_setpoint,
+                OwnershipDomain.THERMAL: lease.heat_source,
+            }[state.domain]
+            accepted_at = {
+                OwnershipDomain.BODY: ownership.body_activation_accepted_at,
+                OwnershipDomain.PUMP: ownership.pump_accepted_at,
+                OwnershipDomain.THERMAL: ownership.heat_source_accepted_at,
+            }[state.domain]
+            if (
+                state.authority is OwnershipAuthority.NONE
+                and state.last_handback_evidence is not None
+                and new_origin is not None and new_origin != previous_origin
+                and accepted_at is not None
+                and state.last_handback_evidence.requested_at < accepted_at <= promoted_at
+            ):
+                states[index] = replace(
+                    state, authority=OwnershipAuthority.POOLOS,
+                    health=OwnershipHealth.PENDING, episode=None, command_blocker=None,
+                )
         promoted = replace(
             lease,
+            domain_states=tuple(states),
             last_confirmed_at=promoted_at,
             reason_code="runtime_ownership_promoted:accepted_session_delivery",
             body_activation=activation or lease.body_activation,
@@ -3359,6 +3400,20 @@ def _body_adoption_id(
         separators=(",", ":"),
     )
     return "thermal-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
+
+
+def _operator_event_consumed_by_handback(
+    event: ExternalChangeEvent, state: DomainOwnershipState,
+) -> bool:
+    consumed = state.last_handback_evidence
+    operator = event.positive_operator_evidence
+    return bool(
+        consumed is not None and operator is not None
+        and operator.domain is consumed.domain
+        and operator.authority_generation == consumed.authority_generation
+        and operator.body_session_id == consumed.body_session_id
+        and operator.requested_at <= consumed.requested_at
+    )
 
 
 def _operator_event_is_exact_poolos_handback(

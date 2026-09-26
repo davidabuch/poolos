@@ -669,6 +669,7 @@ class PoolOSPhysicalCommandAuthority:
     )
     _reset_recovery_generation: int = field(default=0, init=False, repr=False)
     _reset_recovery_active: bool = field(default=False, init=False, repr=False)
+    _reset_recovery_phase: str = field(default="inactive", init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.expectation_ttl <= timedelta(0):
@@ -785,6 +786,7 @@ class PoolOSPhysicalCommandAuthority:
 
         self._reset_recovery_generation += 1
         self._reset_recovery_active = True
+        self._reset_recovery_phase = "reducing"
         self.invalidate_expectations()
         self._invalidate_automatic_thermal_context()
         self._invalidate_automatic_filtration_context()
@@ -795,8 +797,17 @@ class PoolOSPhysicalCommandAuthority:
         """Close Reset authority only after a verified safe baseline."""
 
         self._reset_recovery_active = False
+        self._reset_recovery_phase = "complete"
         self._invalidate_automatic_thermal_context()
         self._invalidate_automatic_filtration_context()
+
+    def wait_for_reset_evidence(self, *, generation: int, invalidated: bool) -> None:
+        """Expose recovery continuation without increasing command permission."""
+
+        if self._reset_recovery_active and generation == self._reset_recovery_generation:
+            self._reset_recovery_phase = (
+                "waiting_for_fresh_evidence" if invalidated else "session_invalidation_failed"
+            )
 
     @property
     def reset_recovery_active(self) -> bool:
@@ -1628,6 +1639,7 @@ class PoolOSPhysicalCommandAuthority:
                 ),
                 "reset_recovery_active": self._reset_recovery_active,
                 "reset_recovery_generation": self._reset_recovery_generation,
+                "reset_recovery_phase": self._reset_recovery_phase,
                 "pending_expectation_count": len(self._expectations),
                 "pending_expectation_limit": self.expectation_limit,
                 "expectation_ttl_seconds": self.expectation_ttl.total_seconds(),

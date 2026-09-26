@@ -138,6 +138,9 @@ class DomainOwnershipState:
     evidence_kind: OwnershipEvidenceKind | None = None
     episode: ReconciliationEpisode | None = None
     positive_operator_evidence: PositiveOperatorEvidence | None = None
+    # Consumed intent is not source/command provenance. Keep its chronology so
+    # replay cannot turn a completed policy hand-back into a new override.
+    last_handback_evidence: PositiveOperatorEvidence | None = None
     command_blocker: str | None = "ownership_origin_unavailable"
     target_value: bool | int | str | None = None
     observed_value: bool | int | float | str | None = None
