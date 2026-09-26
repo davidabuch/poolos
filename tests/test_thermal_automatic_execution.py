@@ -5862,6 +5862,10 @@ def test_user_spa_pentair_solar_preferred_is_policy_handback_not_physical_solar(
     assert desired.required_pump_rpm == driver.baselines.filtration_rpm
     assert desired.evidence["raw_heater_id"] == "HXSLR"
     assert desired.evidence["selected_source"] == "solar_preferred"
+    assert desired.evidence["force_source_command"] is True
+    assert frame.thermal.hot_tub.plan.operations
+    assert isinstance(frame.thermal.hot_tub.plan.operations[0], SetHeatMode)
+    assert frame.thermal.hot_tub.plan.operations[0].mode is PhysicalHeatMode.OFF
 
 
 def test_new_user_spa_inherited_gas_is_neutralized_without_fresh_thermal_intent() -> None:
@@ -5917,6 +5921,9 @@ def test_new_user_spa_inherited_gas_is_neutralized_without_fresh_thermal_intent(
     assert desired.selected_source is PhysicalHeatMode.OFF
     assert desired.required_pump_rpm == driver.baselines.filtration_rpm
     assert desired.evidence["thermal_operator_owned"] is False
+    assert first.thermal.hot_tub.plan.operations
+    assert isinstance(first.thermal.hot_tub.plan.operations[0], SetHeatMode)
+    assert first.thermal.hot_tub.plan.operations[0].mode is PhysicalHeatMode.OFF
 
 
 def test_new_user_spa_fresh_gas_operator_ownership_preserves_gas_during_acquisition() -> None:
