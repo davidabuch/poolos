@@ -202,5 +202,9 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     finally_block = reset[reset.index("finally:", protected):]
     assert "if not safe_baseline_verified:" in finally_block
     assert "await self._async_verify_reset_baseline()" in finally_block
-    assert "if safe_baseline_verified:" in finally_block
-    assert "authority.finish_reset_recovery()" in finally_block
+    assert "self._reset_running = False" in finally_block
+    assert "self._observe_reset_completion()" in finally_block
+    continuation = reset[reset.index("def _observe_reset_completion"):reset.index("@property")]
+    assert "self._safe_reset_baseline()" in continuation
+    assert "authority.finish_reset_recovery()" in continuation
+    assert "await " not in continuation

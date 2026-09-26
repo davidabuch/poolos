@@ -86,6 +86,7 @@ from .thermal_runtime_orchestration import (
     ThermalRuntimeOrchestrationAssessment,
     ThermalRuntimeOrchestrator,
     build_thermal_runtime_ownership_evidence,
+    thermal_body_successor_pending,
 )
 from .thermal_runtime_ownership import (
     SharedHydraulicSafetyClass,
@@ -752,6 +753,35 @@ class ThermalAutomaticExecutionDriver:
         if cleanup_result is not None:
             return cleanup_result
 
+        lease = self.orchestrator.ownership.state.lease
+        if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
+            handback_pump = lease.domain_state(OwnershipDomain.PUMP)
+            # A configured-speed hand-back can stop/reprime the native motor.
+            # Its fixed domain episode owns that convergence, not a newly
+            # synthesized cold-start execution. Observe without issuing a
+            # competing prime or discarding the exact hand-back provenance.
+            if (
+                lease.pump_adoption is not None
+                and handback_pump.last_handback_evidence is not None
+                and handback_pump.authority is OwnershipAuthority.POOLOS
+                and handback_pump.episode is not None
+                and handback_pump.episode.verified_at is None
+                and (
+                    self.active_session is None
+                    or self.active_session.status in {
+                        ThermalLiveExecutionStatus.READY,
+                        ThermalLiveExecutionStatus.COMPLETED,
+                    }
+                )
+            ):
+                # No command is in flight in these statuses. Retire the
+                # unissued transient plan; convergence resumes through the
+                # existing typed successor path, never its obsolete prime.
+                self.active_session = None
+                return self._blocked(
+                    frame, handback_pump.command_blocker or "automatic_thermal_pump_handback_converging"
+                )
+
         if self._reenable_required and self._independent_fault_successor(frame):
             self._reenable_required = False
             self._failed_pool_opportunity_id = None
@@ -901,9 +931,7 @@ class ThermalAutomaticExecutionDriver:
                 and lease.status is ThermalRuntimeOwnershipStatus.OWNED
                 and lease.owns_body
                 and lease.originating_currentness is not None
-                and compatible_thermal_body_successor(
-                    lease.originating_currentness, body.execution_currentness
-                )
+                and thermal_body_successor_pending(lease, body)
                 and self.active_session.originating_currentness.purpose
                 != body.execution_currentness.purpose
             ):
@@ -2924,14 +2952,16 @@ class ThermalAutomaticExecutionDriver:
         if safety is None:
             return "automatic_thermal_live_safety_evidence_unavailable"
 
+        pump_origin = lease.pump_setpoint or lease.pump_adoption
+        source_origin = lease.heat_source or lease.heat_source_adoption
         replace_pump_setpoint = (
-            lease.pump_setpoint is not None
-            and lease.pump_setpoint.intended_value
+            pump_origin is not None
+            and pump_origin.intended_value
             != body.plan.desired.required_pump_rpm
         )
         replace_heat_source = (
-            lease.heat_source is not None
-            and lease.heat_source.intended_value
+            source_origin is not None
+            and source_origin.intended_value
             is not body.plan.desired.selected_source
         )
 

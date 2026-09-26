@@ -167,7 +167,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     spa_automatic_control = SpaAutomaticControlSuppression()
-    spa_session_kind_provider = lambda: None
+    def initial_spa_session_kind():
+        return None
+
+    spa_session_kind_provider = initial_spa_session_kind
 
     def arm_manual_pool_off(suppressed_at: datetime) -> None:
         pool_automatic_control.suppress(
@@ -419,19 +422,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         synchronize_pump_session(native, transport, connection_generation)
         external_change_runtime.process(native, transport, connection_generation)
 
-        # Configured PMPCIRC SPEED is a commissioned operator-intent surface.
-        # Consume fresh Pump intent at the native snapshot boundary so an
-        # IntelliCenter stop/priming transition in the same frame cannot move
-        # execution purpose ahead of the exact 3200->baseline hand-back.
-        pump_operator_events = tuple(
+        # Consume commissioned configured PUMP/source intent before evaluation.
+        # Native motor consequences must not move purpose ahead of hand-back;
+        # Thermal policy evaluation must see the current domain override.
+        domain_operator_events = tuple(
             event
             for event in external_change_runtime.latest_batch.events
             if event.positive_operator_evidence is not None
-            and event.positive_operator_evidence.domain is OwnershipDomain.PUMP
+            and event.positive_operator_evidence.domain in {
+                OwnershipDomain.PUMP, OwnershipDomain.THERMAL,
+            }
         )
-        if pump_operator_events:
+        if domain_operator_events:
             thermal_runtime_orchestrator.ownership.record_operator_events(
-                ExternalChangeBatch(pump_operator_events),
+                ExternalChangeBatch(domain_operator_events),
                 evaluated_at=native.generated_at,
             )
 
