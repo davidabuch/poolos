@@ -2084,6 +2084,66 @@ def test_hot_tub_manual_pmpcirc_takeover_is_pump_only_and_never_terminal() -> No
     assert current.pump_session_effective_rpm == 3200
     assert manager.last_terminal_transition is None
 
+    handback_at = NOW + timedelta(seconds=2)
+    baseline_plan = thermal_assessment(
+        at=handback_at,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=2900,
+    )
+    baseline_currentness = ThermalExecutionCurrentness.from_assessment(
+        baseline_plan,
+        evaluation_id="spa-evaluation-3",
+    )
+    handback = replace(
+        external_event(
+            "spa.pump_circuit.configured_speed_rpm",
+            3200,
+            2900,
+            observed_at=handback_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-pmpcirc-2900-handback",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.PUMP,
+            "pump.rpm",
+            handback_at,
+        ),
+    )
+    returned = manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=handback_at,
+            evaluation_id=baseline_currentness.evaluation_id,
+            plan_id=baseline_currentness.plan_id,
+            requested_mode="Solar Preferred",
+            execution_currentness=baseline_currentness,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+            changes=ExternalChangeBatch((handback,)),
+            pump_session_id="spa-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0101",
+            pump_session_effective_rpm=2900,
+            pump_session_override_state=PumpSpeedOverrideState.NONE,
+        )
+    )
+    restored = manager.state.lease
+    assert returned.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert restored is not None
+    assert restored.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert restored.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert restored.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
+    assert restored.pump_adoption is not None
+    assert restored.pump_adoption.intended_value == 2900
+    assert manager.last_terminal_transition is None
+
 
 def test_return_to_baseline_preserves_body_and_source_after_override() -> None:
     original_plan = thermal_assessment()
