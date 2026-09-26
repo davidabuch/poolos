@@ -1522,6 +1522,42 @@ class ThermalRuntimeEvaluator:
             if not spa_temperature_trusted or spa_temperature is None
             else spa_temperature.trusted_temperature_f
         )
+        solar_preferred_policy_handback = bool(
+            spa_active
+            and spa_session_kind is SpaSessionKind.EXTERNAL_USER
+            and requested_mode is ThermalRequestedMode.SOLAR_PREFERRED
+            and _string_or_none(values.get("spa.raw_heater_id")) == "HXSLR"
+        )
+        if solar_preferred_policy_handback:
+            return ThermalDesiredState(
+                evaluated_at=evidence.evaluated_at,
+                body=ThermalBody.HOT_TUB,
+                requested_mode=requested_mode.value,
+                selected_source=PhysicalHeatMode.OFF,
+                required_pump_rpm=self.baselines.filtration_rpm,
+                reason_code="external_spa_solar_preferred_policy_handback",
+                rpm_reason_code=(
+                    "operating_purpose:ordinary_circulation:"
+                    f"{self.baselines.filtration_rpm}_rpm"
+                ),
+                rationale=(
+                    "Pentair Solar Preferred delegates thermal policy back to PoolOS.",
+                    "Neutralize any still-active physical source before Eco Heat selects one.",
+                ),
+                criteria=(
+                    "external_spa_session",
+                    "pentair_solar_preferred_selected",
+                    "policy_handback_not_physical_solar",
+                    "source_off_before_policy_selection",
+                ),
+                evidence={
+                    "session_kind": spa_session_kind.value,
+                    "selected_source": "solar_preferred",
+                    "raw_heater_id": "HXSLR",
+                },
+                evidence_usable=True,
+                blockers=(),
+            )
         inherited_gas_requires_neutralization = bool(
             spa_active
             and spa_session_kind is SpaSessionKind.EXTERNAL_USER
