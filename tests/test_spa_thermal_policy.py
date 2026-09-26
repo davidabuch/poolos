@@ -3,7 +3,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from poolos.spa_thermal_policy import SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState, SpaThermalPolicyTracker, SpaUserSource
+from poolos.spa_thermal_policy import (
+    SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState,
+    SpaSessionKind, SpaThermalPolicyTracker, SpaUserSource,
+    spa_manual_off_requires_autonomy_suppression,
+)
 from poolos.thermal_source_policy import HeatSourcePermissions, ThermalHeatSource
 
 
@@ -42,6 +46,37 @@ def test_all_user_sources_create_and_end_one_spa_in_use_session(source: SpaUserS
     assert active.spa_in_use
     assert active.state is SpaPolicyState.SPA_IN_USE_HEAT_UP
     assert not off.spa_in_use
+
+
+def test_external_user_spa_off_never_suppresses_future_autonomy() -> None:
+    assert not spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=SpaSessionKind.EXTERNAL_USER,
+        assessed_session_kind=None,
+        assessed_spa_active=True,
+    )
+
+
+def test_external_user_assessment_survives_retired_body_adoption_for_off() -> None:
+    # Live Sep 26 failure: planner still had an active external-user Spa session
+    # while BODY-adoption provenance had already retired from the ownership lease.
+    assert not spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=None,
+        assessed_session_kind=SpaSessionKind.EXTERNAL_USER,
+        assessed_spa_active=True,
+    )
+
+
+def test_stale_or_inactive_external_user_assessment_cannot_cancel_opportunistic_restraint() -> None:
+    assert spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=None,
+        assessed_session_kind=SpaSessionKind.EXTERNAL_USER,
+        assessed_spa_active=False,
+    )
+    assert spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        assessed_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        assessed_spa_active=True,
+    )
 
 
 def test_user_spa_uses_gas_immediately_when_roof_is_below_solar_threshold() -> None:

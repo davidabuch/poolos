@@ -81,7 +81,10 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment  # noqa: E402
-from poolos.spa_thermal_policy import SpaSessionKind  # noqa: E402
+from poolos.spa_thermal_policy import (  # noqa: E402
+    SpaSessionKind,
+    spa_manual_off_requires_autonomy_suppression,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,11 +185,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
 
     def arm_manual_spa_off(suppressed_at: datetime) -> None:
-        # OFF ends a homeowner-started/adopted Spa BODY session.  It must not
+        # OFF ends a homeowner-started/adopted Spa BODY session. It must not
         # globally disable a later independent opportunistic Spa opportunity.
-        # A PoolOS-started opportunistic Spa still needs the pre-delivery
-        # restraint so an explicit operator OFF cannot be immediately replayed.
-        if spa_session_kind_provider() is SpaSessionKind.EXTERNAL_USER:
+        # BODY adoption provenance can retire before the OFF request reaches
+        # this gateway, so preserve a same-native-epoch external-user
+        # classification while Spa is still physically active.
+        ownership_kind = spa_session_kind_provider()
+        assessed_kind: SpaSessionKind | None = None
+        assessed_spa_active: bool | None = None
+        native = coordinator.native_intellicenter_snapshot
+        assessment = thermal_runtime.assessment
+        if (
+            native is not None
+            and assessment is not None
+            and assessment.generated_at == native.generated_at
+        ):
+            hot_tub = assessment.hot_tub
+            assessed_spa_active = hot_tub.body_active
+            raw_kind = hot_tub.plan.desired.evidence.get("session_kind")
+            if isinstance(raw_kind, str):
+                try:
+                    assessed_kind = SpaSessionKind(raw_kind)
+                except ValueError:
+                    assessed_kind = None
+
+        if not spa_manual_off_requires_autonomy_suppression(
+            ownership_session_kind=ownership_kind,
+            assessed_session_kind=assessed_kind,
+            assessed_spa_active=assessed_spa_active,
+        ):
             return
         spa_automatic_control.suppress(
             source=SpaAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,

@@ -30,6 +30,24 @@ class SpaSessionKind(str, Enum):
     POOLOS_OPPORTUNISTIC = "poolos_opportunistic"
 
 
+def spa_manual_off_requires_autonomy_suppression(
+    *,
+    ownership_session_kind: SpaSessionKind | None,
+    assessed_session_kind: SpaSessionKind | None,
+    assessed_spa_active: bool | None,
+) -> bool:
+    """Return whether manual Spa OFF should suppress later autonomous Spa work."""
+
+    if ownership_session_kind is SpaSessionKind.EXTERNAL_USER:
+        return False
+    if (
+        assessed_spa_active is True
+        and assessed_session_kind is SpaSessionKind.EXTERNAL_USER
+    ):
+        return False
+    return True
+
+
 class SpaPolicyState(str, Enum):
     IDLE = "idle"
     SPA_IN_USE_HEAT_UP = "spa_in_use_heat_up"
