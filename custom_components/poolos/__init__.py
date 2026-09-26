@@ -236,6 +236,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     spa_session_kind_provider = thermal_automatic_runtime.driver.spa_session_kind
     external_change_runtime.spa_session_kind_provider = spa_session_kind_provider
+    thermal_runtime.set_spa_thermal_operator_owned_provider(
+        thermal_automatic_runtime.driver.spa_thermal_operator_owned
+    )
 
     def current_operator_context() -> dict[str, object] | None:
         lease = thermal_runtime_orchestrator.ownership.state.lease
