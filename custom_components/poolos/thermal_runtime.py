@@ -92,6 +92,11 @@ class PoolOSThermalRuntime:
         init=False,
         repr=False,
     )
+    _spa_thermal_operator_owned_provider: Callable[[], bool] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     _probe_execution_provider: Callable[
         [], PoolTemperatureProbeExecutionEvidence | None
     ] | None = field(default=None, init=False, repr=False)
@@ -164,6 +169,14 @@ class PoolOSThermalRuntime:
         """Attach in-memory autonomous Spa provenance without persisting it."""
 
         self._spa_session_kind_provider = provider
+
+    def set_spa_thermal_operator_owned_provider(
+        self,
+        provider: Callable[[], bool] | None,
+    ) -> None:
+        """Attach exact current Spa THERMAL operator provenance."""
+
+        self._spa_thermal_operator_owned_provider = provider
 
     def set_requested_mode(
         self,
@@ -347,6 +360,11 @@ class PoolOSThermalRuntime:
                         None
                         if self._spa_session_kind_provider is None
                         else self._spa_session_kind_provider()
+                    ),
+                    spa_thermal_operator_owned=(
+                        False
+                        if self._spa_thermal_operator_owned_provider is None
+                        else self._spa_thermal_operator_owned_provider()
                     ),
                     pump_session_body=(
                         None if pump_session is None else pump_session.body
