@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
 
@@ -17,7 +17,10 @@ from poolos.external_change import (
 from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
+from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
@@ -27,6 +30,7 @@ from poolos.pool_automatic_control_suppression import (
 )
 from poolos.thermal_execution_planning import ThermalPlanDisposition
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
+from poolos.spa_thermal_policy import SpaSessionKind
 
 from .thermal_runtime import PoolOSThermalRuntime
 
@@ -45,6 +49,8 @@ class PoolOSExternalChangeRuntime:
     pool_automatic_control: PoolAutomaticControlSuppression | None = None
     spa_automatic_control: SpaAutomaticControlSuppression | None = None
     owned_intent_provider: Callable[[], Mapping[str, object]] | None = None
+    operator_context_provider: Callable[[], Mapping[str, object] | None] | None = None
+    spa_session_kind_provider: Callable[[], SpaSessionKind | None] | None = None
     monitor: ExternalNativeChangeMonitor = field(init=False)
     _connection_generation: int | None = field(default=None, init=False, repr=False)
     _ownership_blockers: tuple[str, ...] = field(default=(), init=False, repr=False)
@@ -99,6 +105,7 @@ class PoolOSExternalChangeRuntime:
             transport,
             ownership=ownership,
         )
+        batch = self._attribute_operator_intent(batch)
         # Preserve one latest event per canonical thermal/hydraulic takeover
         # concept. Later unrelated transitions or correlated PoolOS consequences
         # cannot erase an earlier lease-relevant takeover. Consumers still apply
@@ -155,12 +162,27 @@ class PoolOSExternalChangeRuntime:
                         reason="external_authoritative_pool_on_to_off",
                     )
         if self.spa_automatic_control is not None:
+            spa_session_kind = (
+                None
+                if self.spa_session_kind_provider is None
+                else self.spa_session_kind_provider()
+            )
             for event in batch.events:
-                if (
+                if not (
                     event.concept == "spa.active"
                     and event.previous_value is True
                     and event.new_value is False
                 ):
+                    continue
+                if (
+                    self.spa_session_kind_provider is None
+                    or spa_session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+                ):
+                    # Operator OFF during a PoolOS-started opportunistic Spa
+                    # must cancel recreation of that autonomous session.  An
+                    # operator ending their own adopted Spa BODY session is
+                    # already the session boundary and must not globally
+                    # disable a later independent opportunistic opportunity.
                     self.spa_automatic_control.suppress(
                         source=SpaAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
                         suppressed_at=event.observed_at,
@@ -176,6 +198,80 @@ class PoolOSExternalChangeRuntime:
                 EVENT_POOLOS_EXTERNAL_CHANGE,
                 dict(event.as_event_data()),
             )
+
+    def _attribute_operator_intent(
+        self,
+        batch: ExternalChangeBatch,
+    ) -> ExternalChangeBatch:
+        """Bind controller intent changes to the exact current ownership epoch.
+
+        Configured PMPCIRC SPEED and body raw-heater selection are commissioned
+        controller intent surfaces. Actual motor RPM remains verification evidence
+        only. PoolOS-correlated consequences are absent from batch.events before
+        this boundary, so they cannot be reclassified as operator intervention.
+        A transition must also be strictly newer than the ownership boundary;
+        same-frame startup/native consequences cannot manufacture manual intent.
+        """
+
+        if self.operator_context_provider is None:
+            return batch
+        context = self.operator_context_provider()
+        if not context:
+            return batch
+        body = context.get("body")
+        generation = context.get("generation")
+        session_id = context.get("session_id")
+        established_at = context.get("established_at")
+        if (
+            body not in {"pool", "hot_tub"}
+            or type(generation) is not int
+            or generation < 1
+            or not isinstance(session_id, str)
+            or not session_id
+            or not isinstance(established_at, datetime)
+        ):
+            return batch
+        prefix = "pool" if body == "pool" else "spa"
+        pump_concept = (
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            if prefix == "pool"
+            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        )
+        attributed = []
+        for event in batch.events:
+            domain = None
+            equipment_id = None
+            if event.concept == pump_concept:
+                domain = OwnershipDomain.PUMP
+                equipment_id = "pump.rpm"
+            elif event.concept == f"{prefix}.raw_heater_id":
+                domain = OwnershipDomain.THERMAL
+                equipment_id = f"{prefix}.raw_heater_id"
+            if (
+                domain is None
+                or event.observed_at <= established_at
+                or event.positive_operator_evidence is not None
+            ):
+                attributed.append(event)
+                continue
+            attributed.append(
+                replace(
+                    event,
+                    positive_operator_evidence=PositiveOperatorEvidence(
+                        request_id="native-operator:" + event.event_id,
+                        authority_generation=generation,
+                        body_session_id=session_id,
+                        domain=domain,
+                        equipment_id=equipment_id,
+                        requested_at=event.observed_at,
+                    ),
+                    reason_code="positive_operator_controller_intent",
+                )
+            )
+        return ExternalChangeBatch(
+            tuple(attributed),
+            batch.correlated_consequences,
+        )
 
     def maintenance_exited(self) -> None:
         """Adopt current truth as a fresh prospective comparison baseline."""

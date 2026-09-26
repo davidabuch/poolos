@@ -64,10 +64,10 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.49",
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.71",
         "pyintellicenter==0.1.20",
     ]
-    assert manifest["version"] == "0.11.49"
+    assert manifest["version"] == "0.11.71"
 
 
 def test_custom_integration_uses_runtime_english_translation() -> None:
@@ -179,3 +179,32 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     reset = button[button.index("class PoolOSResetControlButton"):]
     assert "pool_automatic_control.resume" in reset
     assert "spa_automatic_control.resume" in reset
+
+    # Once Reset authority opens, every subsequent lifecycle operation must be
+    # inside the protected region. A setup/session exception before the old
+    # try block was able to strand reset_recovery_active forever.
+    begin = reset.index("authority.begin_reset_recovery()")
+    protected = reset.index("try:", begin)
+    restrictive = reset.index("restrictive_authority_changed(", begin)
+    assert begin < protected < restrictive
+
+    # Reset closes only after a verified safe baseline. IntelliCenter may
+    # take tens of seconds to settle body/source/pump Off, so both the normal
+    # path and an exceptional path must use a bounded reobservation window
+    # rather than one immediate snapshot.
+    assert "safe_baseline_verified = await self._async_verify_reset_baseline()" in reset
+    verifier = reset[reset.index("async def _async_verify_reset_baseline"):]
+    assert "for attempt in range(16):" in verifier
+    assert "await self.coordinator.async_request_refresh()" in verifier
+    assert "await asyncio.sleep(2)" in verifier
+    assert "if self._safe_reset_baseline():" in verifier
+
+    finally_block = reset[reset.index("finally:", protected):]
+    assert "if not safe_baseline_verified:" in finally_block
+    assert "await self._async_verify_reset_baseline()" in finally_block
+    assert "self._reset_running = False" in finally_block
+    assert "self._observe_reset_completion()" in finally_block
+    continuation = reset[reset.index("def _observe_reset_completion"):reset.index("@property")]
+    assert "self._safe_reset_baseline()" in continuation
+    assert "authority.finish_reset_recovery()" in continuation
+    assert "await " not in continuation

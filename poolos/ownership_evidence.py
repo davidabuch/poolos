@@ -43,10 +43,14 @@ class OwnershipEvidenceKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PositiveOperatorEvidence:
-    """Trusted explicit request, never inferred from its physical consequence.
+    """Trusted operator intent, never inferred from ordinary physical consequence.
 
-Adapters must supply the original request identity and originating generation.
-An uncorrelated IntelliCenter callback is not a source for this record.
+Evidence may originate from an explicit request boundary or from a fresh
+authoritative transition of a specifically commissioned controller intent
+surface (for example configured PMPCIRC SPEED or selected body heat source).
+Actual motor RPM, heating activation, matching state, and unexplained physical
+drift are never sufficient. Adapters must bind the evidence to the exact
+current body-session generation and a stable evidence identity.
 """
 
     request_id: str
@@ -134,6 +138,9 @@ class DomainOwnershipState:
     evidence_kind: OwnershipEvidenceKind | None = None
     episode: ReconciliationEpisode | None = None
     positive_operator_evidence: PositiveOperatorEvidence | None = None
+    # Consumed intent is not source/command provenance. Keep its chronology so
+    # replay cannot turn a completed policy hand-back into a new override.
+    last_handback_evidence: PositiveOperatorEvidence | None = None
     command_blocker: str | None = "ownership_origin_unavailable"
     target_value: bool | int | str | None = None
     observed_value: bool | int | float | str | None = None

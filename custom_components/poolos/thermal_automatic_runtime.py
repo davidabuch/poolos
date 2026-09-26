@@ -282,6 +282,12 @@ class PoolOSThermalAutomaticRuntime:
     _cleanup_topology_reobservation_provenance_id: str | None = field(
         default=None, init=False, repr=False
     )
+    _spa_startup_topology_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
+    _spa_startup_topology_reobservation_token: str | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
@@ -679,6 +685,11 @@ class PoolOSThermalAutomaticRuntime:
             cleanup_task.cancel()
             await asyncio.gather(cleanup_task, return_exceptions=True)
         self._cleanup_topology_reobservation_task = None
+        spa_topology_task = self._spa_startup_topology_reobservation_task
+        if spa_topology_task is not None and not spa_topology_task.done():
+            spa_topology_task.cancel()
+            await asyncio.gather(spa_topology_task, return_exceptions=True)
+        self._spa_startup_topology_reobservation_task = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -753,16 +764,33 @@ class PoolOSThermalAutomaticRuntime:
             if asyncio.current_task() is self._owned_pump_session_reobservation_task:
                 self._owned_pump_session_reobservation_task = None
 
+    def _cleanup_topology_reobservation_identity(self) -> str | None:
+        """Identify either cleanup boundary without granting command authority.
+
+        Source-Off evidence can block transfer out of the residual. Waiting for
+        captured cleanup provenance before requesting that evidence deadlocks
+        unchanged native BODY/source values. Each transfer has its own fixed
+        chronology boundary and therefore needs its own read-only observation.
+        """
+
+        provenance = getattr(self.driver, "cleanup_provenance", None)
+        if provenance is not None:
+            return provenance.provenance_id
+        ownership = getattr(self.orchestrator, "ownership", None)
+        residual = getattr(ownership, "residual_termination", None)
+        if residual is not None:
+            return residual.entitlement_id
+        return None
+
     def _sync_cleanup_topology_reobservation(self) -> None:
         """Request one post-boundary native topology refresh per cleanup provenance."""
 
         if self._unloaded or not self.driver.requested_enabled:
             return
-        provenance = getattr(self.driver, "cleanup_provenance", None)
-        if provenance is None:
+        provenance_id = self._cleanup_topology_reobservation_identity()
+        if provenance_id is None:
             self._cleanup_topology_reobservation_provenance_id = None
             return
-        provenance_id = provenance.provenance_id
         if self._cleanup_topology_reobservation_provenance_id == provenance_id:
             return
         task = self._cleanup_topology_reobservation_task
@@ -780,8 +808,7 @@ class PoolOSThermalAutomaticRuntime:
         try:
             if self._unloaded:
                 return
-            provenance = getattr(self.driver, "cleanup_provenance", None)
-            if provenance is None or provenance.provenance_id != provenance_id:
+            if self._cleanup_topology_reobservation_identity() != provenance_id:
                 return
             refresh = getattr(
                 self.coordinator,
@@ -798,6 +825,59 @@ class PoolOSThermalAutomaticRuntime:
         finally:
             if asyncio.current_task() is self._cleanup_topology_reobservation_task:
                 self._cleanup_topology_reobservation_task = None
+
+    def _sync_spa_startup_topology_reobservation(self) -> bool:
+        """Start one immediate read-only BODY refresh per accepted Spa startup command."""
+
+        if self._unloaded or not self.driver.requested_enabled:
+            return False
+        token = self.driver.opportunistic_spa_topology_reobservation_token()
+        if token is None:
+            return False
+        if self._spa_startup_topology_reobservation_token == token:
+            return False
+        task = self._spa_startup_topology_reobservation_task
+        if task is not None and not task.done():
+            return True
+        self._spa_startup_topology_reobservation_token = token
+        self._spa_startup_topology_reobservation_task = self.hass.async_create_task(
+            self._refresh_spa_startup_topology_once(token),
+            "PoolOS Spa startup native topology reobservation",
+        )
+        return True
+
+    async def _refresh_spa_startup_topology_once(self, token: str) -> None:
+        """Acquire fresh BODY STATUS without issuing any equipment command."""
+
+        try:
+            if self._unloaded:
+                return
+            if self.driver.opportunistic_spa_topology_reobservation_token() != token:
+                return
+            refresh = getattr(
+                self.coordinator,
+                "async_refresh_native_thermal_topology_evidence",
+                None,
+            )
+            if refresh is None:
+                return
+            await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS Spa startup native topology reobservation failed")
+        finally:
+            if asyncio.current_task() is self._spa_startup_topology_reobservation_task:
+                self._spa_startup_topology_reobservation_task = None
+            # If the refresh could not publish a newer native snapshot, allow
+            # the normal latest-frame path to continue toward its fixed deadline.
+            if not self._unloaded and self.driver.requested_enabled:
+                latest = self._latest_frame
+                if (
+                    latest is not None
+                    and latest.epoch_identity != self.driver.last_epoch_identity
+                ):
+                    self._schedule_if_idle()
 
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
@@ -848,6 +928,8 @@ class PoolOSThermalAutomaticRuntime:
         self._sync_owned_pump_session_reobservation()
         self._sync_cleanup_topology_reobservation()
         if self._unloaded or not self.driver.requested_enabled:
+            return
+        if self._sync_spa_startup_topology_reobservation():
             return
         latest = self._latest_frame
         if (

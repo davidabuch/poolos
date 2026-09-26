@@ -30,7 +30,12 @@ from .intellicenter_readonly import (
 )
 from .pump_priming_policy import PumpPrimingPolicy
 from .operating_baselines import PumpOperatingBaselines
-from .spa_thermal_policy import SpaHeatingMode, SpaPolicyAssessment, SpaPolicyInput
+from .spa_thermal_policy import (
+    SpaHeatingMode,
+    SpaPolicyAssessment,
+    SpaPolicyInput,
+    SpaSessionKind,
+)
 from .thermal_source_policy import (
     PoolHeatingMode,
     ThermalHeatSource,
@@ -89,10 +94,13 @@ class ThermalDesiredState:
                 if self.reason_code not in {
                     "pool_temperature_probe_required",
                     "spa_temperature_acquisition_required",
+                    "spa_heat_up_solar_qualifying",
                     "opportunistic_target_cap_reached",
                     "opportunistic_roof_low_hold",
                     "six_pm_preserve",
                     "external_spa_session_operating_purpose",
+                    "external_spa_inherited_gas_neutralization",
+                    "external_spa_solar_preferred_policy_handback",
                     "active_pool_session_operating_purpose",
                     "solar_recovery_hold",
                 }:
@@ -304,6 +312,67 @@ def desired_spa_state(
         effective_blockers += ("required_spa_thermal_evidence_unavailable",)
     if permission_blocked:
         effective_blockers += ("heat_source_permission_veto",)
+    if assessment.reason_code == "opportunistic_waiting_for_idle_hydraulics":
+        # Qualification may continue while Pool hydraulics are finishing, but
+        # there must be no dormant-Spa source/body/pump mutation until a fresh
+        # idle frame proves the isolated start boundary.
+        effective_blockers += ("opportunistic_start_waiting_for_idle_hydraulics",)
+
+    opportunistic_temperature_acquisition = (
+        assessment.session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+        and (
+            observation.opportunistic_start_ready
+            or observation.spa_active
+        )
+        and assessment.heat_source is ThermalHeatSource.SOLAR
+        and observation.spa_target_f is not None
+        and not spa_temperature_available
+    )
+    if opportunistic_temperature_acquisition:
+        # Dormant Spa temperature is deliberately untrusted.  A qualified
+        # Solar opportunity may therefore establish only an isolated,
+        # provenance-bound temperature-acquisition purpose first.  Heating
+        # remains forbidden until a later exclusive-Spa circulation frame
+        # supplies trusted temperature evidence.
+        return ThermalDesiredState(
+            evaluated_at=assessment.evaluated_at,
+            body=ThermalBody.HOT_TUB,
+            requested_mode=observation.heating_mode.value,
+            selected_source=PhysicalHeatMode.OFF,
+            required_pump_rpm=1500,
+            reason_code="spa_temperature_acquisition_required",
+            rpm_reason_code="spa_temperature_acquisition_required",
+            rationale=(
+                "Acquire trusted Spa bulk-water temperature before opportunistic heating.",
+            ),
+            criteria=(
+                "poolos_opportunistic",
+                "commissioned_spa_temperature_acquisition",
+                "gas_fallback_forbidden",
+            ),
+            evidence={
+                "spa_temperature_f": observation.spa_temperature_f,
+                "spa_target_f": observation.spa_target_f,
+                "collector_temperature_f": observation.collector_temperature_f,
+                "spa_active": observation.spa_active,
+                "spa_in_use": False,
+                "pool_demand_satisfied": observation.pool_demand_satisfied,
+                "higher_priority_conflict": observation.higher_priority_conflict,
+                "session_kind": SpaSessionKind.POOLOS_OPPORTUNISTIC.value,
+                "spa_temperature_trusted": False,
+                "opportunistic_start_ready": True,
+                "active_heat_source": observation.active_heat_source.value,
+                "active_heat_source_usable": observation.active_heat_source_usable,
+                "active_operating_purpose": "temperature_acquisition",
+            },
+            evidence_usable=evidence_usable and not permission_blocked,
+            blockers=tuple(
+                blocker
+                for blocker in effective_blockers
+                if blocker != "required_spa_thermal_evidence_unavailable"
+            ),
+        )
+
     session_kind = "user_session" if assessment.spa_in_use else "opportunistic"
     criteria = (
         session_kind,
@@ -341,6 +410,7 @@ def desired_spa_state(
             "spa_temperature_trusted": observation.spa_temperature_trusted,
             "active_heat_source": observation.active_heat_source.value,
             "active_heat_source_usable": observation.active_heat_source_usable,
+            "opportunistic_start_ready": observation.opportunistic_start_ready,
             "active_operating_purpose": (
                 "solar_heating"
                 if observation.active_heat_source is ThermalHeatSource.SOLAR
@@ -422,7 +492,10 @@ class ThermalExecutionPlanBuilder:
         if blockers:
             return self._non_ready(desired, current, blockers)
 
-        source_changed = current.selected_source is not desired.selected_source
+        source_changed = (
+            current.selected_source is not desired.selected_source
+            or bool(desired.evidence.get("force_source_command"))
+        )
         desired_rpm = desired.required_pump_rpm
         rpm_physically_converged = (
             desired_rpm is not None
@@ -550,6 +623,11 @@ class ThermalExecutionPlanBuilder:
                 }
                 metadata = {
                     "verification_truth": "authoritative_native_body_active",
+                    **(
+                        {"spa_opportunistic_body_activation": "true"}
+                        if opportunistic_spa_start
+                        else {}
+                    ),
                 }
             elif kind == "prime":
                 assert self.pump_equipment_id is not None

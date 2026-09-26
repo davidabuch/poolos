@@ -60,6 +60,8 @@ from poolos.physical_command_authority import (  # noqa: E402
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.operating_baselines import PumpOperatingBaselines  # noqa: E402
+from poolos.ownership_evidence import OwnershipDomain  # noqa: E402
+from poolos.external_change import ExternalChangeBatch  # noqa: E402
 from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
@@ -79,6 +81,10 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment  # noqa: E402
+from poolos.spa_thermal_policy import (  # noqa: E402
+    SpaSessionKind,
+    spa_manual_off_requires_autonomy_suppression,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +170,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     spa_automatic_control = SpaAutomaticControlSuppression()
+    def initial_spa_session_kind():
+        return None
+
+    spa_session_kind_provider = initial_spa_session_kind
 
     def arm_manual_pool_off(suppressed_at: datetime) -> None:
         pool_automatic_control.suppress(
@@ -175,6 +185,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
 
     def arm_manual_spa_off(suppressed_at: datetime) -> None:
+        # OFF ends a homeowner-started/adopted Spa BODY session. It must not
+        # globally disable a later independent opportunistic Spa opportunity.
+        # BODY adoption provenance can retire before the OFF request reaches
+        # this gateway, so preserve a same-native-epoch external-user
+        # classification while Spa is still physically active.
+        ownership_kind = spa_session_kind_provider()
+        assessed_kind: SpaSessionKind | None = None
+        assessed_spa_active: bool | None = None
+        native = coordinator.native_intellicenter_snapshot
+        assessment = thermal_runtime.assessment
+        if (
+            native is not None
+            and assessment is not None
+            and assessment.generated_at == native.generated_at
+        ):
+            hot_tub = assessment.hot_tub
+            assessed_spa_active = hot_tub.body_active
+            raw_kind = hot_tub.plan.desired.evidence.get("session_kind")
+            if isinstance(raw_kind, str):
+                try:
+                    assessed_kind = SpaSessionKind(raw_kind)
+                except ValueError:
+                    assessed_kind = None
+
+        if not spa_manual_off_requires_autonomy_suppression(
+            ownership_session_kind=ownership_kind,
+            assessed_session_kind=assessed_kind,
+            assessed_spa_active=assessed_spa_active,
+        ):
+            return
         spa_automatic_control.suppress(
             source=SpaAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
             suppressed_at=suppressed_at,
@@ -226,6 +266,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     external_change_runtime.owned_intent_provider = (
         thermal_automatic_runtime.driver.external_change_owned_intent
     )
+    spa_session_kind_provider = thermal_automatic_runtime.driver.spa_session_kind
+    external_change_runtime.spa_session_kind_provider = spa_session_kind_provider
+    def spa_thermal_operator_owned_or_current_intent() -> bool:
+        if thermal_automatic_runtime.driver.spa_thermal_operator_owned():
+            return True
+        native = coordinator.native_intellicenter_snapshot
+        if native is None:
+            return False
+        return any(
+            event.concept == "spa.raw_heater_id"
+            and event.observed_at == native.generated_at
+            and event.positive_operator_evidence is not None
+            and event.positive_operator_evidence.domain is OwnershipDomain.THERMAL
+            for event in external_change_runtime.latest_batch.events
+        )
+
+    thermal_runtime.set_spa_thermal_operator_owned_provider(
+        spa_thermal_operator_owned_or_current_intent
+    )
+
+    def current_operator_context() -> dict[str, object] | None:
+        lease = thermal_runtime_orchestrator.ownership.state.lease
+        if lease is None or lease.status.value != "owned":
+            return None
+        return {
+            "body": lease.body.value,
+            "generation": (
+                lease.body_session_generation
+                if lease.body_session_generation is not None
+                else lease.generation
+            ),
+            "session_id": lease.body_session_id or lease.lease_id,
+            "established_at": lease.established_at,
+        }
+
+    external_change_runtime.operator_context_provider = current_operator_context
     filtration_automatic_runtime = PoolOSFiltrationAutomaticRuntime(
         hass=hass,
         coordinator=coordinator,
@@ -372,6 +448,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
 
         synchronize_pump_session(native, transport, connection_generation)
         external_change_runtime.process(native, transport, connection_generation)
+
+        # Consume commissioned configured PUMP/source intent before evaluation.
+        # Native motor consequences must not move purpose ahead of hand-back;
+        # Thermal policy evaluation must see the current domain override.
+        domain_operator_events = tuple(
+            event
+            for event in external_change_runtime.latest_batch.events
+            if event.positive_operator_evidence is not None
+            and event.positive_operator_evidence.domain in {
+                OwnershipDomain.PUMP, OwnershipDomain.THERMAL,
+            }
+        )
+        if domain_operator_events:
+            thermal_runtime_orchestrator.ownership.record_operator_events(
+                ExternalChangeBatch(domain_operator_events),
+                evaluated_at=native.generated_at,
+            )
+
         pump_speed_session.apply_external_changes(
             external_change_runtime.latest_batch,
             native,

@@ -3,7 +3,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from poolos.spa_thermal_policy import SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState, SpaThermalPolicyTracker, SpaUserSource
+from poolos.spa_thermal_policy import (
+    SpaHeatingMode, SpaPolicyConfig, SpaPolicyInput, SpaPolicyState,
+    SpaSessionKind, SpaThermalPolicyTracker, SpaUserSource,
+    spa_manual_off_requires_autonomy_suppression,
+)
 from poolos.thermal_source_policy import HeatSourcePermissions, ThermalHeatSource
 
 
@@ -11,7 +15,7 @@ LOCAL = ZoneInfo("America/Los_Angeles")
 NOW = datetime(2026, 8, 26, 14, 0, tzinfo=LOCAL)
 
 
-def observation(*, at: datetime = NOW, active: bool = False, source: SpaUserSource | None = None, spa: float = 90, target: float = 100, roof: float = 125, mode: SpaHeatingMode = SpaHeatingMode.SOLAR_PREFERRED, allowed: bool = True, pool_satisfied: bool = True, debt: timedelta = timedelta(0), conflict: bool = False, permissions: HeatSourcePermissions = HeatSourcePermissions(), active_heat_source: ThermalHeatSource | None = None) -> SpaPolicyInput:
+def observation(*, at: datetime = NOW, active: bool = False, source: SpaUserSource | None = None, spa: float = 90, target: float = 100, roof: float = 125, mode: SpaHeatingMode = SpaHeatingMode.SOLAR_PREFERRED, allowed: bool = True, pool_satisfied: bool = True, debt: timedelta = timedelta(0), conflict: bool = False, permissions: HeatSourcePermissions = HeatSourcePermissions(), active_heat_source: ThermalHeatSource | None = None, start_ready: bool = True) -> SpaPolicyInput:
     return SpaPolicyInput(
         at,
         active,
@@ -30,6 +34,7 @@ def observation(*, at: datetime = NOW, active: bool = False, source: SpaUserSour
             if active and active_heat_source is None
             else active_heat_source or ThermalHeatSource.NONE
         ),
+        opportunistic_start_ready=start_ready,
     )
 
 
@@ -43,25 +48,70 @@ def test_all_user_sources_create_and_end_one_spa_in_use_session(source: SpaUserS
     assert not off.spa_in_use
 
 
-def test_user_spa_uses_gas_immediately_without_pool_probe() -> None:
-    result = SpaThermalPolicyTracker().evaluate(observation(active=True, source=SpaUserSource.ICP, roof=129))
+def test_external_user_spa_off_never_suppresses_future_autonomy() -> None:
+    assert not spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=SpaSessionKind.EXTERNAL_USER,
+        assessed_session_kind=None,
+        assessed_spa_active=True,
+    )
+
+
+def test_external_user_assessment_survives_retired_body_adoption_for_off() -> None:
+    # Live Sep 26 failure: planner still had an active external-user Spa session
+    # while BODY-adoption provenance had already retired from the ownership lease.
+    assert not spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=None,
+        assessed_session_kind=SpaSessionKind.EXTERNAL_USER,
+        assessed_spa_active=True,
+    )
+
+
+def test_stale_or_inactive_external_user_assessment_cannot_cancel_opportunistic_restraint() -> None:
+    assert spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=None,
+        assessed_session_kind=SpaSessionKind.EXTERNAL_USER,
+        assessed_spa_active=False,
+    )
+    assert spa_manual_off_requires_autonomy_suppression(
+        ownership_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        assessed_session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        assessed_spa_active=True,
+    )
+
+
+def test_user_spa_uses_gas_immediately_when_roof_is_below_solar_threshold() -> None:
+    result = SpaThermalPolicyTracker().evaluate(
+        observation(active=True, source=SpaUserSource.ICP, roof=129)
+    )
     assert result.heat_source is ThermalHeatSource.GAS
     assert result.recommended_pump_rpm == 3000
     assert not result.pool_reprobe_allowed
 
 
-def test_heat_up_switches_gas_to_solar_after_130_for_two_minutes() -> None:
-    tracker = SpaThermalPolicyTracker()
-    first = tracker.evaluate(observation(active=True, source=SpaUserSource.HOME_ASSISTANT, roof=130))
+def test_user_spa_above_solar_threshold_waits_without_firing_gas_then_uses_solar() -> None:
+    tracker = SpaThermalPolicyTracker(
+        SpaPolicyConfig(spa_solar_roof_f=110.0)
+    )
+    first = tracker.evaluate(
+        observation(
+            active=True,
+            source=SpaUserSource.HOME_ASSISTANT,
+            roof=118,
+            active_heat_source=ThermalHeatSource.NONE,
+        )
+    )
     solar = tracker.evaluate(
         observation(
             at=NOW + timedelta(minutes=2),
             active=True,
-            roof=130,
+            roof=118,
             active_heat_source=ThermalHeatSource.SOLAR,
         )
     )
-    assert first.heat_source is ThermalHeatSource.GAS
+
+    assert first.heat_source is ThermalHeatSource.NONE
+    assert first.recommended_pump_rpm == 2600
+    assert first.reason_code == "spa_heat_up_solar_qualifying"
     assert solar.heat_source is ThermalHeatSource.SOLAR
     assert solar.recommended_pump_rpm == 2900
 
@@ -111,6 +161,62 @@ def test_opportunistic_toggle_off_blocks_entry_without_affecting_user_spa() -> N
     )
     assert autonomous.state is SpaPolicyState.IDLE
     assert user.spa_in_use
+
+
+def test_opportunistic_qualification_waits_for_clean_idle_start_boundary() -> None:
+    tracker = SpaThermalPolicyTracker()
+
+    first = tracker.evaluate(
+        observation(roof=140, start_ready=False)
+    )
+    qualified_but_waiting = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=2),
+            roof=140,
+            start_ready=False,
+        )
+    )
+    started = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=2, seconds=1),
+            roof=140,
+            start_ready=True,
+        )
+    )
+
+    assert first.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+    assert first.heat_source is ThermalHeatSource.NONE
+    assert qualified_but_waiting.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+    assert (
+        qualified_but_waiting.reason_code
+        == "opportunistic_waiting_for_idle_hydraulics"
+    )
+    assert qualified_but_waiting.heat_source is ThermalHeatSource.NONE
+    assert qualified_but_waiting.recommended_pump_rpm is None
+    assert started.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
+    assert started.heat_source is ThermalHeatSource.SOLAR
+
+
+def test_unactivated_opportunistic_intent_loses_start_readiness_without_retaining_solar() -> None:
+    tracker = SpaThermalPolicyTracker()
+    tracker.evaluate(observation(roof=140))
+    active_intent = tracker.evaluate(
+        observation(at=NOW + timedelta(minutes=2), roof=140)
+    )
+    waiting = tracker.evaluate(
+        observation(
+            at=NOW + timedelta(minutes=2, seconds=1),
+            roof=140,
+            start_ready=False,
+        )
+    )
+
+    assert active_intent.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
+    assert active_intent.heat_source is ThermalHeatSource.SOLAR
+    assert waiting.state is SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+    assert waiting.heat_source is ThermalHeatSource.NONE
+    assert waiting.recommended_pump_rpm is None
+    assert waiting.reason_code == "opportunistic_waiting_for_idle_hydraulics"
 
 
 def test_opportunistic_entry_is_not_clock_or_filtration_debt_gated() -> None:

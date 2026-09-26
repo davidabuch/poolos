@@ -30,6 +30,24 @@ class SpaSessionKind(str, Enum):
     POOLOS_OPPORTUNISTIC = "poolos_opportunistic"
 
 
+def spa_manual_off_requires_autonomy_suppression(
+    *,
+    ownership_session_kind: SpaSessionKind | None,
+    assessed_session_kind: SpaSessionKind | None,
+    assessed_spa_active: bool | None,
+) -> bool:
+    """Return whether manual Spa OFF should suppress later autonomous Spa work."""
+
+    if ownership_session_kind is SpaSessionKind.EXTERNAL_USER:
+        return False
+    if (
+        assessed_spa_active is True
+        and assessed_session_kind is SpaSessionKind.EXTERNAL_USER
+    ):
+        return False
+    return True
+
+
 class SpaPolicyState(str, Enum):
     IDLE = "idle"
     SPA_IN_USE_HEAT_UP = "spa_in_use_heat_up"
@@ -74,6 +92,7 @@ class SpaPolicyInput:
     spa_temperature_trusted: bool = True
     active_heat_source: ThermalHeatSource = ThermalHeatSource.NONE
     active_heat_source_usable: bool = True
+    opportunistic_start_ready: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +202,22 @@ class SpaThermalPolicyTracker:
         lost = self._below_130_since is not None and observation.evaluated_at - self._below_130_since >= self._policy.qualification_hold
         if observation.permissions.solar_allowed and (qualified or (currently_solar and not lost)):
             return self._solar(observation, "spa_heat_up_solar")
+        if (
+            observation.permissions.solar_allowed
+            and roof is not None
+            and roof >= self._policy.spa_solar_roof_f
+        ):
+            # A user-requested Spa BODY is already active.  When Eco Heat is
+            # presently qualifying, keep the same BODY session circulating
+            # without needlessly firing Gas for the qualification hold.
+            self._last_source = ThermalHeatSource.NONE
+            return self._result(
+                observation,
+                self._state,
+                ThermalHeatSource.NONE,
+                self._policy.baselines.filtration_rpm,
+                "spa_heat_up_solar_qualifying",
+            )
         return self._gas_or_none(observation, "spa_heat_up_gas")
 
     def _evaluate_opportunistic(self, observation: SpaPolicyInput) -> SpaPolicyAssessment:
@@ -208,9 +243,29 @@ class SpaThermalPolicyTracker:
                 preserve=False,
             )
 
+        if (
+            self._state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
+            and not observation.spa_active
+            and not observation.opportunistic_start_ready
+        ):
+            # Qualification is not execution authority. If an opportunistic
+            # start has not yet activated the Spa, any loss of the clean idle
+            # hydraulic boundary returns the policy to waiting without
+            # manufacturing BODY/PUMP/THERMAL ownership.
+            self._state = SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+            return self._result(
+                observation,
+                self._state,
+                ThermalHeatSource.NONE,
+                None,
+                "opportunistic_waiting_for_idle_hydraulics",
+                preserve=False,
+            )
+
         if self._state is SpaPolicyState.OPPORTUNISTIC_ACTIVE:
             if (
-                observation.spa_temperature_f is not None
+                observation.spa_temperature_trusted
+                and observation.spa_temperature_f is not None
                 and observation.spa_target_f is not None
                 and observation.spa_temperature_f >= observation.spa_target_f
             ):
@@ -267,6 +322,19 @@ class SpaThermalPolicyTracker:
             and observation.evaluated_at - self._above_130_since
             >= self._policy.qualification_hold
         )
+        if not observation.opportunistic_start_ready:
+            # Allow roof qualification to accrue while Pool work is finishing,
+            # but do not create an executable Spa Solar purpose until a fresh
+            # frame proves Pool OFF, Spa OFF, and pump stopped.
+            self._state = SpaPolicyState.OPPORTUNISTIC_QUALIFYING
+            return self._result(
+                observation,
+                self._state,
+                ThermalHeatSource.NONE,
+                None,
+                "opportunistic_waiting_for_idle_hydraulics",
+                preserve=False,
+            )
         if qualified:
             self._state = SpaPolicyState.OPPORTUNISTIC_ACTIVE
             self._below_120_since = None
