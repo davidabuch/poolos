@@ -12,9 +12,9 @@ COMPONENT = ROOT / "custom_components" / "poolos"
 
 def test_114a_version_and_adr() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.11.68"
+    assert manifest["version"] == "0.11.69"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.68",
+        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.69",
         "pyintellicenter==0.1.20",
     ]
     assert (ROOT / "docs" / "adr" / "ADR-087-high-fidelity-event-driven-observation.md").is_file()
