@@ -1305,7 +1305,7 @@ class ThermalRuntimeOwnershipManager:
                 adopted_at,
             )
 
-        if body is not ThermalBody.POOL:
+        if body not in {ThermalBody.POOL, ThermalBody.HOT_TUB}:
             return deny("body_not_commissioned")
         if not requested_mode.strip() or not execution_plan_id.strip():
             return deny("identity_incomplete")
@@ -1323,34 +1323,77 @@ class ThermalRuntimeOwnershipManager:
         ):
             return deny("currentness_mismatch")
         currentness = current_context.execution_currentness
-        if (
-            currentness is None
-            or currentness.purpose.body is not body
-            or currentness.purpose.kind
-            not in {
+        if currentness is None or currentness.purpose.body is not body:
+            return deny("independent_current_purpose_unavailable")
+        allowed_purposes = (
+            {
                 ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
                 ThermalExecutionPurposeKind.THERMAL_CONTROL,
             }
-        ):
+            if body is ThermalBody.POOL
+            else {ThermalExecutionPurposeKind.THERMAL_CONTROL}
+        )
+        if currentness.purpose.kind not in allowed_purposes:
             return deny("independent_current_purpose_unavailable")
         if evidence.requested_mode != requested_mode:
             return deny("requested_mode_changed")
+        target_active = (
+            evidence.pool_active if body is ThermalBody.POOL else evidence.spa_active
+        )
+        target_fresh = (
+            evidence.pool_activity_fresh
+            if body is ThermalBody.POOL
+            else evidence.spa_activity_fresh
+        )
+        target_usable = (
+            evidence.pool_activity_usable
+            if body is ThermalBody.POOL
+            else evidence.spa_activity_usable
+        )
+        target_observed_at = (
+            evidence.pool_activity_observed_at
+            if body is ThermalBody.POOL
+            else evidence.spa_activity_observed_at
+        )
+        other_active = (
+            evidence.spa_active if body is ThermalBody.POOL else evidence.pool_active
+        )
+        other_fresh = (
+            evidence.spa_activity_fresh
+            if body is ThermalBody.POOL
+            else evidence.pool_activity_fresh
+        )
+        other_usable = (
+            evidence.spa_activity_usable
+            if body is ThermalBody.POOL
+            else evidence.pool_activity_usable
+        )
+        other_observed_at = (
+            evidence.spa_activity_observed_at
+            if body is ThermalBody.POOL
+            else evidence.pool_activity_observed_at
+        )
         if not (
-            evidence.pool_active is True
-            and evidence.pool_activity_fresh
-            and evidence.pool_activity_usable
-            and evidence.pool_activity_observed_at is not None
-            and evidence.pool_activity_observed_at <= adopted_at
+            target_active is True
+            and target_fresh
+            and target_usable
+            and target_observed_at is not None
+            and target_observed_at <= adopted_at
         ):
-            return deny("pool_activity_unusable")
+            return deny(f"{body.value}_activity_unusable")
+        other_name = (
+            ThermalBody.HOT_TUB.value
+            if body is ThermalBody.POOL
+            else ThermalBody.POOL.value
+        )
         if not (
-            evidence.spa_active is False
-            and evidence.spa_activity_fresh
-            and evidence.spa_activity_usable
-            and evidence.spa_activity_observed_at is not None
-            and evidence.spa_activity_observed_at <= adopted_at
+            other_active is False
+            and other_fresh
+            and other_usable
+            and other_observed_at is not None
+            and other_observed_at <= adopted_at
         ):
-            return deny("spa_activity_unusable")
+            return deny(f"{other_name}_activity_unusable")
         if not evidence.shared_hydraulic_inventory_complete:
             return deny("shared_hydraulic_inventory_incomplete")
         if any(
@@ -1430,7 +1473,7 @@ class ThermalRuntimeOwnershipManager:
             command_blocker=None,
             target_value=True,
             observed_value=True,
-            observed_at=evidence.pool_activity_observed_at,
+            observed_at=target_observed_at,
         )
         pump_observed_at = evidence.pump_observed_at
         source_observed_at = evidence.heat_source_observed_at
@@ -1841,6 +1884,11 @@ class ThermalRuntimeOwnershipManager:
                     and abs(evidence.configured_pump_speed_rpm - origin.intended_value) <= self.pump_rpm_tolerance
                 )
                 expected = role in {"priming", "pool_temperature_probe", "thermal_pump_target"}
+                expected = expected or bool(
+                    lease.pump_adoption is not None
+                    and state.last_handback_evidence is not None
+                    and evidence.configured_pump_speed_rpm == lease.pump_adoption.intended_value
+                )
                 equipment = "pump.rpm"
             else:
                 origin = lease.heat_source or lease.heat_source_adoption
@@ -1860,6 +1908,8 @@ class ThermalRuntimeOwnershipManager:
                 and event.positive_operator_evidence.domain is state.domain
                 and lease.established_at <= event.positive_operator_evidence.requested_at
                 <= evidence.evaluated_at
+                and not _operator_event_consumed_by_handback(event, state)
+                and not _operator_event_is_exact_poolos_handback(event, state)
             ), None)
             origin_id = (
                 origin.adoption_id
@@ -2014,7 +2064,10 @@ class ThermalRuntimeOwnershipManager:
     ) -> str | None:
         """Additional denial only; existing exact execution authorization still applies."""
         lease = self._state.lease
-        if lease is None:
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            # Terminal leases are historical once their separately typed
+            # residual reduction has been consumed. They cannot veto the first
+            # command of a fresh independently authorized generation.
             return None
         domain = (OwnershipDomain.BODY if isinstance(operation, SetBodyActive)
                   else OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed)
@@ -2037,7 +2090,9 @@ class ThermalRuntimeOwnershipManager:
     ) -> str | None:
         """Debit one bounded attempt before invoking the existing delivery engine."""
         lease = self._state.lease
-        if lease is None:
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            # Reconciliation budgets belong to one active ownership generation.
+            # Never debit a terminal predecessor for a fresh successor command.
             return None
         domain = (OwnershipDomain.BODY if isinstance(operation, SetBodyActive)
                   else OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed)
@@ -2116,11 +2171,207 @@ class ThermalRuntimeOwnershipManager:
         """Apply trusted domain intent to the current exact body generation."""
 
         for event in events.events:
-            if event.positive_operator_evidence is not None:
-                self.record_operator_intent(
-                    event.positive_operator_evidence,
-                    evaluated_at=evaluated_at,
-                )
+            if event.positive_operator_evidence is None:
+                continue
+            lease = self._state.lease
+            if lease is not None:
+                if _operator_event_consumed_by_handback(
+                    event, lease.domain_state(event.positive_operator_evidence.domain)
+                ):
+                    continue
+                opportunity_id = "operator-handback:" + event.event_id
+                if (
+                    lease.pump_adoption is not None
+                    and lease.pump_adoption.opportunity_id == opportunity_id
+                ) or (
+                    lease.heat_source_adoption is not None
+                    and lease.heat_source_adoption.opportunity_id == opportunity_id
+                ):
+                    # The native snapshot boundary may apply the same trusted
+                    # operator event before orchestration consumes that frame.
+                    # Once an exact hand-back adoption exists, replaying the
+                    # same event must not yield the domain back to Operator.
+                    continue
+            if self._record_exact_operator_handback(
+                event,
+                evaluated_at=evaluated_at,
+            ):
+                continue
+            self.record_operator_intent(
+                event.positive_operator_evidence,
+                evaluated_at=evaluated_at,
+            )
+
+    def _record_exact_operator_handback(
+        self,
+        event: ExternalChangeEvent,
+        *,
+        evaluated_at: datetime,
+    ) -> bool:
+        """Reclaim only the exact concept deliberately returned by the operator."""
+
+        operator = event.positive_operator_evidence
+        lease = self._state.lease
+        if operator is None or lease is None:
+            return False
+        prior = lease.domain_state(operator.domain)
+        if prior.authority is not OwnershipAuthority.OPERATOR:
+            return False
+        if not operator.applies(
+            generation=lease.body_session_generation or lease.generation,
+            session_id=lease.body_session_id or lease.lease_id,
+            domain=operator.domain,
+            equipment_id=operator.equipment_id,
+            established_at=lease.established_at,
+            evaluated_at=evaluated_at,
+        ):
+            return False
+
+        if (
+            operator.domain is OwnershipDomain.THERMAL
+            and lease.body is ThermalBody.HOT_TUB
+            and event.concept == "spa.raw_heater_id"
+            and str(event.new_value) == "HXSLR"
+            and lease.requested_mode.casefold().replace("_", " ")
+            in {"solar preferred", "eco heat"}
+        ):
+            # Pentair Solar Preferred is a policy-selection surface, not proof
+            # that Solar is physically active. A fresh HXSLR transition ends
+            # operator THERMAL ownership, but PoolOS must earn new THERMAL
+            # ownership from an accepted/verified source command. Keep the
+            # domain open (NONE) here rather than manufacturing H0002 provenance.
+            states = {state.domain: state for state in lease.domain_states}
+            states[OwnershipDomain.THERMAL] = replace(
+                prior,
+                authority=OwnershipAuthority.NONE,
+                health=OwnershipHealth.PENDING,
+                evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+                episode=None,
+                positive_operator_evidence=None,
+                command_blocker=None,
+                target_value=None,
+                observed_value="HXSLR",
+                observed_at=event.observed_at,
+                last_handback_evidence=operator,
+            )
+            policy_verified = tuple(
+                item
+                for item in lease.verified_concepts
+                if item is not ThermalRuntimeOwnedConcept.HEAT_SOURCE
+            )
+            updated = replace(
+                lease,
+                last_confirmed_at=max(lease.last_confirmed_at, event.observed_at),
+                reason_code="runtime_ownership_operator_handback:thermal_policy",
+                heat_source=None,
+                heat_source_accepted_at=None,
+                heat_source_adoption=None,
+                verified_concepts=policy_verified,
+                domain_states=tuple(states.values()),
+            )
+            self._state = replace(
+                self._state,
+                lease=updated,
+                reason_code=updated.reason_code,
+            )
+            return True
+
+        intended_value: int | PhysicalHeatMode | None = None
+        matches_prior_target = False
+        if operator.domain is OwnershipDomain.PUMP:
+            if (
+                event.concept
+                not in {
+                    "pool.pump_circuit.configured_speed_rpm",
+                    "spa.pump_circuit.configured_speed_rpm",
+                }
+                or type(event.new_value) not in {int, float}
+                or isinstance(event.new_value, bool)
+            ):
+                return False
+            intended_value = int(event.new_value)
+            matches_prior_target = intended_value == prior.target_value
+        elif operator.domain is OwnershipDomain.THERMAL:
+            if event.concept not in {"pool.raw_heater_id", "spa.raw_heater_id"}:
+                return False
+            intended_value = {
+                "00000": PhysicalHeatMode.OFF,
+                "H0001": PhysicalHeatMode.GAS,
+                "H0002": PhysicalHeatMode.SOLAR,
+            }.get(str(event.new_value))
+            matches_prior_target = (
+                intended_value is not None
+                and prior.target_value in {intended_value, intended_value.value}
+            )
+        else:
+            return False
+
+        if intended_value is None or not matches_prior_target:
+            return False
+
+        concept = (
+            ThermalRuntimeOwnedConcept.PUMP_SETPOINT
+            if operator.domain is OwnershipDomain.PUMP
+            else ThermalRuntimeOwnedConcept.HEAT_SOURCE
+        )
+        opportunity_id = "operator-handback:" + event.event_id
+        adoption = ThermalRuntimeConceptAdoption(
+            adoption_id=_concept_adoption_id(
+                generation=lease.generation,
+                concept=concept,
+                opportunity_id=opportunity_id,
+                adopted_at=event.observed_at,
+            ),
+            concept=concept,
+            intended_value=intended_value,
+            observed_at=event.observed_at,
+            opportunity_id=opportunity_id,
+            reason_code="operator_exact_desired_state_handback",
+            adopted_at=event.observed_at,
+        )
+        states = {state.domain: state for state in lease.domain_states}
+        states[operator.domain] = replace(
+            prior,
+            authority=OwnershipAuthority.POOLOS,
+            health=OwnershipHealth.STABLE,
+            evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+            positive_operator_evidence=None,
+            command_blocker=None,
+            observed_value=intended_value,
+            observed_at=event.observed_at,
+            last_handback_evidence=operator,
+        )
+        verified = tuple(item for item in lease.verified_concepts if item is not concept)
+        if operator.domain is OwnershipDomain.PUMP:
+            updated = replace(
+                lease,
+                last_confirmed_at=max(lease.last_confirmed_at, event.observed_at),
+                reason_code="runtime_ownership_operator_handback:pump",
+                pump_setpoint=None,
+                pump_setpoint_accepted_at=None,
+                pump_adoption=adoption,
+                pump_session_id=None,
+                pump_session_effective_rpm=None,
+                verified_concepts=verified,
+                domain_states=tuple(states.values()),
+            )
+        else:
+            updated = replace(
+                lease,
+                last_confirmed_at=max(lease.last_confirmed_at, event.observed_at),
+                reason_code="runtime_ownership_operator_handback:thermal",
+                heat_source=None,
+                heat_source_accepted_at=None,
+                heat_source_adoption=adoption,
+                verified_concepts=verified,
+                domain_states=tuple(states.values()),
+            )
+        self._state = replace(
+            self._state,
+            lease=updated,
+            reason_code=updated.reason_code,
+        )
+        return True
 
     def promote_session_provenance(
         self,
@@ -2210,8 +2461,37 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 promoted_at,
             )
+        states = list(lease.domain_states)
+        for index, state in enumerate(states):
+            new_origin = {
+                OwnershipDomain.BODY: activation,
+                OwnershipDomain.PUMP: pump,
+                OwnershipDomain.THERMAL: source,
+            }[state.domain]
+            previous_origin = {
+                OwnershipDomain.BODY: lease.body_activation,
+                OwnershipDomain.PUMP: lease.pump_setpoint,
+                OwnershipDomain.THERMAL: lease.heat_source,
+            }[state.domain]
+            accepted_at = {
+                OwnershipDomain.BODY: ownership.body_activation_accepted_at,
+                OwnershipDomain.PUMP: ownership.pump_accepted_at,
+                OwnershipDomain.THERMAL: ownership.heat_source_accepted_at,
+            }[state.domain]
+            if (
+                state.authority is OwnershipAuthority.NONE
+                and state.last_handback_evidence is not None
+                and new_origin is not None and new_origin != previous_origin
+                and accepted_at is not None
+                and state.last_handback_evidence.requested_at < accepted_at <= promoted_at
+            ):
+                states[index] = replace(
+                    state, authority=OwnershipAuthority.POOLOS,
+                    health=OwnershipHealth.PENDING, episode=None, command_blocker=None,
+                )
         promoted = replace(
             lease,
+            domain_states=tuple(states),
             last_confirmed_at=promoted_at,
             reason_code="runtime_ownership_promoted:accepted_session_delivery",
             body_activation=activation or lease.body_activation,
@@ -2435,6 +2715,8 @@ class ThermalRuntimeOwnershipManager:
     def evaluate_pending_successor(
         self,
         evidence: ThermalRuntimeOwnershipEvidence,
+        *,
+        check_requested_mode: bool = True,
     ) -> ThermalRuntimeOwnershipDecision:
         """Retain a predecessor only while an explicit successor may be handed off.
 
@@ -2464,7 +2746,7 @@ class ThermalRuntimeOwnershipManager:
             lease,
             evidence,
             check_identity=False,
-            check_requested_mode=True,
+            check_requested_mode=check_requested_mode,
         )
         if failure is not None:
             return self._terminate(
@@ -2708,12 +2990,17 @@ class ThermalRuntimeOwnershipManager:
         if request.replace_pump_setpoint or request.replace_heat_source:
             predecessor = lease.originating_currentness
             successor = request.successor_context.execution_currentness
-            if (
-                predecessor is None
-                or successor is None
-                or not compatible_thermal_body_successor(predecessor, successor)
-                or not request.successor_requires_body_active
-            ):
+            compatible_successor = bool(
+                predecessor is not None
+                and successor is not None
+                and (
+                    compatible_thermal_body_successor(predecessor, successor)
+                    or _compatible_adopted_user_hot_tub_successor(
+                        lease, predecessor, successor
+                    )
+                )
+            )
+            if not compatible_successor or not request.successor_requires_body_active:
                 return prefix + "replacement_not_compatible_body_successor"
         return None
 
@@ -2791,25 +3078,57 @@ class ThermalRuntimeOwnershipManager:
         )
 
 
+def _compatible_adopted_user_hot_tub_successor(
+    lease: ThermalRuntimeOwnershipLease,
+    predecessor: ThermalExecutionCurrentness,
+    successor: ThermalExecutionCurrentness,
+) -> bool:
+    """Keep one witnessed user Spa BODY across reviewed Eco Heat purposes."""
+
+    adoption = lease.body_adoption
+    before, after = predecessor.purpose, successor.purpose
+    return bool(
+        adoption is not None
+        and adoption.reason_code == "witnessed_user_hot_tub_session"
+        and lease.body is ThermalBody.HOT_TUB
+        and before.body is ThermalBody.HOT_TUB
+        and after.body is ThermalBody.HOT_TUB
+        and before.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+    )
+
+
 def compatible_thermal_body_successor(
     predecessor: ThermalExecutionCurrentness,
     successor: ThermalExecutionCurrentness,
 ) -> bool:
-    """Potential typed Pool successor, never permission for an old execution."""
+    """Potential typed same-BODY successor, never permission for an old execution."""
     before, after = predecessor.purpose, successor.purpose
     before_pumps = {op.equipment_id for op in predecessor.residual_plan.operations
                     if op.operation_type == "SetPumpSpeed"}
     after_pumps = {op.equipment_id for op in successor.residual_plan.operations
                    if op.operation_type == "SetPumpSpeed"}
-    return (
-        before.body is ThermalBody.POOL and after.body is ThermalBody.POOL
-        and before.kind in {ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
-                            ThermalExecutionPurposeKind.THERMAL_CONTROL}
+    shared = (
+        before.body is after.body
         and after.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
         and after.selected_source is not PhysicalHeatMode.OFF
         and before.requested_mode == after.requested_mode
         and before.target_temperature_f == after.target_temperature_f
         and (not before_pumps or not after_pumps or before_pumps == after_pumps)
+    )
+    if not shared:
+        return False
+    if before.body is ThermalBody.POOL:
+        return before.kind in {
+            ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE,
+            ThermalExecutionPurposeKind.THERMAL_CONTROL,
+        }
+    return (
+        before.body is ThermalBody.HOT_TUB
+        and before.kind is ThermalExecutionPurposeKind.THERMAL_CONTROL
+        and before.selected_source is PhysicalHeatMode.OFF
+        and before.required_pump_rpm == 1500
+        and after.selected_source is PhysicalHeatMode.SOLAR
     )
 
 
@@ -3081,6 +3400,50 @@ def _body_adoption_id(
         separators=(",", ":"),
     )
     return "thermal-body-adoption-" + sha256(payload.encode()).hexdigest()[:24]
+
+
+def _operator_event_consumed_by_handback(
+    event: ExternalChangeEvent, state: DomainOwnershipState,
+) -> bool:
+    consumed = state.last_handback_evidence
+    operator = event.positive_operator_evidence
+    return bool(
+        consumed is not None and operator is not None
+        and operator.domain is consumed.domain
+        and operator.authority_generation == consumed.authority_generation
+        and operator.body_session_id == consumed.body_session_id
+        and operator.requested_at <= consumed.requested_at
+    )
+
+
+def _operator_event_is_exact_poolos_handback(
+    event: ExternalChangeEvent,
+    state: DomainOwnershipState,
+) -> bool:
+    """Return whether an operator event exactly restores PoolOS's current target."""
+
+    if state.authority is not OwnershipAuthority.POOLOS:
+        return False
+    target = state.target_value
+    if state.domain is OwnershipDomain.PUMP:
+        return (
+            event.concept
+            in {
+                "pool.pump_circuit.configured_speed_rpm",
+                "spa.pump_circuit.configured_speed_rpm",
+            }
+            and type(event.new_value) in {int, float}
+            and not isinstance(event.new_value, bool)
+            and int(event.new_value) == target
+        )
+    if state.domain is OwnershipDomain.THERMAL:
+        mode = {
+            "00000": PhysicalHeatMode.OFF,
+            "H0001": PhysicalHeatMode.GAS,
+            "H0002": PhysicalHeatMode.SOLAR,
+        }.get(str(event.new_value))
+        return mode is not None and target in {mode, mode.value}
+    return False
 
 
 def _concept_adoption_id(

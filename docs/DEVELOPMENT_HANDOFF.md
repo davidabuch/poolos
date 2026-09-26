@@ -1,5 +1,32 @@
 # PoolOS Current Development Handoff
 
+## Recovery Reset/domain hand-back candidate — 2026-09-26
+
+Based on recovery v0.11.69 (`ddfd7d444036e60e51b9a146134084efb4aacc40`),
+`fix/recovery-reset-domain-handback` repairs observation-driven Reset completion,
+configured PUMP hand-back through native motor settling, and same-body THERMAL
+policy/source hand-back. See
+[RECOVERY_RESET_DOMAIN_HANDBACK_REVIEW.md](RECOVERY_RESET_DOMAIN_HANDBACK_REVIEW.md)
+for causal evidence, remaining physical uncertainty, safety boundaries, and the
+later acceptance sequence. No firmware timing claim or physical commissioning
+result follows from these deterministic regressions. The older candidate status
+below is historical; this pass follows the current recovery lineage.
+
+## Recovery v0.11.60 investigation — 2026-09-23
+
+The recovery-line candidate and red-before-green evidence are documented in
+[RECOVERY_V0_11_60_SPA_FORENSIC_REVIEW.md](RECOVERY_V0_11_60_SPA_FORENSIC_REVIEW.md).
+Cleanup reobservation must cover the retained residual before capture, obtain
+actual source/topology replies, and preserve strict chronology. Compatible Spa
+acquisition completion between commands uses the existing typed handoff. Spa
+shutdown now waits for post-command actual pump0 with a fixed verification
+deadline. Local validation: 3505 tests passed; Quality and upstream local Hassfest
+passed. Full hosted HACS/CI remains pending publication in the other chat. The
+seven-file candidate remains unstaged/uncommitted on
+`fix/recovery-cleanup-native-evidence`, based on recovery v0.11.60. It is not a
+release or a physical commissioning result.
+
+
 ## Purpose
 
 This document is the current working handoff for PoolOS development.

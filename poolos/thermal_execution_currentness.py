@@ -403,6 +403,69 @@ def assess_execution_compatibility(
         )
 
     residual = current.residual_plan.operations
+
+    # Opportunistic Spa temperature acquisition deliberately repeats its
+    # dormant-body source-Off precondition in each command-free planner frame.
+    # Physical Off alone is not provenance, so a brand-new opportunity must
+    # retain that prerequisite. Once this exact execution has positively
+    # verified the source-Off step, however, repeating the identical full
+    # residual plan must not erase PoolOS-attributed progress and restart the
+    # precondition forever. This exception is intentionally restricted to the
+    # Hot Tub source-Off -> BODY activation prefix.
+    verified_spa_source_precondition_repeated = (
+        len(verified) == 1
+        and accepted is None
+        and len(original) >= 2
+        and residual == original
+        and original[0].operation_type == "SetHeatMode"
+        and original[0].equipment_id == ThermalBody.HOT_TUB.value
+        and original[0].requested_value == PhysicalHeatMode.OFF.value
+        and original[0].role == "heat_source"
+        and original[1].operation_type == "SetBodyActive"
+        and original[1].equipment_id == ThermalBody.HOT_TUB.value
+        and original[1].requested_value == "true"
+        and original[1].role == "body_activation"
+        and verified[0] == original[0]
+    )
+    if verified_spa_source_precondition_repeated:
+        return result(
+            ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE,
+            "thermal_execution_verified_spa_source_precondition_repeated",
+        )
+
+    verified_spa_activation_native_circulation_supersedes_unissued_priming = (
+        accepted is None
+        and originating.purpose.body is ThermalBody.HOT_TUB
+        and originating.purpose.requested_mode == "solar_preferred"
+        and originating.purpose.selected_source is PhysicalHeatMode.OFF
+        and len(verified) >= 2
+        and len(original) >= len(verified) + 2
+        and verified[-2].operation_type == "SetHeatMode"
+        and verified[-2].equipment_id == ThermalBody.HOT_TUB.value
+        and verified[-2].requested_value == PhysicalHeatMode.OFF.value
+        and verified[-2].role == "heat_source"
+        and verified[-1].operation_type == "SetBodyActive"
+        and verified[-1].equipment_id == ThermalBody.HOT_TUB.value
+        and verified[-1].requested_value == "true"
+        and verified[-1].role == "body_activation"
+        and original[len(verified)].operation_type == "SetPumpSpeed"
+        and original[len(verified)].role == "priming"
+        and bool(residual)
+        and residual == original[len(verified) + 1 :]
+    )
+    if verified_spa_activation_native_circulation_supersedes_unissued_priming:
+        # IntelliCenter may start Spa circulation immediately as a coupled
+        # consequence of a verified PoolOS BODY activation.  That native
+        # circulation can make the not-yet-issued cold-start priming step
+        # unnecessary while leaving the exact acquisition target unchanged.
+        # Preserve only the already-proven opportunistic Spa execution; never
+        # treat physical equality alone as authority and never skip an accepted
+        # priming command.
+        return result(
+            ThermalExecutionCompatibilityDisposition.PROGRESS_COMPATIBLE,
+            "thermal_execution_verified_spa_activation_native_circulation_supersedes_unissued_priming",
+        )
+
     if (
         current.residual_plan.disposition
         is ThermalPlanDisposition.ALREADY_CONVERGED

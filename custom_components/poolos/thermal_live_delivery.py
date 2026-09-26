@@ -194,7 +194,11 @@ class ManualIntelliCenterThermalLiveDelivery:
             cleanup is not None
             and cleanup.purpose
             is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
-            and body is ThermalBody.POOL
+            and cleanup.body == body.value
+            and cleanup.cleanup_authority is not None
+            and cleanup.cleanup_authority.operation == "body_active"
+            and cleanup.cleanup_authority.target == _BODY_ID[body]
+            and cleanup.cleanup_authority.requested_value is False
         ):
             raise ValueError(
                 "autonomous thermal body deactivation is not commissioned"

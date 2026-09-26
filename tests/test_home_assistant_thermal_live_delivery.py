@@ -130,12 +130,13 @@ def cleanup_context(
     operation: str,
     target: str,
     value: bool | int,
+    body: ThermalBody = ThermalBody.POOL,
 ) -> AutomaticThermalDispatchContext:
     cleanup = AutomaticThermalCleanupAuthority(
         generation=1,
         epoch_identity="cleanup-epoch",
         candidate_identity="cleanup-candidate",
-        body="pool",
+        body=body.value,
         purpose=purpose,
         operation=operation,
         target=target,
@@ -145,7 +146,7 @@ def cleanup_context(
         generation=1,
         epoch_identity="cleanup-epoch",
         session_identity="cleanup:provenance",
-        body="pool",
+        body=body.value,
         purpose=purpose,
         cleanup_authority=cleanup,
     )
@@ -496,6 +497,34 @@ def test_adapter_delivers_exact_pool_body_cleanup_as_false() -> None:
 
     assert receipt.status is CommandStatus.ACKNOWLEDGED
     assert manual.calls == [("body", "B1101", False)]
+
+
+def test_adapter_delivers_exact_hot_tub_body_cleanup_as_false() -> None:
+    """A PoolOS-owned opportunistic Spa generation may shut down its own BODY."""
+
+    manual = FakeManualControl()
+    context = cleanup_context(
+        purpose=AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        operation="body_active",
+        target="B1202",
+        value=False,
+        body=ThermalBody.HOT_TUB,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetBodyActive(equipment_id=ThermalBody.HOT_TUB, active=False),
+            correlation_id="hot-tub-cleanup-off",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.calls == [("body", "B1202", False)]
 
 
 def test_adapter_delivers_only_exact_bound_dynamic_pump_cleanup_target() -> None:

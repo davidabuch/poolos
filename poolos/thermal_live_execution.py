@@ -1443,6 +1443,12 @@ class ThermalLiveExecutionEngine:
                 evidence.evaluated_at,
             )
         if not receipt.accepted:
+            authority_reason = receipt.details.get("authority_reason")
+            failure_reason = (
+                f"physical_authority:{authority_reason}"
+                if isinstance(authority_reason, str) and authority_reason
+                else f"delivery_{receipt.status.value}"
+            )
             status = (
                 ThermalLiveExecutionStatus.TIMED_OUT
                 if receipt.status is CommandStatus.TIMED_OUT
@@ -1457,7 +1463,7 @@ class ThermalLiveExecutionEngine:
                 delivering.lifecycle,
                 to_status=step_status,
                 occurred_at=evidence.evaluated_at,
-                reason=f"delivery_{receipt.status.value}",
+                reason=failure_reason,
                 actor="thermal-live-execution",
                 metadata={"command_id": receipt.command_id},
             )
@@ -1467,12 +1473,12 @@ class ThermalLiveExecutionEngine:
                 lifecycle=failed.lifecycle,
                 correlation_id=correlation_id,
                 receipt=receipt,
-                failure_reason=f"delivery_{receipt.status.value}",
+                failure_reason=failure_reason,
             )
             return self._terminal(
                 replace(session, current_attempt=attempt),
                 status,
-                f"delivery_{receipt.status.value}",
+                failure_reason,
                 evidence.evaluated_at,
             )
         delivered = self.step_state_machine.transition(
@@ -1603,6 +1609,36 @@ class ThermalLiveExecutionEngine:
                 source_id=source_id,
             )
         if hydraulic_failure is not None:
+            spa_startup_topology_refresh_pending = (
+                _opportunistic_spa_startup_step(attempt.step)
+                and hydraulic_failure.startswith(
+                    "hydraulic_activity_evidence_stale:"
+                )
+            )
+            if spa_startup_topology_refresh_pending:
+                deadline = attempt.receipt.issued_at + policy.verification_timeout
+                if evaluated_at >= deadline:
+                    return self._terminal(
+                        replace(
+                            session,
+                            current_attempt=replace(attempt, lifecycle=lifecycle),
+                        ),
+                        ThermalLiveExecutionStatus.TIMED_OUT,
+                        "spa_startup_hydraulic_reobservation_timed_out",
+                        evaluated_at,
+                    )
+                # A stable inactive BODY can legitimately emit no native
+                # transition while PoolOS moves from clean Pool idle into the
+                # opportunistic Spa successor.  For these two exact startup
+                # steps only, stale activity evidence is neither positive
+                # topology proof nor a contradiction.  Remain fail-closed and
+                # wait for the HA bridge's bounded read-only native refresh.
+                return replace(
+                    session,
+                    status=ThermalLiveExecutionStatus.AWAITING_VERIFICATION,
+                    updated_at=evaluated_at,
+                    current_attempt=replace(attempt, lifecycle=lifecycle),
+                )
             reason = f"hydraulic_continuity_lost:{hydraulic_failure}"
             failed = self.step_state_machine.transition(
                 lifecycle,
@@ -1642,7 +1678,7 @@ class ThermalLiveExecutionEngine:
                 # native event on every epoch.
                 verification_started_at=attempt.receipt.issued_at,
                 evaluated_at=evaluated_at,
-                timeout=policy.verification_timeout,
+                timeout=_step_verification_timeout(attempt.step, policy),
                 freshness_policy=FreshnessPolicy(
                     max_age=policy.observation_freshness
                 ),
@@ -1814,7 +1850,35 @@ class ThermalLiveExecutionEngine:
                 "priming_verified_hold_continuity_lost",
                 evaluated_at,
             )
-        if unusable & {item.disposition for item in verification.evidence}:
+        unusable_evidence = tuple(
+            item
+            for item in verification.evidence
+            if item.disposition in unusable
+        )
+        chronology_only_pending = bool(unusable_evidence) and all(
+            item.disposition is VerificationEvidenceDisposition.UNUSABLE
+            and item.reason == "observation_not_later_than_delivery"
+            for item in unusable_evidence
+        )
+        opportunistic_spa_start_step = (
+            attempt.step.metadata.get("spa_opportunistic_source_precondition") == "true"
+            or attempt.step.metadata.get("spa_opportunistic_body_activation") == "true"
+        )
+        if chronology_only_pending and opportunistic_spa_start_step:
+            # The dormant Spa startup path deliberately requires a fresh
+            # post-command native frame.  The first evaluator epoch can race
+            # the native refresh and still expose the pre-command value.  For
+            # these two exact startup steps only, keep authority fail-closed
+            # and wait within the existing bounded verification deadline.
+            if verification.status is VerificationStatus.TIMED_OUT:
+                return self._terminal(
+                    updated,
+                    ThermalLiveExecutionStatus.TIMED_OUT,
+                    verification.reason,
+                    evaluated_at,
+                )
+            return updated
+        if unusable_evidence:
             return self._terminal(
                 updated,
                 ThermalLiveExecutionStatus.FAILED,
@@ -2131,6 +2195,15 @@ def _hydraulic_verification_contract(
     return target, None
 
 
+def _opportunistic_spa_startup_step(step: ExecutionStep) -> bool:
+    """Return whether one step is an exact PoolOS opportunistic Spa startup boundary."""
+
+    return (
+        step.metadata.get("spa_opportunistic_source_precondition") == "true"
+        or step.metadata.get("spa_opportunistic_body_activation") == "true"
+    )
+
+
 def _required_target_active_for_step(
     step: ExecutionStep,
 ) -> bool | None:
@@ -2150,6 +2223,11 @@ def _required_target_active_for_step(
             == "true"
             else False
         )
+    if step.metadata.get("spa_opportunistic_source_precondition") == "true":
+        # The dormant Spa source must be proven Off before PoolOS activates
+        # the Spa body. Verification therefore requires the target body to
+        # remain inactive during this prerequisite step.
+        return False
     return True
 
 
@@ -2229,6 +2307,24 @@ def _session_effective_rpm(
     ):
         return None
     return policy.pump_session_effective_rpm
+
+
+def _step_verification_timeout(
+    step: ExecutionStep,
+    policy: ThermalLiveExecutionPolicy,
+) -> timedelta:
+    """Give Pool temperature-probe RPM convergence its commissioned native bound.
+
+    IntelliCenter can legitimately traverse body-switch/startup pump settling
+    before the configured and actual probe RPM both reach 1500.  The generic
+    30-second thermal command bound is intentionally retained everywhere else;
+    only the explicitly typed Pool probe RPM step shares the existing
+    two-minute ownership reconciliation bound.
+    """
+
+    if step.metadata.get("pool_temperature_probe_step") == "true":
+        return max(policy.verification_timeout, timedelta(seconds=120))
+    return policy.verification_timeout
 
 
 def _minimum_verified_hold(step: ExecutionStep) -> timedelta:

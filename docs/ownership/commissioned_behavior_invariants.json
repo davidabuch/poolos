@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "policy": "Every owner-accepted behavior that has been physically commissioned or promoted to a commissioning acceptance invariant must remain bound to executable regression proof. Later refactors may change implementation internals, but they may not delete the invariant or its behavioral proof without an explicit owner-approved contract change.",
+  "invariants": [
+    {
+      "id": "OWN-049A",
+      "scenario_id": 49,
+      "title": "Homeowner Hot Tub OFF ends only the current user session and preserves future Hot Tub autonomy",
+      "status": "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR",
+      "acceptance": "A homeowner-started/adopted Hot Tub session may end with Spa OFF without arming persistent Autonomous Hot Tub suppression, even if BODY-adoption provenance has already retired while current same-epoch session evidence still identifies an active external-user Spa.",
+      "production_proofs": [
+        {
+          "path": "custom_components/poolos/__init__.py",
+          "symbol": "arm_manual_spa_off"
+        },
+        {
+          "path": "poolos/spa_thermal_policy.py",
+          "symbol": "spa_manual_off_requires_autonomy_suppression"
+        }
+      ],
+      "regression_proofs": [
+        "tests/test_commissioned_behavior_invariants.py::test_own_049a_user_hot_tub_off_preserves_future_autonomy_after_body_adoption_retires",
+        "tests/test_commissioned_behavior_invariants.py::test_own_049a_stale_or_opportunistic_evidence_does_not_bypass_restraint"
+      ]
+    }
+  ]
+}

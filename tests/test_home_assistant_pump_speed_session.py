@@ -23,6 +23,7 @@ from poolos.intellicenter_readonly import (
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
+from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 from poolos.observations import (
     ObservationQuality,
     ObservationSourceKind,
@@ -199,7 +200,7 @@ def _spa_transport(*, at: datetime = NOW, configured: int = 2600) -> NativeIntel
     return replace(_transport(at=at, configured=configured), raw_inventory=(raw,))
 
 
-def test_ha_adapter_startup_anchor_then_unattributed_transition_reconciliation() -> None:
+def test_ha_adapter_established_configured_speed_transition_is_manual_override() -> None:
     baselines = PumpOperatingBaselines(filtration_rpm=2650)
     authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
     runtime = PoolOSPumpSpeedSessionRuntime(
@@ -217,11 +218,33 @@ def test_ha_adapter_startup_anchor_then_unattributed_transition_reconciliation()
         ExternalChangeBatch((_event(at=at, before=2900, after=3200),)),
         changed,
     )
+    assert runtime.session.snapshot.override_state is PumpSpeedOverrideState.VERIFIED
+    assert (
+        runtime.session.snapshot.override_source
+        is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
+    )
+    assert runtime.session.snapshot.effective_rpm == 3200
+    assert runtime.session.snapshot.last_override_transition_reason == (
+        "external_configured_speed_override_verified"
+    )
+
+    handback_at = NOW + timedelta(seconds=2)
+    baseline = _native(at=handback_at, configured=2650)
+    runtime.synchronize(
+        baseline,
+        _transport(at=handback_at, configured=2650),
+        connection_generation=1,
+    )
+    runtime.apply_external_changes(
+        ExternalChangeBatch(
+            (_event(at=handback_at, before=3200, after=2650),)
+        ),
+        baseline,
+    )
     assert runtime.session.snapshot.override_state is PumpSpeedOverrideState.NONE
-    assert runtime.session.snapshot.override_source is PumpSpeedOverrideSource.NONE
     assert runtime.session.snapshot.effective_rpm == 2650
     assert runtime.session.snapshot.last_override_transition_reason == (
-        "unattributed_configured_speed_requires_reconciliation"
+        "external_configured_speed_returned_to_baseline"
     )
 
 
@@ -254,6 +277,90 @@ def test_hot_tub_session_uses_only_exact_spa_pump_circuit() -> None:
         _spa_native(at=NOW + timedelta(seconds=1), configured=3200),
     )
     assert runtime.session.snapshot.override_state is PumpSpeedOverrideState.NONE
+
+
+def test_hot_tub_dynamic_pmpcirc_reassignment_preserves_fresh_operator_override() -> None:
+    baselines = PumpOperatingBaselines(filtration_rpm=2600, solar_heating_rpm=2900)
+    authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
+    runtime = PoolOSPumpSpeedSessionRuntime(PumpSpeedSessionRuntime(baselines), authority)
+
+    initial = replace(
+        _spa_native(configured=2900),
+        observations=tuple(
+            replace(item, value=True)
+            if item.observation_id == "solar.active"
+            else replace(item, value="H0002")
+            if item.observation_id == "spa.raw_heater_id"
+            else item
+            for item in _spa_native(configured=2900).observations
+        ),
+    )
+    runtime.synchronize(initial, _spa_transport(configured=2900), connection_generation=1)
+    assert runtime.session.snapshot.pump_circuit_id == "p0198"
+    assert runtime.session.snapshot.purpose is PumpSpeedSessionPurpose.SOLAR
+
+    at = NOW + timedelta(seconds=1)
+    reassigned_raw = NativeRawObject(
+        native_id="p0101",
+        object_type="PMPCIRC",
+        subtype=None,
+        name="Spa",
+        parent_id="PMP01",
+        observed_at=at,
+        attributes=(
+            NativeRawAttribute("CIRCUIT", "C0001"),
+            NativeRawAttribute("SELECT", "RPM"),
+            NativeRawAttribute("PARENT", "PMP01"),
+            NativeRawAttribute("SPEED", "3200"),
+        ),
+    )
+    changed_transport = replace(
+        _transport(at=at, configured=3200),
+        raw_inventory=(reassigned_raw,),
+    )
+    changed = replace(
+        _spa_native(at=at, configured=3200),
+        observations=tuple(
+            replace(item, value=True)
+            if item.observation_id == "solar.active"
+            else replace(item, value="H0002")
+            if item.observation_id == "spa.raw_heater_id"
+            else item
+            for item in _spa_native(at=at, configured=3200).observations
+        ),
+    )
+
+    runtime.synchronize(changed, changed_transport, connection_generation=1)
+    assert runtime.session.snapshot.pump_circuit_id == "p0101"
+    assert runtime.session.snapshot.override_state is PumpSpeedOverrideState.NONE
+
+    event = ExternalChangeEvent(
+        concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="p0101",
+        previous_value=2900,
+        new_value=3200,
+        observed_at=at,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id="native-operator:test",
+            authority_generation=7,
+            body_session_id="spa-session-7",
+            domain=OwnershipDomain.PUMP,
+            equipment_id="pump.rpm",
+            requested_at=at,
+        ),
+    )
+    runtime.apply_external_changes(ExternalChangeBatch((event,)), changed)
+
+    state = runtime.session.snapshot
+    assert state.pump_circuit_id == "p0101"
+    assert state.override_state is PumpSpeedOverrideState.VERIFIED
+    assert state.override_source is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
+    assert state.effective_rpm == 3200
 
 
 def test_same_frame_actual_purpose_transition_wins_over_rpm_transition() -> None:
@@ -322,7 +429,7 @@ def test_reconnect_generation_reanchors_matching_hardware_without_override() -> 
         ExternalChangeBatch((_event(at=at, before=3200, after=3300),)),
         _native(at=at, configured=3300),
     )
-    assert runtime.session.snapshot.effective_rpm == 2650
+    assert runtime.session.snapshot.effective_rpm == 3300
 
     later = NOW + timedelta(seconds=2)
     runtime.synchronize(

@@ -20,6 +20,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+COMMISSIONED_BEHAVIOR_REGISTRY = (
+    ROOT / "docs" / "ownership" / "commissioned_behavior_invariants.json"
+)
+REQUIRED_COMMISSIONED_BEHAVIOR_IDS = {"OWN-049A"}
+
 
 class ProofLevel(StrEnum):
     COMPONENT = "component"
@@ -705,6 +710,49 @@ def test_v0_11_26_reacquisition_updates_are_unique_and_bound_to_regressions() ->
             assert test_name in defined
         if item["implementation_status"] != "SATISFIED":
             assert item["remaining_gap"].strip()
+
+
+def test_commissioned_behavior_registry_is_bound_to_live_production_and_regressions() -> None:
+    payload = json.loads(COMMISSIONED_BEHAVIOR_REGISTRY.read_text())
+    assert payload["schema_version"] == 1
+    assert "may not delete the invariant" in payload["policy"]
+
+    invariants = payload["invariants"]
+    ids = [item["id"] for item in invariants]
+    assert len(ids) == len(set(ids))
+    assert REQUIRED_COMMISSIONED_BEHAVIOR_IDS <= set(ids)
+
+    defined = _defined_tests()
+    for item in invariants:
+        assert item["status"] == "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR"
+        assert item["scenario_id"] in range(1, 91)
+        assert item["acceptance"].strip()
+        assert item["production_proofs"]
+        assert item["regression_proofs"]
+
+        for proof in item["production_proofs"]:
+            path = ROOT / proof["path"]
+            assert path.is_file()
+            assert proof["symbol"] in path.read_text()
+
+        for node in item["regression_proofs"]:
+            path, separator, test_name = node.partition("::")
+            assert separator == "::"
+            assert (ROOT / path).is_file()
+            assert test_name in defined
+
+
+def test_own_049a_remains_a_permanent_release_gate() -> None:
+    payload = json.loads(COMMISSIONED_BEHAVIOR_REGISTRY.read_text())
+    invariant = next(item for item in payload["invariants"] if item["id"] == "OWN-049A")
+    assert invariant["scenario_id"] == 49
+    assert "preserves future Hot Tub autonomy" in invariant["title"]
+    assert any(
+        node.endswith(
+            "::test_own_049a_user_hot_tub_off_preserves_future_autonomy_after_body_adoption_retires"
+        )
+        for node in invariant["regression_proofs"]
+    )
 
 
 def test_v0_11_27_quick_restart_updates_are_unique_and_bound_to_regressions() -> None:

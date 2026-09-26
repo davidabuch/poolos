@@ -69,6 +69,7 @@ class FakeDriver:
     pump_session_purpose: object | None = None
     probe_evidence: object | None = None
     cleanup_provenance: object | None = None
+    spa_topology_token: str | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
         self.requested_enabled = enabled
@@ -100,6 +101,9 @@ class FakeDriver:
 
     def active_pump_session_purpose(self) -> object | None:
         return self.pump_session_purpose
+
+    def opportunistic_spa_topology_reobservation_token(self) -> str | None:
+        return self.spa_topology_token
 
     def diagnostics(self) -> dict[str, object]:
         return {"state": "test", "requested_enabled": self.requested_enabled}
@@ -145,6 +149,7 @@ class FakeHass:
             "PoolOS automatic thermal execution epoch",
             "PoolOS owned pump-session native reobservation",
             "PoolOS cleanup topology native reobservation",
+            "PoolOS Spa startup native topology reobservation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -165,14 +170,22 @@ def _runtime(module: ModuleType):
         coordinator.cleanup_topology_refresh_event.set()
         return True
 
+    async def refresh_thermal_topology_evidence() -> bool:
+        coordinator.thermal_topology_refresh_count += 1
+        coordinator.thermal_topology_refresh_event.set()
+        return True
+
     coordinator = SimpleNamespace(
         listener_updates=0,
         pump_session_refresh_count=0,
         pump_session_refresh_event=asyncio.Event(),
         cleanup_topology_refresh_count=0,
         cleanup_topology_refresh_event=asyncio.Event(),
+        thermal_topology_refresh_count=0,
+        thermal_topology_refresh_event=asyncio.Event(),
         async_refresh_native_owned_pump_session_evidence=refresh_owned_pump_session_evidence,
         async_refresh_native_cleanup_topology_evidence=refresh_cleanup_topology_evidence,
+        async_refresh_native_thermal_topology_evidence=refresh_thermal_topology_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -248,47 +261,6 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
     asyncio.run(scenario())
 
 
-def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_evidence() -> None:
-    async def scenario(*, priming: bool) -> None:
-        module = _load_module()
-        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
-        runtime, _, _, coordinator, driver = _runtime(module)
-
-        from poolos.pool_temperature_probe_execution import (
-            PoolTemperatureProbeExecutionPhase,
-        )
-        from poolos.pump_speed_session import PumpSpeedSessionPurpose
-
-        driver.requested_enabled = True
-        if priming:
-            driver.pump_session_purpose = PumpSpeedSessionPurpose.PRIMING
-        else:
-            driver.probe_evidence = SimpleNamespace(
-                phase=PoolTemperatureProbeExecutionPhase.ACQUIRING
-            )
-
-        runtime._sync_owned_pump_session_reobservation()
-        await asyncio.wait_for(
-            coordinator.pump_session_refresh_event.wait(),
-            timeout=1,
-        )
-
-        assert coordinator.pump_session_refresh_count >= 1
-        assert runtime._owned_pump_session_reobservation_task is not None
-
-        driver.pump_session_purpose = None
-        driver.probe_evidence = None
-        await asyncio.sleep(0.01)
-
-        task = runtime._owned_pump_session_reobservation_task
-        if task is not None:
-            await asyncio.wait_for(task, timeout=1)
-        assert runtime._owned_pump_session_reobservation_task is None
-
-    asyncio.run(scenario(priming=True))
-    asyncio.run(scenario(priming=False))
-
-
 def test_cleanup_provenance_triggers_one_post_boundary_native_refresh() -> None:
     async def scenario() -> None:
         module = _load_module()
@@ -328,6 +300,78 @@ def test_cleanup_provenance_triggers_one_post_boundary_native_refresh() -> None:
         assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-2"
 
     asyncio.run(scenario())
+
+
+def test_spa_startup_requests_one_immediate_native_topology_reobservation() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, _, coordinator, driver = _runtime(module)
+        runtime.set_enabled(True)
+        driver.spa_topology_token = "receipt-spa-startup-1"
+
+        started = runtime._sync_spa_startup_topology_reobservation()
+
+        assert started is True
+        assert len(hass.tasks) == 1
+        await asyncio.wait_for(
+            coordinator.thermal_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await hass.tasks[0]
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        duplicate = runtime._sync_spa_startup_topology_reobservation()
+        assert duplicate is False
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        driver.spa_topology_token = "receipt-spa-startup-2"
+        restarted = runtime._sync_spa_startup_topology_reobservation()
+        assert restarted is True
+        await asyncio.wait_for(hass.tasks[-1], timeout=1)
+        assert coordinator.thermal_topology_refresh_count == 2
+
+    asyncio.run(scenario())
+
+
+def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_evidence() -> None:
+    async def scenario(*, priming: bool) -> None:
+        module = _load_module()
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        runtime, _, _, coordinator, driver = _runtime(module)
+
+        from poolos.pool_temperature_probe_execution import (
+            PoolTemperatureProbeExecutionPhase,
+        )
+        from poolos.pump_speed_session import PumpSpeedSessionPurpose
+
+        driver.requested_enabled = True
+        if priming:
+            driver.pump_session_purpose = PumpSpeedSessionPurpose.PRIMING
+        else:
+            driver.probe_evidence = SimpleNamespace(
+                phase=PoolTemperatureProbeExecutionPhase.ACQUIRING
+            )
+
+        runtime._sync_owned_pump_session_reobservation()
+        await asyncio.wait_for(
+            coordinator.pump_session_refresh_event.wait(),
+            timeout=1,
+        )
+
+        assert coordinator.pump_session_refresh_count >= 1
+        assert runtime._owned_pump_session_reobservation_task is not None
+
+        driver.pump_session_purpose = None
+        driver.probe_evidence = None
+        await asyncio.sleep(0.01)
+
+        task = runtime._owned_pump_session_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+        assert runtime._owned_pump_session_reobservation_task is None
+
+    asyncio.run(scenario(priming=True))
+    asyncio.run(scenario(priming=False))
 
 
 def test_unload_invalidates_final_authority_and_waits_for_inflight_task() -> None:
