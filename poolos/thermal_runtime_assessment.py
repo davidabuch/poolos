@@ -362,6 +362,7 @@ class ThermalRuntimeEvidence:
     pool_temperature_probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None
     spa_temperature_evidence: SpaTemperatureEvidence | None = None
     spa_session_kind: SpaSessionKind | None = None
+    spa_thermal_operator_owned: bool = False
     pump_session_body: PumpSpeedSessionBody | None = None
     pump_session_id: str | None = None
     pump_session_purpose: PumpSpeedSessionPurpose | None = None
@@ -1521,6 +1522,49 @@ class ThermalRuntimeEvaluator:
             if not spa_temperature_trusted or spa_temperature is None
             else spa_temperature.trusted_temperature_f
         )
+        inherited_gas_requires_neutralization = bool(
+            spa_active
+            and spa_session_kind is SpaSessionKind.EXTERNAL_USER
+            and not spa_temperature_trusted
+            and requested_mode is ThermalRequestedMode.SOLAR_PREFERRED
+            and _string_or_none(values.get("spa.raw_heater_id")) == "H0001"
+            and not evidence.spa_thermal_operator_owned
+        )
+        if inherited_gas_requires_neutralization:
+            return ThermalDesiredState(
+                evaluated_at=evidence.evaluated_at,
+                body=ThermalBody.HOT_TUB,
+                requested_mode=requested_mode.value,
+                selected_source=PhysicalHeatMode.OFF,
+                required_pump_rpm=self.baselines.filtration_rpm,
+                reason_code="external_spa_inherited_gas_neutralization",
+                rpm_reason_code=(
+                    "operating_purpose:ordinary_circulation:"
+                    f"{self.baselines.filtration_rpm}_rpm"
+                ),
+                rationale=(
+                    "Retained pre-session Gas is not fresh operator THERMAL intent.",
+                    "Neutralize the inherited source before Spa temperature acquisition.",
+                ),
+                criteria=(
+                    "external_spa_session",
+                    "spa_temperature_pending",
+                    "inherited_gas_not_operator_owned",
+                    "source_off_before_policy_selection",
+                ),
+                evidence={
+                    "session_kind": spa_session_kind.value,
+                    "selected_source": "gas",
+                    "spa_temperature_disposition": (
+                        None
+                        if spa_temperature is None
+                        else spa_temperature.disposition.value
+                    ),
+                    "thermal_operator_owned": False,
+                },
+                evidence_usable=True,
+                blockers=(),
+            )
         if spa_active and (
             not active_purpose.evidence_usable
             or (
