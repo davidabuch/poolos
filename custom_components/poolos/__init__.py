@@ -81,7 +81,10 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
 )
 from poolos.thermal_live_execution import ThermalLiveCommissioningScope  # noqa: E402
 from poolos.thermal_runtime_assessment import ThermalRuntimeAssessment  # noqa: E402
-from poolos.spa_thermal_policy import (  # noqa: E402\n    SpaSessionKind,\n    spa_manual_off_requires_autonomy_suppression,\n)
+from poolos.spa_thermal_policy import (  # noqa: E402
+    SpaSessionKind,
+    spa_manual_off_requires_autonomy_suppression,
+)
 
 
 @dataclass(frozen=True, slots=True)
