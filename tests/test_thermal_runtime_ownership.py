@@ -1180,26 +1180,6 @@ def test_exact_operator_return_to_poolos_target_hands_back_only_that_domain(
     assert lease.body_session_generation is not None
     assert lease.body_session_id is not None
 
-    # Mirror the live commissioned session: ownership has already observed a
-    # stable Solar/2900 frame, so the Pump domain carries PoolOS's exact target
-    # before any operator takeover occurs.
-    manager.evaluate(
-        evidence(
-            body=ThermalBody.HOT_TUB,
-            at=NOW + timedelta(milliseconds=500),
-            evaluation_id=currentness.evaluation_id,
-            plan_id=currentness.plan_id,
-            requested_mode="Solar Preferred",
-            execution_currentness=currentness,
-            pump_rpm=2900,
-            configured_pump_rpm=2900,
-            heat_source=PhysicalHeatMode.SOLAR,
-        )
-    )
-    lease = manager.state.lease
-    assert lease is not None
-    assert lease.domain_state(OwnershipDomain.PUMP).target_value == 2900
-
     override_at = NOW + timedelta(seconds=1)
     override = replace(
         external_event(
@@ -2204,6 +2184,26 @@ def test_hot_tub_pump_handback_is_idempotent_before_priming_successor() -> None:
     assert lease is not None
     assert lease.body_session_generation is not None
     assert lease.body_session_id is not None
+
+    # Mirror the live commissioned session: ownership has already observed a
+    # stable Solar/2900 frame, so Pump carries PoolOS's exact desired target
+    # before the operator takeover.
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=NOW + timedelta(milliseconds=500),
+            evaluation_id=currentness.evaluation_id,
+            plan_id=currentness.plan_id,
+            requested_mode="Solar Preferred",
+            execution_currentness=currentness,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+        )
+    )
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.domain_state(OwnershipDomain.PUMP).target_value == 2900
 
     override_at = NOW + timedelta(seconds=1)
     override = replace(
