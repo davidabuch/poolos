@@ -1554,6 +1554,7 @@ class ThermalRuntimeEvaluator:
                     "session_kind": spa_session_kind.value,
                     "selected_source": "solar_preferred",
                     "raw_heater_id": "HXSLR",
+                    "force_source_command": True,
                 },
                 evidence_usable=True,
                 blockers=(),
