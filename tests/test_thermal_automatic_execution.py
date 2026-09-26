@@ -466,6 +466,7 @@ def _frame(
     pump_session_purpose: PumpSpeedSessionPurpose | None = None,
     pump_session_effective_rpm: int | None = None,
     pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
+    spa_thermal_operator_owned: bool | None = None,
     command_ledger: StructuredCommandLedger | None = None,
     real_probe_continuity: bool = False,
     pool_opportunity_id: str | None = None,
@@ -589,6 +590,11 @@ def _frame(
                 is FiltrationDisposition.RUN_NOW
             ),
             spa_session_kind=(None if driver is None else driver.spa_session_kind()),
+            spa_thermal_operator_owned=(
+                (False if driver is None else driver.spa_thermal_operator_owned())
+                if spa_thermal_operator_owned is None
+                else spa_thermal_operator_owned
+            ),
             pool_temperature_probe_execution=probe_execution,
             pool_temperature_probe_continuity=probe_continuity,
             pump_session_body=(
@@ -5823,6 +5829,93 @@ def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
     assert lease.body_activation is None
     assert lease.pump_setpoint is not None
     assert driver.spa_session_kind() is SpaSessionKind.EXTERNAL_USER
+
+
+def test_new_user_spa_inherited_gas_is_neutralized_without_fresh_thermal_intent() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0102",
+        spa_heater="H0001",
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    first = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        spa_pump_circuit_id="p0102",
+        spa_heater="H0001",
+        heater_active=True,
+        spa_heating_demand_active=True,
+        spa_temperature=80.0,
+        spa_target=98.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+        spa_thermal_operator_owned=False,
+    )
+
+    desired = first.thermal.hot_tub.plan.desired
+    assert desired.reason_code == "external_spa_inherited_gas_neutralization"
+    assert desired.selected_source is PhysicalHeatMode.OFF
+    assert desired.required_pump_rpm == driver.baselines.filtration_rpm
+    assert desired.evidence["thermal_operator_owned"] is False
+
+
+def test_new_user_spa_fresh_gas_operator_ownership_preserves_gas_during_acquisition() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+
+    first = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=3000,
+        configured_rpm=3000,
+        spa_pump_circuit_id="p0102",
+        spa_heater="H0001",
+        heater_active=True,
+        spa_heating_demand_active=True,
+        spa_temperature=80.0,
+        spa_target=98.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+        spa_thermal_operator_owned=True,
+    )
+
+    desired = first.thermal.hot_tub.plan.desired
+    assert desired.reason_code == "external_spa_session_operating_purpose"
+    assert desired.selected_source is PhysicalHeatMode.GAS
+    assert desired.required_pump_rpm == driver.baselines.gas_heating_rpm
 
 
 def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> None:
