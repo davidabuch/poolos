@@ -1819,6 +1819,60 @@ def test_reset_recovery_fences_normal_work_and_allows_only_reductions() -> None:
     assert authority.assess(pool_off).reason is PhysicalAuthorityReason.RESET_RECOVERY_INACTIVE
 
 
+def test_reset_recovery_finish_unblocks_fresh_automatic_thermal_epoch() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("before-reset")
+    before = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="before-reset",
+        session_identity="solar-session-before-reset",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
+    )
+    request_before = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1101",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=True,
+        automatic_thermal_context=before,
+    )
+    assert authority.assess(request_before).allowed
+
+    authority.begin_reset_recovery()
+    assert authority.diagnostics(now=NOW)["reset_recovery_active"] is True
+    assert (
+        authority.assess(request_before).reason
+        is PhysicalAuthorityReason.RESET_RECOVERY_ACTIVE
+    )
+
+    # Safe-baseline verification is performed by the HA Reset button. Once it
+    # closes Reset authority, stale pre-Reset dispatch remains invalid, but a
+    # fresh autonomous epoch may be established immediately from current
+    # policy/evidence.
+    authority.finish_reset_recovery()
+    assert authority.diagnostics(now=NOW)["reset_recovery_active"] is False
+    assert (
+        authority.assess(request_before).reason
+        is not PhysicalAuthorityReason.RESET_RECOVERY_ACTIVE
+    )
+
+    authority.begin_automatic_thermal_epoch("after-reset")
+    after = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="after-reset",
+        session_identity="solar-session-after-reset",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
+    )
+    request_after = replace(request_before, automatic_thermal_context=after)
+    assert authority.assess(request_after).allowed
+
+
 def test_reset_recovery_invalidates_queued_normal_expectations() -> None:
     authority = ready()
     pending = authority.reserve(request(), consequence(), now=NOW)
