@@ -2227,7 +2227,7 @@ class ThermalRuntimeOwnershipManager:
                 observed_value="HXSLR",
                 observed_at=event.observed_at,
             )
-            verified = tuple(
+            policy_verified = tuple(
                 item
                 for item in lease.verified_concepts
                 if item is not ThermalRuntimeOwnedConcept.HEAT_SOURCE
@@ -2239,7 +2239,7 @@ class ThermalRuntimeOwnershipManager:
                 heat_source=None,
                 heat_source_accepted_at=None,
                 heat_source_adoption=None,
-                verified_concepts=verified,
+                verified_concepts=policy_verified,
                 domain_states=tuple(states.values()),
             )
             self._state = replace(
