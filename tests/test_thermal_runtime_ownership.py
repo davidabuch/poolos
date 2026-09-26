@@ -1258,7 +1258,7 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
         manager,
         execution_ownership(
             body=ThermalBody.HOT_TUB,
-            activation=False,
+            activation=True,
             pump_rpm=2900,
             source=PhysicalHeatMode.SOLAR,
         ),
