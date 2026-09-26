@@ -5831,6 +5831,39 @@ def test_live_user_spa_gas_uses_exact_dynamic_pump_with_body_adoption() -> None:
     assert driver.spa_session_kind() is SpaSessionKind.EXTERNAL_USER
 
 
+def test_user_spa_pentair_solar_preferred_is_policy_handback_not_physical_solar() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+
+    frame = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=2900,
+        configured_rpm=2900,
+        spa_pump_circuit_id="p0102",
+        spa_heater="HXSLR",
+        heater_active=True,
+        spa_heating_demand_active=True,
+        spa_temperature=84.0,
+        spa_target=98.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        driver=driver,
+        evaluator=evaluator,
+    )
+
+    desired = frame.thermal.hot_tub.plan.desired
+    assert desired.reason_code == "external_spa_solar_preferred_policy_handback"
+    assert desired.selected_source is PhysicalHeatMode.OFF
+    assert desired.required_pump_rpm == driver.baselines.filtration_rpm
+    assert desired.evidence["raw_heater_id"] == "HXSLR"
+    assert desired.evidence["selected_source"] == "solar_preferred"
+
+
 def test_new_user_spa_inherited_gas_is_neutralized_without_fresh_thermal_intent() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
