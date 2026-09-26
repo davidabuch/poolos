@@ -1983,6 +1983,108 @@ def test_same_purpose_pump_override_preserves_body_and_source_provenance(
         assert lease.originating_currentness == originating
 
 
+def test_hot_tub_manual_pmpcirc_takeover_is_pump_only_and_never_terminal() -> None:
+    plan = thermal_assessment(
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=2900,
+    )
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        plan,
+        evaluation_id="spa-evaluation-1",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    established = manager.establish(
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+            evaluation_id=currentness.evaluation_id,
+            plan_id=currentness.plan_id,
+            execution_plan_id="spa-execution-plan-1",
+        ),
+        established_at=NOW,
+        requested_mode="Solar Preferred",
+        current_context=ThermalLiveExecutionContext(
+            currentness.evaluation_id,
+            currentness.plan_id,
+            currentness,
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.body_session_generation is not None
+    assert lease.body_session_id is not None
+
+    changed_at = NOW + timedelta(seconds=1)
+    override_plan = thermal_assessment(
+        at=changed_at,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=3200,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=3200,
+    )
+    override_currentness = ThermalExecutionCurrentness.from_assessment(
+        override_plan,
+        evaluation_id="spa-evaluation-2",
+    )
+    event = replace(
+        external_event(
+            "spa.pump_circuit.configured_speed_rpm",
+            2900,
+            3200,
+            observed_at=changed_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-pmpcirc-3200",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.PUMP,
+            "pump.rpm",
+            changed_at,
+        ),
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=changed_at,
+            evaluation_id=override_currentness.evaluation_id,
+            plan_id=override_currentness.plan_id,
+            requested_mode="Solar Preferred",
+            execution_currentness=override_currentness,
+            pump_rpm=3200,
+            configured_pump_rpm=3200,
+            heat_source=PhysicalHeatMode.SOLAR,
+            changes=ExternalChangeBatch((event,)),
+            pump_session_id="spa-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0101",
+            pump_session_effective_rpm=3200,
+            pump_session_override_state=PumpSpeedOverrideState.VERIFIED,
+        )
+    )
+
+    current = manager.state.lease
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert current is not None
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.OPERATOR
+    assert current.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
+    assert current.pump_setpoint is None
+    assert current.pump_session_effective_rpm == 3200
+    assert manager.last_terminal_transition is None
+
+
 def test_return_to_baseline_preserves_body_and_source_after_override() -> None:
     original_plan = thermal_assessment()
     originating = ThermalExecutionCurrentness.from_assessment(
