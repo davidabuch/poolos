@@ -60,6 +60,7 @@ from poolos.physical_command_authority import (  # noqa: E402
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.operating_baselines import PumpOperatingBaselines  # noqa: E402
+from poolos.ownership_evidence import OwnershipDomain  # noqa: E402
 from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
@@ -236,8 +237,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     spa_session_kind_provider = thermal_automatic_runtime.driver.spa_session_kind
     external_change_runtime.spa_session_kind_provider = spa_session_kind_provider
+    def spa_thermal_operator_owned_or_current_intent() -> bool:
+        if thermal_automatic_runtime.driver.spa_thermal_operator_owned():
+            return True
+        native = coordinator.native_intellicenter_snapshot
+        if native is None:
+            return False
+        return any(
+            event.concept == "spa.raw_heater_id"
+            and event.observed_at == native.generated_at
+            and event.positive_operator_evidence is not None
+            and event.positive_operator_evidence.domain is OwnershipDomain.THERMAL
+            for event in external_change_runtime.latest_batch.events
+        )
+
     thermal_runtime.set_spa_thermal_operator_owned_provider(
-        thermal_automatic_runtime.driver.spa_thermal_operator_owned
+        spa_thermal_operator_owned_or_current_intent
     )
 
     def current_operator_context() -> dict[str, object] | None:
