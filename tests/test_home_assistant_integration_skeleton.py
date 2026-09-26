@@ -188,11 +188,19 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     restrictive = reset.index("restrictive_authority_changed(", begin)
     assert begin < protected < restrictive
 
-    # Reset closes only after a verified safe baseline. If the normal path
-    # raises early, finally performs one fresh verification opportunity before
-    # deciding whether to close or preserve the safety fence.
+    # Reset closes only after a verified safe baseline. IntelliCenter may
+    # take tens of seconds to settle body/source/pump Off, so both the normal
+    # path and an exceptional path must use a bounded reobservation window
+    # rather than one immediate snapshot.
+    assert "safe_baseline_verified = await self._async_verify_reset_baseline()" in reset
+    verifier = reset[reset.index("async def _async_verify_reset_baseline"):]
+    assert "for attempt in range(16):" in verifier
+    assert "await self.coordinator.async_request_refresh()" in verifier
+    assert "await asyncio.sleep(2)" in verifier
+    assert "if self._safe_reset_baseline():" in verifier
+
     finally_block = reset[reset.index("finally:", protected):]
     assert "if not safe_baseline_verified:" in finally_block
-    assert "await self.coordinator.async_request_refresh()" in finally_block
+    assert "await self._async_verify_reset_baseline()" in finally_block
     assert "if safe_baseline_verified:" in finally_block
     assert "authority.finish_reset_recovery()" in finally_block
