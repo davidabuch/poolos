@@ -168,8 +168,8 @@ def test_reset_safe_native_update_closes_fence_after_button_exits(monkeypatch, e
     asyncio.run(run())
 
 
-def test_reset_hung_refresh_accepts_fresh_safe_native_truth(monkeypatch):
-    """A hung explicit refresh must not strand Reset when live truth is already safe."""
+def test_reset_refresh_timeout_accepts_fresh_safe_native_truth(monkeypatch):
+    """A timed-out explicit refresh may use independently arrived safe native truth."""
     module = _button_module(monkeypatch)
 
     async def run():
@@ -190,12 +190,7 @@ def test_reset_hung_refresh_accepts_fresh_safe_native_truth(monkeypatch):
         listeners = []
 
         async def refresh():
-            coordinator.native_intellicenter_snapshot = _snapshot(
-                active=False, rpm=0
-            )
-            for listener in tuple(listeners):
-                listener()
-            await asyncio.Future()
+            return None
 
         coordinator = SimpleNamespace(
             native_intellicenter_snapshot=_snapshot(active=True, rpm=2900),
@@ -204,11 +199,22 @@ def test_reset_hung_refresh_accepts_fresh_safe_native_truth(monkeypatch):
                 listeners.append(listener) or (lambda: listeners.remove(listener))
             ),
         )
+
+        async def timeout_with_safe_native_truth(awaitable, *, timeout):
+            assert timeout == module._RESET_REFRESH_TIMEOUT_SECONDS
+            awaitable.close()
+            coordinator.native_intellicenter_snapshot = _snapshot(
+                active=False, rpm=0
+            )
+            for listener in tuple(listeners):
+                listener()
+            raise TimeoutError
+
         entry = SimpleNamespace(
             runtime_data=runtime, entry_id="test", async_on_unload=Mock()
         )
         button = module.PoolOSResetControlButton(coordinator, entry)
-        monkeypatch.setattr(module, "_RESET_REFRESH_TIMEOUT_SECONDS", 0.001)
+        monkeypatch.setattr(module.asyncio, "wait_for", timeout_with_safe_native_truth)
         monkeypatch.setattr(module.asyncio, "sleep", AsyncMock())
 
         await button.async_press()
