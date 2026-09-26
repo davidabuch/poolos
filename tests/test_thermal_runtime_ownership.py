@@ -2186,6 +2186,19 @@ def test_hot_tub_pump_handback_survives_intellicenter_priming_transient() -> Non
     assert lease.body_session_id is not None
 
     override_at = NOW + timedelta(seconds=1)
+    override_plan = thermal_assessment(
+        at=override_at,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=3200,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=3200,
+    )
+    override_currentness = ThermalExecutionCurrentness.from_assessment(
+        override_plan,
+        evaluation_id="spa-priming-evaluation-2",
+    )
     override = replace(
         external_event(
             "spa.pump_circuit.configured_speed_rpm",
@@ -2206,7 +2219,10 @@ def test_hot_tub_pump_handback_survives_intellicenter_priming_transient() -> Non
         evidence(
             body=ThermalBody.HOT_TUB,
             at=override_at,
+            evaluation_id=override_currentness.evaluation_id,
+            plan_id=override_currentness.plan_id,
             requested_mode="Solar Preferred",
+            execution_currentness=override_currentness,
             pump_rpm=3200,
             configured_pump_rpm=3200,
             heat_source=PhysicalHeatMode.SOLAR,
@@ -2218,12 +2234,28 @@ def test_hot_tub_pump_handback_survives_intellicenter_priming_transient() -> Non
             pump_session_override_state=PumpSpeedOverrideState.VERIFIED,
         )
     )
+    overridden = manager.state.lease
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert overridden is not None
     assert (
-        manager.state.lease.domain_state(OwnershipDomain.PUMP).authority
+        overridden.domain_state(OwnershipDomain.PUMP).authority
         is OwnershipAuthority.OPERATOR
     )
 
     handback_at = NOW + timedelta(seconds=2)
+    handback_plan = thermal_assessment(
+        at=handback_at,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=0,
+    )
+    handback_currentness = ThermalExecutionCurrentness.from_assessment(
+        handback_plan,
+        evaluation_id="spa-priming-evaluation-3",
+    )
     handback = replace(
         external_event(
             "spa.pump_circuit.configured_speed_rpm",
@@ -2244,7 +2276,10 @@ def test_hot_tub_pump_handback_survives_intellicenter_priming_transient() -> Non
         evidence(
             body=ThermalBody.HOT_TUB,
             at=handback_at,
+            evaluation_id=handback_currentness.evaluation_id,
+            plan_id=handback_currentness.plan_id,
             requested_mode="Solar Preferred",
+            execution_currentness=handback_currentness,
             pump_rpm=0,
             configured_pump_rpm=2900,
             heat_source=PhysicalHeatMode.SOLAR,
