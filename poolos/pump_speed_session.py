@@ -110,6 +110,7 @@ class PumpSpeedNativeTransition:
     new_rpm: int
     observed_at: datetime
     correlated_request_id: str | None = None
+    positive_operator_intent: bool = False
 
     def __post_init__(self) -> None:
         _require_aware(self.observed_at)
@@ -388,7 +389,11 @@ class PumpSpeedSessionRuntime:
             self._session_id is None
             or self._pump_circuit_id != transition.native_object_id
             or self._established_at is None
-            or transition.observed_at <= self._established_at
+            or transition.observed_at < self._established_at
+            or (
+                transition.observed_at == self._established_at
+                and not transition.positive_operator_intent
+            )
             or (
                 self._last_native_transition_at is not None
                 and transition.observed_at <= self._last_native_transition_at

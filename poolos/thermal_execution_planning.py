@@ -99,6 +99,8 @@ class ThermalDesiredState:
                     "opportunistic_roof_low_hold",
                     "six_pm_preserve",
                     "external_spa_session_operating_purpose",
+                    "external_spa_inherited_gas_neutralization",
+                    "external_spa_solar_preferred_policy_handback",
                     "active_pool_session_operating_purpose",
                     "solar_recovery_hold",
                 }:
@@ -490,7 +492,10 @@ class ThermalExecutionPlanBuilder:
         if blockers:
             return self._non_ready(desired, current, blockers)
 
-        source_changed = current.selected_source is not desired.selected_source
+        source_changed = (
+            current.selected_source is not desired.selected_source
+            or bool(desired.evidence.get("force_source_command"))
+        )
         desired_rpm = desired.required_pump_rpm
         rpm_physically_converged = (
             desired_rpm is not None

@@ -1252,6 +1252,98 @@ def test_exact_operator_return_to_poolos_target_hands_back_only_that_domain(
     assert current.domain_state(other).authority is OwnershipAuthority.POOLOS
 
 
+def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_provenance() -> None:
+    manager = ThermalRuntimeOwnershipManager()
+    establish(
+        manager,
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+        ),
+        requested_mode="Solar Preferred",
+    )
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.body_session_generation is not None
+    assert lease.body_session_id is not None
+
+    override_at = NOW + timedelta(seconds=1)
+    gas_override = replace(
+        external_event(
+            "spa.raw_heater_id",
+            "H0002",
+            "H0001",
+            observed_at=override_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-gas-override",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.THERMAL,
+            "spa.raw_heater_id",
+            override_at,
+        ),
+    )
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=override_at,
+            requested_mode="Solar Preferred",
+            changes=ExternalChangeBatch((gas_override,)),
+            heat_source=PhysicalHeatMode.GAS,
+        )
+    )
+    overridden = manager.state.lease
+    assert overridden is not None
+    assert (
+        overridden.domain_state(OwnershipDomain.THERMAL).authority
+        is OwnershipAuthority.OPERATOR
+    )
+
+    handback_at = NOW + timedelta(seconds=2)
+    policy_handback = replace(
+        external_event(
+            "spa.raw_heater_id",
+            "H0001",
+            "HXSLR",
+            observed_at=handback_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-solar-preferred-handback",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.THERMAL,
+            "spa.raw_heater_id",
+            handback_at,
+        ),
+    )
+    manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=handback_at,
+            requested_mode="Solar Preferred",
+            changes=ExternalChangeBatch((policy_handback,)),
+            heat_source=PhysicalHeatMode.GAS,
+            source_usable=False,
+        )
+    )
+
+    current = manager.state.lease
+    assert current is not None
+    thermal = current.domain_state(OwnershipDomain.THERMAL)
+    assert thermal.authority is OwnershipAuthority.NONE
+    assert thermal.health is OwnershipHealth.PENDING
+    assert thermal.observed_value == "HXSLR"
+    assert current.heat_source is None
+    assert current.heat_source_adoption is None
+    assert ThermalRuntimeOwnedConcept.HEAT_SOURCE not in current.verified_concepts
+    assert current.reason_code == "runtime_ownership_retained:current_evidence_confirmed"
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+
+
 def test_explicit_compatible_same_body_handoff_creates_new_generation() -> None:
     manager = full_manager()
     predecessor = manager.state.lease
@@ -1889,6 +1981,168 @@ def test_same_purpose_pump_override_preserves_body_and_source_provenance(
     else:
         assert lease.pump_setpoint is not None
         assert lease.originating_currentness == originating
+
+
+def test_hot_tub_manual_pmpcirc_takeover_is_pump_only_and_never_terminal() -> None:
+    plan = thermal_assessment(
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=2900,
+    )
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        plan,
+        evaluation_id="spa-evaluation-1",
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    established = manager.establish(
+        execution_ownership(
+            body=ThermalBody.HOT_TUB,
+            activation=True,
+            pump_rpm=2900,
+            source=PhysicalHeatMode.SOLAR,
+            evaluation_id=currentness.evaluation_id,
+            plan_id=currentness.plan_id,
+            execution_plan_id="spa-execution-plan-1",
+        ),
+        established_at=NOW,
+        requested_mode="Solar Preferred",
+        current_context=ThermalLiveExecutionContext(
+            currentness.evaluation_id,
+            currentness.plan_id,
+            currentness,
+        ),
+        execution_progress=ThermalExecutionProgress(),
+    )
+    assert established.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    lease = manager.state.lease
+    assert lease is not None
+    assert lease.body_session_generation is not None
+    assert lease.body_session_id is not None
+
+    changed_at = NOW + timedelta(seconds=1)
+    override_plan = thermal_assessment(
+        at=changed_at,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=3200,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=3200,
+    )
+    override_currentness = ThermalExecutionCurrentness.from_assessment(
+        override_plan,
+        evaluation_id="spa-evaluation-2",
+    )
+    event = replace(
+        external_event(
+            "spa.pump_circuit.configured_speed_rpm",
+            2900,
+            3200,
+            observed_at=changed_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-pmpcirc-3200",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.PUMP,
+            "pump.rpm",
+            changed_at,
+        ),
+    )
+
+    decision = manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=changed_at,
+            evaluation_id=override_currentness.evaluation_id,
+            plan_id=override_currentness.plan_id,
+            requested_mode="Solar Preferred",
+            execution_currentness=override_currentness,
+            pump_rpm=3200,
+            configured_pump_rpm=3200,
+            heat_source=PhysicalHeatMode.SOLAR,
+            changes=ExternalChangeBatch((event,)),
+            pump_session_id="spa-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0101",
+            pump_session_effective_rpm=3200,
+            pump_session_override_state=PumpSpeedOverrideState.VERIFIED,
+        )
+    )
+
+    current = manager.state.lease
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert current is not None
+    assert current.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.OPERATOR
+    assert current.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
+    assert current.pump_setpoint is None
+    assert current.pump_session_effective_rpm == 3200
+    assert manager.last_terminal_transition is None
+
+    handback_at = NOW + timedelta(seconds=2)
+    baseline_plan = thermal_assessment(
+        at=handback_at,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.SOLAR,
+        current_rpm=2900,
+    )
+    baseline_currentness = ThermalExecutionCurrentness.from_assessment(
+        baseline_plan,
+        evaluation_id="spa-evaluation-3",
+    )
+    handback = replace(
+        external_event(
+            "spa.pump_circuit.configured_speed_rpm",
+            3200,
+            2900,
+            observed_at=handback_at,
+        ),
+        positive_operator_evidence=PositiveOperatorEvidence(
+            "spa-pmpcirc-2900-handback",
+            lease.body_session_generation,
+            lease.body_session_id,
+            OwnershipDomain.PUMP,
+            "pump.rpm",
+            handback_at,
+        ),
+    )
+    returned = manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=handback_at,
+            evaluation_id=baseline_currentness.evaluation_id,
+            plan_id=baseline_currentness.plan_id,
+            requested_mode="Solar Preferred",
+            execution_currentness=baseline_currentness,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+            changes=ExternalChangeBatch((handback,)),
+            pump_session_id="spa-solar-session",
+            pump_session_purpose=PumpSpeedSessionPurpose.SOLAR,
+            pump_session_pump_circuit_id="p0101",
+            pump_session_effective_rpm=2900,
+            pump_session_override_state=PumpSpeedOverrideState.NONE,
+        )
+    )
+    restored = manager.state.lease
+    assert returned.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert restored is not None
+    assert restored.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert restored.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
+    assert restored.domain_state(OwnershipDomain.THERMAL).authority is OwnershipAuthority.POOLOS
+    assert restored.pump_adoption is not None
+    assert restored.pump_adoption.intended_value == 2900
+    assert manager.last_terminal_transition is None
 
 
 def test_return_to_baseline_preserves_body_and_source_after_override() -> None:

@@ -544,6 +544,44 @@ def test_wrong_pump_regressive_duplicate_and_boundary_transition_are_ignored() -
     assert runtime.snapshot.override_state is PumpSpeedOverrideState.NONE
 
 
+def test_same_boundary_unattributed_transition_remains_ignored() -> None:
+    runtime = PumpSpeedSessionRuntime(BASELINES)
+    runtime.observe(evidence())
+
+    runtime.apply_transition(
+        PumpSpeedNativeTransition(
+            "pool.pump_circuit.configured_speed_rpm",
+            "p0102",
+            2650,
+            3200,
+            NOW,
+        )
+    )
+
+    assert runtime.snapshot.override_state is PumpSpeedOverrideState.NONE
+    assert runtime.snapshot.effective_rpm == 2650
+
+
+def test_same_boundary_positive_operator_transition_establishes_override() -> None:
+    runtime = PumpSpeedSessionRuntime(BASELINES)
+    runtime.observe(evidence())
+
+    runtime.apply_transition(
+        PumpSpeedNativeTransition(
+            "pool.pump_circuit.configured_speed_rpm",
+            "p0102",
+            2650,
+            3200,
+            NOW,
+            positive_operator_intent=True,
+        )
+    )
+
+    assert runtime.snapshot.override_state is PumpSpeedOverrideState.VERIFIED
+    assert runtime.snapshot.override_source is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
+    assert runtime.snapshot.effective_rpm == 3200
+
+
 def test_connection_generation_change_clears_and_does_not_reconstruct_override() -> None:
     runtime = PumpSpeedSessionRuntime(BASELINES)
     runtime.observe(evidence(rpm=3200))

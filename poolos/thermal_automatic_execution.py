@@ -48,6 +48,7 @@ from .pool_circulation_ownership import (
     PoolCirculationOwnershipRegistry,
 )
 from .operating_baselines import PumpOperatingBaselines
+from .ownership_evidence import OwnershipAuthority, OwnershipDomain
 from .pump_priming_policy import PumpPrimingPolicy
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .spa_thermal_policy import SpaSessionKind
@@ -451,6 +452,18 @@ class ThermalAutomaticExecutionDriver:
         ):
             return SpaSessionKind.EXTERNAL_USER
         return None
+
+    def spa_thermal_operator_owned(self) -> bool:
+        """Return whether fresh operator evidence currently owns Spa THERMAL."""
+
+        lease = self.orchestrator.ownership.state.lease
+        return bool(
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.body is ThermalBody.HOT_TUB
+            and lease.domain_state(OwnershipDomain.THERMAL).authority
+            is OwnershipAuthority.OPERATOR
+        )
 
     def opportunistic_spa_topology_reobservation_token(self) -> str | None:
         """Expose one accepted Spa-startup command that needs fresh BODY topology."""

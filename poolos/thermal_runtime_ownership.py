@@ -2202,6 +2202,54 @@ class ThermalRuntimeOwnershipManager:
         ):
             return False
 
+        if (
+            operator.domain is OwnershipDomain.THERMAL
+            and lease.body is ThermalBody.HOT_TUB
+            and event.concept == "spa.raw_heater_id"
+            and str(event.new_value) == "HXSLR"
+            and lease.requested_mode.casefold().replace("_", " ")
+            in {"solar preferred", "eco heat"}
+        ):
+            # Pentair Solar Preferred is a policy-selection surface, not proof
+            # that Solar is physically active. A fresh HXSLR transition ends
+            # operator THERMAL ownership, but PoolOS must earn new THERMAL
+            # ownership from an accepted/verified source command. Keep the
+            # domain open (NONE) here rather than manufacturing H0002 provenance.
+            states = {state.domain: state for state in lease.domain_states}
+            states[OwnershipDomain.THERMAL] = replace(
+                prior,
+                authority=OwnershipAuthority.NONE,
+                health=OwnershipHealth.PENDING,
+                evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+                episode=None,
+                positive_operator_evidence=None,
+                command_blocker=None,
+                target_value=None,
+                observed_value="HXSLR",
+                observed_at=event.observed_at,
+            )
+            policy_verified = tuple(
+                item
+                for item in lease.verified_concepts
+                if item is not ThermalRuntimeOwnedConcept.HEAT_SOURCE
+            )
+            updated = replace(
+                lease,
+                last_confirmed_at=max(lease.last_confirmed_at, event.observed_at),
+                reason_code="runtime_ownership_operator_handback:thermal_policy",
+                heat_source=None,
+                heat_source_accepted_at=None,
+                heat_source_adoption=None,
+                verified_concepts=policy_verified,
+                domain_states=tuple(states.values()),
+            )
+            self._state = replace(
+                self._state,
+                lease=updated,
+                reason_code=updated.reason_code,
+            )
+            return True
+
         intended_value: int | PhysicalHeatMode | None = None
         matches_prior_target = False
         if operator.domain is OwnershipDomain.PUMP:

@@ -362,6 +362,7 @@ class ThermalRuntimeEvidence:
     pool_temperature_probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None
     spa_temperature_evidence: SpaTemperatureEvidence | None = None
     spa_session_kind: SpaSessionKind | None = None
+    spa_thermal_operator_owned: bool = False
     pump_session_body: PumpSpeedSessionBody | None = None
     pump_session_id: str | None = None
     pump_session_purpose: PumpSpeedSessionPurpose | None = None
@@ -948,6 +949,24 @@ class ThermalRuntimeEvaluator:
             spa_temperature=spa_temperature,
             higher_priority_conflict=higher_priority_conflict,
         )
+        policy_source_neutralization = (
+            body is ThermalBody.HOT_TUB
+            and desired.reason_code
+            == "external_spa_solar_preferred_policy_handback"
+            and heater_id == "HXSLR"
+        )
+        if policy_source_neutralization:
+            # HXSLR is a known Pentair policy-selection state, not a physical
+            # heat-source observation.  Permit only this reducing OFF plan to
+            # proceed; do not make HXSLR usable as Solar/Gas evidence.
+            blockers = tuple(
+                item for item in blockers if item != "native_heater_unknown"
+            )
+            desired = replace(
+                desired,
+                evidence_usable=not blockers,
+                blockers=blockers,
+            )
         if body is ThermalBody.POOL:
             desired = replace(
                 desired,
@@ -984,7 +1003,10 @@ class ThermalRuntimeEvaluator:
             selected_source=current_source,
             pump_rpm=pump_rpm,
             body_active=active if isinstance(active, bool) else None,
-            source_evidence_usable=heater_id in {"00000", "H0001", "H0002"},
+            source_evidence_usable=(
+                heater_id in {"00000", "H0001", "H0002"}
+                or policy_source_neutralization
+            ),
             pump_evidence_usable="pump.rpm" not in missing and "pump.rpm" not in stale,
             blockers=blockers,
             htmode=_string_or_none(values.get(f"{prefix}.raw_htmode")),
@@ -1521,6 +1543,86 @@ class ThermalRuntimeEvaluator:
             if not spa_temperature_trusted or spa_temperature is None
             else spa_temperature.trusted_temperature_f
         )
+        solar_preferred_policy_handback = bool(
+            spa_active
+            and spa_session_kind is SpaSessionKind.EXTERNAL_USER
+            and requested_mode is ThermalRequestedMode.SOLAR_PREFERRED
+            and _string_or_none(values.get("spa.raw_heater_id")) == "HXSLR"
+        )
+        if solar_preferred_policy_handback:
+            return ThermalDesiredState(
+                evaluated_at=evidence.evaluated_at,
+                body=ThermalBody.HOT_TUB,
+                requested_mode=requested_mode.value,
+                selected_source=PhysicalHeatMode.OFF,
+                required_pump_rpm=self.baselines.filtration_rpm,
+                reason_code="external_spa_solar_preferred_policy_handback",
+                rpm_reason_code=(
+                    "operating_purpose:ordinary_circulation:"
+                    f"{self.baselines.filtration_rpm}_rpm"
+                ),
+                rationale=(
+                    "Pentair Solar Preferred delegates thermal policy back to PoolOS.",
+                    "Neutralize any still-active physical source before Eco Heat selects one.",
+                ),
+                criteria=(
+                    "external_spa_session",
+                    "pentair_solar_preferred_selected",
+                    "policy_handback_not_physical_solar",
+                    "source_off_before_policy_selection",
+                ),
+                evidence={
+                    "session_kind": spa_session_kind.value,
+                    "selected_source": "solar_preferred",
+                    "raw_heater_id": "HXSLR",
+                    "force_source_command": True,
+                },
+                evidence_usable=True,
+                blockers=(),
+            )
+        inherited_gas_requires_neutralization = bool(
+            spa_active
+            and spa_session_kind is SpaSessionKind.EXTERNAL_USER
+            and not spa_temperature_trusted
+            and requested_mode is ThermalRequestedMode.SOLAR_PREFERRED
+            and _string_or_none(values.get("spa.raw_heater_id")) == "H0001"
+            and not evidence.spa_thermal_operator_owned
+        )
+        if inherited_gas_requires_neutralization:
+            return ThermalDesiredState(
+                evaluated_at=evidence.evaluated_at,
+                body=ThermalBody.HOT_TUB,
+                requested_mode=requested_mode.value,
+                selected_source=PhysicalHeatMode.OFF,
+                required_pump_rpm=self.baselines.filtration_rpm,
+                reason_code="external_spa_inherited_gas_neutralization",
+                rpm_reason_code=(
+                    "operating_purpose:ordinary_circulation:"
+                    f"{self.baselines.filtration_rpm}_rpm"
+                ),
+                rationale=(
+                    "Retained pre-session Gas is not fresh operator THERMAL intent.",
+                    "Neutralize the inherited source before Spa temperature acquisition.",
+                ),
+                criteria=(
+                    "external_spa_session",
+                    "spa_temperature_pending",
+                    "inherited_gas_not_operator_owned",
+                    "source_off_before_policy_selection",
+                ),
+                evidence={
+                    "session_kind": spa_session_kind.value,
+                    "selected_source": "gas",
+                    "spa_temperature_disposition": (
+                        None
+                        if spa_temperature is None
+                        else spa_temperature.disposition.value
+                    ),
+                    "thermal_operator_owned": False,
+                },
+                evidence_usable=True,
+                blockers=(),
+            )
         if spa_active and (
             not active_purpose.evidence_usable
             or (
