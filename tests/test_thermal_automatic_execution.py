@@ -5632,21 +5632,32 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
 
     for seconds in range(123, 260):
         before = len(delivery.calls)
+        current_frame = frame(
+            seconds,
+            spa_active=active,
+            pump_rpm=pump_rpm,
+            configured_rpm=configured_rpm,
+            spa_heater=spa_heater,
+            solar_active=solar_active,
+        )
         result = asyncio.run(
             driver.process_epoch(
-                frame(
-                    seconds,
-                    spa_active=active,
-                    pump_rpm=pump_rpm,
-                    configured_rpm=configured_rpm,
-                    spa_heater=spa_heater,
-                    solar_active=solar_active,
-                ),
+                current_frame,
                 delivery_factory=factory,
             )
         )
         if result.state is ThermalAutomaticDriverState.BLOCKED and result.blocker:
-            pytest.fail(f"unexpected block at {seconds}: {result.blocker}")
+            lease = orchestrator.ownership.state.lease
+            predecessor = None if lease is None else lease.originating_currentness
+            desired = current_frame.thermal.hot_tub.plan.desired
+            pytest.fail(
+                "unexpected block at "
+                f"{seconds}: {result.blocker}; "
+                f"predecessor={None if predecessor is None else predecessor.purpose}; "
+                f"desired_source={desired.selected_source}; "
+                f"desired_rpm={desired.required_pump_rpm}; "
+                f"desired_reason={desired.reason_code}"
+            )
 
         for operation in delivery.calls[before:]:
             if isinstance(operation, SetPumpSpeed):
