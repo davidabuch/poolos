@@ -38,6 +38,7 @@ from .spa_thermal_policy import (
     SpaHeatingMode,
     SpaPolicyInput,
     SpaPolicyConfig,
+    DEFAULT_SPA_SOLAR_ROOF_F,
     SpaSessionKind,
     SpaThermalPolicyTracker,
     SpaUserSource,
@@ -608,7 +609,7 @@ class ThermalRuntimeEvaluator:
         cls,
         baselines: PumpOperatingBaselines,
         *,
-        spa_solar_roof_f: float = 110.0,
+        spa_solar_roof_f: float = DEFAULT_SPA_SOLAR_ROOF_F,
     ) -> ThermalRuntimeEvaluator:
         """Build every nested thermal policy from one logical baseline source."""
 
