@@ -53,6 +53,7 @@ from .pump_priming_policy import PumpPrimingPolicy
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .spa_thermal_policy import SpaSessionKind
 from .thermal_execution_currentness import (
+    ThermalExecutionCurrentness,
     ThermalExecutionProgress,
     ThermalExecutionPurposeKind,
 )
@@ -3018,6 +3019,15 @@ class ThermalAutomaticExecutionDriver:
                 body.plan.desired,
                 body.plan.current,
                 force_pump_command=True,
+            )
+            successor_currentness = ThermalExecutionCurrentness.from_assessment(
+                successor_plan,
+                evaluation_id=safety.current_evaluation_id,
+            )
+            safety = replace(
+                safety,
+                current_plan_id=successor_plan.plan_id,
+                execution_currentness=successor_currentness,
             )
 
             preflight = self.engine.authorization_engine.structural_preflight(
