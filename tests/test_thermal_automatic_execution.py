@@ -5685,10 +5685,7 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
     assert lease is not None
     assert lease.pump_setpoint is not None
     assert lease.pump_setpoint.intended_value == 2900
-    assert (
-        lease.domain_state(OwnershipDomain.PUMP).authority
-        is OwnershipAuthority.POOLOS
-    )
+    assert lease.owns_pump_setpoint
 
     # Returning Pool demand must be able to reduce the autonomous Spa session;
     # missing PUMP provenance must never strand cleanup at
