@@ -112,6 +112,7 @@ class FakeDriver:
 @dataclass
 class FakeAuthority:
     base_authority_reason: PhysicalAuthorityReason = PhysicalAuthorityReason.ALLOWED
+    reset_recovery_active: bool = False
     epochs: list[str] = field(default_factory=list)
     configurations: list[tuple[bool, bool, str]] = field(default_factory=list)
     unloaded: bool = False
@@ -228,6 +229,42 @@ def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_fram
     assert driver.disabled_epochs == ["epoch-1"]
     assert driver.processed == []
     assert hass.tasks == []
+
+
+def test_reset_recovery_blocks_intermediate_thermal_driver_until_fresh_post_reset_epoch() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+
+        authority.reset_recovery_active = True
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "reset-intermediate"),
+        )
+
+        # Native truth is still accepted/published, but the automatic driver
+        # must not run while Reset owns the physical transition.
+        assert authority.epochs == ["reset-intermediate"]
+        assert driver.processed == []
+        assert hass.tasks == []
+
+        authority.reset_recovery_active = False
+        later = NOW + timedelta(seconds=1)
+        runtime.observe(
+            _snapshot(later),
+            None,
+            _orchestration(later, "post-reset-fresh"),
+        )
+
+        assert authority.epochs == ["reset-intermediate", "post-reset-fresh"]
+        assert len(hass.tasks) == 1
+        driver.release.set()
+        await hass.tasks[0]
+        assert driver.processed == ["post-reset-fresh"]
+
+    asyncio.run(scenario())
 
 
 def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
