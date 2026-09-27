@@ -2951,10 +2951,10 @@ class ThermalRuntimeOwnershipManager:
                     or ThermalExecutionProgress()
                 ),
             )
-            if (
-                compatibility.reason_code
-                != "thermal_execution_convergence_not_attributed"
-            ):
+            if compatibility.reason_code not in {
+                "thermal_execution_convergence_not_attributed",
+                "thermal_execution_leading_pump_alignment_not_attributed",
+            }:
                 return prefix + "successor_plan_not_current"
         if evidence.requested_mode != request.successor_requested_mode:
             return prefix + "successor_requested_mode_not_current"
