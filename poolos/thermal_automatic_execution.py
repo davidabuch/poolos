@@ -2890,7 +2890,15 @@ class ThermalAutomaticExecutionDriver:
                 execution_progress=session.execution_progress,
             )
 
-        if decision.current_state.status is not ThermalRuntimeOwnershipStatus.OWNED:
+        if (
+            decision.disposition
+            not in {
+                ThermalRuntimeOwnershipDisposition.ESTABLISHED,
+                ThermalRuntimeOwnershipDisposition.RETAINED,
+            }
+            or decision.current_state.status
+            is not ThermalRuntimeOwnershipStatus.OWNED
+        ):
             return decision.reason_code
         return None
 
