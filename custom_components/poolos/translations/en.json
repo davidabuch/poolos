@@ -45,7 +45,7 @@
     "step": {
       "init": {
         "title": "PoolOS high-fidelity observation mappings",
-        "description": "Update observation sources and operating policy used after the config entry reloads. Saving options does not directly issue equipment commands. Hot Tub Solar accepts 110–150°F; 130–140°F is suggested for normal use. The same threshold applies to normal Eco Heat Hot Tub sessions and opportunistic Solar heating. PoolOS automatically continues Solar until the roof falls 10°F below the configured threshold when the applicable policy allows hysteresis.",
+        "description": "Update observation sources and operating policy used after the config entry reloads. Saving options does not directly issue equipment commands. Hot Tub Solar accepts a configurable 110–150°F roof threshold. The same configured threshold applies to normal Eco Heat Hot Tub sessions and opportunistic Solar heating. PoolOS automatically continues Solar until the roof falls 10°F below the configured threshold when the applicable policy allows hysteresis.",
         "data": {
           "pool_thermostat_entity": "Pool thermostat entity",
           "spa_thermostat_entity": "Spa thermostat entity",
