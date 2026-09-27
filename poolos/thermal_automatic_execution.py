@@ -2955,13 +2955,17 @@ class ThermalAutomaticExecutionDriver:
         pump_origin = lease.pump_setpoint or lease.pump_adoption
         source_origin = lease.heat_source or lease.heat_source_adoption
         replace_pump_setpoint = (
-            body.plan.desired.required_pump_rpm is not None
-            and lease.domain_state(OwnershipDomain.PUMP).authority
-            is not OwnershipAuthority.OPERATOR
-            and (
-                pump_origin is None
-                or pump_origin.intended_value
+            (
+                pump_origin is not None
+                and pump_origin.intended_value
                 != body.plan.desired.required_pump_rpm
+            )
+            or (
+                body.body is ThermalBody.HOT_TUB
+                and body.plan.desired.required_pump_rpm is not None
+                and pump_origin is None
+                and lease.domain_state(OwnershipDomain.PUMP).authority
+                is not OwnershipAuthority.OPERATOR
             )
         )
         replace_heat_source = (
