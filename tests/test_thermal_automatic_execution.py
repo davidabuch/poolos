@@ -5645,6 +5645,9 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
                 delivery_factory=factory,
             )
         )
+        if result.state is ThermalAutomaticDriverState.BLOCKED and result.blocker:
+            pytest.fail(f"unexpected block at {seconds}: {result.blocker}")
+
         for operation in delivery.calls[before:]:
             if isinstance(operation, SetPumpSpeed):
                 pump_rpm = configured_rpm = operation.rpm
