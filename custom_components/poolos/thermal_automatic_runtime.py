@@ -882,6 +882,12 @@ class PoolOSThermalAutomaticRuntime:
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
             return
+        if self.authority.reset_recovery_active:
+            # Reset owns the transition to the verified OFF/0 baseline. Normal
+            # thermal work must not run on intermediate native snapshots: even
+            # command-free prospective adoption here would create a fresh lease
+            # over equipment that Reset is still intentionally shutting down.
+            return
         if self.manual is None:
             self.driver.fail_closed(
                 failed_at=self._latest_frame.observed_at,
