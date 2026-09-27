@@ -522,6 +522,33 @@ def assess_execution_compatibility(
             "thermal_execution_leading_pump_alignment_not_attributed",
         )
 
+    unaccepted_hot_tub_pump_provenance_prefix = (
+        not verified
+        and accepted is None
+        and originating.purpose.body is ThermalBody.HOT_TUB
+        and originating.purpose.requested_mode == "solar_preferred"
+        and originating.purpose.selected_source is PhysicalHeatMode.SOLAR
+        and originating.purpose.required_pump_rpm is not None
+        and len(original) == len(residual) + 1
+        and bool(original)
+        and original[0].operation_type == "SetPumpSpeed"
+        and original[0].role == "thermal_pump_target"
+        and original[0].requested_value
+        == str(originating.purpose.required_pump_rpm)
+        and original[1:] == residual
+    )
+    if unaccepted_hot_tub_pump_provenance_prefix:
+        # A PoolOS-started Spa may already be physically at the configured Solar
+        # RPM before the typed OFF/1500 -> Solar/2900 successor can issue its
+        # own Pump command.  Equality is not provenance: report this as UNKNOWN
+        # so the live boundary may permit exactly the pending provenance-
+        # establishing Pump command, while ownership remains ungranted until
+        # that accepted consequence is authoritatively verified.
+        return result(
+            ThermalExecutionCompatibilityDisposition.UNKNOWN,
+            "thermal_execution_pump_provenance_not_attributed",
+        )
+
     matching_offsets = tuple(
         offset
         for offset in range(len(verified), maximum_removed + 1)
