@@ -5679,12 +5679,7 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
             stable = True
             break
 
-    assert saw_fresh_2900_command, (
-        result.state,
-        result.blocker,
-        result.runtime_ownership_summary,
-        tuple(type(item).__name__ for item in delivery.calls),
-    )
+    assert saw_fresh_2900_command, result.blocker
     assert stable, (result.state, result.blocker, result.runtime_ownership_summary)
     lease = orchestrator.ownership.state.lease
     assert lease is not None
