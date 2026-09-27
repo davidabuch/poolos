@@ -5646,7 +5646,11 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
                 delivery_factory=factory,
             )
         )
-        if result.state is ThermalAutomaticDriverState.BLOCKED and result.blocker:
+        if (
+            result.state is ThermalAutomaticDriverState.BLOCKED
+            and result.blocker
+            and result.blocker != "automatic_thermal_typed_successor_ready"
+        ):
             lease = orchestrator.ownership.state.lease
             predecessor = None if lease is None else lease.originating_currentness
             desired = current_frame.thermal.hot_tub.plan.desired
