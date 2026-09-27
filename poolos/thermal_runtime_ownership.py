@@ -2882,10 +2882,22 @@ class ThermalRuntimeOwnershipManager:
                 ):
                     return "runtime_ownership_superseded:execution_purpose"
                 if not compatibility.continuation_allowed:
-                    return (
-                        "runtime_ownership_preempted:execution_currentness_unprovable:"
-                        f"{compatibility.reason_code}"
-                    )
+                    if (
+                        compatibility.reason_code
+                        == "thermal_execution_leading_pump_alignment_not_attributed"
+                    ):
+                        # Same semantic successor, but native equipment has
+                        # already reached its leading pump target before the
+                        # successor accepted that command. Keep the existing
+                        # BODY origin alive for the bounded provenance-establishing
+                        # delivery; this grants no Pump ownership by itself.
+                        pass
+                    else:
+                        return (
+                            "runtime_ownership_preempted:"
+                            "execution_currentness_unprovable:"
+                            f"{compatibility.reason_code}"
+                        )
             else:
                 if evidence.current_context.evaluation_id != lease.evaluation_id:
                     return "runtime_ownership_superseded:evaluation_id"
@@ -2951,10 +2963,10 @@ class ThermalRuntimeOwnershipManager:
                     or ThermalExecutionProgress()
                 ),
             )
-            if (
-                compatibility.reason_code
-                != "thermal_execution_convergence_not_attributed"
-            ):
+            if compatibility.reason_code not in {
+                "thermal_execution_convergence_not_attributed",
+                "thermal_execution_leading_pump_alignment_not_attributed",
+            }:
                 return prefix + "successor_plan_not_current"
         if evidence.requested_mode != request.successor_requested_mode:
             return prefix + "successor_requested_mode_not_current"

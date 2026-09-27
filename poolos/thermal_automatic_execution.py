@@ -53,6 +53,7 @@ from .pump_priming_policy import PumpPrimingPolicy
 from .pump_speed_session import PumpSpeedOverrideState, PumpSpeedSessionPurpose
 from .spa_thermal_policy import SpaSessionKind
 from .thermal_execution_currentness import (
+    ThermalExecutionCurrentness,
     ThermalExecutionProgress,
     ThermalExecutionPurposeKind,
 )
@@ -2889,7 +2890,15 @@ class ThermalAutomaticExecutionDriver:
                 execution_progress=session.execution_progress,
             )
 
-        if decision.current_state.status is not ThermalRuntimeOwnershipStatus.OWNED:
+        if (
+            decision.disposition
+            not in {
+                ThermalRuntimeOwnershipDisposition.ESTABLISHED,
+                ThermalRuntimeOwnershipDisposition.RETAINED,
+            }
+            or decision.current_state.status
+            is not ThermalRuntimeOwnershipStatus.OWNED
+        ):
             return decision.reason_code
         return None
 
@@ -2955,9 +2964,19 @@ class ThermalAutomaticExecutionDriver:
         pump_origin = lease.pump_setpoint or lease.pump_adoption
         source_origin = lease.heat_source or lease.heat_source_adoption
         replace_pump_setpoint = (
-            pump_origin is not None
-            and pump_origin.intended_value
-            != body.plan.desired.required_pump_rpm
+            (
+                pump_origin is not None
+                and pump_origin.intended_value
+                != body.plan.desired.required_pump_rpm
+            )
+            or (
+                body.body is ThermalBody.HOT_TUB
+                and body.plan.desired.selected_source is PhysicalHeatMode.SOLAR
+                and body.plan.desired.required_pump_rpm is not None
+                and pump_origin is None
+                and lease.domain_state(OwnershipDomain.PUMP).authority
+                is not OwnershipAuthority.OPERATOR
+            )
         )
         replace_heat_source = (
             source_origin is not None
@@ -2972,17 +2991,38 @@ class ThermalAutomaticExecutionDriver:
         # new Pump provenance. If the handoff must replace the predecessor Pump
         # setpoint, create one normal idempotent SetPumpSpeed operation so the
         # successor can establish fresh accepted-command provenance.
-        if (
+        force_pool_successor_pump_provenance = (
             converged_successor
             and replace_pump_setpoint
             and body.body is ThermalBody.POOL
             and body.plan.desired.required_pump_rpm is not None
+        )
+        force_hot_tub_successor_pump_provenance = (
+            replace_pump_setpoint
+            and body.body is ThermalBody.HOT_TUB
+            and body.plan.desired.selected_source is not PhysicalHeatMode.OFF
+            and body.plan.desired.required_pump_rpm is not None
+            and pump_origin is None
+            and lease.body_activation is not None
+            and not any(
+                isinstance(operation, SetPumpSpeed)
+                for operation in body.plan.operations
+            )
+        )
+        if (
+            force_pool_successor_pump_provenance
+            or force_hot_tub_successor_pump_provenance
         ):
-            if safety.pool_pump_circuit_id is None:
+            pump_equipment_id = (
+                safety.pool_pump_circuit_id
+                if body.body is ThermalBody.POOL
+                else safety.target_pump_circuit_id
+            )
+            if pump_equipment_id is None:
                 return "automatic_thermal_live_safety_evidence_unavailable"
 
             successor_plan = ThermalExecutionPlanBuilder(
-                pump_equipment_id=safety.pool_pump_circuit_id,
+                pump_equipment_id=pump_equipment_id,
                 configured_speed_concept=safety.configured_pump_speed_concept,
                 priming_policy=PumpPrimingPolicy(baselines=self.baselines),
             ).build(
@@ -2990,6 +3030,16 @@ class ThermalAutomaticExecutionDriver:
                 body.plan.current,
                 force_pump_command=True,
             )
+            if force_hot_tub_successor_pump_provenance:
+                successor_currentness = ThermalExecutionCurrentness.from_assessment(
+                    successor_plan,
+                    evaluation_id=safety.current_evaluation_id,
+                )
+                safety = replace(
+                    safety,
+                    current_plan_id=successor_plan.plan_id,
+                    execution_currentness=successor_currentness,
+                )
 
             preflight = self.engine.authorization_engine.structural_preflight(
                 successor_plan,
@@ -3045,12 +3095,21 @@ class ThermalAutomaticExecutionDriver:
             replace_pump_setpoint=replace_pump_setpoint,
             replace_heat_source=replace_heat_source,
         )
+        handoff_body = (
+            body
+            if successor_plan is body.plan or force_hot_tub_successor_pump_provenance
+            else replace(
+                body,
+                plan=successor_plan,
+                live_safety_evidence=safety,
+            )
+        )
         decision = self.orchestrator.ownership.handoff(
             request,
             build_thermal_runtime_ownership_evidence(
                 generated_at=frame.observed_at,
                 observations={item.observation_id: item for item in frame.observations},
-                body=body,
+                body=handoff_body,
                 external_changes=frame.external_changes,
                 freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
             ),

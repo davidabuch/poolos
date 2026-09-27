@@ -818,7 +818,10 @@ class ThermalLiveAuthorizationEngine:
             if (
                 not currentness.continuation_allowed
                 and currentness.reason_code
-                != "thermal_execution_convergence_not_attributed"
+                not in {
+                    "thermal_execution_convergence_not_attributed",
+                    "thermal_execution_leading_pump_alignment_not_attributed",
+                }
             ):
                 reasons.append(currentness.reason_code)
         freshness_reference = assessment.desired.evaluated_at
@@ -1233,10 +1236,10 @@ class ThermalLiveExecutionEngine:
                 originating_currentness,
                 evidence.execution_currentness,
             )
-            if (
-                compatibility.reason_code
-                != "thermal_execution_convergence_not_attributed"
-            ):
+            if compatibility.reason_code not in {
+                "thermal_execution_convergence_not_attributed",
+                "thermal_execution_leading_pump_alignment_not_attributed",
+            }:
                 raise ValueError(
                     "thermal live execution currentness does not match plan"
                 )
@@ -1327,7 +1330,10 @@ class ThermalLiveExecutionEngine:
         provenance_establishing_delivery = (
             not currentness.continuation_allowed
             and currentness.reason_code
-            == "thermal_execution_convergence_not_attributed"
+            in {
+                "thermal_execution_convergence_not_attributed",
+                "thermal_execution_leading_pump_alignment_not_attributed",
+            }
         )
         if (
             not currentness.continuation_allowed
