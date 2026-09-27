@@ -3068,7 +3068,7 @@ class ThermalAutomaticExecutionDriver:
                 return f"automatic_thermal_session_begin_failed:{_bounded(str(exc))}"
         successor_context = (
             body.live_execution_context
-            if successor is None or force_hot_tub_successor_pump_provenance
+            if successor is None
             else successor.originating_context
         )
         successor_progress = (
