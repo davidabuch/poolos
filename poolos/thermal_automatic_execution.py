@@ -2963,6 +2963,7 @@ class ThermalAutomaticExecutionDriver:
             )
             or (
                 body.body is ThermalBody.HOT_TUB
+                and body.plan.desired.selected_source is PhysicalHeatMode.SOLAR
                 and body.plan.desired.required_pump_rpm is not None
                 and pump_origin is None
                 and lease.domain_state(OwnershipDomain.PUMP).authority
@@ -3021,15 +3022,16 @@ class ThermalAutomaticExecutionDriver:
                 body.plan.current,
                 force_pump_command=True,
             )
-            successor_currentness = ThermalExecutionCurrentness.from_assessment(
-                successor_plan,
-                evaluation_id=safety.current_evaluation_id,
-            )
-            safety = replace(
-                safety,
-                current_plan_id=successor_plan.plan_id,
-                execution_currentness=successor_currentness,
-            )
+            if force_hot_tub_successor_pump_provenance:
+                successor_currentness = ThermalExecutionCurrentness.from_assessment(
+                    successor_plan,
+                    evaluation_id=safety.current_evaluation_id,
+                )
+                safety = replace(
+                    safety,
+                    current_plan_id=successor_plan.plan_id,
+                    execution_currentness=successor_currentness,
+                )
 
             preflight = self.engine.authorization_engine.structural_preflight(
                 successor_plan,
