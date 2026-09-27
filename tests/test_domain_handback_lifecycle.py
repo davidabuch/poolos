@@ -11,7 +11,7 @@ from test_thermal_runtime_ownership import external_event
 from poolos.external_change import ExternalChangeBatch
 from poolos.integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed, ThermalBody
 from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain, PositiveOperatorEvidence
-from poolos.thermal_automatic_execution import ThermalAutomaticExecutionDriver
+from poolos.thermal_automatic_execution import (\n    ThermalAutomaticDriverState,\n    ThermalAutomaticExecutionDriver,\n)
 from poolos.thermal_runtime_assessment import ThermalRuntimeEvaluator, ThermalRequestedMode
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
 
@@ -153,12 +153,42 @@ def test_spa_pump_and_thermal_handback_preserve_continuous_body(source_return, p
         selected_at = 171 if source_return == "H0002" else None
         intent(171, OwnershipDomain.THERMAL, "spa.raw_heater_id", "H0001", source_return)
         transitions = []
+        converged_reacquisition_seen = False
         for second in range(171, 330):
-            await epoch(second)
+            result = await epoch(second)
             lease = orchestrator.ownership.state.lease
-            transitions.append((second, driver.assessment.blocker, lease.reason_code))
+            thermal_authority = lease.domain_state(OwnershipDomain.THERMAL).authority
+            transitions.append(
+                (
+                    second,
+                    driver.assessment.blocker,
+                    lease.reason_code,
+                    result.state.value,
+                    source,
+                    solar,
+                    rpm,
+                    thermal_authority.value,
+                )
+            )
             assert lease.body_session_id == origin.body_session_id, transitions
-            assert lease.domain_state(OwnershipDomain.THERMAL).authority is not OwnershipAuthority.OPERATOR
+            assert thermal_authority is not OwnershipAuthority.OPERATOR
+            if (
+                source == "H0002"
+                and solar
+                and rpm == 2900
+                and result.state is ThermalAutomaticDriverState.CONVERGED
+            ):
+                # Physical convergence is not enough by itself to manufacture
+                # authority. But by the time automatic execution declares this
+                # HXSLR policy hand-back CONVERGED, PoolOS must already have
+                # accepted/verified its own Solar-source successor and restored
+                # THERMAL authority. This is the Sep 27 physical regression:
+                # H0002/2900/CONVERGED while THERMAL remained NONE/PENDING.
+                assert thermal_authority is OwnershipAuthority.POOLOS, transitions
+                assert lease.owns_heat_source, transitions
+                converged_reacquisition_seen = True
+                break
+        assert converged_reacquisition_seen, transitions[-40:]
         owners(OwnershipAuthority.POOLOS, OwnershipAuthority.POOLOS)
         assert source == "H0002" and solar and rpm == 2900 and not gas
 
