@@ -501,6 +501,27 @@ def assess_execution_compatibility(
             "thermal_execution_convergence_not_attributed",
         )
 
+    leading_pump_alignment_not_attributed = (
+        not verified
+        and accepted is None
+        and len(original) >= 2
+        and bool(residual)
+        and original[0].operation_type == "SetPumpSpeed"
+        and original[0].role == "thermal_pump_target"
+        and residual == original[1:]
+    )
+    if leading_pump_alignment_not_attributed:
+        # Native equipment may reach the exact successor pump target before
+        # PoolOS has accepted its own successor command.  That equality grants
+        # no provenance, but it must not kill the still-current execution when
+        # the fresh planner differs only by omitting that aligned leading pump
+        # step.  The live engine may issue the pending idempotent pump command
+        # through the normal authorization gateway to establish provenance.
+        return result(
+            ThermalExecutionCompatibilityDisposition.UNKNOWN,
+            "thermal_execution_leading_pump_alignment_not_attributed",
+        )
+
     matching_offsets = tuple(
         offset
         for offset in range(len(verified), maximum_removed + 1)
