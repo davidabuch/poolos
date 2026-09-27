@@ -59,7 +59,7 @@ class SpaPolicyState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class SpaPolicyConfig:
-    spa_solar_roof_f: float = 130.0
+    spa_solar_roof_f: float = 110.0
     spa_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
     maintenance_deficit_f: float = 2.0
@@ -119,9 +119,9 @@ class SpaThermalPolicyTracker:
         self._state = SpaPolicyState.IDLE
         self._spa_in_use = False
         self._maintenance_latched = False
-        self._above_130_since: datetime | None = None
-        self._below_130_since: datetime | None = None
-        self._below_120_since: datetime | None = None
+        self._above_threshold_since: datetime | None = None
+        self._below_threshold_since: datetime | None = None
+        self._below_hysteresis_threshold_since: datetime | None = None
         self._last_evaluated_at: datetime | None = None
         self._last_source = ThermalHeatSource.NONE
 
@@ -155,8 +155,8 @@ class SpaThermalPolicyTracker:
                 return self._evaluate_opportunistic(observation)
             if not self._spa_in_use:
                 self._maintenance_latched = False
-                self._above_130_since = None
-                self._below_130_since = None
+                self._above_threshold_since = None
+                self._below_threshold_since = None
                 self._last_source = ThermalHeatSource.NONE
             self._spa_in_use = True
             return self._evaluate_user_session(observation)
@@ -164,8 +164,8 @@ class SpaThermalPolicyTracker:
             self._spa_in_use = False
             self._maintenance_latched = False
             self._state = SpaPolicyState.IDLE
-            self._above_130_since = None
-            self._below_130_since = None
+            self._above_threshold_since = None
+            self._below_threshold_since = None
 
         return self._evaluate_opportunistic(observation)
 
@@ -190,16 +190,16 @@ class SpaThermalPolicyTracker:
             return self._gas_or_none(observation, "spa_maintenance_gas")
 
         if roof is not None and roof >= self._policy.spa_solar_roof_f:
-            if self._above_130_since is None:
-                self._above_130_since = observation.evaluated_at
-            self._below_130_since = None
+            if self._above_threshold_since is None:
+                self._above_threshold_since = observation.evaluated_at
+            self._below_threshold_since = None
         else:
-            self._above_130_since = None
-            if self._below_130_since is None:
-                self._below_130_since = observation.evaluated_at
-        qualified = self._above_130_since is not None and observation.evaluated_at - self._above_130_since >= self._policy.qualification_hold
+            self._above_threshold_since = None
+            if self._below_threshold_since is None:
+                self._below_threshold_since = observation.evaluated_at
+        qualified = self._above_threshold_since is not None and observation.evaluated_at - self._above_threshold_since >= self._policy.qualification_hold
         currently_solar = self._state is SpaPolicyState.SPA_IN_USE_HEAT_UP and self._last_source is ThermalHeatSource.SOLAR
-        lost = self._below_130_since is not None and observation.evaluated_at - self._below_130_since >= self._policy.qualification_hold
+        lost = self._below_threshold_since is not None and observation.evaluated_at - self._below_threshold_since >= self._policy.qualification_hold
         if observation.permissions.solar_allowed and (qualified or (currently_solar and not lost)):
             return self._solar(observation, "spa_heat_up_solar")
         if (
@@ -232,8 +232,8 @@ class SpaThermalPolicyTracker:
         )
         if not eligible:
             self._state = SpaPolicyState.IDLE
-            self._above_130_since = None
-            self._below_120_since = None
+            self._above_threshold_since = None
+            self._below_hysteresis_threshold_since = None
             return self._result(
                 observation,
                 self._state,
@@ -270,7 +270,7 @@ class SpaThermalPolicyTracker:
                 and observation.spa_temperature_f >= observation.spa_target_f
             ):
                 self._state = SpaPolicyState.OPPORTUNISTIC_HOLD
-                self._below_120_since = None
+                self._below_hysteresis_threshold_since = None
                 return self._result(
                     observation,
                     self._state,
@@ -287,13 +287,13 @@ class SpaThermalPolicyTracker:
                     - self._policy.spa_solar_hysteresis_f
                 )
             ):
-                if self._below_120_since is None:
-                    self._below_120_since = observation.evaluated_at
+                if self._below_hysteresis_threshold_since is None:
+                    self._below_hysteresis_threshold_since = observation.evaluated_at
             else:
-                self._below_120_since = None
+                self._below_hysteresis_threshold_since = None
             if (
-                self._below_120_since is not None
-                and observation.evaluated_at - self._below_120_since
+                self._below_hysteresis_threshold_since is not None
+                and observation.evaluated_at - self._below_hysteresis_threshold_since
                 >= self._policy.qualification_hold
             ):
                 self._state = SpaPolicyState.OPPORTUNISTIC_HOLD
@@ -312,14 +312,14 @@ class SpaThermalPolicyTracker:
             )
 
         if roof is not None and roof >= self._policy.spa_solar_roof_f:
-            if self._above_130_since is None:
-                self._above_130_since = observation.evaluated_at
+            if self._above_threshold_since is None:
+                self._above_threshold_since = observation.evaluated_at
         else:
-            self._above_130_since = None
+            self._above_threshold_since = None
 
         qualified = (
-            self._above_130_since is not None
-            and observation.evaluated_at - self._above_130_since
+            self._above_threshold_since is not None
+            and observation.evaluated_at - self._above_threshold_since
             >= self._policy.qualification_hold
         )
         if not observation.opportunistic_start_ready:
@@ -337,7 +337,7 @@ class SpaThermalPolicyTracker:
             )
         if qualified:
             self._state = SpaPolicyState.OPPORTUNISTIC_ACTIVE
-            self._below_120_since = None
+            self._below_hysteresis_threshold_since = None
             return self._solar(
                 observation,
                 "opportunistic_started_or_resumed",
