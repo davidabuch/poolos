@@ -3055,11 +3055,10 @@ class ThermalAutomaticExecutionDriver:
                 )
             except ValueError as exc:
                 return f"automatic_thermal_session_begin_failed:{_bounded(str(exc))}"
-        successor_context = (
-            body.live_execution_context
-            if successor is None
-            else successor.originating_context
-        )
+        # The forced command plan is an execution artifact used to earn
+        # prospective command provenance. Ownership currentness remains bound
+        # to the real runtime assessment supplied by this authoritative frame.
+        successor_context = body.live_execution_context
         successor_progress = (
             ThermalExecutionProgress()
             if successor is None
@@ -3084,21 +3083,12 @@ class ThermalAutomaticExecutionDriver:
             replace_pump_setpoint=replace_pump_setpoint,
             replace_heat_source=replace_heat_source,
         )
-        handoff_body = (
-            body
-            if successor_plan is body.plan
-            else replace(
-                body,
-                plan=successor_plan,
-                live_safety_evidence=safety,
-            )
-        )
         decision = self.orchestrator.ownership.handoff(
             request,
             build_thermal_runtime_ownership_evidence(
                 generated_at=frame.observed_at,
                 observations={item.observation_id: item for item in frame.observations},
-                body=handoff_body,
+                body=body,
                 external_changes=frame.external_changes,
                 freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
             ),
