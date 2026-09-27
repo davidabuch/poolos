@@ -11,7 +11,10 @@ from test_thermal_runtime_ownership import external_event
 from poolos.external_change import ExternalChangeBatch
 from poolos.integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed, ThermalBody
 from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain, PositiveOperatorEvidence
-from poolos.thermal_automatic_execution import (\n    ThermalAutomaticDriverState,\n    ThermalAutomaticExecutionDriver,\n)
+from poolos.thermal_automatic_execution import (
+    ThermalAutomaticDriverState,
+    ThermalAutomaticExecutionDriver,
+)
 from poolos.thermal_runtime_assessment import ThermalRuntimeEvaluator, ThermalRequestedMode
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
 
