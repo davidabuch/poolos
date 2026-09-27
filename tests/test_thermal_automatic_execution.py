@@ -5540,6 +5540,206 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         )
 
 
+
+def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> None:
+    """Native 2900 convergence cannot strand PoolOS Spa cleanup without PUMP proof."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery, driver=driver)
+
+    def frame(
+        seconds: int,
+        *,
+        spa_active: bool,
+        pump_rpm: int,
+        configured_rpm: int,
+        spa_heater: str = "00000",
+        solar_active: bool = False,
+        pool_temperature: float = 90.0,
+        pool_target: float = 90.0,
+    ):
+        return _frame(
+            orchestrator,
+            NOW + timedelta(seconds=seconds),
+            pool_active=False,
+            body=ThermalBody.HOT_TUB,
+            spa_active=spa_active,
+            pump_rpm=pump_rpm,
+            configured_rpm=configured_rpm,
+            spa_heater=spa_heater,
+            solar_active=solar_active,
+            pool_temperature=pool_temperature,
+            pool_target=pool_target,
+            spa_temperature=90.0,
+            spa_target=100.0,
+            solar_temperature=140.0,
+            mode=ThermalRequestedMode.SOLAR_PREFERRED,
+            evaluator=evaluator,
+            driver=driver,
+        )
+
+    baseline = frame(0, spa_active=False, pump_rpm=0, configured_rpm=2900)
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    for seconds in (1, 121):
+        asyncio.run(
+            driver.process_epoch(
+                frame(
+                    seconds,
+                    spa_active=False,
+                    pump_rpm=0,
+                    configured_rpm=2900,
+                ),
+                delivery_factory=factory,
+            )
+        )
+
+    assert len(delivery.calls) == 1
+    assert isinstance(delivery.calls[0], SetHeatMode)
+    assert delivery.calls[0].mode is PhysicalHeatMode.OFF
+
+    body_requested = asyncio.run(
+        driver.process_epoch(
+            frame(
+                122,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2900,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert body_requested.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].active is True
+
+    # IntelliCenter may immediately apply the already-configured 2900 PMPCIRC
+    # consequence when Spa turns on.  Physical equality is not provenance.
+    active = True
+    pump_rpm = configured_rpm = 2900
+    spa_heater = "00000"
+    solar_active = False
+    stable = False
+    saw_fresh_2900_command = False
+
+    for seconds in range(123, 260):
+        before = len(delivery.calls)
+        result = asyncio.run(
+            driver.process_epoch(
+                frame(
+                    seconds,
+                    spa_active=active,
+                    pump_rpm=pump_rpm,
+                    configured_rpm=configured_rpm,
+                    spa_heater=spa_heater,
+                    solar_active=solar_active,
+                ),
+                delivery_factory=factory,
+            )
+        )
+        for operation in delivery.calls[before:]:
+            if isinstance(operation, SetPumpSpeed):
+                pump_rpm = configured_rpm = operation.rpm
+                if operation.rpm == 2900:
+                    saw_fresh_2900_command = True
+            elif isinstance(operation, SetHeatMode):
+                spa_heater = (
+                    "H0002"
+                    if operation.mode is PhysicalHeatMode.SOLAR
+                    else (
+                        "H0001"
+                        if operation.mode is PhysicalHeatMode.GAS
+                        else "00000"
+                    )
+                )
+                solar_active = operation.mode is PhysicalHeatMode.SOLAR
+            elif isinstance(operation, SetBodyActive):
+                active = operation.active
+
+        lease = orchestrator.ownership.state.lease
+        if (
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.body is ThermalBody.HOT_TUB
+            and lease.owns_body
+            and lease.owns_pump_setpoint
+            and lease.owns_heat_source
+            and pump_rpm == 2900
+            and spa_heater == "H0002"
+            and solar_active
+        ):
+            stable = True
+            break
+
+    assert saw_fresh_2900_command, tuple(type(item).__name__ for item in delivery.calls)
+    assert stable, (result.state, result.blocker, result.runtime_ownership_summary)
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.pump_setpoint is not None
+    assert lease.pump_setpoint.intended_value == 2900
+    assert (
+        lease.domain_state(OwnershipDomain.PUMP).authority
+        is OwnershipAuthority.POOLOS
+    )
+
+    # Returning Pool demand must be able to reduce the autonomous Spa session;
+    # missing PUMP provenance must never strand cleanup at
+    # circulation_hot_tub_not_commissioned.
+    pool_priority = False
+    for seconds in range(seconds + 1, seconds + 80):
+        before = len(delivery.calls)
+        result = asyncio.run(
+            driver.process_epoch(
+                frame(
+                    seconds,
+                    spa_active=active,
+                    pump_rpm=pump_rpm,
+                    configured_rpm=configured_rpm,
+                    spa_heater=spa_heater,
+                    solar_active=solar_active,
+                    pool_temperature=89.0,
+                    pool_target=90.0,
+                ),
+                delivery_factory=factory,
+            )
+        )
+        for operation in delivery.calls[before:]:
+            if isinstance(operation, SetPumpSpeed):
+                pump_rpm = configured_rpm = operation.rpm
+            elif isinstance(operation, SetHeatMode):
+                spa_heater = (
+                    "H0002"
+                    if operation.mode is PhysicalHeatMode.SOLAR
+                    else (
+                        "H0001"
+                        if operation.mode is PhysicalHeatMode.GAS
+                        else "00000"
+                    )
+                )
+                solar_active = operation.mode is PhysicalHeatMode.SOLAR
+            elif isinstance(operation, SetBodyActive):
+                active = operation.active
+
+        assert (
+            result.runtime_ownership_summary.get(
+                "circulation_arbitration_reason_code"
+            )
+            != "circulation_hot_tub_not_commissioned"
+        )
+        if not active:
+            pool_priority = True
+            break
+
+    assert pool_priority, (result.state, result.blocker, result.runtime_ownership_summary)
+
 def test_opportunistic_spa_stale_idle_hydraulics_cannot_start() -> None:
     """Idle-looking but stale hydraulics cannot authorize autonomous Spa start."""
 
