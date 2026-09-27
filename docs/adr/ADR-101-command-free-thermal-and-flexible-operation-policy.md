@@ -55,10 +55,12 @@ forecast falls back to physical rules.
 ### Spa
 
 One spa-session tracker represents HA/ICP/OCP user sessions. User spa heat-up
-uses gas immediately unless roof ≥130°F continuously for two minutes, and
-switches back after two continuous minutes below 130°F. Reaching target latches
-maintenance for the session. Maintenance uses solar at roof ≥120°F while close
-to target, gas below 120°F, or gas when deficit exceeds 2°F and roof is below
+uses gas immediately unless roof remains at or above the configured Spa Solar
+roof threshold continuously for two minutes, and switches back after two
+continuous minutes below that configured threshold. Reaching target latches
+maintenance for the session. Maintenance uses Solar down to the configured
+threshold minus hysteresis while close to target, and otherwise follows the
+configured source permissions when useful Solar is no longer available.
 130°F. Spa Gas Only suppresses all spa solar.
 
 Opportunistic spa heating is optional and solar-only. Pool heating demand has

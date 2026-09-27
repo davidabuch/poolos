@@ -1079,10 +1079,11 @@ Status: implemented pending review.
   a separate Solar Only forecast override, and hard Solar/Gas Allowed gates;
 - adds the simple five-day Solar Only forecast gate while falling back to
   physical rules when forecast evidence is absent or stale;
-- treats HA, ICP, and OCP as equal user spa sources; adds two-minute 130°F
-  heat-up switching, latched 120°F maintenance behavior, and Gas Only;
+- treats HA, ICP, and OCP as equal user spa sources; adds two-minute
+  configured-threshold heat-up switching, threshold-relative maintenance
+  hysteresis, and Gas Only;
 - adds 1–6 PM debt-aware solar-only opportunistic spa heating, useful-heat hold
-  down to 120°F, isolated heat preservation until 10 PM, and no pool reprobe;
+  down to the configured hysteresis threshold, isolated heat preservation until 10 PM, and no pool reprobe;
 - represents the supplied LADWP weekday tariff as generic timezone-aware
   day-of-week profile data, with weekends defaulting to Base;
 - preserves two days of oldest-first filtration debt using configurable trusted-

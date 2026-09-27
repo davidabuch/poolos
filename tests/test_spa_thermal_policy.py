@@ -116,12 +116,12 @@ def test_user_spa_above_solar_threshold_waits_without_firing_gas_then_uses_solar
     assert solar.recommended_pump_rpm == 2900
 
 
-def test_heat_up_solar_falls_back_after_below_130_for_two_minutes() -> None:
-    tracker = SpaThermalPolicyTracker()
-    tracker.evaluate(observation(active=True, roof=130))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), active=True, roof=130))
-    still_solar = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), active=True, roof=129))
-    gas = tracker.evaluate(observation(at=NOW + timedelta(minutes=5), active=True, roof=129))
+def test_heat_up_solar_falls_back_after_below_configured_threshold_for_two_minutes() -> None:
+    tracker = SpaThermalPolicyTracker(SpaPolicyConfig(spa_solar_roof_f=135.0))
+    tracker.evaluate(observation(active=True, roof=135))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), active=True, roof=135))
+    still_solar = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), active=True, roof=134))
+    gas = tracker.evaluate(observation(at=NOW + timedelta(minutes=5), active=True, roof=134))
     assert still_solar.heat_source is ThermalHeatSource.SOLAR
     assert gas.heat_source is ThermalHeatSource.GAS
 
@@ -140,7 +140,7 @@ def test_maintenance_source_rules() -> None:
     solar = tracker.evaluate(observation(at=NOW + timedelta(minutes=1), active=True, spa=99, roof=120))
     low_roof = tracker.evaluate(observation(at=NOW + timedelta(minutes=2), active=True, spa=99, roof=119))
     deficit = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), active=True, spa=97, roof=125))
-    hot_roof = tracker.evaluate(observation(at=NOW + timedelta(minutes=4), active=True, spa=97, roof=130))
+    hot_roof = tracker.evaluate(observation(at=NOW + timedelta(minutes=4), active=True, spa=97, roof=135))
     assert solar.heat_source is ThermalHeatSource.SOLAR
     assert low_roof.heat_source is ThermalHeatSource.GAS
     assert deficit.heat_source is ThermalHeatSource.GAS
@@ -224,14 +224,14 @@ def test_opportunistic_entry_is_not_clock_or_filtration_debt_gated() -> None:
     first = tracker.evaluate(
         observation(
             at=NOW.replace(hour=10),
-            roof=130,
+            roof=135,
             debt=timedelta(hours=6),
         )
     )
     active = tracker.evaluate(
         observation(
             at=NOW.replace(hour=10, minute=2),
-            roof=130,
+            roof=135,
             debt=timedelta(hours=6),
         )
     )
@@ -242,8 +242,8 @@ def test_opportunistic_entry_is_not_clock_or_filtration_debt_gated() -> None:
 
 def test_opportunistic_continues_to_hysteresis_then_stops_and_waits() -> None:
     tracker = SpaThermalPolicyTracker()
-    tracker.evaluate(observation(roof=130))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
+    tracker.evaluate(observation(roof=135))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=135))
     useful = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), roof=120))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=4), roof=119))
     hold = tracker.evaluate(observation(at=NOW + timedelta(minutes=6), roof=119))
@@ -256,10 +256,10 @@ def test_opportunistic_continues_to_hysteresis_then_stops_and_waits() -> None:
 
 def test_opportunistic_target_is_a_cap_and_stops_circulation() -> None:
     tracker = SpaThermalPolicyTracker()
-    tracker.evaluate(observation(roof=130))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
+    tracker.evaluate(observation(roof=135))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=135))
     capped = tracker.evaluate(
-        observation(at=NOW + timedelta(minutes=3), spa=100, target=100, roof=130)
+        observation(at=NOW + timedelta(minutes=3), spa=100, target=100, roof=135)
     )
     assert capped.state is SpaPolicyState.OPPORTUNISTIC_HOLD
     assert capped.heat_source is ThermalHeatSource.NONE
@@ -269,21 +269,21 @@ def test_opportunistic_target_is_a_cap_and_stops_circulation() -> None:
 
 def test_opportunistic_hold_resumes_after_two_minutes_when_roof_recovers() -> None:
     tracker = SpaThermalPolicyTracker()
-    tracker.evaluate(observation(roof=130))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
+    tracker.evaluate(observation(roof=135))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=135))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=3), roof=119))
     tracker.evaluate(observation(at=NOW + timedelta(minutes=5), roof=119))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=6), roof=130))
-    resumed = tracker.evaluate(observation(at=NOW + timedelta(minutes=8), roof=130))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=6), roof=135))
+    resumed = tracker.evaluate(observation(at=NOW + timedelta(minutes=8), roof=135))
     assert resumed.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
 
 
 def test_user_claims_opportunistic_spa_and_off_can_return_to_policy() -> None:
     tracker = SpaThermalPolicyTracker()
-    tracker.evaluate(observation(roof=130))
-    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=130))
+    tracker.evaluate(observation(roof=135))
+    tracker.evaluate(observation(at=NOW + timedelta(minutes=2), roof=135))
     claimed = tracker.evaluate(observation(at=NOW + timedelta(minutes=3), active=True, source=SpaUserSource.OCP, roof=125))
-    off = tracker.evaluate(observation(at=NOW + timedelta(minutes=4), active=False, source=SpaUserSource.OCP, roof=130))
+    off = tracker.evaluate(observation(at=NOW + timedelta(minutes=4), active=False, source=SpaUserSource.OCP, roof=135))
     assert claimed.spa_in_use
     assert claimed.heat_source is ThermalHeatSource.GAS
     assert off.state in {SpaPolicyState.OPPORTUNISTIC_QUALIFYING, SpaPolicyState.OPPORTUNISTIC_ACTIVE}
@@ -378,7 +378,7 @@ def test_pool_target_reached_but_roof_low_waits_then_later_roof_starts_spa() -> 
     qualifying = tracker.evaluate(
         observation(
             at=NOW.replace(hour=11),
-            roof=130,
+            roof=135,
             pool_satisfied=True,
             debt=timedelta(hours=6),
         )
@@ -386,7 +386,7 @@ def test_pool_target_reached_but_roof_low_waits_then_later_roof_starts_spa() -> 
     active = tracker.evaluate(
         observation(
             at=NOW.replace(hour=11, minute=2),
-            roof=130,
+            roof=135,
             pool_satisfied=True,
             debt=timedelta(hours=6),
         )

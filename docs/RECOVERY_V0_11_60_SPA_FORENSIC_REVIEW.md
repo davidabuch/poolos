@@ -157,8 +157,7 @@ The priority case continues to a new Pool BODY origin/generation and Pool Solar
 2900. Neither the original Pool origin nor the Spa origin authorizes that Pool
 activation. No Gas command occurs. Spa's current repository trust policy accepts
 fresh exclusive Spa circulation as temperature evidence; this test does not
-invent an additional physical mixing/settling guarantee. The model raises roof
-from the initial 125 F to 140 F for the default 130 F Spa qualification threshold.
+invent an additional physical mixing/settling guarantee. The model raises roof from below to above the configured Spa Solar qualification threshold.
 
 ## 5. Protected regression envelope
 
