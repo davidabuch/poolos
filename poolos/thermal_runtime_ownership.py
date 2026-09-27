@@ -2473,16 +2473,18 @@ class ThermalRuntimeOwnershipManager:
                 OwnershipDomain.PUMP: lease.pump_setpoint,
                 OwnershipDomain.THERMAL: lease.heat_source,
             }[state.domain]
-            accepted_at = {
-                OwnershipDomain.BODY: ownership.body_activation_accepted_at,
-                OwnershipDomain.PUMP: ownership.pump_accepted_at,
-                OwnershipDomain.THERMAL: ownership.heat_source_accepted_at,
-            }[state.domain]
+            accepted_at = _accepted_boundary(
+                promoted_at,
+                {
+                    OwnershipDomain.BODY: ownership.body_activation_accepted_at,
+                    OwnershipDomain.PUMP: ownership.pump_accepted_at,
+                    OwnershipDomain.THERMAL: ownership.heat_source_accepted_at,
+                }[state.domain],
+            )
             if (
                 state.authority is OwnershipAuthority.NONE
                 and state.last_handback_evidence is not None
                 and new_origin is not None and new_origin != previous_origin
-                and accepted_at is not None
                 and state.last_handback_evidence.requested_at < accepted_at <= promoted_at
             ):
                 states[index] = replace(
