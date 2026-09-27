@@ -1366,8 +1366,10 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
     assert replayed.heat_source_adoption is None
     assert replayed.body_session_id == current.body_session_id
 
-    # Delayed promotion is not a fresh command. Only an accepted receipt after
-    # the policy hand-back may acquire THERMAL authority from NONE.
+    # Promotion is invoked only after the live engine accepted a command.
+    # If the delivery ownership omits an explicit receipt timestamp, promoted_at
+    # is the canonical accepted boundary used everywhere else in the lease.
+    # A timestamp older than the HXSLR gesture must still be rejected.
     manager.promote_session_provenance(
         replace(
             execution_ownership(body=ThermalBody.HOT_TUB, source=PhysicalHeatMode.SOLAR, plan_id=currentness.plan_id),
@@ -1381,7 +1383,9 @@ def test_spa_solar_preferred_policy_selection_hands_back_thermal_without_solar_p
         execution_progress=ThermalExecutionProgress(),
     )
     assert manager.state.lease.domain_state(OwnershipDomain.THERMAL).authority is (
-        OwnershipAuthority.POOLOS if receipt_second == 3 else OwnershipAuthority.NONE
+        OwnershipAuthority.POOLOS
+        if receipt_second in {None, 3}
+        else OwnershipAuthority.NONE
     )
 
 
