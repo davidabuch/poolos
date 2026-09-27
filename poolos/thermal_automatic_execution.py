@@ -2988,12 +2988,15 @@ class ThermalAutomaticExecutionDriver:
             and body.plan.desired.required_pump_rpm is not None
         )
         force_hot_tub_successor_pump_provenance = (
-            converged_successor
-            and replace_pump_setpoint
+            replace_pump_setpoint
             and body.body is ThermalBody.HOT_TUB
             and body.plan.desired.required_pump_rpm is not None
             and pump_origin is None
             and lease.body_activation is not None
+            and not any(
+                isinstance(operation, SetPumpSpeed)
+                for operation in body.plan.operations
+            )
         )
         if (
             force_pool_successor_pump_provenance
