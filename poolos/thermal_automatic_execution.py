@@ -2981,19 +2981,34 @@ class ThermalAutomaticExecutionDriver:
         # new Pump provenance. If the handoff must replace the predecessor Pump
         # setpoint, create one normal idempotent SetPumpSpeed operation so the
         # successor can establish fresh accepted-command provenance.
-        if (
-            replace_pump_setpoint
+        force_pool_successor_pump_provenance = (
+            converged_successor
+            and replace_pump_setpoint
+            and body.body is ThermalBody.POOL
             and body.plan.desired.required_pump_rpm is not None
-            and not any(
-                isinstance(operation, SetPumpSpeed)
-                for operation in body.plan.operations
-            )
+        )
+        force_hot_tub_successor_pump_provenance = (
+            converged_successor
+            and replace_pump_setpoint
+            and body.body is ThermalBody.HOT_TUB
+            and body.plan.desired.required_pump_rpm is not None
+            and pump_origin is None
+            and lease.body_activation is not None
+        )
+        if (
+            force_pool_successor_pump_provenance
+            or force_hot_tub_successor_pump_provenance
         ):
-            if safety.target_pump_circuit_id is None:
+            pump_equipment_id = (
+                safety.pool_pump_circuit_id
+                if body.body is ThermalBody.POOL
+                else safety.target_pump_circuit_id
+            )
+            if pump_equipment_id is None:
                 return "automatic_thermal_live_safety_evidence_unavailable"
 
             successor_plan = ThermalExecutionPlanBuilder(
-                pump_equipment_id=safety.target_pump_circuit_id,
+                pump_equipment_id=pump_equipment_id,
                 configured_speed_concept=safety.configured_pump_speed_concept,
                 priming_policy=PumpPrimingPolicy(baselines=self.baselines),
             ).build(
