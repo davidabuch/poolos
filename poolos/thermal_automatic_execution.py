@@ -3084,12 +3084,21 @@ class ThermalAutomaticExecutionDriver:
             replace_pump_setpoint=replace_pump_setpoint,
             replace_heat_source=replace_heat_source,
         )
+        handoff_body = (
+            body
+            if successor_plan is body.plan
+            else replace(
+                body,
+                plan=successor_plan,
+                live_safety_evidence=safety,
+            )
+        )
         decision = self.orchestrator.ownership.handoff(
             request,
             build_thermal_runtime_ownership_evidence(
                 generated_at=frame.observed_at,
                 observations={item.observation_id: item for item in frame.observations},
-                body=body,
+                body=handoff_body,
                 external_changes=frame.external_changes,
                 freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
             ),
