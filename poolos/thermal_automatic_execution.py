@@ -2991,6 +2991,7 @@ class ThermalAutomaticExecutionDriver:
         force_hot_tub_successor_pump_provenance = (
             replace_pump_setpoint
             and body.body is ThermalBody.HOT_TUB
+            and body.plan.desired.selected_source is not PhysicalHeatMode.OFF
             and body.plan.desired.required_pump_rpm is not None
             and pump_origin is None
             and lease.body_activation is not None
@@ -3055,10 +3056,11 @@ class ThermalAutomaticExecutionDriver:
                 )
             except ValueError as exc:
                 return f"automatic_thermal_session_begin_failed:{_bounded(str(exc))}"
-        # The forced command plan is an execution artifact used to earn
-        # prospective command provenance. Ownership currentness remains bound
-        # to the real runtime assessment supplied by this authoritative frame.
-        successor_context = body.live_execution_context
+        successor_context = (
+            body.live_execution_context
+            if successor is None
+            else successor.originating_context
+        )
         successor_progress = (
             ThermalExecutionProgress()
             if successor is None
