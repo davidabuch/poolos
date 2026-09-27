@@ -2955,9 +2955,14 @@ class ThermalAutomaticExecutionDriver:
         pump_origin = lease.pump_setpoint or lease.pump_adoption
         source_origin = lease.heat_source or lease.heat_source_adoption
         replace_pump_setpoint = (
-            pump_origin is not None
-            and pump_origin.intended_value
-            != body.plan.desired.required_pump_rpm
+            body.plan.desired.required_pump_rpm is not None
+            and lease.domain_state(OwnershipDomain.PUMP).authority
+            is not OwnershipAuthority.OPERATOR
+            and (
+                pump_origin is None
+                or pump_origin.intended_value
+                != body.plan.desired.required_pump_rpm
+            )
         )
         replace_heat_source = (
             source_origin is not None
@@ -2973,16 +2978,18 @@ class ThermalAutomaticExecutionDriver:
         # setpoint, create one normal idempotent SetPumpSpeed operation so the
         # successor can establish fresh accepted-command provenance.
         if (
-            converged_successor
-            and replace_pump_setpoint
-            and body.body is ThermalBody.POOL
+            replace_pump_setpoint
             and body.plan.desired.required_pump_rpm is not None
+            and not any(
+                isinstance(operation, SetPumpSpeed)
+                for operation in body.plan.operations
+            )
         ):
-            if safety.pool_pump_circuit_id is None:
+            if safety.target_pump_circuit_id is None:
                 return "automatic_thermal_live_safety_evidence_unavailable"
 
             successor_plan = ThermalExecutionPlanBuilder(
-                pump_equipment_id=safety.pool_pump_circuit_id,
+                pump_equipment_id=safety.target_pump_circuit_id,
                 configured_speed_concept=safety.configured_pump_speed_concept,
                 priming_policy=PumpPrimingPolicy(baselines=self.baselines),
             ).build(
