@@ -10,6 +10,11 @@ from .operational_intent import IntentCriterion, OperationalIntent, OperationalI
 from .thermal_source_policy import HeatSourcePermissions, ThermalHeatSource
 
 
+MIN_SPA_SOLAR_ROOF_F = 110.0
+MAX_SPA_SOLAR_ROOF_F = 150.0
+DEFAULT_SPA_SOLAR_ROOF_F = (MIN_SPA_SOLAR_ROOF_F + MAX_SPA_SOLAR_ROOF_F) / 2
+
+
 class SpaUserSource(str, Enum):
     HOME_ASSISTANT = "home_assistant"
     ICP = "icp"
@@ -59,14 +64,14 @@ class SpaPolicyState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class SpaPolicyConfig:
-    spa_solar_roof_f: float = 110.0
+    spa_solar_roof_f: float = DEFAULT_SPA_SOLAR_ROOF_F
     spa_solar_hysteresis_f: float = 10.0
     qualification_hold: timedelta = timedelta(minutes=2)
     maintenance_deficit_f: float = 2.0
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
 
     def __post_init__(self) -> None:
-        if not 110.0 <= self.spa_solar_roof_f <= 150.0:
+        if not MIN_SPA_SOLAR_ROOF_F <= self.spa_solar_roof_f <= MAX_SPA_SOLAR_ROOF_F:
             raise ValueError("spa_solar_roof_f must be between 110 and 150 F")
         if self.spa_solar_hysteresis_f <= 0:
             raise ValueError("spa_solar_hysteresis_f must be positive")
