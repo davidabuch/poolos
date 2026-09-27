@@ -5629,6 +5629,7 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
     solar_active = False
     stable = False
     saw_fresh_2900_command = False
+    commissioning_trace: list[tuple[object, ...]] = []
 
     for seconds in range(123, 260):
         before = len(delivery.calls)
@@ -5646,6 +5647,34 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
                 delivery_factory=factory,
             )
         )
+        new_operations = tuple(
+            (
+                type(operation).__name__,
+                getattr(operation, "rpm", None),
+                getattr(getattr(operation, "mode", None), "value", None),
+                getattr(operation, "active", None),
+            )
+            for operation in delivery.calls[before:]
+        )
+        lease_snapshot = orchestrator.ownership.state.lease
+        commissioning_trace.append(
+            (
+                seconds,
+                result.state.value,
+                result.blocker,
+                active,
+                pump_rpm,
+                configured_rpm,
+                spa_heater,
+                solar_active,
+                new_operations,
+                None if lease_snapshot is None else lease_snapshot.status.value,
+                None if lease_snapshot is None else lease_snapshot.owns_body,
+                None if lease_snapshot is None else lease_snapshot.owns_pump_setpoint,
+                None if lease_snapshot is None else lease_snapshot.owns_heat_source,
+                None if lease_snapshot is None else lease_snapshot.reason_code,
+            )
+        )
         if (
             result.state is ThermalAutomaticDriverState.BLOCKED
             and result.blocker
@@ -5660,7 +5689,8 @@ def test_opportunistic_spa_preconverged_pump_earns_successor_provenance() -> Non
                 f"predecessor={None if predecessor is None else predecessor.purpose}; "
                 f"desired_source={desired.selected_source}; "
                 f"desired_rpm={desired.required_pump_rpm}; "
-                f"desired_reason={desired.reason_code}"
+                f"desired_reason={desired.reason_code}; "
+                f"trace={commissioning_trace[-45:]}"
             )
 
         for operation in delivery.calls[before:]:
