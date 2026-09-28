@@ -1517,6 +1517,16 @@ class PoolOSPhysicalCommandAuthority:
         if (
             reason is PhysicalAuthorityReason.ALLOWED
             and self._grid_outage_epoch_id is not None
+            and request.source in {
+                PhysicalRequestSource.AUTOMATIC_THERMAL,
+                PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                PhysicalRequestSource.RECONCILIATION,
+            }
+        ):
+            reason = PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and self._grid_outage_epoch_id is not None
             and request.source is PhysicalRequestSource.MANUAL
             and _manual_request_violates_grid_outage_safety(
                 request,
