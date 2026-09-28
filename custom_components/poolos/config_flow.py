@@ -19,6 +19,9 @@ from .const import (
     CONF_PUMP_FILTRATION_RPM,
     CONF_PUMP_GAS_HEATING_RPM,
     CONF_PUMP_GRID_OUTAGE_RPM,
+    CONF_SANITATION_RPM,
+    CONF_POOL_SANITATION_DURATION_MINUTES,
+    CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
     CONF_PUMP_PRIMING_RPM,
     CONF_PUMP_SOLAR_HEATING_RPM,
     CONF_PUMP_TEMPERATURE_PROBE_RPM,
@@ -45,10 +48,15 @@ from .const import (
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     DEFAULT_INTELLICENTER_TRANSPORT,
     DEFAULT_SPA_SOLAR_ROOF_F,
+    DEFAULT_SANITATION_RPM,
+    DEFAULT_POOL_SANITATION_DURATION_MINUTES,
+    DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
     DEFAULT_OPERATING_MODE,
     DOMAIN,
     MAX_SPA_SOLAR_ROOF_F,
     MIN_SPA_SOLAR_ROOF_F,
+    MIN_SANITATION_DURATION_MINUTES,
+    MAX_SANITATION_DURATION_MINUTES,
     NAME,
     INTELLICENTER_TRANSPORT_OPTIONS,
 )
@@ -194,6 +202,36 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
     for key, default in pump_speed_fields.items():
         fields[vol.Required(key, default=current.get(key, default))] = (
             pump_speed_selector
+        )
+
+    fields[
+        vol.Required(
+            CONF_SANITATION_RPM,
+            default=current.get(CONF_SANITATION_RPM, DEFAULT_SANITATION_RPM),
+        )
+    ] = pump_speed_selector
+
+    sanitation_duration_selector = selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=MIN_SANITATION_DURATION_MINUTES,
+            max=MAX_SANITATION_DURATION_MINUTES,
+            step=5,
+            mode="box",
+            unit_of_measurement="min",
+        )
+    )
+    for key, default in (
+        (
+            CONF_POOL_SANITATION_DURATION_MINUTES,
+            DEFAULT_POOL_SANITATION_DURATION_MINUTES,
+        ),
+        (
+            CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
+            DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
+        ),
+    ):
+        fields[vol.Required(key, default=current.get(key, default))] = (
+            sanitation_duration_selector
         )
     fields[
         vol.Optional(

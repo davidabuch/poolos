@@ -44,6 +44,8 @@ def test_required_integration_files_exist() -> None:
             "observation.py",
                 "pump_baselines.py",
                 "pump_speed_session.py",
+            "sanitation_delivery.py",
+            "sanitation_runtime.py",
                 "shadow.py",
         "select.py",
         "sensor.py",

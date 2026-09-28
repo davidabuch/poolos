@@ -754,6 +754,15 @@ SENSORS = (
         "mdi:pool-thermometer",
     ),
     PoolOSControlCenterSensorDescription(
+        "sanitation",
+        "Sanitation",
+        lambda coordinator, runtime: runtime.sanitation_runtime.diagnostics()[
+            "state"
+        ].upper(),
+        lambda coordinator, runtime: runtime.sanitation_runtime.diagnostics(),
+        "mdi:shield-refresh",
+    ),
+    PoolOSControlCenterSensorDescription(
         "thermal_execution_readiness",
         "Thermal Execution Readiness",
         lambda coordinator, runtime: (

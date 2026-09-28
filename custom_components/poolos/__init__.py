@@ -30,8 +30,14 @@ _enable_local_vendored_core()
 
 from .const import (  # noqa: E402
     CONF_PREFERRED_FILTRATION_CATCHUP_START,
+    CONF_SANITATION_RPM,
+    CONF_POOL_SANITATION_DURATION_MINUTES,
+    CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
     DEFAULT_OPERATING_MODE,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+    DEFAULT_SANITATION_RPM,
+    DEFAULT_POOL_SANITATION_DURATION_MINUTES,
+    DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
     PLATFORMS,
 )
 from .config_entry_migration import migrate_config_entry  # noqa: E402
@@ -46,6 +52,7 @@ from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .observation import ObservationSnapshot  # noqa: E402
 from .pump_baselines import compose_pump_baseline_runtime  # noqa: E402
 from .pump_speed_session import PoolOSPumpSpeedSessionRuntime  # noqa: E402
+from .sanitation_runtime import PoolOSSanitationRuntime  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 from .thermal_automatic_runtime import PoolOSThermalAutomaticRuntime  # noqa: E402
 from poolos.thermal_runtime_orchestration import (  # noqa: E402
@@ -67,6 +74,7 @@ from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
+from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
     PoolCirculationOwnershipRegistry,
@@ -103,6 +111,7 @@ class PoolOSRuntimeData:
     thermal_automatic_runtime: PoolOSThermalAutomaticRuntime
     grid_outage_safety_runtime: PoolOSGridOutageSafetyRuntime
     filtration_automatic_runtime: PoolOSFiltrationAutomaticRuntime
+    sanitation_runtime: PoolOSSanitationRuntime
     pool_automatic_control: PoolAutomaticControlSuppression
     pump_operating_baselines: PumpOperatingBaselines
     pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
@@ -174,8 +183,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         return None
 
     spa_session_kind_provider = initial_spa_session_kind
+    def no_sanitation_manual_off(_body: str) -> bool:
+        return False
+
+    sanitation_manual_off_handler = no_sanitation_manual_off
 
     def arm_manual_pool_off(suppressed_at: datetime) -> None:
+        if sanitation_manual_off_handler("pool"):
+            return
         pool_automatic_control.suppress(
             source=(
                 PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST
@@ -185,6 +200,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
 
     def arm_manual_spa_off(suppressed_at: datetime) -> None:
+        if sanitation_manual_off_handler("hot_tub"):
+            return
         # OFF ends a homeowner-started/adopted Spa BODY session. It must not
         # globally disable a later independent opportunistic Spa opportunity.
         # BODY adoption provenance can retire before the OFF request reaches
@@ -323,6 +340,64 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         engine=pump_composition.grid_outage_engine,
     )
 
+    sanitation_runtime = PoolOSSanitationRuntime(
+        hass=hass,
+        entry_id=entry.entry_id,
+        coordinator=coordinator,
+        thermal_runtime=thermal_runtime,
+        authority=physical_command_authority,
+        manual=manual_intellicenter,
+        default_rpm=int(configured.get(CONF_SANITATION_RPM, DEFAULT_SANITATION_RPM)),
+        pool_duration_seconds=60 * int(
+            configured.get(
+                CONF_POOL_SANITATION_DURATION_MINUTES,
+                DEFAULT_POOL_SANITATION_DURATION_MINUTES,
+            )
+        ),
+        hot_tub_duration_seconds=60 * int(
+            configured.get(
+                CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
+                DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
+            )
+        ),
+    )
+
+    def sanitation_authority_boundary_changed(
+        changed_at: datetime,
+        active: bool,
+    ) -> None:
+        # Sanitation is a first-class maintenance authority, not an external
+        # takeover. Retire normal execution provenance without issuing cleanup;
+        # sanitation itself owns the successor body/pump/thermal purpose.
+        thermal_automatic_runtime.driver.restrictive_authority_changed(
+            changed_at=changed_at
+        )
+        lease = pool_circulation_ownership.filtration_lease
+        if lease is not None:
+            pool_circulation_ownership.release_filtration(
+                session_id=lease.session_id
+            )
+        if not active:
+            # Fresh post-sanitation observations may establish the next
+            # independent PoolOS purpose. Equality alone grants nothing.
+            physical_command_authority.begin_automatic_filtration_epoch(
+                f"post-sanitation:{changed_at.isoformat()}"
+            )
+
+    sanitation_runtime.authority_boundary_changed = (
+        sanitation_authority_boundary_changed
+    )
+
+    def handle_sanitation_manual_off(body: str) -> bool:
+        return sanitation_runtime.note_manual_body_off(
+            SanitationBody.POOL
+            if body == "pool"
+            else SanitationBody.HOT_TUB
+        )
+
+    sanitation_manual_off_handler = handle_sanitation_manual_off
+    await sanitation_runtime.async_restore()
+
     def synchronize_pool_automatic_restraint(_state: object) -> None:
         physical_command_authority.set_pool_automatic_control_suppressed(
             pool_automatic_control.globally_suppressed
@@ -398,6 +473,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_automatic_runtime=thermal_automatic_runtime,
         grid_outage_safety_runtime=grid_outage_safety_runtime,
         filtration_automatic_runtime=filtration_automatic_runtime,
+        sanitation_runtime=sanitation_runtime,
         pool_automatic_control=pool_automatic_control,
         spa_automatic_control=spa_automatic_control,
         pump_operating_baselines=pump_baselines,
@@ -498,6 +574,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
                 transport,
                 getattr(transport_runtime, "discovery_generation", 0),
             )
+        sanitation_runtime.observe(
+            snapshot,
+            orchestration,
+            external_change_runtime.latest_batch,
+        )
         thermal_automatic_runtime.observe(
             snapshot,
             assessment,
@@ -595,6 +676,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> b
     entry.runtime_data.thermal_runtime.set_orchestration_observer(None)
     entry.runtime_data.thermal_runtime.set_orchestration_failure_observer(None)
     await entry.runtime_data.grid_outage_safety_runtime.async_unload()
+    await entry.runtime_data.sanitation_runtime.async_unload()
     await entry.runtime_data.thermal_automatic_runtime.async_unload()
     await entry.runtime_data.filtration_automatic_runtime.async_unload()
     entry.runtime_data.thermal_runtime_orchestrator.unload(
