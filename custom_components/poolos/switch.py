@@ -35,6 +35,7 @@ from poolos.pool_automatic_control_suppression import (
     spa_suppression_is_current,
 )
 from poolos.thermal_runtime_assessment import ThermalRequestedMode
+from poolos.sanitation import SanitationBody
 from poolos.thermal_runtime_ownership import ThermalQuickRestartCheckpoint
 
 
@@ -979,6 +980,78 @@ class PoolOSNativeIntelliCenterSwitch(
         }
 
 
+class PoolOSSanitationSwitch(
+    CoordinatorEntity[PoolOSCoordinator],
+    SwitchEntity,
+):
+    """Expose one explicit, mutually-exclusive sanitation session request."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:shield-refresh"
+
+    def __init__(
+        self,
+        coordinator: PoolOSCoordinator,
+        entry: ConfigEntry[PoolOSRuntimeData],
+        body: SanitationBody,
+    ) -> None:
+        super().__init__(coordinator)
+        self._runtime = entry.runtime_data
+        self._body = body
+        label = "Pool" if body is SanitationBody.POOL else "Hot Tub"
+        self._attr_name = f"{label} Sanitation"
+        self._attr_unique_id = (
+            f"{entry.entry_id}_{body.value}_sanitation"
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return self._runtime.sanitation_runtime.is_active(self._body)
+
+    @property
+    def available(self) -> bool:
+        manual = self._runtime.manual_intellicenter
+        return (
+            manual is not None
+            and manual.available
+            and not self._runtime.physical_command_authority.reset_recovery_active
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        active_body = self._runtime.sanitation_runtime.active_body
+        if active_body is not None and active_body is not self._body:
+            raise ManualIntelliCenterCommandError(
+                f"{active_body.value} sanitation is already active"
+            )
+        if active_body is self._body:
+            return
+        await self._runtime.sanitation_runtime.async_start(self._body)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        if not self._runtime.sanitation_runtime.is_active(self._body):
+            return
+        await self._runtime.sanitation_runtime.async_cancel(
+            self._body,
+            reason="operator_toggle_off",
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        diagnostics = self._runtime.sanitation_runtime.diagnostics()
+        return {
+            **diagnostics,
+            "requested_body": self._body.value,
+            "heat_allowed": False,
+            "gas_allowed": False,
+            "solar_allowed": False,
+            "manual_body_off_cancels": True,
+            "grid_outage_pauses": True,
+            "pool_filtration_credit": self._body is SanitationBody.POOL,
+        }
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry[PoolOSRuntimeData],
@@ -1010,5 +1083,15 @@ async def async_setup_entry(
             PoolOSMaintenanceModeSwitch(entry),
             PoolOSPoolAutonomousControlSwitch(entry),
             PoolOSSpaAutonomousControlSwitch(entry),
+            PoolOSSanitationSwitch(
+                runtime.coordinator,
+                entry,
+                SanitationBody.POOL,
+            ),
+            PoolOSSanitationSwitch(
+                runtime.coordinator,
+                entry,
+                SanitationBody.HOT_TUB,
+            ),
         ]
     )
