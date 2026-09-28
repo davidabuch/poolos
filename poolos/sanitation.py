@@ -231,7 +231,6 @@ class SanitationController:
     def abandon(self, *, reason: str) -> SanitationAssessment:
         """Retire durable sanitation intent for an explicit higher authority."""
 
-        session = self.session
         self.session = None
         return SanitationAssessment(
             None,
