@@ -483,6 +483,11 @@ def test_non_default_probe_and_outage_registration_remain_exact() -> None:
 def test_active_outage_manual_ceiling_uses_configured_outage_rpm() -> None:
     authority = ready_authority()
     authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage-epoch",
+        pump_ceiling_required=True,
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id="outage-epoch",
         frame_identity="outage-frame",
