@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PhysicalCommandRequest,
@@ -182,7 +184,7 @@ def test_rejected_heat_and_cancel_body_off_do_not_leak_operator_ownership_intent
             source=PhysicalRequestSource.MANUAL,
             requested_value="H0001",
         ),
-        at=__import__("datetime").datetime(2026, 9, 27, tzinfo=__import__("datetime").UTC),
+        at=datetime(2026, 9, 27, tzinfo=UTC),
     )
     authority.note_operator_request(
         PhysicalCommandRequest(
@@ -191,7 +193,7 @@ def test_rejected_heat_and_cancel_body_off_do_not_leak_operator_ownership_intent
             source=PhysicalRequestSource.MANUAL,
             requested_value=False,
         ),
-        at=__import__("datetime").datetime(2026, 9, 27, tzinfo=__import__("datetime").UTC),
+        at=datetime(2026, 9, 27, tzinfo=UTC),
     )
     authority.note_operator_request(
         PhysicalCommandRequest(
@@ -200,7 +202,7 @@ def test_rejected_heat_and_cancel_body_off_do_not_leak_operator_ownership_intent
             source=PhysicalRequestSource.MANUAL,
             requested_value=2800,
         ),
-        at=__import__("datetime").datetime(2026, 9, 27, tzinfo=__import__("datetime").UTC),
+        at=datetime(2026, 9, 27, tzinfo=UTC),
     )
 
     assert len(seen) == 1
