@@ -31,6 +31,7 @@ class PhysicalRequestSource(StrEnum):
     SAFETY_INTERLOCK = "safety_interlock"
     GRID_OUTAGE_SAFETY = "grid_outage_safety"
     RESET_RECOVERY = "reset_recovery"
+    SANITATION = "sanitation"
 
 
 class PhysicalAuthorityReason(StrEnum):
@@ -74,6 +75,12 @@ class PhysicalAuthorityReason(StrEnum):
     RESET_RECOVERY_INACTIVE = "reset_recovery_inactive"
     RESET_RECOVERY_ACTIVE = "reset_recovery_active"
     RESET_RECOVERY_OPERATION_UNAUTHORIZED = "reset_recovery_operation_unauthorized"
+    SANITATION_INACTIVE = "sanitation_inactive"
+    SANITATION_ACTIVE = "sanitation_active"
+    SANITATION_CONTEXT_MISSING = "sanitation_context_missing"
+    SANITATION_CONTEXT_STALE = "sanitation_context_stale"
+    SANITATION_OPERATION_UNAUTHORIZED = "sanitation_operation_unauthorized"
+    SANITATION_PAUSED_OUTAGE = "sanitation_paused_outage"
 
 
 class GridOutageDispatchPurpose(StrEnum):
@@ -297,6 +304,51 @@ class AutomaticThermalProbeAuthority:
 
 
 @dataclass(frozen=True, slots=True)
+class SanitationDispatchContext:
+    """Exact current authority for one sanitation operation."""
+
+    generation: int
+    session_id: str
+    body: str
+    operation: str
+    target: str
+    requested_value: bool | int | str
+    pump_circuit_id: str
+    sanitation_rpm: int
+    runtime_binding: str = ""
+
+    def __post_init__(self) -> None:
+        if self.generation < 1:
+            raise ValueError("sanitation generation must be positive")
+        for name in ("session_id", "body", "operation", "target", "pump_circuit_id"):
+            if not str(getattr(self, name)).strip():
+                raise ValueError(f"{name} must not be empty")
+        if self.body not in {"pool", "hot_tub"}:
+            raise ValueError("unsupported sanitation body")
+        if not is_pmpcirc_native_id(self.pump_circuit_id):
+            raise ValueError("sanitation requires a concrete PMPCIRC identity")
+        if self.sanitation_rpm <= 0:
+            raise ValueError("sanitation RPM must be positive")
+        body_target = "B1101" if self.body == "pool" else "B1202"
+        allowed = (
+            self.operation == "body_heat_source"
+            and self.target == body_target
+            and self.requested_value == "00000"
+        ) or (
+            self.operation == "body_active"
+            and self.target == body_target
+            and type(self.requested_value) is bool
+        ) or (
+            self.operation == "pump_circuit_speed"
+            and self.target == self.pump_circuit_id
+            and type(self.requested_value) is int
+            and self.requested_value == self.sanitation_rpm
+        )
+        if not allowed:
+            raise ValueError("operation exceeds exact sanitation envelope")
+
+
+@dataclass(frozen=True, slots=True)
 class AutomaticThermalDispatchContext:
     """Restrictive one-epoch authority proof for automatic thermal delivery."""
 
@@ -485,6 +537,7 @@ class PhysicalCommandRequest:
     automatic_thermal_context: AutomaticThermalDispatchContext | None = None
     automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None
     grid_outage_context: GridOutageDispatchContext | None = None
+    sanitation_context: SanitationDispatchContext | None = None
 
     def __post_init__(self) -> None:
         if not self.operation.strip() or not self.target.strip():
@@ -518,6 +571,20 @@ class PhysicalCommandRequest:
             raise ValueError(
                 "automatic filtration context requires automatic filtration source"
             )
+        if (
+            self.source is not PhysicalRequestSource.SANITATION
+            and self.sanitation_context is not None
+        ):
+            raise ValueError("sanitation context requires sanitation source")
+        if (
+            self.source is PhysicalRequestSource.SANITATION
+            and (
+                self.automatic_thermal_context is not None
+                or self.automatic_filtration_context is not None
+                or self.grid_outage_context is not None
+            )
+        ):
+            raise ValueError("sanitation requests cannot carry unrelated contexts")
         if (
             self.source is PhysicalRequestSource.AUTOMATIC_FILTRATION
             and self.automatic_thermal_context is not None
@@ -670,6 +737,14 @@ class PoolOSPhysicalCommandAuthority:
     _reset_recovery_generation: int = field(default=0, init=False, repr=False)
     _reset_recovery_active: bool = field(default=False, init=False, repr=False)
     _reset_recovery_phase: str = field(default="inactive", init=False, repr=False)
+    _sanitation_generation: int = field(default=0, init=False, repr=False)
+    _sanitation_active: bool = field(default=False, init=False, repr=False)
+    _sanitation_body: str | None = field(default=None, init=False, repr=False)
+    _sanitation_session_id: str | None = field(default=None, init=False, repr=False)
+    _sanitation_rpm: int | None = field(default=None, init=False, repr=False)
+    _sanitation_context: SanitationDispatchContext | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.expectation_ttl <= timedelta(0):
@@ -1099,6 +1174,111 @@ class PoolOSPhysicalCommandAuthority:
         self._automatic_filtration_gate_enabled = False
         self._invalidate_automatic_filtration_context()
 
+    def begin_sanitation_session(
+        self,
+        *,
+        body: str,
+        session_id: str,
+        sanitation_rpm: int,
+    ) -> int:
+        """Fence normal automatic work for one explicit sanitation session."""
+
+        normalized_body = str(body).strip().casefold()
+        if normalized_body not in {"pool", "hot_tub"}:
+            raise ValueError("unsupported sanitation body")
+        if not str(session_id).strip():
+            raise ValueError("sanitation session_id must not be empty")
+        if sanitation_rpm <= 0:
+            raise ValueError("sanitation RPM must be positive")
+        if (
+            self._sanitation_active
+            and (
+                self._sanitation_session_id != session_id
+                or self._sanitation_body != normalized_body
+            )
+        ):
+            raise ValueError("another sanitation session is already active")
+        changed = not self._sanitation_active
+        self._sanitation_active = True
+        self._sanitation_body = normalized_body
+        self._sanitation_session_id = session_id
+        self._sanitation_rpm = int(sanitation_rpm)
+        if changed:
+            self._sanitation_generation += 1
+        self._sanitation_context = None
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+        self._invalidate_undispatched_sanitation_expectations()
+        return self._sanitation_generation
+
+    def end_sanitation_session(self, *, session_id: str) -> None:
+        """Retire sanitation authority without manufacturing successor ownership."""
+
+        if (
+            not self._sanitation_active
+            or self._sanitation_session_id != session_id
+        ):
+            return
+        self._sanitation_active = False
+        self._sanitation_body = None
+        self._sanitation_session_id = None
+        self._sanitation_rpm = None
+        self._sanitation_generation += 1
+        self._sanitation_context = None
+        self._invalidate_undispatched_sanitation_expectations()
+        self._invalidate_automatic_thermal_context()
+        self._invalidate_automatic_filtration_context()
+
+    @property
+    def sanitation_active(self) -> bool:
+        return self._sanitation_active
+
+    @property
+    def sanitation_body(self) -> str | None:
+        return self._sanitation_body
+
+    def bind_sanitation_dispatch(
+        self,
+        *,
+        session_id: str,
+        body: str,
+        operation: str,
+        target: str,
+        requested_value: bool | int | str,
+        pump_circuit_id: str,
+        sanitation_rpm: int,
+    ) -> SanitationDispatchContext:
+        """Bind one operation to the exact current sanitation generation."""
+
+        if (
+            not self._sanitation_active
+            or session_id != self._sanitation_session_id
+            or body != self._sanitation_body
+            or sanitation_rpm != self._sanitation_rpm
+        ):
+            raise ValueError("sanitation session is not current")
+        context = SanitationDispatchContext(
+            generation=self._sanitation_generation,
+            session_id=session_id,
+            body=body,
+            operation=operation,
+            target=target,
+            requested_value=requested_value,
+            pump_circuit_id=pump_circuit_id,
+            sanitation_rpm=sanitation_rpm,
+            runtime_binding=self._runtime_binding,
+        )
+        self._sanitation_context = context
+        return context
+
+    def _invalidate_undispatched_sanitation_expectations(self) -> None:
+        self._expectations = {
+            key: item
+            for key, item in self._expectations.items()
+            if item.request.source is not PhysicalRequestSource.SANITATION
+            or item.dispatch_started
+        }
+
     def configure_grid_outage_safety(self, *, enabled: bool) -> None:
         """Set the independent default-off outage gate and invalidate old work."""
 
@@ -1232,6 +1412,33 @@ class PoolOSPhysicalCommandAuthority:
         reason = self.base_authority_reason
         if (
             reason is PhysicalAuthorityReason.ALLOWED
+            and self._sanitation_active
+            and request.source in {
+                PhysicalRequestSource.AUTOMATIC_THERMAL,
+                PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                PhysicalRequestSource.RECONCILIATION,
+            }
+        ):
+            reason = PhysicalAuthorityReason.SANITATION_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and self._sanitation_active
+            and request.source is PhysicalRequestSource.MANUAL
+        ):
+            if (
+                request.operation == "body_heat_source"
+                and request.requested_value != "00000"
+            ):
+                reason = PhysicalAuthorityReason.SANITATION_ACTIVE
+            elif (
+                request.operation == "body_active"
+                and request.requested_value is True
+                and request.target
+                != ("B1101" if self._sanitation_body == "pool" else "B1202")
+            ):
+                reason = PhysicalAuthorityReason.SANITATION_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
             and self._reset_recovery_active
             and request.source not in {
                 PhysicalRequestSource.RESET_RECOVERY,
@@ -1255,6 +1462,7 @@ class PoolOSPhysicalCommandAuthority:
                 PhysicalRequestSource.AUTOMATIC_THERMAL,
                 PhysicalRequestSource.AUTOMATIC_FILTRATION,
                 PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+                PhysicalRequestSource.SANITATION,
             }
             and self._automatic_restoration_barrier_required
             and not (
@@ -1298,6 +1506,11 @@ class PoolOSPhysicalCommandAuthority:
             and request.source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
         ):
             reason = self._grid_outage_reason(request)
+        elif (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and request.source is PhysicalRequestSource.SANITATION
+        ):
+            reason = self._sanitation_reason(request)
         if (
             reason is PhysicalAuthorityReason.ALLOWED
             and request.source in {PhysicalRequestSource.AUTOMATIC_THERMAL,
@@ -1314,6 +1527,30 @@ class PoolOSPhysicalCommandAuthority:
             maintenance_mode=self._maintenance_mode,
             controller_mode=self._controller_mode,
         )
+
+    def _sanitation_reason(
+        self,
+        request: PhysicalCommandRequest,
+    ) -> PhysicalAuthorityReason:
+        if not self._sanitation_active:
+            return PhysicalAuthorityReason.SANITATION_INACTIVE
+        if self._grid_outage_epoch_id is not None:
+            return PhysicalAuthorityReason.SANITATION_PAUSED_OUTAGE
+        context = request.sanitation_context
+        if context is None:
+            return PhysicalAuthorityReason.SANITATION_CONTEXT_MISSING
+        if (
+            context != self._sanitation_context
+            or context.generation != self._sanitation_generation
+            or context.session_id != self._sanitation_session_id
+            or context.body != self._sanitation_body
+            or context.sanitation_rpm != self._sanitation_rpm
+            or context.runtime_binding != self._runtime_binding
+        ):
+            return PhysicalAuthorityReason.SANITATION_CONTEXT_STALE
+        if not _sanitation_request_matches_context(request, context):
+            return PhysicalAuthorityReason.SANITATION_OPERATION_UNAUTHORIZED
+        return PhysicalAuthorityReason.ALLOWED
 
     def _manual_pump_session_request_current(
         self,
@@ -1640,6 +1877,11 @@ class PoolOSPhysicalCommandAuthority:
                 "reset_recovery_active": self._reset_recovery_active,
                 "reset_recovery_generation": self._reset_recovery_generation,
                 "reset_recovery_phase": self._reset_recovery_phase,
+                "sanitation_active": self._sanitation_active,
+                "sanitation_generation": self._sanitation_generation,
+                "sanitation_body": self._sanitation_body,
+                "sanitation_session_id": self._sanitation_session_id,
+                "sanitation_rpm": self._sanitation_rpm,
                 "pending_expectation_count": len(self._expectations),
                 "pending_expectation_limit": self.expectation_limit,
                 "expectation_ttl_seconds": self.expectation_ttl.total_seconds(),
@@ -1672,6 +1914,18 @@ class PoolOSPhysicalCommandAuthority:
                 ),
             }
         )
+
+
+def _sanitation_request_matches_context(
+    request: PhysicalCommandRequest,
+    context: SanitationDispatchContext,
+) -> bool:
+    return bool(
+        request.operation == context.operation
+        and request.target == context.target
+        and type(request.requested_value) is type(context.requested_value)
+        and request.requested_value == context.requested_value
+    )
 
 
 def _reset_recovery_request_allowed(request: PhysicalCommandRequest) -> bool:
