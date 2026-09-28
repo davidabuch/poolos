@@ -30,6 +30,7 @@ from .const import (
     CONF_INTELLICENTER_HOST,
     CONF_INTELLICENTER_TRANSPORT,
     CONF_GRID_STATUS_ENTITY,
+    CONF_GRID_OUTAGE_SIMULATION_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
     CONF_POOL_LIGHT_ENTITY,
@@ -140,6 +141,7 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         CONF_JETS_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_SLIDE_ACTIVE_ENTITY: ["binary_sensor", "switch"],
         CONF_POOL_LIGHT_ENTITY: ["light"],
+        CONF_GRID_OUTAGE_SIMULATION_ENTITY: ["input_boolean"],
     }
 
     fields: dict[vol.Marker, object] = {}
