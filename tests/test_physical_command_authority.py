@@ -457,6 +457,11 @@ def test_confirmed_outage_final_gateway_fences_normal_automatic_work() -> None:
     assert authority.assess(request_value).allowed
 
     authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=True,
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id="outage",
         frame_identity="outage-frame",
@@ -467,6 +472,10 @@ def test_confirmed_outage_final_gateway_fences_normal_automatic_work() -> None:
         is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
     )
 
+    authority.set_grid_outage_domain_state(
+        active=False,
+        outage_epoch_id=None,
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id=None,
         frame_identity="grid-return",
@@ -493,6 +502,11 @@ def test_confirmed_outage_final_gateway_fences_normal_automatic_work() -> None:
 def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
     authority = ready()
     authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=True,
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id="outage",
         frame_identity="frame",
@@ -565,6 +579,10 @@ def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
 def test_grid_return_releases_manual_safety_fence_without_restoring_old_state() -> None:
     authority = ready()
     authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id="outage",
         frame_identity="off-grid",
@@ -580,6 +598,10 @@ def test_grid_return_releases_manual_safety_fence_without_restoring_old_state() 
         is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
     )
 
+    authority.set_grid_outage_domain_state(
+        active=False,
+        outage_epoch_id=None,
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id=None,
         frame_identity="on-grid",
