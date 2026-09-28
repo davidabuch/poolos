@@ -43,6 +43,7 @@ from poolos.observations import (
     PoolObservation,
 )
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
@@ -249,7 +250,12 @@ def enabled_engine() -> GridOutagePhysicalSafetyEngine:
     return engine
 
 
-def external_event(concept: str, *, at: datetime = NOW) -> ExternalChangeEvent:
+def external_event(
+    concept: str,
+    *,
+    at: datetime = NOW,
+    operator: PositiveOperatorEvidence | None = None,
+) -> ExternalChangeEvent:
     return ExternalChangeEvent(
         concept=concept,
         semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
@@ -261,6 +267,7 @@ def external_event(concept: str, *, at: datetime = NOW) -> ExternalChangeEvent:
         action_taken="accepted_native_value",
         notification_recommended=False,
         reconciliation_required=False,
+        positive_operator_evidence=operator,
     )
 
 
@@ -741,6 +748,33 @@ def test_external_preemption_uses_only_uncorrelated_relevant_post_authority_even
         stale,
         authority_not_before=NOW,
         evaluated_at=NOW + timedelta(seconds=1),
+    ) is None
+
+
+def test_positive_operator_intent_during_outage_does_not_preempt_safety() -> None:
+    requested_at = NOW + timedelta(milliseconds=250)
+    operator = PositiveOperatorEvidence(
+        request_id="manual-spa-on",
+        authority_generation=7,
+        body_session_id="spa-session",
+        domain=OwnershipDomain.BODY,
+        equipment_id="spa.active",
+        requested_at=requested_at,
+    )
+    batch = ExternalChangeBatch(
+        (
+            external_event(
+                "spa.active",
+                at=NOW + timedelta(seconds=1),
+                operator=operator,
+            ),
+        )
+    )
+
+    assert grid_outage_external_preemption_reason(
+        batch,
+        authority_not_before=NOW,
+        evaluated_at=NOW + timedelta(seconds=2),
     ) is None
 
 
