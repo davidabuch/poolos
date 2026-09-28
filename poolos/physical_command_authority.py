@@ -1333,11 +1333,18 @@ class PoolOSPhysicalCommandAuthority:
             and frame_identity == self._grid_outage_frame_identity
         ):
             return
+        outage_boundary_changed = outage_epoch_id != self._grid_outage_epoch_id
         self._grid_outage_generation += 1
         self._grid_outage_epoch_id = outage_epoch_id
         self._grid_outage_frame_identity = frame_identity
         self._grid_outage_authority = None
         self._invalidate_undispatched_grid_outage_expectations()
+        if outage_boundary_changed:
+            # Entry and authoritative clear are safety authority boundaries.
+            # Old normal contexts must never become valid again merely because
+            # the outage fence appeared or disappeared.
+            self._invalidate_automatic_thermal_context()
+            self._invalidate_automatic_filtration_context()
 
     def register_grid_outage_candidate(
         self,
