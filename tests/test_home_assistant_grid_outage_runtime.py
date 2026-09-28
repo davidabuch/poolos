@@ -17,6 +17,7 @@ from poolos.external_change import (
     ExternalSemanticEventType,
 )
 from poolos.grid_outage_physical_safety import GridOutageSafetyLifecycle
+from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.physical_command_authority import PhysicalAuthorityReason
 from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 
@@ -112,6 +113,7 @@ class FakeEngine:
             lifecycle=lifecycle,
             outage_epoch_id="outage" if self.candidate is not None else None,
             candidate=self.candidate,
+            circulation=None,
         )
         return self.assessment
 
@@ -139,10 +141,22 @@ class FakeAuthority:
     base_authority_reason: PhysicalAuthorityReason = PhysicalAuthorityReason.ALLOWED
     enabled: list[bool] = field(default_factory=list)
     frames: list[tuple[str | None, str]] = field(default_factory=list)
+    domains: list[tuple[bool, str | None, bool]] = field(default_factory=list)
     unloaded: bool = False
 
     def configure_grid_outage_safety(self, *, enabled: bool) -> None:
         self.enabled.append(enabled)
+
+    def set_grid_outage_domain_state(
+        self,
+        *,
+        active: bool,
+        outage_epoch_id: str | None,
+        pump_ceiling_required: bool = False,
+    ) -> None:
+        self.domains.append(
+            (active, outage_epoch_id, pump_ceiling_required)
+        )
 
     def begin_grid_outage_frame(self, *, outage_epoch_id: str | None, frame_identity: str) -> None:
         self.frames.append((outage_epoch_id, frame_identity))
@@ -191,7 +205,10 @@ def snapshot(at: datetime, identity: str) -> tuple[object, object]:
         SimpleNamespace(generated_at=at, observations=()),
         SimpleNamespace(
             snapshot_identity=identity,
-            outage=SimpleNamespace(confirmed_at=NOW),
+            outage=SimpleNamespace(
+                confirmed_at=NOW,
+                disposition=GridOutageDisposition.CONFIRMED_OUTAGE,
+            ),
         ),
     )
 
