@@ -64,6 +64,7 @@ from .thermal_execution_planning import (
 from .thermal_live_execution import (
     ThermalLiveDeliveryPort,
     ThermalLiveExecutionEngine,
+    ThermalLiveExecutionOwnership,
     commissioning_scope_allows_body,
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
