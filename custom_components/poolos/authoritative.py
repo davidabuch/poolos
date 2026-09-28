@@ -168,6 +168,8 @@ def _external_observations(
     mapped_entities: dict[str, str] = {}
 
     grid_entity = mapping.get(CONF_GRID_STATUS_ENTITY)
+    if grid_entity is not None:
+        mapped_entities[CONF_GRID_STATUS_ENTITY] = grid_entity
     simulation_entity = mapping.get(CONF_GRID_OUTAGE_SIMULATION_ENTITY)
     simulation_state = (
         None if simulation_entity is None else states.get(simulation_entity)
@@ -214,7 +216,6 @@ def _external_observations(
     elif grid_entity is None:
         missing_required.extend(sorted(AUTHORITATIVE_REQUIRED_EXTERNAL_CONCEPTS))
     else:
-        mapped_entities[CONF_GRID_STATUS_ENTITY] = grid_entity
         state = states.get(grid_entity)
         if state is None:
             unavailable.append(grid_entity)
