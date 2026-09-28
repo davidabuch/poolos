@@ -576,6 +576,77 @@ def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
     ).allowed
 
 
+def test_outage_manual_safety_fence_respects_gate_and_conditional_pump_ceiling() -> None:
+    authority = ready()
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=False,
+    )
+
+    high_pump = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=3200,
+    )
+    spa_on = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1202",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=True,
+    )
+
+    # Canonical outage domain fences normal automation, but the independent
+    # physical Safety gate must be enabled before it can deny manual writes.
+    assert authority.assess(high_pump).allowed
+    assert authority.assess(spa_on).allowed
+
+    authority.configure_grid_outage_safety(enabled=True)
+
+    # A high manual Pool RPM is not categorically forbidden when the outage
+    # engine has not proven circulation must be retained/reduced.
+    assert authority.assess(high_pump).allowed
+    assert (
+        authority.assess(spa_on).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+
+def test_inactive_body_heat_policy_can_be_changed_during_outage_without_load() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+    )
+    authority.replace_native_truth(
+        {
+            ("pool.active", "B1101"): True,
+            ("spa.active", "B1202"): False,
+        }
+    )
+
+    pool_gas = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value="H0001",
+    )
+    spa_gas = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1202",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value="H0001",
+    )
+
+    assert (
+        authority.assess(pool_gas).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+    assert authority.assess(spa_gas).allowed
+
+
 def test_grid_return_releases_manual_safety_fence_without_restoring_old_state() -> None:
     authority = ready()
     authority.configure_grid_outage_safety(enabled=True)
