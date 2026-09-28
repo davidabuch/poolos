@@ -622,8 +622,8 @@ def test_inactive_body_heat_policy_can_be_changed_during_outage_without_load() -
     )
     authority.replace_native_truth(
         {
-            ("pool.active", "B1101"): True,
-            ("spa.active", "B1202"): False,
+            ("pool.active", "intellicenter_native:test:B1101"): True,
+            ("spa.active", "intellicenter_native:test:B1202"): False,
         }
     )
 
@@ -645,6 +645,66 @@ def test_inactive_body_heat_policy_can_be_changed_during_outage_without_load() -
         is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
     )
     assert authority.assess(spa_gas).allowed
+
+
+def test_pool_body_on_during_outage_requires_selected_heat_authoritatively_off() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+    )
+    pool_on = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1101",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=True,
+    )
+
+    authority.replace_native_truth(
+        {
+            ("pool.raw_heater_id", "intellicenter_native:test:B1101"): "H0001",
+        }
+    )
+    assert (
+        authority.assess(pool_on).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+    authority.replace_native_truth(
+        {
+            ("pool.raw_heater_id", "intellicenter_native:test:B1101"): "H0002",
+        }
+    )
+    assert (
+        authority.assess(pool_on).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+    authority.replace_native_truth(
+        {
+            ("pool.raw_heater_id", "intellicenter_native:test:B1101"): "00000",
+        }
+    )
+    assert authority.assess(pool_on).allowed
+
+
+def test_pool_body_on_during_outage_fails_closed_when_selected_heat_unknown() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+    )
+    decision = authority.assess(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1101",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=True,
+        )
+    )
+    assert decision.reason is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
 
 
 def test_grid_return_releases_manual_safety_fence_without_restoring_old_state() -> None:
