@@ -433,6 +433,41 @@ def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
     assert authority.assess(wrong).reason is PhysicalAuthorityReason.GRID_OUTAGE_OPERATION_UNAUTHORIZED
 
 
+def test_confirmed_outage_final_gateway_fences_normal_automatic_work() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("thermal-epoch")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="thermal-epoch",
+        session_identity="thermal-session",
+        body="pool",
+        pump_circuit_id="p0102",
+    )
+    request_value = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value="H0002",
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(request_value).allowed
+
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="outage-frame",
+    )
+
+    assert (
+        authority.assess(request_value).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+
 def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
     authority = ready()
     authority.configure_grid_outage_safety(enabled=True)
