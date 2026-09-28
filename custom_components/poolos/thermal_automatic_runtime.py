@@ -507,7 +507,11 @@ class PoolOSThermalAutomaticRuntime:
             "thermal", eligible=eligible, observed_at=snapshot.generated_at,
         )
         reason = self.authority.base_authority_reason
-        ready = reason is PhysicalAuthorityReason.ALLOWED
+        sanitation_active = self.authority.sanitation_active
+        ready = (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and not sanitation_active
+        )
         pump_session = (
             None
             if self.pump_speed_session is None
@@ -547,7 +551,13 @@ class PoolOSThermalAutomaticRuntime:
             ),
             physical_authority_ready=ready,
             physical_authority_blocker=(
-                None if ready else f"physical_authority:{reason.value}"
+                None
+                if ready
+                else (
+                    "physical_authority:sanitation_active"
+                    if sanitation_active
+                    else f"physical_authority:{reason.value}"
+                )
             ),
             filtration_successor=(
                 None
