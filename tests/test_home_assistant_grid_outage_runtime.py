@@ -111,7 +111,7 @@ class FakeEngine:
         )
         self.assessment = SimpleNamespace(
             lifecycle=lifecycle,
-            outage_epoch_id="outage" if self.candidate is not None else None,
+            outage_epoch_id="outage",
             candidate=self.candidate,
             circulation=None,
         )
@@ -200,14 +200,23 @@ def runtime(module: ModuleType, engine: FakeEngine):
     return value, hass, authority
 
 
-def snapshot(at: datetime, identity: str) -> tuple[object, object]:
+def snapshot(
+    at: datetime,
+    identity: str,
+    *,
+    disposition: GridOutageDisposition = GridOutageDisposition.CONFIRMED_OUTAGE,
+) -> tuple[object, object]:
     return (
         SimpleNamespace(generated_at=at, observations=()),
         SimpleNamespace(
             snapshot_identity=identity,
             outage=SimpleNamespace(
-                confirmed_at=NOW,
-                disposition=GridOutageDisposition.CONFIRMED_OUTAGE,
+                confirmed_at=(
+                    NOW
+                    if disposition is GridOutageDisposition.CONFIRMED_OUTAGE
+                    else None
+                ),
+                disposition=disposition,
             ),
         ),
     )
@@ -279,6 +288,35 @@ def test_new_frame_invalidates_queued_context_and_coalesces_one_pending_frame() 
         await hass.tasks[0]
         assert engine.accepted
         assert engine.frames == ["frame-1", "frame-3"]
+
+    asyncio.run(scenario())
+
+
+def test_authoritative_grid_return_clears_safety_domain_during_inflight_delivery() -> None:
+    async def scenario() -> None:
+        FakeDelivery.release = asyncio.Event()
+        FakeDelivery.started = asyncio.Event()
+        FakeDelivery.calls = []
+        FakeDelivery.error = None
+        module = load_module()
+        engine = FakeEngine(candidate=candidate())
+        value, hass, authority = runtime(module, engine)
+
+        value.observe(*snapshot(NOW, "off-grid"))
+        await FakeDelivery.started.wait()
+        assert authority.domains[-1][0] is True
+
+        value.observe(
+            *snapshot(
+                NOW + timedelta(seconds=1),
+                "grid-return",
+                disposition=GridOutageDisposition.ON_GRID,
+            )
+        )
+        assert authority.domains[-1] == (False, None, False)
+
+        FakeDelivery.release.set()
+        await hass.tasks[0]
 
     asyncio.run(scenario())
 
