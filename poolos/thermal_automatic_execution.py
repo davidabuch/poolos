@@ -879,7 +879,10 @@ class ThermalAutomaticExecutionDriver:
                 promotion_failure = self._promote_session(
                     before.ownership,
                     verified,
-                    promoted_at=frame.observed_at,
+                    promoted_at=_promotion_boundary(
+                        before.ownership,
+                        frame.observed_at,
+                    ),
                     requested_mode=body.requested_mode.value,
                 )
                 if promotion_failure is not None:
@@ -1443,7 +1446,10 @@ class ThermalAutomaticExecutionDriver:
             promotion_failure = self._promote_session(
                 delivered.ownership,
                 delivered,
-                promoted_at=frame.observed_at,
+                promoted_at=_promotion_boundary(
+                    delivered.ownership,
+                    frame.observed_at,
+                ),
                 requested_mode=body.requested_mode.value,
             )
             if promotion_failure is not None:
@@ -4193,6 +4199,30 @@ def _live_boolean_observation(
     if freshness is not ObservationFreshness.FRESH:
         return None
     return observation.value
+
+
+def _promotion_boundary(
+    ownership: ThermalLiveExecutionOwnership,
+    frame_observed_at: datetime,
+) -> datetime:
+    """Use the latest accepted-command boundary when it follows the frame.
+
+    Delivery is asynchronous relative to observation. A command accepted after
+    the frame was captured is still valid fresh provenance; using only the
+    frame timestamp can make a legitimate post-handback receipt appear to come
+    from the future and prevent domain ownership promotion.
+    """
+
+    accepted = tuple(
+        item
+        for item in (
+            ownership.body_activation_accepted_at,
+            ownership.pump_accepted_at,
+            ownership.heat_source_accepted_at,
+        )
+        if item is not None
+    )
+    return max((frame_observed_at, *accepted))
 
 
 def _require_aware(value: datetime) -> None:
