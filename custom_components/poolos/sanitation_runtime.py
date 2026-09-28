@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -55,6 +55,7 @@ class PoolOSSanitationRuntime:
     default_rpm: int
     pool_duration_seconds: int
     hot_tub_duration_seconds: int
+    authority_boundary_changed: Callable[[datetime, bool], None] | None = None
     controller: SanitationController = field(default_factory=SanitationController)
     assessment: SanitationAssessment | None = None
     _task: asyncio.Task[CommandReceipt] | None = field(
@@ -124,6 +125,8 @@ class PoolOSSanitationRuntime:
             session_id=session.session_id,
             sanitation_rpm=session.target_rpm,
         )
+        if self.authority_boundary_changed is not None:
+            self.authority_boundary_changed(datetime.now(UTC), True)
         self._last_persisted_remaining = session.remaining_seconds
         self._last_persisted_lifecycle = session.lifecycle.value
 
@@ -151,6 +154,8 @@ class PoolOSSanitationRuntime:
             session_id=session.session_id,
             sanitation_rpm=session.target_rpm,
         )
+        if self.authority_boundary_changed is not None:
+            self.authority_boundary_changed(now, True)
         self._last_delivery_error = None
         await self._persist(force=True)
         await self.coordinator.async_request_refresh()
@@ -259,6 +264,8 @@ class PoolOSSanitationRuntime:
             self.authority.end_sanitation_session(
                 session_id=session_before.session_id
             )
+            if self.authority_boundary_changed is not None:
+                self.authority_boundary_changed(snapshot.generated_at, False)
             self._last_delivery_error = None
             self.hass.async_create_task(
                 self._persist(force=True),
