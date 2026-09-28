@@ -545,7 +545,7 @@ def test_same_raw_timestamp_with_changed_state_is_contradictory() -> None:
     assert result.evidence_status is GridOutageEvidenceStatus.CONTRADICTORY
 
 
-def test_source_change_is_unknown_and_breaks_pending_continuity() -> None:
+def test_arbitrary_real_source_change_is_unknown_and_breaks_pending_continuity() -> None:
     tracker = GridOutageConfirmationTracker()
     _evaluate(tracker, outage_active=True, evaluated_at=NOW)
 
@@ -558,6 +558,67 @@ def test_source_change_is_unknown_and_breaks_pending_continuity() -> None:
 
     assert changed.disposition is GridOutageDisposition.UNKNOWN
     assert changed.evidence_status is GridOutageEvidenceStatus.CONTRADICTORY
+
+
+def test_commissioning_simulation_source_handoff_starts_fresh_confirmation() -> None:
+    tracker = GridOutageConfirmationTracker()
+    real_source = SOURCE_ID
+    simulated_source = "poolos_simulation:input_boolean.poolos_simulate_grid_outage"
+
+    on_grid = _evaluate(
+        tracker,
+        outage_active=False,
+        evaluated_at=NOW,
+        source_id=real_source,
+    )
+    pending = _evaluate(
+        tracker,
+        outage_active=True,
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id=simulated_source,
+    )
+    confirmed = _evaluate(
+        tracker,
+        outage_active=True,
+        evaluated_at=NOW + timedelta(seconds=3),
+        observed_at=NOW + timedelta(seconds=1),
+        source_id=simulated_source,
+    )
+
+    assert on_grid.disposition is GridOutageDisposition.ON_GRID
+    assert pending.disposition is GridOutageDisposition.OFF_GRID_PENDING
+    assert pending.pending_since == NOW + timedelta(seconds=1)
+    assert confirmed.disposition is GridOutageDisposition.CONFIRMED_OUTAGE
+    assert confirmed.threshold_reached_at == NOW + timedelta(seconds=3)
+
+
+def test_confirmed_simulated_outage_can_end_on_real_authoritative_grid_return() -> None:
+    tracker = GridOutageConfirmationTracker()
+    simulated_source = "poolos_simulation:input_boolean.poolos_simulate_grid_outage"
+
+    _evaluate(
+        tracker,
+        outage_active=True,
+        evaluated_at=NOW,
+        source_id=simulated_source,
+    )
+    _evaluate(
+        tracker,
+        outage_active=True,
+        evaluated_at=NOW + timedelta(seconds=2),
+        observed_at=NOW,
+        source_id=simulated_source,
+    )
+
+    returned = _evaluate(
+        tracker,
+        outage_active=False,
+        evaluated_at=NOW + timedelta(seconds=3),
+        source_id=SOURCE_ID,
+    )
+
+    assert returned.disposition is GridOutageDisposition.ON_GRID
+    assert returned.grid_returned_at == NOW + timedelta(seconds=3)
 
 
 def test_wrong_observation_id_is_unusable() -> None:
