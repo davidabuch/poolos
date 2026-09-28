@@ -170,9 +170,11 @@ class PoolOSResetControlButton(
                 raise RuntimeError("Reset PoolOS Control requires IntelliCenter delivery")
 
             reset_at = datetime.now(UTC)
-            await runtime.sanitation_runtime.async_abandon_for_higher_authority(
-                reason="reset_poolos_control",
-            )
+            sanitation_runtime = getattr(runtime, "sanitation_runtime", None)
+            if sanitation_runtime is not None:
+                await sanitation_runtime.async_abandon_for_higher_authority(
+                    reason="reset_poolos_control",
+                )
             self._reset_generation = authority.begin_reset_recovery()
             self._reset_observation_after = reset_at
             self._reset_running = True
