@@ -277,6 +277,16 @@ class SanitationController:
                 "sanitation_cancel_body_off",
             )
 
+        if session.lifecycle is SanitationLifecycle.COMPLETING:
+            if observation.target_body_active is False:
+                self.session = None
+                return self._assessment("sanitation_completed")
+            return self._action(
+                SanitationActionKind.BODY_OFF,
+                False,
+                "sanitation_duration_complete_body_off",
+            )
+
         if observation.grid_on is None:
             self.session = replace(
                 session,
