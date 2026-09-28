@@ -215,6 +215,25 @@ def test_powerwall_grid_status_is_required_read_only_observation() -> None:
     assert "Powerwall grid status entity (1_Powerwall)" in translations
 
 
+def test_grid_outage_simulation_helper_is_optional_and_event_driven() -> None:
+    const = (COMPONENT / "const.py").read_text(encoding="utf-8")
+    flow = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
+    observation = (COMPONENT / "observation.py").read_text(encoding="utf-8")
+    authoritative = (COMPONENT / "authoritative.py").read_text(encoding="utf-8")
+
+    assert (
+        'CONF_GRID_OUTAGE_SIMULATION_ENTITY = "grid_outage_simulation_entity"'
+        in const
+    )
+    assert (
+        'CONF_GRID_OUTAGE_SIMULATION_ENTITY: ["input_boolean"]'
+        in flow
+    )
+    assert "option_keys.add(CONF_GRID_OUTAGE_SIMULATION_ENTITY)" in observation
+    assert "poolos_simulation:" in authoritative
+    assert "simulation_active" in authoritative
+
+
 def test_grid_observation_adds_no_outage_actuation() -> None:
     component_source = "\n".join(
         path.read_text(encoding="utf-8").lower() for path in COMPONENT.glob("*.py")

@@ -61,6 +61,7 @@ _CONST = _load_component_module("const")
 build_authoritative_snapshot = _AUTHORITATIVE.build_authoritative_snapshot
 
 CONF_GRID_STATUS_ENTITY = _CONST.CONF_GRID_STATUS_ENTITY
+CONF_GRID_OUTAGE_SIMULATION_ENTITY = _CONST.CONF_GRID_OUTAGE_SIMULATION_ENTITY
 CONF_POOL_LIGHT_ENTITY = _CONST.CONF_POOL_LIGHT_ENTITY
 CONF_POOL_THERMOSTAT_ENTITY = _CONST.CONF_POOL_THERMOSTAT_ENTITY
 
@@ -133,6 +134,7 @@ def test_snapshot_diagnostics_identify_authoritative_source() -> None:
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
 GRID_ENTITY = "binary_sensor.test_grid"
+SIMULATION_ENTITY = "input_boolean.poolos_simulate_grid_outage"
 POOL_CLIMATE_ENTITY = "climate.legacy_pool"
 POOL_LIGHT_ENTITY = "light.legacy_pool_light"
 
@@ -289,6 +291,87 @@ def test_behavior_grid_truth_is_still_supplied_by_home_assistant() -> None:
     assert observations["grid.available"].value is True
     assert observations["grid.outage_active"].value is False
     assert observations["grid.available"].source_id == f"home_assistant:{GRID_ENTITY}"
+
+
+def test_behavior_outage_simulator_off_preserves_real_grid_authority() -> None:
+    snapshot = build_authoritative_snapshot(
+        native_snapshot=_native_snapshot(),
+        options=_grid_options(
+            **{CONF_GRID_OUTAGE_SIMULATION_ENTITY: SIMULATION_ENTITY}
+        ),
+        states={
+            GRID_ENTITY: _ha_state(GRID_ENTITY, "on"),
+            SIMULATION_ENTITY: _ha_state(SIMULATION_ENTITY, "off"),
+        },
+        now=NOW,
+    )
+
+    observations = _observations_by_concept(snapshot)
+
+    assert observations["grid.available"].value is True
+    assert observations["grid.outage_active"].value is False
+    assert observations["grid.outage_active"].source_id == (
+        f"home_assistant:{GRID_ENTITY}"
+    )
+
+
+def test_behavior_outage_simulator_on_overrides_only_grid_with_simulated_provenance() -> None:
+    snapshot = build_authoritative_snapshot(
+        native_snapshot=_native_snapshot(
+            overrides={
+                "pool.active": True,
+                "pump.rpm": 2900.0,
+                "solar.active": True,
+            }
+        ),
+        options=_grid_options(
+            **{CONF_GRID_OUTAGE_SIMULATION_ENTITY: SIMULATION_ENTITY}
+        ),
+        states={
+            GRID_ENTITY: _ha_state(GRID_ENTITY, "on"),
+            SIMULATION_ENTITY: _ha_state(SIMULATION_ENTITY, "on"),
+        },
+        now=NOW,
+    )
+
+    observations = _observations_by_concept(snapshot)
+
+    assert observations["grid.available"].value is False
+    assert observations["grid.outage_active"].value is True
+    assert observations["grid.outage_active"].source_id == (
+        f"poolos_simulation:{SIMULATION_ENTITY}"
+    )
+    assert observations["pool.active"].value is True
+    assert observations["pump.rpm"].value == 2900.0
+    assert observations["solar.active"].value is True
+    assert observations["pool.active"].source_id.startswith(
+        "intellicenter_native:"
+    )
+    assert snapshot.mapped_entities[
+        CONF_GRID_STATUS_ENTITY
+    ] == GRID_ENTITY
+    assert snapshot.mapped_entities[
+        CONF_GRID_OUTAGE_SIMULATION_ENTITY
+    ] == SIMULATION_ENTITY
+
+
+def test_behavior_outage_simulator_can_commission_without_real_grid_state_present() -> None:
+    snapshot = build_authoritative_snapshot(
+        native_snapshot=_native_snapshot(),
+        options=_grid_options(
+            **{CONF_GRID_OUTAGE_SIMULATION_ENTITY: SIMULATION_ENTITY}
+        ),
+        states={
+            SIMULATION_ENTITY: _ha_state(SIMULATION_ENTITY, "on"),
+        },
+        now=NOW,
+    )
+
+    observations = _observations_by_concept(snapshot)
+
+    assert observations["grid.outage_active"].value is True
+    assert snapshot.healthy is True
+    assert GRID_ENTITY not in snapshot.unavailable_entities
 
 
 def test_behavior_unchanged_stateful_grid_remains_authoritative_when_read_now() -> None:

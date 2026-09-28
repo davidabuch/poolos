@@ -60,6 +60,17 @@ stale, future, contradictory, or otherwise unusable evidence cannot confirm a
 pending outage and cannot manufacture proof that a confirmed outage ended.
 Only usable positive on-grid evidence ends a confirmed outage epoch.
 
+For physical commissioning without interrupting utility service, PoolOS may be
+configured with an optional Home Assistant `input_boolean` simulation source. The
+simulation source is injected only at the same canonical external-observation
+boundary as the real grid-status entity. When the helper is ON, PoolOS publishes
+`grid.available=false` and `grid.outage_active=true` with explicit
+`poolos_simulation:` provenance; all pool, spa, source, pump, circuit, and
+temperature observations remain real. When the helper is OFF or not configured,
+the Powerwall grid-status entity remains the sole grid authority. The commissioning
+helper is configured to initialize OFF after Home Assistant restart and is not a
+production outage source.
+
 The tracker is in-memory and deliberately does not reconstruct confirmation
 from an old matching state after restart. A first off-grid evaluation after
 restart begins a new two-second evidentiary epoch. It uses no sleep, polling,

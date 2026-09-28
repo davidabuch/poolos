@@ -56,6 +56,7 @@ CONF_WATERFALL_ACTIVE_ENTITY = "waterfall_active_entity"
 CONF_JETS_ACTIVE_ENTITY = "jets_active_entity"
 CONF_SLIDE_ACTIVE_ENTITY = "slide_active_entity"
 CONF_GRID_STATUS_ENTITY = "grid_status_entity"
+CONF_GRID_OUTAGE_SIMULATION_ENTITY = "grid_outage_simulation_entity"
 CONF_POOL_LIGHT_ENTITY = "pool_light_entity"
 
 # Removed in config-entry schema 2.1. Native IntelliCenter observations remain;
@@ -98,6 +99,7 @@ OPTIONAL_ENTITY_OPTIONS = (
     CONF_JETS_ACTIVE_ENTITY,
     CONF_SLIDE_ACTIVE_ENTITY,
     CONF_POOL_LIGHT_ENTITY,
+    CONF_GRID_OUTAGE_SIMULATION_ENTITY,
 )
 ALL_ENTITY_OPTIONS = REQUIRED_ENTITY_OPTIONS + OPTIONAL_ENTITY_OPTIONS
 

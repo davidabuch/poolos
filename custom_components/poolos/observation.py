@@ -21,6 +21,7 @@ from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
     CONF_HEATER_ACTIVE_ENTITY,
     CONF_GRID_STATUS_ENTITY,
+    CONF_GRID_OUTAGE_SIMULATION_ENTITY,
     CONF_JETS_ACTIVE_ENTITY,
     CONF_POOL_COMMAND_ENTITY,
     CONF_POOL_LIGHT_ENTITY,
@@ -222,6 +223,7 @@ def configured_entity_mapping(options: Mapping[str, Any]) -> dict[str, str]:
 
     mapping: dict[str, str] = {}
     option_keys = {spec.option_key for spec in MAPPING_SPECS}
+    option_keys.add(CONF_GRID_OUTAGE_SIMULATION_ENTITY)
     for option_key in sorted(option_keys):
         value = options.get(option_key)
         if isinstance(value, str) and value.strip():

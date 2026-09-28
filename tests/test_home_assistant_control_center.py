@@ -108,6 +108,17 @@ def test_roadmap_records_11_1e_done() -> None:
     assert "### Epic 11.1E — PoolOS Control Center" in roadmap
 
 
+def test_grid_evidence_source_exposes_simulated_provenance() -> None:
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+    assert '"grid_evidence_source"' in source
+    assert '"Grid Evidence Source"' in source
+    assert '"SIMULATED"' in source
+    assert '"REAL"' in source
+    assert '"poolos_simulation:"' in source
+    assert '"source_id"' in source
+    assert '"simulated"' in source
+
+
 def test_dashboard_explains_future_powerwall_conservation_without_actuation() -> None:
     text = DASHBOARD.read_text(encoding="utf-8")
     assert "Grid & Resilience" in text

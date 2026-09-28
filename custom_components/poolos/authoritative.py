@@ -28,6 +28,7 @@ from poolos.observations import (
 
 from .const import (
     CONF_GRID_STATUS_ENTITY,
+    CONF_GRID_OUTAGE_SIMULATION_ENTITY,
     CONF_POOL_LIGHT_ENTITY,
     OBSERVATION_STALE_AFTER,
 )
@@ -167,10 +168,54 @@ def _external_observations(
     mapped_entities: dict[str, str] = {}
 
     grid_entity = mapping.get(CONF_GRID_STATUS_ENTITY)
-    if grid_entity is None:
+    if grid_entity is not None:
+        mapped_entities[CONF_GRID_STATUS_ENTITY] = grid_entity
+    simulation_entity = mapping.get(CONF_GRID_OUTAGE_SIMULATION_ENTITY)
+    simulation_state = (
+        None if simulation_entity is None else states.get(simulation_entity)
+    )
+    simulation_active = (
+        simulation_state is not None
+        and simulation_state.state.strip().casefold() == "on"
+    )
+    if simulation_entity is not None:
+        mapped_entities[CONF_GRID_OUTAGE_SIMULATION_ENTITY] = simulation_entity
+
+    if simulation_active:
+        assert simulation_entity is not None
+        assert simulation_state is not None
+        for concept, value in (
+            (ObservationConcept.GRID_AVAILABLE, False),
+            (ObservationConcept.GRID_OUTAGE_ACTIVE, True),
+        ):
+            observation = mapper.map_state(
+                simulation_state,
+                HomeAssistantObservationBinding(
+                    entity_id=simulation_entity,
+                    observation_id=concept.value,
+                    value_type=HomeAssistantValueType.BOOLEAN,
+                    unit=None,
+                    source_id=f"poolos_simulation:{simulation_entity}",
+                    value_map=MappingProxyType({"on": value}),
+                ),
+            )
+            observations.append(
+                PoolObservation(
+                    observation_id=observation.observation_id,
+                    value=observation.value,
+                    unit=observation.unit,
+                    truth_level=observation.truth_level,
+                    observed_at=read_at,
+                    source_kind=observation.source_kind,
+                    source_id=observation.source_id,
+                    quality=observation.quality,
+                    confidence=observation.confidence,
+                    evidence=observation.evidence,
+                )
+            )
+    elif grid_entity is None:
         missing_required.extend(sorted(AUTHORITATIVE_REQUIRED_EXTERNAL_CONCEPTS))
     else:
-        mapped_entities[CONF_GRID_STATUS_ENTITY] = grid_entity
         state = states.get(grid_entity)
         if state is None:
             unavailable.append(grid_entity)
