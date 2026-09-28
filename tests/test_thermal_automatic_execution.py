@@ -68,6 +68,7 @@ from poolos.thermal_automatic_execution import (
     ThermalAutomaticDriverState,
     ThermalAutomaticExecutionDriver,
     ThermalAutomaticExecutionFrame,
+    _promotion_boundary,
     _restrained_body,
 )
 from poolos.thermal_circulation_cleanup import (
@@ -9098,3 +9099,38 @@ def test_owned_body_activation_survives_native_exact_solar_convergence() -> None
     assert lease.body_session_id == first_body_session_id
     assert lease.body_session_generation == first_body_session_generation
     assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
+
+
+def test_promotion_boundary_uses_later_real_delivery_acceptance_time() -> None:
+    frame_at = NOW
+    accepted_at = NOW + timedelta(milliseconds=750)
+    ownership = ThermalLiveExecutionOwnership(
+        evaluation_id="evaluation-1",
+        thermal_plan_id="plan-1",
+        execution_plan_id="execution-1",
+        target_body=ThermalBody.HOT_TUB,
+        heat_source_operation_id="source-op",
+        heat_source_receipt_id="source-receipt",
+        heat_source_correlation_id="source-correlation",
+        commanded_heat_source=PhysicalHeatMode.SOLAR,
+        heat_source_accepted_at=accepted_at,
+    )
+
+    assert _promotion_boundary(ownership, frame_at) == accepted_at
+
+
+def test_promotion_boundary_never_moves_before_observation_frame() -> None:
+    frame_at = NOW
+    ownership = ThermalLiveExecutionOwnership(
+        evaluation_id="evaluation-1",
+        thermal_plan_id="plan-1",
+        execution_plan_id="execution-1",
+        target_body=ThermalBody.HOT_TUB,
+        heat_source_operation_id="source-op",
+        heat_source_receipt_id="source-receipt",
+        heat_source_correlation_id="source-correlation",
+        commanded_heat_source=PhysicalHeatMode.SOLAR,
+        heat_source_accepted_at=NOW - timedelta(milliseconds=750),
+    )
+
+    assert _promotion_boundary(ownership, frame_at) == frame_at
