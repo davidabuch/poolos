@@ -98,6 +98,7 @@ class FakeDriver:
 @dataclass
 class FakeAuthority:
     base_authority_reason: PhysicalAuthorityReason = PhysicalAuthorityReason.ALLOWED
+    sanitation_active: bool = False
     epochs: list[str] = field(default_factory=list)
     configurations: list[bool] = field(default_factory=list)
     unloaded: bool = False
@@ -188,6 +189,30 @@ def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_fram
     assert driver.disabled_epochs == ["epoch-1"]
     assert driver.processed == []
     assert hass.tasks == []
+
+
+def test_sanitation_preempts_filtration_before_command_delivery() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+        authority.sanitation_active = True
+
+        runtime.observe(
+            _snapshot(NOW),
+            _orchestration("sanitation-active"),
+            external_changes=ExternalChangeBatch(()),
+        )
+
+        assert len(hass.tasks) == 1
+        driver.release.set()
+        await hass.tasks[0]
+        frame = runtime._latest_frame
+        assert frame is not None
+        assert frame.physical_authority_ready is False
+        assert frame.physical_authority_blocker == "physical_authority:sanitation_active"
+
+    asyncio.run(scenario())
 
 
 def test_bridge_coalesces_new_truth_without_overlapping_tasks() -> None:
