@@ -177,6 +177,20 @@ class PoolOSSanitationRuntime:
         self.coordinator.async_update_listeners()
         return True
 
+    async def async_abandon_for_higher_authority(self, *, reason: str) -> None:
+        """Retire sanitation intent without issuing commands; caller owns reduction."""
+
+        session = self.controller.session
+        if session is None:
+            return
+        prior_session_id = session.session_id
+        self.assessment = self.controller.abandon(reason=reason)
+        self.authority.end_sanitation_session(session_id=prior_session_id)
+        if self.authority_boundary_changed is not None:
+            self.authority_boundary_changed(datetime.now(UTC), False)
+        await self._persist(force=True)
+        self.coordinator.async_update_listeners()
+
     async def async_cancel(self, body: SanitationBody, *, reason: str) -> None:
         """Request deterministic sanitation cancellation for the active body."""
 
