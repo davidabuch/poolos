@@ -34,6 +34,7 @@
           "pool_sanitation_duration_minutes": "Pool sanitation duration (minutes)",
           "hot_tub_sanitation_duration_minutes": "Hot Tub sanitation duration (minutes)",
           "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
+          "grid_outage_simulation_entity": "Grid outage simulation helper (commissioning only)",
           "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)",
           "intellicenter_host": "IntelliCenter host for independent read-only discovery (optional)",
           "intellicenter_transport": "Independent IntelliCenter transport"
@@ -75,6 +76,7 @@
           "pump_priming_rpm": "Priming pump speed (RPM)",
           "pump_grid_outage_rpm": "Grid-outage pump speed (RPM)",
           "grid_status_entity": "Powerwall grid status entity (1_Powerwall)",
+          "grid_outage_simulation_entity": "Grid outage simulation helper (commissioning only)",
           "pool_light_entity": "Pool light entity (power, color mode, and scene/effect)",
           "intellicenter_host": "IntelliCenter host for independent read-only discovery (optional)",
           "intellicenter_transport": "Independent IntelliCenter transport",
