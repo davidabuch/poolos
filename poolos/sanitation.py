@@ -228,6 +228,20 @@ class SanitationController:
         self.session = restored
         return self._assessment("sanitation_restored_waiting_for_fresh_evidence")
 
+    def abandon(self, *, reason: str) -> SanitationAssessment:
+        """Retire durable sanitation intent for an explicit higher authority."""
+
+        session = self.session
+        self.session = None
+        return SanitationAssessment(
+            None,
+            None,
+            reason,
+            "none",
+            "none",
+            "none",
+        )
+
     def request_cancel(self, *, reason: str) -> SanitationAssessment:
         session = self.session
         if session is None or not session.active:
