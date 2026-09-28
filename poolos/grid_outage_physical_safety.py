@@ -324,7 +324,8 @@ class GridOutageSafetyAssessment:
                 "restoration_enabled": False,
                 "starts_circulation": False,
                 "safety_authority_active": (
-                    self.outage_epoch_id is not None
+                    self.gate_effective
+                    and self.outage_epoch_id is not None
                     and self.lifecycle
                     not in {
                         GridOutageSafetyLifecycle.ENDED,
@@ -334,7 +335,10 @@ class GridOutageSafetyAssessment:
                 ),
                 "safety_authority_class": (
                     "grid_outage_safety"
-                    if self.outage_epoch_id is not None
+                    if (
+                        self.gate_effective
+                        and self.outage_epoch_id is not None
+                    )
                     else "none"
                 ),
                 "normal_ownership_created": False,
