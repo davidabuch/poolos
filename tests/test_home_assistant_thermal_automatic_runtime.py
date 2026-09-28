@@ -113,6 +113,7 @@ class FakeDriver:
 class FakeAuthority:
     base_authority_reason: PhysicalAuthorityReason = PhysicalAuthorityReason.ALLOWED
     reset_recovery_active: bool = False
+    sanitation_active: bool = False
     epochs: list[str] = field(default_factory=list)
     configurations: list[tuple[bool, bool, str]] = field(default_factory=list)
     unloaded: bool = False
@@ -229,6 +230,31 @@ def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_fram
     assert driver.disabled_epochs == ["epoch-1"]
     assert driver.processed == []
     assert hass.tasks == []
+
+
+def test_sanitation_preempts_thermal_before_command_delivery() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+        authority.sanitation_active = True
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "sanitation-active"),
+        )
+
+        assert len(hass.tasks) == 1
+        driver.release.set()
+        await hass.tasks[0]
+        assert driver.processed == ["sanitation-active"]
+        frame = runtime._latest_frame
+        assert frame is not None
+        assert frame.physical_authority_ready is False
+        assert frame.physical_authority_blocker == "physical_authority:sanitation_active"
+
+    asyncio.run(scenario())
 
 
 def test_reset_recovery_blocks_intermediate_thermal_driver_until_fresh_post_reset_epoch() -> None:
