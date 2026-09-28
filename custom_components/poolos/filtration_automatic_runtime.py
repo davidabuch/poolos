@@ -187,6 +187,7 @@ class PoolOSFiltrationAutomaticRuntime:
         if self._unloaded:
             return
         authority_reason = self.authority.base_authority_reason
+        sanitation_active = self.authority.sanitation_active
         thermal = self.thermal_runtime.assessment
         filtration = self.filtration_runtime.assessment
         eligible = None
@@ -223,9 +224,14 @@ class PoolOSFiltrationAutomaticRuntime:
             ),
             physical_authority_ready=(
                 authority_reason is PhysicalAuthorityReason.ALLOWED
+                and not sanitation_active
             ),
             physical_authority_blocker=(
-                None
+                (
+                    "physical_authority:sanitation_active"
+                    if sanitation_active
+                    else None
+                )
                 if authority_reason is PhysicalAuthorityReason.ALLOWED
                 else f"physical_authority:{authority_reason.value}"
             ),
