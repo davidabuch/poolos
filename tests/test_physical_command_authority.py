@@ -433,6 +433,104 @@ def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
     assert authority.assess(wrong).reason is PhysicalAuthorityReason.GRID_OUTAGE_OPERATION_UNAUTHORIZED
 
 
+def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="frame",
+    )
+
+    blocked = (
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1101",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="H0002",
+        ),
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="H0001",
+        ),
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=True,
+        ),
+        PhysicalCommandRequest(
+            operation="circuit_active",
+            target="C0003",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=True,
+        ),
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0102",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=1800,
+        ),
+    )
+    for request_value in blocked:
+        assert (
+            authority.assess(request_value).reason
+            is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        )
+
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1101",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="00000",
+        )
+    ).allowed
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=False,
+        )
+    ).allowed
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0102",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=1400,
+        )
+    ).allowed
+
+
+def test_grid_return_releases_manual_safety_fence_without_restoring_old_state() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="off-grid",
+    )
+    gas = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value="H0001",
+    )
+    assert (
+        authority.assess(gas).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+    authority.begin_grid_outage_frame(
+        outage_epoch_id=None,
+        frame_identity="on-grid",
+    )
+
+    assert authority.assess(gas).allowed
+
+
 def test_grid_outage_context_is_invalidated_by_new_frame_gate_or_unload() -> None:
     authority = ready()
     authority.configure_grid_outage_safety(enabled=True)
