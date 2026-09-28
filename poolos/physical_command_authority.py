@@ -761,7 +761,37 @@ class PoolOSPhysicalCommandAuthority:
 
     def note_operator_request(self, request: PhysicalCommandRequest, *, at: datetime) -> None:
         """Report explicit requests only; native observations never call this."""
-        if request.source is PhysicalRequestSource.MANUAL and self.operator_request_listener is not None:
+
+        if request.source is not PhysicalRequestSource.MANUAL:
+            return
+        if self._sanitation_active:
+            sanitation_body_target = (
+                "B1101" if self._sanitation_body == "pool" else "B1202"
+            )
+            if (
+                request.operation == "body_heat_source"
+                and request.target == sanitation_body_target
+            ):
+                # Heat selection is prohibited during sanitation and must not
+                # survive as a latent post-sanitation Thermal override.
+                return
+            if (
+                request.operation == "body_active"
+                and request.target == sanitation_body_target
+                and request.requested_value is False
+            ):
+                # BODY Off is the explicit sanitation-cancel gesture, not an
+                # External BODY takeover or durable automatic suppression.
+                return
+            if (
+                request.operation == "body_active"
+                and request.target != sanitation_body_target
+                and request.requested_value is True
+            ):
+                # The mutually-exclusive opposite-body request is rejected and
+                # creates no ownership evidence.
+                return
+        if self.operator_request_listener is not None:
             self.operator_request_listener(request, at)
 
     @property
