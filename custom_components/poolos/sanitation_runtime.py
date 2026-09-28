@@ -161,6 +161,22 @@ class PoolOSSanitationRuntime:
         await self.coordinator.async_request_refresh()
         self.coordinator.async_update_listeners()
 
+    def note_manual_body_off(self, body: SanitationBody) -> bool:
+        """Convert ordinary manual BODY Off into sanitation cancellation intent."""
+
+        session = self.controller.session
+        if session is None or not session.active or session.body is not body:
+            return False
+        self.assessment = self.controller.request_cancel(
+            reason="manual_body_off",
+        )
+        self.hass.async_create_task(
+            self._persist(force=True),
+            "Persist manual PoolOS sanitation cancellation",
+        )
+        self.coordinator.async_update_listeners()
+        return True
+
     async def async_cancel(self, body: SanitationBody, *, reason: str) -> None:
         """Request deterministic sanitation cancellation for the active body."""
 
