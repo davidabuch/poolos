@@ -140,9 +140,15 @@ class SanitationSession:
             session_id=str(payload["session_id"]),
             body=SanitationBody(str(payload["body"])),
             requested_at=datetime.fromisoformat(str(payload["requested_at"])),
-            target_rpm=int(payload["target_rpm"]),
-            configured_duration_seconds=int(payload["configured_duration_seconds"]),
-            remaining_seconds=float(payload["remaining_seconds"]),
+            target_rpm=_stored_int(payload["target_rpm"], "target_rpm"),
+            configured_duration_seconds=_stored_int(
+                payload["configured_duration_seconds"],
+                "configured_duration_seconds",
+            ),
+            remaining_seconds=_stored_float(
+                payload["remaining_seconds"],
+                "remaining_seconds",
+            ),
             lifecycle=lifecycle,
             last_qualified_at=None,
             pump_override_external=bool(payload.get("pump_override_external", False)),
@@ -482,3 +488,15 @@ class SanitationController:
             ),
             "poolos_sanitation",
         )
+
+
+def _stored_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise TypeError(f"{name} must be numeric")
+    return int(value)
+
+
+def _stored_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise TypeError(f"{name} must be numeric")
+    return float(value)
