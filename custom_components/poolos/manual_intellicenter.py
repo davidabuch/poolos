@@ -34,6 +34,7 @@ from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
     ExpectedNativeConsequence,
     GridOutageDispatchContext,
+    SanitationDispatchContext,
     PhysicalCommandDeniedError,
     PhysicalCommandRequest,
     PhysicalRequestSource,
@@ -274,6 +275,7 @@ class ManualIntelliCenterControl:
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
+        sanitation_context: SanitationDispatchContext | None = None,
         reset_recovery: bool = False,
     ) -> ManualCommandReceipt:
         """Turn Pool/Spa body circulation on or off."""
@@ -313,6 +315,7 @@ class ManualIntelliCenterControl:
                 automatic_thermal_context=automatic_thermal_context,
                 automatic_filtration_context=automatic_filtration_context,
                 grid_outage_context=grid_outage_context,
+                sanitation_context=sanitation_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=f"{prefix}.active",
@@ -433,6 +436,7 @@ class ManualIntelliCenterControl:
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
+        sanitation_context: SanitationDispatchContext | None = None,
         reset_recovery: bool = False,
     ) -> ManualCommandReceipt:
         """Select one explicitly allow-listed heat source for a Pool/Spa body."""
@@ -453,6 +457,7 @@ class ManualIntelliCenterControl:
                 requested_value=heater_objnam,
                 automatic_thermal_context=automatic_thermal_context,
                 grid_outage_context=grid_outage_context,
+                sanitation_context=sanitation_context,
             ),
             consequence=ExpectedNativeConsequence(
                 concept=f"{prefix}.raw_heater_id",
@@ -613,6 +618,7 @@ class ManualIntelliCenterControl:
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         grid_outage_context: GridOutageDispatchContext | None = None,
+        sanitation_context: SanitationDispatchContext | None = None,
         request_id: str | None = None,
         pump_session_id: str | None = None,
     ) -> ManualCommandReceipt:
@@ -635,7 +641,11 @@ class ManualIntelliCenterControl:
         thermal_body = (
             automatic_thermal_context.body
             if automatic_thermal_context is not None
-            else manual_body
+            else (
+                sanitation_context.body
+                if sanitation_context is not None
+                else manual_body
+            )
         )
         parent_id, minimum, maximum = self._pump_circuit_rpm_limits(
             pump_circuit_objnam,
@@ -662,6 +672,7 @@ class ManualIntelliCenterControl:
             automatic_thermal_context=automatic_thermal_context,
             automatic_filtration_context=automatic_filtration_context,
             grid_outage_context=grid_outage_context,
+            sanitation_context=sanitation_context,
         )
         await self._async_deliver(
             request=request,
@@ -681,6 +692,7 @@ class ManualIntelliCenterControl:
                 if request_source in {
                     PhysicalRequestSource.AUTOMATIC_THERMAL,
                     PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                    PhysicalRequestSource.SANITATION,
                 }
                 else ()
             ),
