@@ -708,6 +708,54 @@ def _grid_evidence_attributes(
     }
 
 
+def _observation(
+    coordinator: PoolOSCoordinator,
+    observation_id: str,
+) -> Any:
+    snapshot = coordinator.data
+    if snapshot is None:
+        return None
+    for observation in snapshot.observations:
+        if observation.observation_id == observation_id:
+            return observation
+    return None
+
+
+def _grid_evidence_source(
+    coordinator: PoolOSCoordinator,
+    runtime: PoolOSRuntimeData,
+) -> str:
+    del runtime
+    observation = _observation(coordinator, "grid.outage_active")
+    source_id = None if observation is None else observation.source_id
+    if isinstance(source_id, str) and source_id.startswith("poolos_simulation:"):
+        return "SIMULATED"
+    if isinstance(source_id, str) and source_id.startswith("home_assistant:"):
+        return "REAL"
+    return "UNKNOWN"
+
+
+def _grid_evidence_attributes(
+    coordinator: PoolOSCoordinator,
+    runtime: PoolOSRuntimeData,
+) -> dict[str, Any]:
+    del runtime
+    observation = _observation(coordinator, "grid.outage_active")
+    return {
+        "source_id": None if observation is None else observation.source_id,
+        "simulated": (
+            observation is not None
+            and isinstance(observation.source_id, str)
+            and observation.source_id.startswith("poolos_simulation:")
+        ),
+        "grid_available": _observation_value(coordinator, "grid.available"),
+        "grid_outage_active": _observation_value(
+            coordinator,
+            "grid.outage_active",
+        ),
+    }
+
+
 def _display_observation_value(coordinator: PoolOSCoordinator, observation_id: str) -> Any:
     """Return operator-friendly telemetry without changing recorded evidence."""
 
@@ -772,6 +820,13 @@ TELEMETRY = (
 
 
 SENSORS = (
+    PoolOSControlCenterSensorDescription(
+        "grid_evidence_source",
+        "Grid Evidence Source",
+        _grid_evidence_source,
+        _grid_evidence_attributes,
+        "mdi:source-branch",
+    ),
     PoolOSControlCenterSensorDescription(
         "grid_evidence_source",
         "Grid Evidence Source",
