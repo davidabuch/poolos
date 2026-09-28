@@ -139,6 +139,10 @@ def test_grid_outage_preempts_sanitation_dispatch() -> None:
         target="p0103",
         value=3200,
     )
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage-1",
+    )
     authority.begin_grid_outage_frame(
         outage_epoch_id="outage-1",
         frame_identity="frame-1",

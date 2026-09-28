@@ -70,6 +70,7 @@ class PhysicalAuthorityReason(StrEnum):
     GRID_OUTAGE_CONTEXT_STALE = "grid_outage_context_stale"
     GRID_OUTAGE_OPERATION_UNAUTHORIZED = "grid_outage_operation_unauthorized"
     GRID_OUTAGE_DRIVER_UNLOADED = "grid_outage_driver_unloaded"
+    GRID_OUTAGE_SAFETY_ACTIVE = "grid_outage_safety_active"
     MANUAL_PUMP_SESSION_STALE = "manual_pump_session_stale"
     OWNERSHIP_DOMAIN_COMMAND_DENIED = "ownership_domain_command_denied"
     RESET_RECOVERY_INACTIVE = "reset_recovery_inactive"
@@ -729,6 +730,9 @@ class PoolOSPhysicalCommandAuthority:
     _grid_outage_gate_enabled: bool = field(default=False, init=False, repr=False)
     _grid_outage_loaded: bool = field(default=True, init=False, repr=False)
     _grid_outage_generation: int = field(default=0, init=False, repr=False)
+    _grid_outage_domain_active: bool = field(default=False, init=False, repr=False)
+    _grid_outage_domain_epoch_id: str | None = field(default=None, init=False, repr=False)
+    _grid_outage_pump_ceiling_required: bool = field(default=False, init=False, repr=False)
     _grid_outage_epoch_id: str | None = field(default=None, init=False, repr=False)
     _grid_outage_frame_identity: str | None = field(default=None, init=False, repr=False)
     _grid_outage_authority: GridOutageDispatchAuthority | None = field(
@@ -1317,6 +1321,34 @@ class PoolOSPhysicalCommandAuthority:
         self._grid_outage_gate_enabled = bool(enabled)
         self._invalidate_grid_outage_context()
 
+    def set_grid_outage_domain_state(
+        self,
+        *,
+        active: bool,
+        outage_epoch_id: str | None,
+        pump_ceiling_required: bool = False,
+    ) -> None:
+        """Synchronize canonical outage-domain authority independently of dispatch."""
+
+        active = bool(active)
+        if active and (outage_epoch_id is None or not outage_epoch_id.strip()):
+            raise ValueError("active outage domain requires an epoch identity")
+        if not active:
+            outage_epoch_id = None
+            pump_ceiling_required = False
+        boundary_changed = (
+            active != self._grid_outage_domain_active
+            or outage_epoch_id != self._grid_outage_domain_epoch_id
+        )
+        self._grid_outage_domain_active = active
+        self._grid_outage_domain_epoch_id = outage_epoch_id
+        self._grid_outage_pump_ceiling_required = bool(pump_ceiling_required)
+        if boundary_changed:
+            # Safety entry and authoritative clear permanently stale old normal
+            # command envelopes. Grid return requires a fresh policy epoch.
+            self._invalidate_automatic_thermal_context()
+            self._invalidate_automatic_filtration_context()
+
     def begin_grid_outage_frame(
         self,
         *,
@@ -1397,6 +1429,9 @@ class PoolOSPhysicalCommandAuthority:
 
         self._grid_outage_loaded = False
         self._grid_outage_gate_enabled = False
+        self._grid_outage_domain_active = False
+        self._grid_outage_domain_epoch_id = None
+        self._grid_outage_pump_ceiling_required = False
         self._invalidate_grid_outage_context()
 
     def _invalidate_grid_outage_context(self) -> None:
@@ -1515,6 +1550,29 @@ class PoolOSPhysicalCommandAuthority:
             reason = PhysicalAuthorityReason.SPA_AUTOMATIC_CONTROL_SUPPRESSED
         if (
             reason is PhysicalAuthorityReason.ALLOWED
+            and self._grid_outage_domain_active
+            and request.source in {
+                PhysicalRequestSource.AUTOMATIC_THERMAL,
+                PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                PhysicalRequestSource.RECONCILIATION,
+            }
+        ):
+            reason = PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and self._grid_outage_domain_active
+            and self._grid_outage_gate_enabled
+            and request.source is PhysicalRequestSource.MANUAL
+            and _manual_request_violates_grid_outage_safety(
+                request,
+                outage_rpm=self.baselines.grid_outage_rpm,
+                pump_ceiling_required=self._grid_outage_pump_ceiling_required,
+                native_truth=self._native_truth,
+            )
+        ):
+            reason = PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
             and request.source is PhysicalRequestSource.MANUAL
             and request.operation == "pump_circuit_speed"
             and request.manual_pump_session_id is not None
@@ -1564,7 +1622,7 @@ class PoolOSPhysicalCommandAuthority:
     ) -> PhysicalAuthorityReason:
         if not self._sanitation_active:
             return PhysicalAuthorityReason.SANITATION_INACTIVE
-        if self._grid_outage_epoch_id is not None:
+        if self._grid_outage_domain_active:
             return PhysicalAuthorityReason.SANITATION_PAUSED_OUTAGE
         context = request.sanitation_context
         if context is None:
@@ -1935,6 +1993,15 @@ class PoolOSPhysicalCommandAuthority:
                     self._automatic_filtration_generation
                 ),
                 "grid_outage_safety_gate_enabled": self._grid_outage_gate_enabled,
+                "grid_outage_domain_active": self._grid_outage_domain_active,
+                "grid_outage_domain_epoch_id": self._grid_outage_domain_epoch_id,
+                "grid_outage_pump_ceiling_required": (
+                    self._grid_outage_pump_ceiling_required
+                ),
+                "grid_outage_safety_authority_active": (
+                    self._grid_outage_domain_active
+                    and self._grid_outage_gate_enabled
+                ),
                 "grid_outage_safety_loaded": self._grid_outage_loaded,
                 "grid_outage_generation": self._grid_outage_generation,
                 "grid_outage_candidate": (
@@ -2100,6 +2167,52 @@ def _matches(expected: ExpectedNativeConsequence, value: Any) -> bool:
         except (TypeError, ValueError):
             return False
     return value == expected.expected_value
+
+
+_GRID_OUTAGE_UNSAFE_ON_TARGETS = frozenset(
+    {"C0002", "C0003", "C0004", "FTR01"}
+)
+
+
+def _manual_request_violates_grid_outage_safety(
+    request: PhysicalCommandRequest,
+    *,
+    outage_rpm: int,
+    pump_ceiling_required: bool,
+    native_truth: Mapping[tuple[str, str], Any],
+) -> bool:
+    """Return whether one manual write conflicts with active outage safety.
+
+    Positive operator intent remains observable even when the physical write is
+    denied.  The safety boundary blocks only commands that would recreate a
+    mandatory high-load/unsafe condition while a confirmed outage epoch owns
+    reduction authority.
+    """
+
+    if request.operation == "body_heat_source":
+        if request.requested_value == "00000":
+            return False
+        active_concept = (
+            "pool.active" if request.target == "B1101" else "spa.active"
+        )
+        active = native_truth.get((active_concept, request.target))
+        # Explicitly inactive body configuration is policy intent, not load.
+        # Unknown/active state fails closed while physical Safety is enabled.
+        return active is not False
+    if request.operation == "body_active":
+        return request.target == "B1202" and request.requested_value is True
+    if request.operation == "circuit_active":
+        return (
+            request.target in _GRID_OUTAGE_UNSAFE_ON_TARGETS
+            and request.requested_value is True
+        )
+    if request.operation == "pump_circuit_speed":
+        return (
+            pump_ceiling_required
+            and type(request.requested_value) is int
+            and request.requested_value > outage_rpm
+        )
+    return False
 
 
 def _grid_outage_shape_matches(

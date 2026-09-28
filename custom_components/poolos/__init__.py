@@ -574,6 +574,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
                 transport,
                 getattr(transport_runtime, "discovery_generation", 0),
             )
+        # Safety synchronizes first. On outage entry this establishes the
+        # canonical Safety fence before normal executors can dispatch; on
+        # authoritative grid return it clears Safety and invalidates stale
+        # pre-outage command contexts before fresh normal reevaluation.
+        grid_outage_safety_runtime.observe(
+            snapshot,
+            orchestration,
+            external_change_runtime.latest_batch,
+        )
         sanitation_runtime.observe(
             snapshot,
             orchestration,
@@ -589,11 +598,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             snapshot,
             orchestration,
             external_changes=external_change_runtime.latest_batch,
-        )
-        grid_outage_safety_runtime.observe(
-            snapshot,
-            orchestration,
-            external_change_runtime.latest_batch,
         )
 
     thermal_runtime.set_orchestration_observer(observe_thermal_orchestration)

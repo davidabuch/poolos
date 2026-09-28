@@ -433,6 +433,254 @@ def test_grid_outage_authority_is_default_off_exact_and_independent() -> None:
     assert authority.assess(wrong).reason is PhysicalAuthorityReason.GRID_OUTAGE_OPERATION_UNAUTHORIZED
 
 
+def test_confirmed_outage_final_gateway_fences_normal_automatic_work() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("thermal-epoch")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="thermal-epoch",
+        session_identity="thermal-session",
+        body="pool",
+        pump_circuit_id="p0102",
+    )
+    request_value = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value="H0002",
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(request_value).allowed
+
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=True,
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="outage-frame",
+    )
+
+    assert (
+        authority.assess(request_value).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+    authority.set_grid_outage_domain_state(
+        active=False,
+        outage_epoch_id=None,
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id=None,
+        frame_identity="grid-return",
+    )
+    assert (
+        authority.assess(request_value).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+    authority.begin_automatic_thermal_epoch("post-outage-epoch")
+    fresh_context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="post-outage-epoch",
+        session_identity="post-outage-session",
+        body="pool",
+        pump_circuit_id="p0102",
+    )
+    fresh = replace(
+        request_value,
+        automatic_thermal_context=fresh_context,
+    )
+    assert authority.assess(fresh).allowed
+
+
+def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=True,
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="frame",
+    )
+
+    blocked = (
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1101",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="H0002",
+        ),
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="H0001",
+        ),
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=True,
+        ),
+        PhysicalCommandRequest(
+            operation="circuit_active",
+            target="C0003",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=True,
+        ),
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0102",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=1800,
+        ),
+    )
+    for request_value in blocked:
+        assert (
+            authority.assess(request_value).reason
+            is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        )
+
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1101",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="00000",
+        )
+    ).allowed
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=False,
+        )
+    ).allowed
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0102",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=1400,
+        )
+    ).allowed
+
+
+def test_outage_manual_safety_fence_respects_gate_and_conditional_pump_ceiling() -> None:
+    authority = ready()
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=False,
+    )
+
+    high_pump = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=3200,
+    )
+    spa_on = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1202",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=True,
+    )
+
+    # Canonical outage domain fences normal automation, but the independent
+    # physical Safety gate must be enabled before it can deny manual writes.
+    assert authority.assess(high_pump).allowed
+    assert authority.assess(spa_on).allowed
+
+    authority.configure_grid_outage_safety(enabled=True)
+
+    # A high manual Pool RPM is not categorically forbidden when the outage
+    # engine has not proven circulation must be retained/reduced.
+    assert authority.assess(high_pump).allowed
+    assert (
+        authority.assess(spa_on).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+
+def test_inactive_body_heat_policy_can_be_changed_during_outage_without_load() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+    )
+    authority.replace_native_truth(
+        {
+            ("pool.active", "B1101"): True,
+            ("spa.active", "B1202"): False,
+        }
+    )
+
+    pool_gas = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value="H0001",
+    )
+    spa_gas = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1202",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value="H0001",
+    )
+
+    assert (
+        authority.assess(pool_gas).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+    assert authority.assess(spa_gas).allowed
+
+
+def test_grid_return_releases_manual_safety_fence_without_restoring_old_state() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage",
+        frame_identity="off-grid",
+    )
+    gas = PhysicalCommandRequest(
+        operation="body_heat_source",
+        target="B1101",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value="H0001",
+    )
+    assert (
+        authority.assess(gas).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+    authority.set_grid_outage_domain_state(
+        active=False,
+        outage_epoch_id=None,
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id=None,
+        frame_identity="on-grid",
+    )
+
+    assert authority.assess(gas).allowed
+
+
 def test_grid_outage_context_is_invalidated_by_new_frame_gate_or_unload() -> None:
     authority = ready()
     authority.configure_grid_outage_safety(enabled=True)

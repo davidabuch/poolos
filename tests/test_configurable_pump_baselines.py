@@ -480,6 +480,40 @@ def test_non_default_probe_and_outage_registration_remain_exact() -> None:
         )
 
 
+def test_active_outage_manual_ceiling_uses_configured_outage_rpm() -> None:
+    authority = ready_authority()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage-epoch",
+        pump_ceiling_required=True,
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-frame",
+    )
+
+    assert authority.assess(
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0102",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=1600,
+        )
+    ).allowed
+    assert (
+        authority.assess(
+            PhysicalCommandRequest(
+                operation="pump_circuit_speed",
+                target="p0102",
+                source=PhysicalRequestSource.MANUAL,
+                requested_value=1601,
+            )
+        ).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+
+
 def test_non_default_priming_authority_is_exact() -> None:
     authority = ready_authority()
     authority.configure_automatic_thermal(

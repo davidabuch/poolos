@@ -323,6 +323,28 @@ class GridOutageSafetyAssessment:
                 "command_delivery_enabled": self.command_delivery_enabled,
                 "restoration_enabled": False,
                 "starts_circulation": False,
+                "safety_authority_active": (
+                    self.gate_effective
+                    and self.outage_epoch_id is not None
+                    and self.lifecycle
+                    not in {
+                        GridOutageSafetyLifecycle.ENDED,
+                        GridOutageSafetyLifecycle.INACTIVE,
+                        GridOutageSafetyLifecycle.UNLOADED,
+                    }
+                ),
+                "safety_authority_class": (
+                    "grid_outage_safety"
+                    if (
+                        self.gate_effective
+                        and self.outage_epoch_id is not None
+                    )
+                    else "none"
+                ),
+                "normal_ownership_created": False,
+                "operator_intent_policy": (
+                    "safety_wins_while_active_preserve_positive_intent_on_clear"
+                ),
             }
         )
 
@@ -1087,6 +1109,7 @@ def grid_outage_external_preemption_reason(
         )
         for event in batch.events
         if event.concept in GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS
+        and event.positive_operator_evidence is None
         and authority_not_before < event.observed_at <= evaluated_at
     )
     if not relevant:

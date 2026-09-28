@@ -17,7 +17,9 @@ from poolos.external_change import (
     ExternalSemanticEventType,
 )
 from poolos.grid_outage_physical_safety import GridOutageSafetyLifecycle
+from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.physical_command_authority import PhysicalAuthorityReason
+from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,8 +111,9 @@ class FakeEngine:
         )
         self.assessment = SimpleNamespace(
             lifecycle=lifecycle,
-            outage_epoch_id="outage" if self.candidate is not None else None,
+            outage_epoch_id="outage",
             candidate=self.candidate,
+            circulation=None,
         )
         return self.assessment
 
@@ -138,10 +141,22 @@ class FakeAuthority:
     base_authority_reason: PhysicalAuthorityReason = PhysicalAuthorityReason.ALLOWED
     enabled: list[bool] = field(default_factory=list)
     frames: list[tuple[str | None, str]] = field(default_factory=list)
+    domains: list[tuple[bool, str | None, bool]] = field(default_factory=list)
     unloaded: bool = False
 
     def configure_grid_outage_safety(self, *, enabled: bool) -> None:
         self.enabled.append(enabled)
+
+    def set_grid_outage_domain_state(
+        self,
+        *,
+        active: bool,
+        outage_epoch_id: str | None,
+        pump_ceiling_required: bool = False,
+    ) -> None:
+        self.domains.append(
+            (active, outage_epoch_id, pump_ceiling_required)
+        )
 
     def begin_grid_outage_frame(self, *, outage_epoch_id: str | None, frame_identity: str) -> None:
         self.frames.append((outage_epoch_id, frame_identity))
@@ -185,12 +200,24 @@ def runtime(module: ModuleType, engine: FakeEngine):
     return value, hass, authority
 
 
-def snapshot(at: datetime, identity: str) -> tuple[object, object]:
+def snapshot(
+    at: datetime,
+    identity: str,
+    *,
+    disposition: GridOutageDisposition = GridOutageDisposition.CONFIRMED_OUTAGE,
+) -> tuple[object, object]:
     return (
         SimpleNamespace(generated_at=at, observations=()),
         SimpleNamespace(
             snapshot_identity=identity,
-            outage=SimpleNamespace(confirmed_at=NOW),
+            outage=SimpleNamespace(
+                confirmed_at=(
+                    NOW
+                    if disposition is GridOutageDisposition.CONFIRMED_OUTAGE
+                    else None
+                ),
+                disposition=disposition,
+            ),
         ),
     )
 
@@ -261,6 +288,35 @@ def test_new_frame_invalidates_queued_context_and_coalesces_one_pending_frame() 
         await hass.tasks[0]
         assert engine.accepted
         assert engine.frames == ["frame-1", "frame-3"]
+
+    asyncio.run(scenario())
+
+
+def test_authoritative_grid_return_clears_safety_domain_during_inflight_delivery() -> None:
+    async def scenario() -> None:
+        FakeDelivery.release = asyncio.Event()
+        FakeDelivery.started = asyncio.Event()
+        FakeDelivery.calls = []
+        FakeDelivery.error = None
+        module = load_module()
+        engine = FakeEngine(candidate=candidate())
+        value, hass, authority = runtime(module, engine)
+
+        value.observe(*snapshot(NOW, "off-grid"))
+        await FakeDelivery.started.wait()
+        assert authority.domains[-1][0] is True
+
+        value.observe(
+            *snapshot(
+                NOW + timedelta(seconds=1),
+                "grid-return",
+                disposition=GridOutageDisposition.ON_GRID,
+            )
+        )
+        assert authority.domains[-1] == (False, None, False)
+
+        FakeDelivery.release.set()
+        await hass.tasks[0]
 
     asyncio.run(scenario())
 
@@ -348,6 +404,41 @@ def test_same_frame_external_change_is_part_of_current_authoritative_reality() -
     assert engine.frames == ["external-frame"]
     assert engine.external_reasons == [None]
     assert engine.assessment is not None
+
+
+def test_positive_operator_request_during_outage_does_not_poison_safety_frame() -> None:
+    module = load_module()
+    engine = FakeEngine()
+    value, _, _ = runtime(module, engine)
+    request_at = NOW + timedelta(milliseconds=250)
+    event = ExternalChangeEvent(
+        concept="spa.active",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="B1202",
+        previous_value=False,
+        new_value=True,
+        observed_at=NOW + timedelta(seconds=1),
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id="manual-spa-on",
+            authority_generation=4,
+            body_session_id="spa-session",
+            domain=OwnershipDomain.BODY,
+            equipment_id="spa.active",
+            requested_at=request_at,
+        ),
+    )
+
+    value.observe(
+        *snapshot(NOW + timedelta(seconds=2), "operator-during-outage"),
+        ExternalChangeBatch((event,)),
+    )
+
+    assert engine.frames == ["operator-during-outage"]
+    assert engine.external_reasons == [None]
 
 
 def test_external_change_after_prior_candidate_formation_reaches_outage_engine() -> None:

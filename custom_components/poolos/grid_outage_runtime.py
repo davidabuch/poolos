@@ -13,6 +13,7 @@ from poolos.external_change import ExternalChangeBatch
 from poolos.grid_outage_physical_safety import (
     GridOutagePhysicalSafetyEngine,
     GridOutageReductionCandidate,
+    OutageCirculationDisposition,
     GridOutageSafetyFrame,
     GridOutageSafetyLifecycle,
     grid_outage_external_preemption_reason,
@@ -23,6 +24,7 @@ from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
 )
+from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrationAssessment
 
 from .coordinator import PoolOSCoordinator
@@ -82,9 +84,16 @@ class PoolOSGridOutageSafetyRuntime:
         if self._unloaded or orchestration.outage is None:
             return
         if self._task is not None:
-            # A newer frame must invalidate queued physical authority immediately,
-            # but the engine retains the exact candidate until an in-flight
-            # delivery has either returned an accepted receipt or failed.
+            # Authoritative grid return ends the Safety domain immediately even
+            # if an older reduction delivery is still resolving. Otherwise keep
+            # the already-established domain until the pending frame is evaluated.
+            if orchestration.outage.disposition is GridOutageDisposition.ON_GRID:
+                self.authority.set_grid_outage_domain_state(
+                    active=False,
+                    outage_epoch_id=None,
+                )
+            # A newer frame must invalidate queued physical dispatch authority,
+            # but not the independently tracked confirmed-outage Safety domain.
             self.authority.begin_grid_outage_frame(
                 outage_epoch_id=None,
                 frame_identity=orchestration.snapshot_identity,
@@ -163,6 +172,27 @@ class PoolOSGridOutageSafetyRuntime:
             external_preemption_reason=external_preemption_reason,
         )
         assessment = self.engine.evaluate(frame)
+        outage_domain_active = (
+            assessment.outage_epoch_id is not None
+            and assessment.lifecycle
+            not in {
+                GridOutageSafetyLifecycle.ENDED,
+                GridOutageSafetyLifecycle.INACTIVE,
+                GridOutageSafetyLifecycle.UNLOADED,
+            }
+        )
+        pump_ceiling_required = bool(
+            assessment.circulation is not None
+            and assessment.circulation.disposition
+            is OutageCirculationDisposition.REQUIRED
+        )
+        self.authority.set_grid_outage_domain_state(
+            active=outage_domain_active,
+            outage_epoch_id=(
+                assessment.outage_epoch_id if outage_domain_active else None
+            ),
+            pump_ceiling_required=pump_ceiling_required,
+        )
         self.authority.begin_grid_outage_frame(
             outage_epoch_id=assessment.outage_epoch_id,
             frame_identity=frame.frame_identity,
@@ -250,6 +280,10 @@ class PoolOSGridOutageSafetyRuntime:
         if self._unloaded:
             return
         self._unloaded = True
+        self.authority.set_grid_outage_domain_state(
+            active=False,
+            outage_epoch_id=None,
+        )
         self.authority.unload_grid_outage_safety()
         self.engine.unload(unloaded_at=datetime.now(UTC))
         self._pending = None
