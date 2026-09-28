@@ -231,7 +231,17 @@ class GridOutageConfirmationTracker:
         if self._source_id is None:
             self._source_id = observation.source_id
         elif observation.source_id != self._source_id:
-            return GridAvailability.UNKNOWN, GridOutageEvidenceStatus.CONTRADICTORY
+            if not _commissioning_source_handoff_allowed(
+                previous=self._source_id,
+                current=observation.source_id,
+            ):
+                return GridAvailability.UNKNOWN, GridOutageEvidenceStatus.CONTRADICTORY
+            self._source_id = observation.source_id
+            self._last_raw_observed_at = None
+            self._last_raw_availability = None
+            if self._confirmed_at is None:
+                self._pending_since = None
+                self._outage_epoch_started_at = None
 
         if self._last_raw_observed_at is not None:
             if observation.observed_at < self._last_raw_observed_at:
@@ -366,6 +376,22 @@ class GridOutageConfirmationTracker:
             grid_returned_at=None,
             reason_code=GridOutageReasonCode.OUTAGE_CONFIRMED,
         )
+
+
+def _commissioning_source_handoff_allowed(
+    *,
+    previous: str,
+    current: str,
+) -> bool:
+    """Allow only the explicit real <-> commissioning simulation source handoff."""
+
+    previous_is_real = previous.startswith("home_assistant:")
+    current_is_real = current.startswith("home_assistant:")
+    previous_is_simulated = previous.startswith("poolos_simulation:")
+    current_is_simulated = current.startswith("poolos_simulation:")
+    return (previous_is_real and current_is_simulated) or (
+        previous_is_simulated and current_is_real
+    )
 
 
 def _input_fingerprint(observation: PoolObservation | None) -> tuple[object, ...]:
