@@ -2174,6 +2174,31 @@ _GRID_OUTAGE_UNSAFE_ON_TARGETS = frozenset(
 )
 
 
+def _native_truth_value(
+    native_truth: Mapping[tuple[str, str], Any],
+    *,
+    concept: str,
+    native_object_id: str,
+) -> Any:
+    """Resolve current native truth by exact ID or canonical source suffix."""
+
+    exact = native_truth.get((concept, native_object_id))
+    if exact is not None:
+        return exact
+    matches = [
+        value
+        for (candidate_concept, source_id), value in native_truth.items()
+        if candidate_concept == concept
+        and (
+            source_id == native_object_id
+            or source_id.endswith(f":{native_object_id}")
+        )
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def _manual_request_violates_grid_outage_safety(
     request: PhysicalCommandRequest,
     *,
@@ -2195,12 +2220,31 @@ def _manual_request_violates_grid_outage_safety(
         active_concept = (
             "pool.active" if request.target == "B1101" else "spa.active"
         )
-        active = native_truth.get((active_concept, request.target))
+        active = _native_truth_value(
+            native_truth,
+            concept=active_concept,
+            native_object_id=request.target,
+        )
         # Explicitly inactive body configuration is policy intent, not load.
         # Unknown/active state fails closed while physical Safety is enabled.
         return active is not False
     if request.operation == "body_active":
-        return request.target == "B1202" and request.requested_value is True
+        if request.requested_value is not True:
+            return False
+        if request.target == "B1202":
+            return True
+        if request.target == "B1101":
+            selected = _native_truth_value(
+                native_truth,
+                concept="pool.raw_heater_id",
+                native_object_id="B1101",
+            )
+            # Pool circulation itself may be legitimate during outage. Only
+            # allow Body ON when current selected heat is authoritatively OFF;
+            # otherwise Body ON could recreate Gas/Solar load before the next
+            # Safety observation.
+            return selected != "00000"
+        return False
     if request.operation == "circuit_active":
         return (
             request.target in _GRID_OUTAGE_UNSAFE_ON_TARGETS
