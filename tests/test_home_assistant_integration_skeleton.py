@@ -212,3 +212,13 @@ def test_reset_poolos_control_is_first_class_reduction_recovery() -> None:
     assert "self._safe_reset_baseline()" in continuation
     assert "authority.finish_reset_recovery()" in continuation
     assert "await " not in continuation
+
+
+def test_grid_outage_safety_synchronizes_before_normal_automatic_executors() -> None:
+    source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+    outage = source.index("grid_outage_safety_runtime.observe(")
+    sanitation = source.index("sanitation_runtime.observe(")
+    thermal = source.index("thermal_automatic_runtime.observe(")
+    filtration = source.index("filtration_automatic_runtime.observe(")
+
+    assert outage < sanitation < thermal < filtration
