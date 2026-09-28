@@ -163,3 +163,45 @@ def test_ending_sanitation_invalidates_old_context() -> None:
 
     decision = authority.assess(request)
     assert decision.reason is PhysicalAuthorityReason.SANITATION_INACTIVE
+
+
+def test_rejected_heat_and_cancel_body_off_do_not_leak_operator_ownership_intent() -> None:
+    authority = ready()
+    seen = []
+    authority.operator_request_listener = lambda request, at: seen.append((request, at))
+    authority.begin_sanitation_session(
+        body="hot_tub",
+        session_id="sanitation-session",
+        sanitation_rpm=3200,
+    )
+
+    authority.note_operator_request(
+        PhysicalCommandRequest(
+            operation="body_heat_source",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value="H0001",
+        ),
+        at=__import__("datetime").datetime(2026, 9, 27, tzinfo=__import__("datetime").UTC),
+    )
+    authority.note_operator_request(
+        PhysicalCommandRequest(
+            operation="body_active",
+            target="B1202",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=False,
+        ),
+        at=__import__("datetime").datetime(2026, 9, 27, tzinfo=__import__("datetime").UTC),
+    )
+    authority.note_operator_request(
+        PhysicalCommandRequest(
+            operation="pump_circuit_speed",
+            target="p0103",
+            source=PhysicalRequestSource.MANUAL,
+            requested_value=2800,
+        ),
+        at=__import__("datetime").datetime(2026, 9, 27, tzinfo=__import__("datetime").UTC),
+    )
+
+    assert len(seen) == 1
+    assert seen[0][0].operation == "pump_circuit_speed"
