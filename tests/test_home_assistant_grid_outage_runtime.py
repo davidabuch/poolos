@@ -18,6 +18,7 @@ from poolos.external_change import (
 )
 from poolos.grid_outage_physical_safety import GridOutageSafetyLifecycle
 from poolos.physical_command_authority import PhysicalAuthorityReason
+from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -348,6 +349,41 @@ def test_same_frame_external_change_is_part_of_current_authoritative_reality() -
     assert engine.frames == ["external-frame"]
     assert engine.external_reasons == [None]
     assert engine.assessment is not None
+
+
+def test_positive_operator_request_during_outage_does_not_poison_safety_frame() -> None:
+    module = load_module()
+    engine = FakeEngine()
+    value, _, _ = runtime(module, engine)
+    request_at = NOW + timedelta(milliseconds=250)
+    event = ExternalChangeEvent(
+        concept="spa.active",
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="B1202",
+        previous_value=False,
+        new_value=True,
+        observed_at=NOW + timedelta(seconds=1),
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id="manual-spa-on",
+            authority_generation=4,
+            body_session_id="spa-session",
+            domain=OwnershipDomain.BODY,
+            equipment_id="spa.active",
+            requested_at=request_at,
+        ),
+    )
+
+    value.observe(
+        *snapshot(NOW + timedelta(seconds=2), "operator-during-outage"),
+        ExternalChangeBatch((event,)),
+    )
+
+    assert engine.frames == ["operator-during-outage"]
+    assert engine.external_reasons == [None]
 
 
 def test_external_change_after_prior_candidate_formation_reaches_outage_engine() -> None:
