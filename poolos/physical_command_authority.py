@@ -70,6 +70,7 @@ class PhysicalAuthorityReason(StrEnum):
     GRID_OUTAGE_CONTEXT_STALE = "grid_outage_context_stale"
     GRID_OUTAGE_OPERATION_UNAUTHORIZED = "grid_outage_operation_unauthorized"
     GRID_OUTAGE_DRIVER_UNLOADED = "grid_outage_driver_unloaded"
+    GRID_OUTAGE_SAFETY_ACTIVE = "grid_outage_safety_active"
     MANUAL_PUMP_SESSION_STALE = "manual_pump_session_stale"
     OWNERSHIP_DOMAIN_COMMAND_DENIED = "ownership_domain_command_denied"
     RESET_RECOVERY_INACTIVE = "reset_recovery_inactive"
@@ -1515,6 +1516,16 @@ class PoolOSPhysicalCommandAuthority:
             reason = PhysicalAuthorityReason.SPA_AUTOMATIC_CONTROL_SUPPRESSED
         if (
             reason is PhysicalAuthorityReason.ALLOWED
+            and self._grid_outage_epoch_id is not None
+            and request.source is PhysicalRequestSource.MANUAL
+            and _manual_request_violates_grid_outage_safety(
+                request,
+                outage_rpm=self.baselines.grid_outage_rpm,
+            )
+        ):
+            reason = PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
             and request.source is PhysicalRequestSource.MANUAL
             and request.operation == "pump_circuit_speed"
             and request.manual_pump_session_id is not None
@@ -2100,6 +2111,41 @@ def _matches(expected: ExpectedNativeConsequence, value: Any) -> bool:
         except (TypeError, ValueError):
             return False
     return value == expected.expected_value
+
+
+_GRID_OUTAGE_UNSAFE_ON_TARGETS = frozenset(
+    {"C0002", "C0003", "C0004", "FTR01"}
+)
+
+
+def _manual_request_violates_grid_outage_safety(
+    request: PhysicalCommandRequest,
+    *,
+    outage_rpm: int,
+) -> bool:
+    """Return whether one manual write conflicts with active outage safety.
+
+    Positive operator intent remains observable even when the physical write is
+    denied.  The safety boundary blocks only commands that would recreate a
+    mandatory high-load/unsafe condition while a confirmed outage epoch owns
+    reduction authority.
+    """
+
+    if request.operation == "body_heat_source":
+        return request.requested_value != "00000"
+    if request.operation == "body_active":
+        return request.target == "B1202" and request.requested_value is True
+    if request.operation == "circuit_active":
+        return (
+            request.target in _GRID_OUTAGE_UNSAFE_ON_TARGETS
+            and request.requested_value is True
+        )
+    if request.operation == "pump_circuit_speed":
+        return (
+            type(request.requested_value) is int
+            and request.requested_value > outage_rpm
+        )
+    return False
 
 
 def _grid_outage_shape_matches(
