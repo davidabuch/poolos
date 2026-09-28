@@ -74,6 +74,7 @@ from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
+from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
     PoolCirculationOwnershipRegistry,
@@ -182,8 +183,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         return None
 
     spa_session_kind_provider = initial_spa_session_kind
+    def no_sanitation_manual_off(_body: str) -> bool:
+        return False
+
+    sanitation_manual_off_handler = no_sanitation_manual_off
 
     def arm_manual_pool_off(suppressed_at: datetime) -> None:
+        if sanitation_manual_off_handler("pool"):
+            return
         pool_automatic_control.suppress(
             source=(
                 PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST
@@ -193,6 +200,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
 
     def arm_manual_spa_off(suppressed_at: datetime) -> None:
+        if sanitation_manual_off_handler("hot_tub"):
+            return
         # OFF ends a homeowner-started/adopted Spa BODY session. It must not
         # globally disable a later independent opportunistic Spa opportunity.
         # BODY adoption provenance can retire before the OFF request reaches
@@ -378,6 +387,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     sanitation_runtime.authority_boundary_changed = (
         sanitation_authority_boundary_changed
     )
+
+    def handle_sanitation_manual_off(body: str) -> bool:
+        return sanitation_runtime.note_manual_body_off(
+            SanitationBody.POOL
+            if body == "pool"
+            else SanitationBody.HOT_TUB
+        )
+
+    sanitation_manual_off_handler = handle_sanitation_manual_off
     await sanitation_runtime.async_restore()
 
     def synchronize_pool_automatic_restraint(_state: object) -> None:
