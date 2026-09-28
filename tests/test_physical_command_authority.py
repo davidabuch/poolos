@@ -467,6 +467,28 @@ def test_confirmed_outage_final_gateway_fences_normal_automatic_work() -> None:
         is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
     )
 
+    authority.begin_grid_outage_frame(
+        outage_epoch_id=None,
+        frame_identity="grid-return",
+    )
+    assert (
+        authority.assess(request_value).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+    authority.begin_automatic_thermal_epoch("post-outage-epoch")
+    fresh_context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="post-outage-epoch",
+        session_identity="post-outage-session",
+        body="pool",
+        pump_circuit_id="p0102",
+    )
+    fresh = replace(
+        request_value,
+        automatic_thermal_context=fresh_context,
+    )
+    assert authority.assess(fresh).allowed
+
 
 def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
     authority = ready()
