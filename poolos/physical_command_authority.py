@@ -770,7 +770,7 @@ class PoolOSPhysicalCommandAuthority:
             )
             if (
                 request.operation == "body_heat_source"
-                and request.target == sanitation_body_target
+                and request.requested_value != "00000"
             ):
                 # Heat selection is prohibited during sanitation and must not
                 # survive as a latent post-sanitation Thermal override.
