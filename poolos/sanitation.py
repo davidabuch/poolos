@@ -162,7 +162,7 @@ class SanitationSession:
 @dataclass(frozen=True, slots=True)
 class SanitationObservation:
     observed_at: datetime
-    grid_on: bool
+    grid_on: bool | None
     target_body_active: bool | None
     other_body_active: bool | None
     heat_source_id: str | None
@@ -277,7 +277,14 @@ class SanitationController:
                 "sanitation_cancel_body_off",
             )
 
-        if not observation.grid_on:
+        if observation.grid_on is None:
+            self.session = replace(
+                session,
+                lifecycle=SanitationLifecycle.STARTING,
+                last_qualified_at=None,
+            )
+            return self._assessment("sanitation_waiting_for_grid_evidence")
+        if observation.grid_on is False:
             self.session = replace(
                 session,
                 lifecycle=SanitationLifecycle.PAUSED_OUTAGE,
