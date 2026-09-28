@@ -109,7 +109,7 @@ def test_roadmap_records_11_1e_done() -> None:
 
 
 def test_grid_evidence_source_exposes_simulated_provenance() -> None:
-    source = SENSOR.read_text(encoding="utf-8")
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
     assert '"grid_evidence_source"' in source
     assert '"Grid Evidence Source"' in source
     assert '"SIMULATED"' in source
