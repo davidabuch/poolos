@@ -258,3 +258,8 @@ def test_absent_retired_parity_inputs_are_deterministic_missing_reference_only()
     assert {detail.status for detail in report.details} == {
         ObservationParityStatus.MISSING_HA
     }
+
+
+def test_grid_outage_simulation_is_optional_commissioning_input() -> None:
+    assert CONST.CONF_GRID_OUTAGE_SIMULATION_ENTITY in CONST.OPTIONAL_ENTITY_OPTIONS
+    assert CONST.CONF_GRID_OUTAGE_SIMULATION_ENTITY not in CONST.REQUIRED_ENTITY_OPTIONS
