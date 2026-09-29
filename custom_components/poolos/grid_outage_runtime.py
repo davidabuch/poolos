@@ -165,7 +165,8 @@ class PoolOSGridOutageSafetyRuntime:
             and outage.confirmed_at is not None
         ):
             outage_epoch = (
-                f"{outage.source_id}|{outage.outage_epoch_started_at}|"
+                f"{getattr(outage, 'source_id', '')}|"
+                f"{getattr(outage, 'outage_epoch_started_at', None)}|"
                 f"{outage.confirmed_at.isoformat()}"
             )
             if outage_epoch != self._pool_shutdown_entitlement_epoch:
