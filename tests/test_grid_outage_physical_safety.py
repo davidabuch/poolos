@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 from fractions import Fraction
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
