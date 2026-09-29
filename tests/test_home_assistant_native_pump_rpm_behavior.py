@@ -360,6 +360,72 @@ def test_automatic_hot_tub_can_deliver_exact_dynamic_spa_pmpcirc_speed(
     assert attribution.request_source is PhysicalRequestSource.AUTOMATIC_THERMAL
 
 
+def test_grid_outage_pump_reduction_registers_actual_rpm_consequence(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(
+        objnam="PMP01",
+        minimum_rpm=450,
+        maximum_rpm=3450,
+    )
+    pool_circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=2900,
+    )
+    gateway, recorder = _gateway([pump, pool_circuit])
+    authority = gateway._command_authority
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-frame",
+    )
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-frame",
+        candidate_id="outage-pump-candidate",
+        purpose=GridOutageDispatchPurpose.POOL_PUMP_REDUCTION,
+        operation="pump_circuit_speed",
+        target="p0102",
+        requested_value=1500,
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+
+    receipt = _run(
+        gateway.async_set_pump_circuit_speed(
+            "p0102",
+            1500,
+            request_source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+            grid_outage_context=context,
+        )
+    )
+
+    assert recorder.calls == [("p0102", {"SPEED": "1500"})]
+    assert receipt.value == 1500
+
+    observed_at = datetime.now(UTC)
+    actual = authority.correlate(
+        concept="pump.rpm",
+        native_object_id="PMP01",
+        value=1500.0,
+        observed_at=observed_at,
+    )
+    assert actual is not None
+    assert actual.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+
+    configured = authority.correlate(
+        concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        native_object_id="p0102",
+        value=1500.0,
+        observed_at=observed_at,
+    )
+    assert configured is not None
+    assert configured.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+
+
 def test_manual_pump_receipt_preserves_explicit_session_request_identity(
     pump_object_factory,
     pump_circuit_object_factory,

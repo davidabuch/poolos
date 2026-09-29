@@ -692,6 +692,7 @@ class ManualIntelliCenterControl:
                 if request_source in {
                     PhysicalRequestSource.AUTOMATIC_THERMAL,
                     PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                    PhysicalRequestSource.GRID_OUTAGE_SAFETY,
                     PhysicalRequestSource.SANITATION,
                 }
                 else ()
