@@ -160,7 +160,7 @@ class PoolOSGridOutageSafetyRuntime:
         if outage.disposition is GridOutageDisposition.ON_GRID:
             self._pool_shutdown_entitlement_epoch = None
             self._pool_shutdown_entitled = False
-        elif outage.disposition is GridOutageDisposition.PENDING_CONFIRMATION:
+        elif outage.disposition is GridOutageDisposition.OFF_GRID_PENDING:
             # Capture termination provenance before the confirmed-outage Safety
             # authority preempts/retires normal thermal/filtration ownership.
             # This is a one-way positive latch for the pending outage epoch:
