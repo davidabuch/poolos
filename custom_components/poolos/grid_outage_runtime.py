@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 import logging
+from typing import Callable
 
 from homeassistant.core import HomeAssistant
 
 from poolos.external_change import ExternalChangeBatch
+from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_physical_safety import (
     GridOutagePhysicalSafetyEngine,
     GridOutageReductionCandidate,
@@ -49,6 +51,10 @@ class PoolOSGridOutageSafetyRuntime:
     thermal_runtime: PoolOSThermalRuntime
     authority: PoolOSPhysicalCommandAuthority
     manual: ManualIntelliCenterControl | None
+    pool_shutdown_entitlement_provider: Callable[[], bool] = field(
+        default=lambda: False,
+        repr=False,
+    )
     engine: GridOutagePhysicalSafetyEngine = field(default_factory=GridOutagePhysicalSafetyEngine)
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
     _pending: (
@@ -60,6 +66,17 @@ class PoolOSGridOutageSafetyRuntime:
         | None
     ) = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _pool_shutdown_entitlement_epoch: str | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _pool_shutdown_entitled: bool = field(default=False, init=False, repr=False)
+    _filtration_satisfied_commissioning_override: bool = field(
+        default=False,
+        init=False,
+        repr=False,
+    )
 
     @property
     def enabled(self) -> bool:
@@ -72,6 +89,19 @@ class PoolOSGridOutageSafetyRuntime:
         self.engine.set_enabled(enabled, changed_at=now)
         self.authority.configure_grid_outage_safety(enabled=enabled)
         self.coordinator.async_update_listeners()
+
+    @property
+    def filtration_satisfied_commissioning_override(self) -> bool:
+        """Return the restart-reset commissioning-only ledger override."""
+
+        return self._filtration_satisfied_commissioning_override
+
+    def set_filtration_satisfied_commissioning_override(self, enabled: bool) -> None:
+        """Override only the outage frame; never mutate the production ledger."""
+
+        self._filtration_satisfied_commissioning_override = bool(enabled)
+        self.coordinator.async_update_listeners()
+
 
     def observe(
         self,
@@ -126,9 +156,51 @@ class PoolOSGridOutageSafetyRuntime:
         """Process one frame while no delivery coroutine is in flight."""
 
         assert orchestration.outage is not None
+        outage = orchestration.outage
+        if outage.disposition is GridOutageDisposition.ON_GRID:
+            self._pool_shutdown_entitlement_epoch = None
+            self._pool_shutdown_entitled = False
+        elif (
+            outage.disposition is GridOutageDisposition.CONFIRMED_OUTAGE
+            and outage.confirmed_at is not None
+        ):
+            outage_epoch = (
+                f"{outage.source_id}|{outage.outage_epoch_started_at}|"
+                f"{outage.confirmed_at.isoformat()}"
+            )
+            if outage_epoch != self._pool_shutdown_entitlement_epoch:
+                self._pool_shutdown_entitlement_epoch = outage_epoch
+                self._pool_shutdown_entitled = bool(
+                    self.pool_shutdown_entitlement_provider()
+                )
+
         base_reason = self.authority.base_authority_reason
         manual_ready = self.manual is not None and self.manual.available
         filtration_runtime = getattr(self.thermal_runtime, "filtration_runtime", None)
+        filtration = None if filtration_runtime is None else filtration_runtime.assessment
+        simulated_outage = str(getattr(outage, "source_id", "")).startswith(
+            "poolos_simulation:"
+        )
+        if (
+            filtration is not None
+            and self._filtration_satisfied_commissioning_override
+            and simulated_outage
+            and outage.disposition is GridOutageDisposition.CONFIRMED_OUTAGE
+        ):
+            filtration = replace(
+                filtration,
+                evaluated_at=snapshot.generated_at,
+                remaining_runtime=timedelta(0),
+                total_remaining_runtime=timedelta(0),
+                disposition=FiltrationDisposition.SATISFIED,
+                independent_disposition=FiltrationDisposition.SATISFIED,
+                next_suitable_at=None,
+                reason_code="commissioning_grid_outage_filtration_satisfied_override",
+                rationale=(
+                    "Commissioning-only outage frame override; production ledger unchanged.",
+                ),
+                currently_earning_credit=False,
+            )
         prior_assessment = self.engine.assessment
         prior_attempt = (
             None
@@ -161,7 +233,7 @@ class PoolOSGridOutageSafetyRuntime:
             observed_at=snapshot.generated_at,
             observations=tuple(snapshot.observations),
             outage=orchestration.outage,
-            filtration=(None if filtration_runtime is None else filtration_runtime.assessment),
+            filtration=filtration,
             physical_authority_ready=(base_reason is PhysicalAuthorityReason.ALLOWED),
             transport_ready=manual_ready,
             pool_pump_circuit_id=(
@@ -169,6 +241,7 @@ class PoolOSGridOutageSafetyRuntime:
                 if thermal_assessment is None
                 else thermal_assessment.pool_pump_circuit_id
             ),
+            pool_shutdown_authorized=self._pool_shutdown_entitled,
             external_preemption_reason=external_preemption_reason,
         )
         assessment = self.engine.evaluate(frame)
@@ -287,6 +360,9 @@ class PoolOSGridOutageSafetyRuntime:
         self.authority.unload_grid_outage_safety()
         self.engine.unload(unloaded_at=datetime.now(UTC))
         self._pending = None
+        self._pool_shutdown_entitlement_epoch = None
+        self._pool_shutdown_entitled = False
+        self._filtration_satisfied_commissioning_override = False
         task = self._task
         if task is not None and not task.done():
             try:
@@ -318,6 +394,12 @@ class PoolOSGridOutageSafetyRuntime:
             "automatic_thermal_gate_independent": True,
             "thermal_live_gate_independent": True,
             "commissioning_scope_independent": True,
+            "pool_shutdown_entitlement_latched": self._pool_shutdown_entitled,
+            "filtration_satisfied_commissioning_override": (
+                self._filtration_satisfied_commissioning_override
+            ),
+            "filtration_satisfied_override_requires_simulated_outage": True,
+            "production_filtration_ledger_mutated_by_override": False,
         }
 
 
