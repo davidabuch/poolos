@@ -860,21 +860,87 @@ def test_each_nonpump_reduction_requires_later_exact_native_verification(
     assert verified.last_verified_reduction is kind
 
 
-def test_pump_verification_requires_configured_and_actual_later_truth() -> None:
+def test_pump_verification_waits_for_physical_rpm_settle_before_deadline() -> None:
     engine = enabled_engine()
     first = engine.evaluate(frame())
-    candidate = cast(object, first.candidate)
     assert first.candidate is not None
     engine.record_accepted_delivery(first.candidate, accepted_at=NOW)
+
     later_at = NOW + timedelta(seconds=1)
-    wrong_actual = engine.evaluate(
+    settling = engine.evaluate(
         frame(
             at=later_at,
             identity="frame-2",
             observations=safe_observations(at=later_at, configured=1500, rpm=1600),
         )
     )
-    assert candidate is not None
+
+    assert settling.lifecycle is GridOutageSafetyLifecycle.AWAITING_VERIFICATION
+    assert settling.attempt is not None
+    assert settling.reason_code == "grid_outage_verification_pending"
+
+    settled_at = NOW + timedelta(seconds=15)
+    verified = engine.evaluate(
+        frame(
+            at=settled_at,
+            identity="frame-3",
+            observations=safe_observations(
+                at=settled_at,
+                configured=1500,
+                rpm=1500,
+            ),
+        )
+    )
+
+    assert verified.lifecycle is GridOutageSafetyLifecycle.PROGRESS
+    assert (
+        verified.last_verified_reduction
+        is GridOutageReductionKind.POOL_PUMP_REDUCTION
+    )
+
+
+def test_pump_verification_times_out_if_actual_rpm_never_settles() -> None:
+    engine = enabled_engine()
+    first = engine.evaluate(frame())
+    assert first.candidate is not None
+    engine.record_accepted_delivery(first.candidate, accepted_at=NOW)
+
+    expired_at = NOW + timedelta(seconds=45)
+    timed_out = engine.evaluate(
+        frame(
+            at=expired_at,
+            identity="frame-timeout",
+            observations=safe_observations(
+                at=expired_at,
+                configured=1500,
+                rpm=1600,
+            ),
+        )
+    )
+
+    assert timed_out.lifecycle is GridOutageSafetyLifecycle.FAILED
+    assert timed_out.reason_code == "grid_outage_verification_timed_out"
+
+
+def test_pump_verification_fails_if_actual_rpm_undershoots_tolerance() -> None:
+    engine = enabled_engine()
+    first = engine.evaluate(frame())
+    assert first.candidate is not None
+    engine.record_accepted_delivery(first.candidate, accepted_at=NOW)
+
+    later_at = NOW + timedelta(seconds=1)
+    wrong_actual = engine.evaluate(
+        frame(
+            at=later_at,
+            identity="frame-under",
+            observations=safe_observations(
+                at=later_at,
+                configured=1500,
+                rpm=1474,
+            ),
+        )
+    )
+
     assert wrong_actual.lifecycle is GridOutageSafetyLifecycle.FAILED
 
 
