@@ -113,6 +113,27 @@ class PoolOSGridOutageSafetyRuntime:
 
         if self._unloaded or orchestration.outage is None:
             return
+
+        # Capture positive Pool BODY termination provenance at the observation
+        # boundary, before any normal executor later in this same orchestration
+        # callback can relinquish ownership because the grid is no longer
+        # authoritatively ON. _process_frame may be delayed behind an in-flight
+        # Safety delivery, so sampling only there is too late.
+        outage = orchestration.outage
+        if outage.disposition is GridOutageDisposition.ON_GRID:
+            self._pool_shutdown_entitlement_epoch = None
+            self._pool_shutdown_entitled = False
+        elif outage.disposition is GridOutageDisposition.OFF_GRID_PENDING:
+            if self._pool_shutdown_entitlement_epoch is None:
+                self._pool_shutdown_entitlement_epoch = (
+                    f"pending|{getattr(outage, 'source_id', '')}|"
+                    f"{getattr(outage, 'outage_epoch_started_at', None)}"
+                )
+            if not self._pool_shutdown_entitled:
+                self._pool_shutdown_entitled = bool(
+                    self.pool_shutdown_entitlement_provider()
+                )
+
         if self._task is not None:
             # Authoritative grid return ends the Safety domain immediately even
             # if an older reduction delivery is still resolving. Otherwise keep
@@ -160,23 +181,6 @@ class PoolOSGridOutageSafetyRuntime:
         if outage.disposition is GridOutageDisposition.ON_GRID:
             self._pool_shutdown_entitlement_epoch = None
             self._pool_shutdown_entitled = False
-        elif outage.disposition is GridOutageDisposition.OFF_GRID_PENDING:
-            # Capture termination provenance before the confirmed-outage Safety
-            # authority preempts/retires normal thermal/filtration ownership.
-            # This is a one-way positive latch for the pending outage epoch:
-            # later ownership loss caused by Safety itself must not erase it.
-            if self._pool_shutdown_entitlement_epoch is None:
-                self._pool_shutdown_entitlement_epoch = (
-                    f"pending|{getattr(outage, 'source_id', '')}|"
-                    f"{getattr(outage, 'outage_epoch_started_at', None)}"
-                )
-                self._pool_shutdown_entitled = bool(
-                    self.pool_shutdown_entitlement_provider()
-                )
-            elif not self._pool_shutdown_entitled:
-                self._pool_shutdown_entitled = bool(
-                    self.pool_shutdown_entitlement_provider()
-                )
         elif (
             outage.disposition is GridOutageDisposition.CONFIRMED_OUTAGE
             and outage.confirmed_at is not None
