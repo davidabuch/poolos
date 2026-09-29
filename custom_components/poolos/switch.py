@@ -466,6 +466,50 @@ class PoolOSGridOutagePhysicalSafetySwitch(SwitchEntity):
         return self._runtime.grid_outage_safety_runtime.diagnostics()
 
 
+class PoolOSGridOutageFiltrationSatisfiedSimulationSwitch(SwitchEntity):
+    """Restart-reset commissioning seam that never mutates filtration debt."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Grid Outage Filtration Satisfied Simulation"
+    _attr_icon = "mdi:filter-check-outline"
+
+    def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
+        self._runtime = entry.runtime_data
+        self._attr_unique_id = (
+            f"{entry.entry_id}_grid_outage_filtration_satisfied_simulation"
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return (
+            self._runtime.grid_outage_safety_runtime
+            .filtration_satisfied_commissioning_override
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.grid_outage_safety_runtime.set_filtration_satisfied_commissioning_override(
+            True
+        )
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        del kwargs
+        self._runtime.grid_outage_safety_runtime.set_filtration_satisfied_commissioning_override(
+            False
+        )
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "commissioning_only": True,
+            "effective_only_during_simulated_confirmed_outage": True,
+            "production_filtration_ledger_mutated": False,
+            "restores_across_restart": False,
+        }
+
+
 class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
     """Persistent global deny for every PoolOS physical mutation."""
 
@@ -1080,6 +1124,7 @@ async def async_setup_entry(
             PoolOSThermalAutomaticExecutionSwitch(entry),
             PoolOSFiltrationAutomaticExecutionSwitch(entry),
             PoolOSGridOutagePhysicalSafetySwitch(entry),
+            PoolOSGridOutageFiltrationSatisfiedSimulationSwitch(entry),
             PoolOSMaintenanceModeSwitch(entry),
             PoolOSPoolAutonomousControlSwitch(entry),
             PoolOSSpaAutonomousControlSwitch(entry),
