@@ -160,6 +160,23 @@ class PoolOSGridOutageSafetyRuntime:
         if outage.disposition is GridOutageDisposition.ON_GRID:
             self._pool_shutdown_entitlement_epoch = None
             self._pool_shutdown_entitled = False
+        elif outage.disposition is GridOutageDisposition.PENDING_CONFIRMATION:
+            # Capture termination provenance before the confirmed-outage Safety
+            # authority preempts/retires normal thermal/filtration ownership.
+            # This is a one-way positive latch for the pending outage epoch:
+            # later ownership loss caused by Safety itself must not erase it.
+            if self._pool_shutdown_entitlement_epoch is None:
+                self._pool_shutdown_entitlement_epoch = (
+                    f"pending|{getattr(outage, 'source_id', '')}|"
+                    f"{getattr(outage, 'outage_epoch_started_at', None)}"
+                )
+                self._pool_shutdown_entitled = bool(
+                    self.pool_shutdown_entitlement_provider()
+                )
+            elif not self._pool_shutdown_entitled:
+                self._pool_shutdown_entitled = bool(
+                    self.pool_shutdown_entitlement_provider()
+                )
         elif (
             outage.disposition is GridOutageDisposition.CONFIRMED_OUTAGE
             and outage.confirmed_at is not None
@@ -169,11 +186,11 @@ class PoolOSGridOutageSafetyRuntime:
                 f"{getattr(outage, 'outage_epoch_started_at', None)}|"
                 f"{outage.confirmed_at.isoformat()}"
             )
-            if outage_epoch != self._pool_shutdown_entitlement_epoch:
-                self._pool_shutdown_entitlement_epoch = outage_epoch
+            if self._pool_shutdown_entitlement_epoch is None:
                 self._pool_shutdown_entitled = bool(
                     self.pool_shutdown_entitlement_provider()
                 )
+            self._pool_shutdown_entitlement_epoch = outage_epoch
 
         base_reason = self.authority.base_authority_reason
         manual_ready = self.manual is not None and self.manual.available
