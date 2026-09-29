@@ -234,6 +234,46 @@ def candidate(identity: str = "candidate") -> object:
     )
 
 
+def test_pending_outage_captures_shutdown_entitlement_before_processing() -> None:
+    module = load_module()
+    engine = FakeEngine()
+    value, _, _ = runtime(module, engine)
+    entitled = True
+    value.pool_shutdown_entitlement_provider = lambda: entitled
+
+    value.observe(
+        *snapshot(
+            NOW,
+            "pending",
+            disposition=GridOutageDisposition.OFF_GRID_PENDING,
+        )
+    )
+    assert value._pool_shutdown_entitled is True
+
+    # Normal execution may relinquish ownership after Safety's observation
+    # boundary but before the first confirmed frame.
+    entitled = False
+    value.observe(*snapshot(NOW + timedelta(seconds=3), "confirmed"))
+    assert value._pool_shutdown_entitled is True
+
+
+def test_pending_outage_does_not_fabricate_shutdown_entitlement() -> None:
+    module = load_module()
+    engine = FakeEngine()
+    value, _, _ = runtime(module, engine)
+    value.pool_shutdown_entitlement_provider = lambda: False
+
+    value.observe(
+        *snapshot(
+            NOW,
+            "pending-external",
+            disposition=GridOutageDisposition.OFF_GRID_PENDING,
+        )
+    )
+    value.observe(*snapshot(NOW + timedelta(seconds=3), "confirmed-external"))
+    assert value._pool_shutdown_entitled is False
+
+
 def test_default_off_and_enable_never_process_cached_frame() -> None:
     module = load_module()
     engine = FakeEngine()
