@@ -436,8 +436,8 @@ class PoolOSFiltrationAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
         }
 
 
-class PoolOSGridOutagePhysicalSafetySwitch(SwitchEntity):
-    """Independent restart-reset gate for confirmed-outage reductions."""
+class PoolOSGridOutagePhysicalSafetySwitch(RestoreEntity, SwitchEntity):
+    """Persist explicit operator enablement for confirmed-outage reductions."""
 
     _attr_has_entity_name = True
     _attr_name = "Grid Outage Physical Safety"
@@ -451,6 +451,17 @@ class PoolOSGridOutagePhysicalSafetySwitch(SwitchEntity):
     def is_on(self) -> bool:
         return self._runtime.grid_outage_safety_runtime.enabled
 
+    async def async_added_to_hass(self) -> None:
+        """Restore only explicit gate intent; never restore outage authority."""
+
+        await super().async_added_to_hass()
+        previous = await self.async_get_last_state()
+        if previous is not None and previous.state == "on":
+            # set_enabled() still requires a fresh authoritative frame after
+            # enable, so restart persistence cannot replay stale outage work.
+            self._runtime.grid_outage_safety_runtime.set_enabled(True)
+            self.async_write_ha_state()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
         self._runtime.grid_outage_safety_runtime.set_enabled(True)
@@ -463,7 +474,12 @@ class PoolOSGridOutagePhysicalSafetySwitch(SwitchEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return self._runtime.grid_outage_safety_runtime.diagnostics()
+        return {
+            **self._runtime.grid_outage_safety_runtime.diagnostics(),
+            "commissioned_desired_state_persists_across_restart": True,
+            "physical_outage_authority_restored": False,
+            "fresh_authoritative_frame_required_after_restore": True,
+        }
 
 
 class PoolOSGridOutageFiltrationSatisfiedSimulationSwitch(SwitchEntity):
