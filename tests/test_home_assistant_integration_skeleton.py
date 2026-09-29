@@ -135,6 +135,25 @@ def test_adr_and_roadmap_record_no_operational_behavior() -> None:
     assert "no IntelliCenter discovery" in roadmap
     assert "| 11.1B | Home Assistant integration skeleton | DONE |" in roadmap
 
+def test_grid_outage_safety_switch_persists_explicit_operator_enablement() -> None:
+    source = (COMPONENT / "switch.py").read_text(encoding="utf-8")
+    start = source.index("class PoolOSGridOutagePhysicalSafetySwitch")
+    end = source.index(
+        "class PoolOSGridOutageFiltrationSatisfiedSimulationSwitch",
+        start,
+    )
+    block = source[start:end]
+
+    assert "RestoreEntity, SwitchEntity" in block
+    assert "async_get_last_state()" in block
+    assert 'previous.state == "on"' in block
+    assert "set_enabled(True)" in block
+    assert "set_enabled(False)" in block
+    assert '"commissioned_desired_state_persists_across_restart": True' in block
+    assert '"physical_outage_authority_restored": False' in block
+    assert '"fresh_authoritative_frame_required_after_restore": True' in block
+
+
 def test_native_observer_expires_transient_manual_off_before_runtime_processing() -> None:
     source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
 

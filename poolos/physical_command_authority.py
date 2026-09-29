@@ -1557,6 +1557,21 @@ class PoolOSPhysicalCommandAuthority:
         if (
             reason is PhysicalAuthorityReason.ALLOWED
             and self._grid_outage_domain_active
+            and self._grid_outage_gate_enabled
+            and request.operation == "pump_circuit_speed"
+            and request.source is not PhysicalRequestSource.GRID_OUTAGE_SAFETY
+            and type(request.requested_value) is int
+            and request.requested_value > self.baselines.grid_outage_rpm
+        ):
+            # Confirmed-outage pump speed is a global safety ceiling, not a
+            # feature-specific rule. Any current or future subsystem that
+            # reaches the central physical gateway is prevented from raising a
+            # pump above the configured outage RPM. Grid Outage Safety itself
+            # remains exact-envelope bound by _grid_outage_reason().
+            reason = PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+        if (
+            reason is PhysicalAuthorityReason.ALLOWED
+            and self._grid_outage_domain_active
             and request.source in {
                 PhysicalRequestSource.AUTOMATIC_THERMAL,
                 PhysicalRequestSource.AUTOMATIC_FILTRATION,

@@ -576,7 +576,37 @@ def test_confirmed_outage_safety_outranks_conflicting_manual_writes() -> None:
     ).allowed
 
 
-def test_outage_manual_safety_fence_respects_gate_and_conditional_pump_ceiling() -> None:
+def test_confirmed_outage_enforces_global_pump_ceiling_for_future_sources() -> None:
+    authority = ready()
+    high_speed = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTONOMOUS,
+        requested_value=3200,
+    )
+    outage_speed = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.AUTONOMOUS,
+        requested_value=1500,
+    )
+
+    assert authority.assess(high_speed).allowed
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage",
+        pump_ceiling_required=False,
+    )
+
+    assert (
+        authority.assess(high_speed).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
+    assert authority.assess(outage_speed).allowed
+
+
+def test_outage_manual_safety_fence_respects_gate_and_global_pump_ceiling() -> None:
     authority = ready()
     authority.set_grid_outage_domain_state(
         active=True,
@@ -604,9 +634,14 @@ def test_outage_manual_safety_fence_respects_gate_and_conditional_pump_ceiling()
 
     authority.configure_grid_outage_safety(enabled=True)
 
-    # A high manual Pool RPM is not categorically forbidden when the outage
-    # engine has not proven circulation must be retained/reduced.
-    assert authority.assess(high_pump).allowed
+    # Once the independent physical Safety gate is enabled, the configured
+    # outage RPM is a global ceiling even if circulation is not currently
+    # required. This prevents latent/future high-speed modes from bypassing
+    # the confirmed-outage authority boundary.
+    assert (
+        authority.assess(high_pump).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
+    )
     assert (
         authority.assess(spa_on).reason
         is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
