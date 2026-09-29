@@ -18,6 +18,7 @@ from poolos.external_change import (
 )
 from poolos.grid_outage_physical_safety import GridOutageSafetyLifecycle
 from poolos.grid_outage_confirmation import GridOutageDisposition
+from poolos.integration import ThermalBody
 from poolos.physical_command_authority import PhysicalAuthorityReason
 from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 
@@ -272,6 +273,38 @@ def test_pending_outage_does_not_fabricate_shutdown_entitlement() -> None:
     )
     value.observe(*snapshot(NOW + timedelta(seconds=3), "confirmed-external"))
     assert value._pool_shutdown_entitled is False
+
+
+def test_thermal_pool_shutdown_entitlement_accepts_residual_body_adoption() -> None:
+    module = load_module()
+    ownership = SimpleNamespace(
+        state=SimpleNamespace(
+            lease=SimpleNamespace(
+                status=SimpleNamespace(value="relinquished"),
+                body=ThermalBody.POOL,
+                owns_body=True,
+            )
+        ),
+        residual_termination=SimpleNamespace(
+            body=ThermalBody.POOL,
+            body_activation=None,
+            body_adoption=object(),
+        ),
+    )
+    assert module.thermal_pool_shutdown_entitlement_present(ownership) is True
+
+
+def test_thermal_pool_shutdown_entitlement_rejects_no_pool_body_provenance() -> None:
+    module = load_module()
+    ownership = SimpleNamespace(
+        state=SimpleNamespace(lease=None),
+        residual_termination=SimpleNamespace(
+            body=ThermalBody.HOT_TUB,
+            body_activation=object(),
+            body_adoption=None,
+        ),
+    )
+    assert module.thermal_pool_shutdown_entitlement_present(ownership) is False
 
 
 def test_default_off_and_enable_never_process_cached_frame() -> None:
