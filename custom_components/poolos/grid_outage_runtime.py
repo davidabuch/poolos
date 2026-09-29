@@ -28,6 +28,11 @@ from poolos.physical_command_authority import (
 )
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrationAssessment
+from poolos.thermal_runtime_ownership import (
+    ThermalRuntimeOwnershipManager,
+    ThermalRuntimeOwnershipStatus,
+)
+from poolos.integration import ThermalBody
 
 from .coordinator import PoolOSCoordinator
 from .grid_outage_delivery import ManualIntelliCenterGridOutageDelivery
@@ -40,6 +45,37 @@ from .thermal_runtime import PoolOSThermalRuntime
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def thermal_pool_shutdown_entitlement_present(
+    ownership: ThermalRuntimeOwnershipManager,
+) -> bool:
+    """Return reduction-only Pool BODY termination provenance.
+
+    Normal owned BODY authority qualifies directly. A residual termination
+    entitlement retained when normal ownership is relinquished also qualifies
+    when it contains Pool BODY activation/adoption provenance. Residual proof
+    never restores normal ownership and is usable only for reduction.
+    """
+
+    lease = ownership.state.lease
+    if (
+        lease is not None
+        and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+        and lease.body is ThermalBody.POOL
+        and lease.owns_body
+    ):
+        return True
+
+    residual = ownership.residual_termination
+    return bool(
+        residual is not None
+        and residual.body is ThermalBody.POOL
+        and (
+            residual.body_activation is not None
+            or residual.body_adoption is not None
+        )
+    )
 
 
 @dataclass(slots=True)
