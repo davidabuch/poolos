@@ -94,6 +94,7 @@ class GridOutageDispatchPurpose(StrEnum):
     SLIDE_OFF = "slide_off"
     WATERFALL_OFF = "waterfall_off"
     SPA_BODY_OFF = "spa_body_off"
+    POOL_BODY_OFF = "pool_body_off"
     POOL_PUMP_REDUCTION = "pool_pump_reduction"
 
 
@@ -135,6 +136,11 @@ _GRID_OUTAGE_SHAPES: Mapping[
         GridOutageDispatchPurpose.SPA_BODY_OFF: (
             "body_active",
             "B1202",
+            False,
+        ),
+        GridOutageDispatchPurpose.POOL_BODY_OFF: (
+            "body_active",
+            "B1101",
             False,
         ),
     }
