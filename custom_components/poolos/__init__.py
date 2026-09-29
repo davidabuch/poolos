@@ -47,7 +47,10 @@ from .filtration_automatic_runtime import (  # noqa: E402
     PoolOSFiltrationAutomaticRuntime,
 )
 from .external_change_runtime import PoolOSExternalChangeRuntime  # noqa: E402
-from .grid_outage_runtime import PoolOSGridOutageSafetyRuntime  # noqa: E402
+from .grid_outage_runtime import (  # noqa: E402
+    PoolOSGridOutageSafetyRuntime,
+    thermal_pool_shutdown_entitlement_present,
+)
 from .manual_intellicenter import ManualIntelliCenterControl  # noqa: E402
 from .observation import ObservationSnapshot  # noqa: E402
 from .pump_baselines import compose_pump_baseline_runtime  # noqa: E402
@@ -337,12 +340,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     def pool_shutdown_entitlement_provider() -> bool:
         """Return current PoolOS BODY provenance before Safety preemption."""
 
-        thermal_lease = thermal_runtime_orchestrator.ownership.state.lease
-        if (
-            thermal_lease is not None
-            and thermal_lease.status.value == "owned"
-            and thermal_lease.body.value == "pool"
-            and thermal_lease.owns_body
+        if thermal_pool_shutdown_entitlement_present(
+            thermal_runtime_orchestrator.ownership
         ):
             return True
 
