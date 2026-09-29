@@ -846,11 +846,18 @@ class GridOutagePhysicalSafetyEngine:
                 return (
                     "timed_out" if frame.observed_at >= attempt.verification_deadline else "pending"
                 )
-            if (
-                rpm is None
-                or abs(rpm - self.baselines.grid_outage_rpm) > _RPM_TOLERANCE
-            ):
+            if rpm is None:
                 return "failed"
+            target_rpm = self.baselines.grid_outage_rpm
+            if abs(rpm - target_rpm) <= _RPM_TOLERANCE:
+                return "verified"
+            if rpm < target_rpm - _RPM_TOLERANCE:
+                return "failed"
+            return (
+                "timed_out"
+                if frame.observed_at >= attempt.verification_deadline
+                else "pending"
+            )
         return "verified"
 
     def _store_blocked(
