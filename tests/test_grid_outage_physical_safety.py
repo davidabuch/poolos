@@ -876,7 +876,7 @@ def test_pump_verification_waits_for_physical_rpm_settle_before_deadline() -> No
 
     assert settling.lifecycle is GridOutageSafetyLifecycle.AWAITING_VERIFICATION
     assert settling.attempt is not None
-    assert settling.reason_code == "grid_outage_verification_pending"
+    assert settling.reason_code == "grid_outage_awaiting_later_authoritative_verification"
 
     settled_at = NOW + timedelta(seconds=15)
     verified = engine.evaluate(
