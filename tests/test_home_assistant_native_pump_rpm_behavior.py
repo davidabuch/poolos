@@ -426,6 +426,72 @@ def test_grid_outage_pump_reduction_registers_actual_rpm_consequence(
     assert configured.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
 
 
+def test_grid_outage_owned_pool_shutdown_registers_coupled_pump_stop(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(
+        objnam="PMP01",
+        minimum_rpm=450,
+        maximum_rpm=3450,
+    )
+    pool_circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=1500,
+    )
+    gateway, recorder = _gateway([pump, pool_circuit])
+    authority = gateway._command_authority
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-stop-frame",
+    )
+    registered = authority.register_grid_outage_candidate(
+        outage_epoch_id="outage-epoch",
+        frame_identity="outage-stop-frame",
+        candidate_id="outage-pool-off-candidate",
+        purpose=GridOutageDispatchPurpose.POOL_BODY_OFF,
+        operation="body_active",
+        target="B1101",
+        requested_value=False,
+    )
+    context = authority.bind_grid_outage_dispatch(registered)
+
+    receipt = _run(
+        gateway.async_set_body_active(
+            "B1101",
+            False,
+            request_source=PhysicalRequestSource.GRID_OUTAGE_SAFETY,
+            grid_outage_context=context,
+        )
+    )
+
+    assert recorder.calls == [("B1101", {"STATUS": "OFF"})]
+    assert receipt.value is False
+
+    observed_at = datetime.now(UTC)
+    body = authority.correlate(
+        concept="pool.active",
+        native_object_id="B1101",
+        value=False,
+        observed_at=observed_at,
+    )
+    assert body is not None
+    assert body.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+
+    pump_stop = authority.correlate(
+        concept="pump.rpm",
+        native_object_id="PMP01",
+        value=0.0,
+        observed_at=observed_at,
+    )
+    assert pump_stop is not None
+    assert pump_stop.request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+
+
 def test_manual_pump_receipt_preserves_explicit_session_request_identity(
     pump_object_factory,
     pump_circuit_object_factory,

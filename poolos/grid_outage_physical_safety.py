@@ -64,6 +64,7 @@ class GridOutageReductionKind(StrEnum):
     SLIDE_OFF = "slide_off"
     WATERFALL_OFF = "waterfall_off"
     SPA_BODY_OFF = "spa_body_off"
+    POOL_BODY_OFF = "pool_body_off"
     POOL_PUMP_REDUCTION = "pool_pump_reduction"
 
 
@@ -228,6 +229,14 @@ _CANDIDATE_SHAPES: Mapping[
             "B1202",
             7,
         ),
+        GridOutageReductionKind.POOL_BODY_OFF: (
+            "body_active",
+            "B1101",
+            False,
+            "pool.active",
+            "B1101",
+            8,
+        ),
     }
 )
 
@@ -244,6 +253,7 @@ class GridOutageSafetyFrame:
     physical_authority_ready: bool
     transport_ready: bool
     pool_pump_circuit_id: str | None = None
+    pool_shutdown_authorized: bool = False
     external_preemption_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -833,6 +843,28 @@ class GridOutagePhysicalSafetyEngine:
             return "failed"
         if expected.value != attempt.candidate.requested_value:
             return "failed"
+        if attempt.candidate.kind is GridOutageReductionKind.POOL_BODY_OFF:
+            actual = _state(by_id.get("pump.rpm"), frame.observed_at)
+            rpm = _number(actual)
+            if (
+                not actual.usable
+                or actual.observed_at is None
+                or actual.observed_at <= attempt.accepted_at
+            ):
+                return (
+                    "timed_out"
+                    if frame.observed_at >= attempt.verification_deadline
+                    else "pending"
+                )
+            if rpm is None:
+                return "failed"
+            if rpm <= _RPM_TOLERANCE:
+                return "verified"
+            return (
+                "timed_out"
+                if frame.observed_at >= attempt.verification_deadline
+                else "pending"
+            )
         if attempt.candidate.kind is GridOutageReductionKind.POOL_PUMP_REDUCTION:
             if _pump_verification_blocker(by_id, frame.observed_at) is not None:
                 return "failed"
@@ -1027,6 +1059,18 @@ def _select_candidate(
         ), "grid_outage_pump_reduction_ready"
 
     if circulation.disposition is OutageCirculationDisposition.NOT_REQUIRED:
+        if (
+            pool_active is True
+            and spa_active is False
+            and pool_source == "00000"
+            and frame.pool_shutdown_authorized
+        ):
+            return _candidate(
+                GridOutageReductionKind.POOL_BODY_OFF,
+                frame,
+                epoch,
+                baselines,
+            ), "grid_outage_owned_pool_shutdown_ready"
         return None, "grid_outage_external_circulation_left_untouched"
     return None, circulation.reason_code
 

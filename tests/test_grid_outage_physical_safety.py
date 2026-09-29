@@ -229,6 +229,7 @@ def frame(
     transport: bool = True,
     external_preemption_reason: str | None = None,
     pump_circuit_id: str | None = "p0102",
+    pool_shutdown_authorized: bool = False,
 ) -> GridOutageSafetyFrame:
     return GridOutageSafetyFrame(
         frame_identity=identity,
@@ -239,6 +240,7 @@ def frame(
         physical_authority_ready=authority,
         transport_ready=transport,
         pool_pump_circuit_id=pump_circuit_id,
+        pool_shutdown_authorized=pool_shutdown_authorized,
         external_preemption_reason=external_preemption_reason,
     )
 
@@ -1070,3 +1072,78 @@ def test_unload_and_grid_return_never_restore_or_replay() -> None:
     )
     assert late_receipt.lifecycle is GridOutageSafetyLifecycle.UNLOADED
     assert late_receipt.attempt is None
+
+
+def test_satisfied_filtration_shuts_down_only_poolos_owned_pool() -> None:
+    owned = enabled_engine().evaluate(
+        frame(
+            filtration_state=FiltrationDisposition.SATISFIED,
+            pool_shutdown_authorized=True,
+            observations=safe_observations(configured=1500, rpm=1500),
+        )
+    )
+    assert owned.lifecycle is GridOutageSafetyLifecycle.CANDIDATE_READY
+    assert owned.candidate is not None
+    assert owned.candidate.kind is GridOutageReductionKind.POOL_BODY_OFF
+    assert owned.candidate.operation == "body_active"
+    assert owned.candidate.target == "B1101"
+    assert owned.candidate.requested_value is False
+
+    external = enabled_engine().evaluate(
+        frame(
+            filtration_state=FiltrationDisposition.SATISFIED,
+            pool_shutdown_authorized=False,
+            observations=safe_observations(configured=1500, rpm=1500),
+        )
+    )
+    assert external.candidate is None
+    assert external.reason_code == "grid_outage_external_circulation_left_untouched"
+
+
+def test_owned_pool_shutdown_waits_for_physical_pump_stop() -> None:
+    engine = enabled_engine()
+    ready = engine.evaluate(
+        frame(
+            filtration_state=FiltrationDisposition.SATISFIED,
+            pool_shutdown_authorized=True,
+            observations=safe_observations(configured=1500, rpm=1500),
+        )
+    )
+    assert ready.candidate is not None
+    assert ready.candidate.kind is GridOutageReductionKind.POOL_BODY_OFF
+    engine.record_accepted_delivery(ready.candidate, accepted_at=NOW)
+
+    settling_at = NOW + timedelta(seconds=1)
+    settling = engine.evaluate(
+        frame(
+            at=settling_at,
+            identity="pool-off-settling",
+            filtration_state=FiltrationDisposition.SATISFIED,
+            pool_shutdown_authorized=True,
+            observations=safe_observations(
+                at=settling_at,
+                pool=False,
+                configured=1500,
+                rpm=900,
+            ),
+        )
+    )
+    assert settling.lifecycle is GridOutageSafetyLifecycle.AWAITING_VERIFICATION
+
+    stopped_at = NOW + timedelta(seconds=5)
+    stopped = engine.evaluate(
+        frame(
+            at=stopped_at,
+            identity="pool-off-stopped",
+            filtration_state=FiltrationDisposition.SATISFIED,
+            pool_shutdown_authorized=True,
+            observations=safe_observations(
+                at=stopped_at,
+                pool=False,
+                configured=1500,
+                rpm=0,
+            ),
+        )
+    )
+    assert stopped.lifecycle is GridOutageSafetyLifecycle.PROGRESS
+    assert stopped.last_verified_reduction is GridOutageReductionKind.POOL_BODY_OFF

@@ -67,7 +67,10 @@ from poolos.physical_command_authority import (  # noqa: E402
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.operating_baselines import PumpOperatingBaselines  # noqa: E402
-from poolos.ownership_evidence import OwnershipDomain  # noqa: E402
+from poolos.ownership_evidence import (  # noqa: E402
+    OwnershipAuthority,
+    OwnershipDomain,
+)
 from poolos.external_change import ExternalChangeBatch  # noqa: E402
 from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterObservationSnapshot,
@@ -331,12 +334,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         pump_speed_session=pump_speed_session,
         pool_automatic_control=pool_automatic_control,
     )
+    def pool_shutdown_entitlement_provider() -> bool:
+        """Return current PoolOS BODY provenance before Safety preemption."""
+
+        thermal_lease = thermal_runtime_orchestrator.ownership.state.lease
+        if (
+            thermal_lease is not None
+            and thermal_lease.status.value == "owned"
+            and thermal_lease.body.value == "pool"
+            and thermal_lease.owns_body
+        ):
+            return True
+
+        filtration_lease = pool_circulation_ownership.filtration_lease
+        if (
+            filtration_lease is not None
+            and filtration_lease.verified
+            and filtration_lease.body_verified
+            and filtration_lease.domain_state(OwnershipDomain.BODY).authority
+            is OwnershipAuthority.POOLOS
+        ):
+            return True
+        return False
+
     grid_outage_safety_runtime = PoolOSGridOutageSafetyRuntime(
         hass=hass,
         coordinator=coordinator,
         thermal_runtime=thermal_runtime,
         authority=physical_command_authority,
         manual=manual_intellicenter,
+        pool_shutdown_entitlement_provider=pool_shutdown_entitlement_provider,
         engine=pump_composition.grid_outage_engine,
     )
 

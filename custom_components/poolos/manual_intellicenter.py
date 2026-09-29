@@ -306,6 +306,29 @@ class ManualIntelliCenterControl:
             and spa_off_requested is not None
         ):
             spa_off_requested(datetime.now(UTC))
+        additional_consequences: tuple[ExpectedNativeConsequence, ...] = ()
+        if (
+            request_source is PhysicalRequestSource.GRID_OUTAGE_SAFETY
+            and body_objnam == "B1101"
+            and active is False
+        ):
+            parent_id = self._unique_parent_pump_id_for_circuit(
+                POOL_CIRCUIT_NATIVE_ID
+            )
+            if parent_id is None:
+                raise ManualIntelliCenterCommandNotDispatchedError(
+                    "owned Pool outage shutdown requires unique live Pool parent pump"
+                )
+            additional_consequences = (
+                ExpectedNativeConsequence(
+                    concept="pump.rpm",
+                    native_object_id=parent_id,
+                    expected_value=0.0,
+                    numeric_tolerance=25.0,
+                    retain_matching_updates=True,
+                ),
+            )
+
         await self._async_deliver(
             request=PhysicalCommandRequest(
                 operation="body_active",
@@ -322,6 +345,7 @@ class ManualIntelliCenterControl:
                 native_object_id=body_objnam,
                 expected_value=active,
             ),
+            additional_consequences=additional_consequences,
             dispatch=lambda: self._controller.request_changes(
                 body_objnam,
                 {STATUS_ATTR: STATUS_ON if active else STATUS_OFF},
@@ -851,6 +875,23 @@ class ManualIntelliCenterControl:
             return None
 
         return numeric if numeric > 0 else None
+
+    def _unique_parent_pump_id_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> str | None:
+        """Return the unique live parent pump for one body circuit."""
+
+        matches: list[str] = []
+        for candidate in self._model.get_by_type(PMPCIRC_TYPE):
+            resolved = self._validated_body_pump_circuit(
+                candidate,
+                circuit_id=circuit_id,
+            )
+            if resolved is not None:
+                parent_id, _minimum, _maximum = resolved
+                matches.append(parent_id)
+        return matches[0] if len(matches) == 1 else None
 
     def _pump_circuit_rpm_limits(
         self,
