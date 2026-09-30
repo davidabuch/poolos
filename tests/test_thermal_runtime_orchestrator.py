@@ -476,8 +476,8 @@ def test_same_timestamp_conflict_after_newer_ownership_establishment_fails_close
     lease = result.ownership_decision.current_state.lease
     assert lease is not None
     assert lease.established_at == established_at
-    assert lease.ownership_ended_at == established_at
-    assert lease.ownership_ended_at >= lease.established_at
+    assert lease.ended_at == established_at
+    assert lease.ended_at >= lease.established_at
 
 
 def test_same_timestamp_changed_plan_identity_fails_closed() -> None:
