@@ -5,6 +5,12 @@
     "@davidabuch"
   ],
   "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/davidabuch/poolos",
   "integration_type": "service",
   "iot_class": "local_push",
@@ -14,11 +20,5 @@
     "pyintellicenter==0.1.20"
   ],
   "single_config_entry": true,
-  "version": "0.11.91",
-  "dependencies": [
-    "frontend",
-    "http",
-    "panel_custom",
-    "websocket_api"
-  ]
+  "version": "0.11.91"
 }
