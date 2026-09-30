@@ -18,6 +18,7 @@ from poolos.external_change import ExternalChangeBatch
 from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
+from poolos.native_circulation_change import native_circulation_snapshot_is_fresh
 from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
@@ -215,35 +216,24 @@ class PoolOSFiltrationAutomaticRuntime:
                     ordinary_filtration_rpm=session_rpm,
                 )
         native = self.coordinator.native_intellicenter_snapshot
-        native_relevant = bool(
+        native_fresh = bool(
             native is not None
-            and any(
-                event.observed_at == native.generated_at
-                and event.concept
-                in {
-                    "pool.active",
-                    "pump.rpm",
-                    "pool.pump_circuit_configured_speed",
-                    "solar.active",
-                    "heater.active",
-                    "spa.active",
-                    "waterfall.active",
-                    "jets.active",
-                    "slide.active",
-                }
-                for event in external_changes.events
+            and native_circulation_snapshot_is_fresh(
+                generated_at=native.generated_at,
+                evaluated_at=snapshot.generated_at,
             )
         )
         execution_epoch_identity = orchestration.snapshot_identity
         execution_observed_at = snapshot.generated_at
         execution_observations = tuple(snapshot.observations)
-        if native_relevant:
+        if native_fresh:
             assert native is not None
             execution_epoch_identity = (
                 f"{orchestration.snapshot_identity}:native:"
                 f"{native.generated_at.isoformat()}"
             )
-            execution_observed_at = native.generated_at
+            # Evaluate native truth against the current policy/orchestration
+            # time so stale native observations still fail freshness checks.
             execution_observations = tuple(native.observations)
 
         frame = FiltrationAutomaticExecutionFrame(
