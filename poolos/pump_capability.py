@@ -58,6 +58,7 @@ class PumpCapabilityProfile:
             raise ValueError(f"{label} capability limits must be complete")
         if minimum is None:
             return
+        assert maximum is not None
         if minimum <= 0 or maximum <= 0 or minimum > maximum:
             raise ValueError(f"{label} capability limits are invalid")
 
