@@ -85,6 +85,9 @@ from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
 )
+from poolos.native_circulation_change import (  # noqa: E402
+    NativeCirculationChangeTracker,
+)
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
 from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
@@ -223,6 +226,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     pool_body_session_boundary = PoolBodySessionBoundaryTracker()
+    native_circulation_change = NativeCirculationChangeTracker()
     spa_automatic_control = SpaAutomaticControlSuppression()
     def initial_spa_session_kind():
         return None
@@ -627,28 +631,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             native,
         )
 
-        relevant_native_change = any(
-            event.concept
-            in {
-                "pool.active",
-                "pump.rpm",
-                "pool.pump_circuit_configured_speed",
-                "solar.active",
-                "heater.active",
-                "spa.active",
-                "waterfall.active",
-                "jets.active",
-                "slide.active",
-            }
-            and event.observed_at == native.generated_at
-            for event in external_change_runtime.latest_batch.events
-        )
-        if relevant_native_change:
-            # Native circulation/source changes can create or end an execution
-            # purpose even when HA policy inputs are otherwise unchanged.
-            # Re-run the policy/orchestration bridge so automatic filtration
-            # receives a fresh execution epoch from the authoritative native
-            # evidence instead of waiting for an unrelated HA state change.
+        if native_circulation_change.observe(native.observations):
+            # Native circulation/source truth is a first-class execution input.
+            # Re-run policy/orchestration whenever those authoritative facts
+            # change, independent of optional external-change diagnostics.
             thermal_runtime.refresh(publish=True)
 
     coordinator.set_native_snapshot_observer(observe_native_snapshot)
