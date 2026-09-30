@@ -172,6 +172,88 @@ def test_automatic_filtration_gpm_binding_rejects_unit_or_value_mismatch() -> No
         )
 
 
+def test_automatic_thermal_gpm_requires_exact_current_solar_target_session() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("gpm-thermal-epoch")
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    authority.synchronize_pump_target_session(
+        session_id="gpm-solar-session",
+        body="pool",
+        purpose="solar_heating",
+        pump_circuit_id="p0102",
+        effective_target=target,
+    )
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="gpm-thermal-epoch",
+        session_identity="thermal-session",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
+        pump_session_id="gpm-solar-session",
+        effective_pump_target=target,
+    )
+    allowed = PhysicalCommandRequest(
+        operation="pump_circuit_flow",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=42,
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.ALLOWED
+
+    wrong_value = replace(allowed, requested_value=43)
+    assert (
+        authority.assess(wrong_value).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+    wrong_unit = replace(
+        allowed,
+        operation="pump_circuit_speed",
+        requested_value=42,
+    )
+    assert (
+        authority.assess(wrong_unit).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+
+    authority.synchronize_pump_target_session(
+        session_id="new-gpm-solar-session",
+        body="pool",
+        purpose="solar_heating",
+        pump_circuit_id="p0102",
+        effective_target=PumpOperatingTarget(PumpTargetUnit.GPM, 45),
+    )
+    assert (
+        authority.assess(allowed).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+
+def test_automatic_thermal_gpm_context_rejects_non_solar_gas_scope() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("gpm-thermal-epoch")
+    with pytest.raises(ValueError, match="Solar/Gas"):
+        authority.bind_automatic_thermal_dispatch(
+            epoch_identity="gpm-thermal-epoch",
+            session_identity="probe-like-session",
+            body="pool",
+            pump_circuit_id="p0102",
+            operating_purpose="priming",
+            pump_session_id="gpm-session",
+            effective_pump_target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+        )
+
+
 def test_automatic_thermal_override_is_exact_body_purpose_and_rpm_bound() -> None:
     authority = ready()
     authority.configure_automatic_thermal(
