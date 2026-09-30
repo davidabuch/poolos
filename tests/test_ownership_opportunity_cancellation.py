@@ -5,9 +5,61 @@ from datetime import UTC, datetime, timedelta
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
     PoolAutomaticControlSuppressionSource as Source,
+    PoolBodySessionBoundaryTracker,
+    retire_transient_pool_suppression_for_new_session,
 )
 
 NOW = datetime(2026, 9, 16, 19, tzinfo=UTC)
+
+
+def test_first_post_restart_pool_on_snapshot_cannot_clear_transient_restraint() -> None:
+    restraint = PoolAutomaticControlSuppression()
+    restraint.suppress(
+        source=Source.MANUAL_POOLOS_OFF_REQUEST,
+        suppressed_at=NOW,
+        reason="manual_pool_off",
+    )
+    tracker = PoolBodySessionBoundaryTracker()
+
+    assert not retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=True,
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    assert restraint.state.suppressed
+
+    assert not retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=True,
+        observed_at=NOW + timedelta(seconds=2),
+    )
+    assert restraint.state.suppressed
+
+
+def test_only_observed_native_off_to_on_clears_transient_restraint() -> None:
+    restraint = PoolAutomaticControlSuppression()
+    restraint.suppress(
+        source=Source.MANUAL_POOLOS_OFF_REQUEST,
+        suppressed_at=NOW,
+        reason="manual_pool_off",
+    )
+    tracker = PoolBodySessionBoundaryTracker()
+
+    assert not retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=False,
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    assert retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=True,
+        observed_at=NOW + timedelta(seconds=2),
+    )
+    assert not restraint.state.suppressed
 
 
 def test_manual_pool_on_off_then_later_tou_filtration_retires_transient_restraint() -> None:
