@@ -67,6 +67,10 @@ def test_settings_panel_exposes_only_commissioned_gpm_purposes() -> None:
         "pump_solar_heating_gpm",
         "pump_gas_heating_unit",
         "pump_gas_heating_gpm",
+        "pump_temperature_probe_unit",
+        "pump_temperature_probe_gpm",
+        "sanitation_unit",
+        "sanitation_gpm",
     ):
         assert key in frontend
     assert "_settings_schema(current)" in backend
@@ -75,17 +79,12 @@ def test_settings_panel_exposes_only_commissioned_gpm_purposes() -> None:
     assert 'pump_flow_capability(body="pool")' in backend
     assert 'pump_flow_capability(body="hot_tub")' in backend
 
-    # Probe, priming, outage, and sanitation remain RPM-only until separately
-    # commissioned; their latent core target keys must not leak into the UI.
+    # Priming and outage intentionally remain RPM-only safety/startup slices.
     for forbidden in (
-        "pump_temperature_probe_unit",
-        "pump_temperature_probe_gpm",
         "pump_priming_unit",
         "pump_priming_gpm",
         "pump_grid_outage_unit",
         "pump_grid_outage_gpm",
-        "sanitation_unit",
-        "sanitation_gpm",
     ):
         assert forbidden not in frontend
 
@@ -97,4 +96,6 @@ def test_settings_panel_gpm_selector_uses_live_native_limits() -> None:
     assert "unitSelector(Boolean(filtrationGpm.supported))" in source
     assert "unitSelector(Boolean(solarGpm.supported))" in source
     assert "unitSelector(Boolean(gasGpm.supported))" in source
+    assert "unitSelector(Boolean(probeGpm.supported))" in source
+    assert "unitSelector(Boolean(sanitationGpm.supported))" in source
     assert "pump_target_capabilities" in source

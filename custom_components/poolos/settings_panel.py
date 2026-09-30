@@ -19,6 +19,10 @@ from .const import (
     CONF_PUMP_GAS_HEATING_UNIT,
     CONF_PUMP_SOLAR_HEATING_GPM,
     CONF_PUMP_SOLAR_HEATING_UNIT,
+    CONF_PUMP_TEMPERATURE_PROBE_GPM,
+    CONF_PUMP_TEMPERATURE_PROBE_UNIT,
+    CONF_SANITATION_GPM,
+    CONF_SANITATION_UNIT,
     DOMAIN,
     INTEGRATION_VERSION,
     PUMP_TARGET_UNIT_GPM,
@@ -57,6 +61,8 @@ def _pump_target_capabilities(entry: ConfigEntry) -> dict[str, dict[str, Any]]:
             "filtration": dict(unavailable),
             "solar_heating": dict(unavailable),
             "gas_heating": dict(unavailable),
+            "temperature_probe": dict(unavailable),
+            "sanitation": dict(unavailable),
         }
 
     pool = dict(manual.pump_flow_capability(body="pool"))
@@ -89,6 +95,8 @@ def _pump_target_capabilities(entry: ConfigEntry) -> dict[str, dict[str, Any]]:
         "filtration": filtration,
         "solar_heating": dict(thermal),
         "gas_heating": dict(thermal),
+        "temperature_probe": dict(thermal),
+        "sanitation": dict(thermal),
     }
 
 
@@ -107,6 +115,16 @@ _GPM_SETTING_BINDINGS = (
         CONF_PUMP_GAS_HEATING_UNIT,
         CONF_PUMP_GAS_HEATING_GPM,
         "gas_heating",
+    ),
+    (
+        CONF_PUMP_TEMPERATURE_PROBE_UNIT,
+        CONF_PUMP_TEMPERATURE_PROBE_GPM,
+        "temperature_probe",
+    ),
+    (
+        CONF_SANITATION_UNIT,
+        CONF_SANITATION_GPM,
+        "sanitation",
     ),
 )
 
