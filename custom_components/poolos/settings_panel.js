@@ -471,11 +471,27 @@ class PoolOSSettingsPanel extends HTMLElement {
     form.data = this._data;
     form.schema = SCHEMA;
     form.computeLabel = (schema) => LABELS[schema.name] ?? schema.title ?? schema.name;
-    form.addEventListener("value-changed", (event) => {
-      this._data = { ...event.detail.value };
-      this._message = "";
-      this._render();
-    });
+    if (!form._poolosBound) {
+      form._poolosBound = true;
+      form.addEventListener("value-changed", (event) => {
+        this._data = { ...event.detail.value };
+        form.data = this._data;
+        this._message = "";
+        this._updateActions();
+      });
+    }
+  }
+
+  _updateActions() {
+    if (!this.shadowRoot) return;
+    const save = this.shadowRoot.getElementById("save");
+    const message = this.shadowRoot.querySelector(".message");
+    if (save) {
+      save.disabled = !this._dirty() || this._saving;
+    }
+    if (message) {
+      message.textContent = this._message;
+    }
   }
 }
 
