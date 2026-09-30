@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable
 
+from .native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from .observations import PoolObservation
 
 NATIVE_CIRCULATION_EXECUTION_CONCEPTS = (
@@ -35,6 +37,21 @@ def native_circulation_fingerprint(
     )
 
 
+def native_circulation_snapshot_is_fresh(
+    *,
+    generated_at: datetime,
+    evaluated_at: datetime,
+) -> bool:
+    """Return whether native circulation truth is fresh enough for execution."""
+
+    age = evaluated_at - generated_at
+    return (
+        -NATIVE_STEADY_STATE_FRESHNESS.future_tolerance
+        <= age
+        <= NATIVE_STEADY_STATE_FRESHNESS.max_age
+    )
+
+
 @dataclass(slots=True)
 class NativeCirculationChangeTracker:
     """Detect meaningful native circulation changes without diagnostic events."""
@@ -57,4 +74,5 @@ __all__ = [
     "NATIVE_CIRCULATION_EXECUTION_CONCEPTS",
     "NativeCirculationChangeTracker",
     "native_circulation_fingerprint",
+    "native_circulation_snapshot_is_fresh",
 ]
