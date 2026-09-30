@@ -299,7 +299,10 @@ class PoolAutomaticControlSuppression:
                 ),
                 "pool_manual_off_suppression_reason": self.state.reason,
                 "pool_manual_off_suppression_generation": self.state.generation,
-                "pool_manual_off_resume_required": self.state.suppressed,
+                "pool_manual_off_resume_required": (
+                    self.state.suppressed
+                    and self.state.source not in _TRANSIENT_POOL_SOURCES
+                ),
                 "pool_semantic_opportunities": {
                     family: {
                         "opportunity_id": item.opportunity_id,
