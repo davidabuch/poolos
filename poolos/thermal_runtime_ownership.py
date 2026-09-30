@@ -114,6 +114,7 @@ class ThermalRuntimeConceptProvenance:
     receipt_id: str
     correlation_id: str
     intended_value: bool | int | PhysicalHeatMode
+    intended_unit: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("operation_id", "receipt_id", "correlation_id"):
@@ -162,6 +163,7 @@ class ThermalRuntimeConceptAdoption:
     concept: ThermalRuntimeOwnedConcept
     intended_value: int | PhysicalHeatMode
     observed_at: datetime
+    intended_unit: str | None = None
     opportunity_id: str
     reason_code: str
     adopted_at: datetime
@@ -182,7 +184,9 @@ class ThermalRuntimeConceptAdoption:
                 or not isinstance(self.intended_value, int)
                 or self.intended_value <= 0
             ):
-                raise ValueError("pump adoption requires a positive integer RPM")
+                raise ValueError("pump adoption requires a positive integer target")
+            if self.intended_unit not in {None, "rpm", "gpm"}:
+                raise ValueError("pump adoption unit must be rpm or gpm")
         else:
             if isinstance(self.intended_value, int):
                 raise ValueError("source adoption requires a heat mode")
