@@ -14,6 +14,7 @@ from poolos.pump_operating_target import (
 )
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
 from poolos.pump_speed_session import PumpSpeedSessionRuntime
+from poolos.pump_target_session import PumpTargetSessionRuntime
 from poolos.thermal_runtime_assessment import ThermalRuntimeEvaluator
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrator
 
@@ -205,6 +206,7 @@ class PumpBaselineRuntimeComposition:
     physical_authority: PoolOSPhysicalCommandAuthority
     grid_outage_engine: GridOutagePhysicalSafetyEngine
     pump_speed_session: PumpSpeedSessionRuntime
+    pump_target_session: PumpTargetSessionRuntime
 
 
 def compose_pump_baseline_runtime(
@@ -231,6 +233,7 @@ def compose_pump_baseline_runtime(
         physical_authority=PoolOSPhysicalCommandAuthority(baselines=baselines),
         grid_outage_engine=GridOutagePhysicalSafetyEngine(baselines=baselines),
         pump_speed_session=PumpSpeedSessionRuntime(baselines=baselines),
+        pump_target_session=PumpTargetSessionRuntime(targets=targets),
     )
 
 

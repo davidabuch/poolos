@@ -222,6 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     pump_speed_session = PoolOSPumpSpeedSessionRuntime(
         pump_composition.pump_speed_session,
         physical_command_authority,
+        pump_composition.pump_target_session,
     )
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
