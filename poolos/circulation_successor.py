@@ -67,9 +67,9 @@ class FiltrationSuccessorEvidence:
     total_remaining_runtime: timedelta
     currently_earning_credit: bool
     immediate_circulation_required: bool | None
-    finish_now_continuation: bool
     successor_target_rpm: int | None
     target_semantics: FiltrationTargetSemantics
+    finish_now_continuation: bool = False
     authority: str = "none"
     command_delivery_enabled: bool = False
 
