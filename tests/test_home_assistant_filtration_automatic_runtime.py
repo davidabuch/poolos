@@ -192,7 +192,7 @@ def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_fram
     assert hass.tasks == []
 
 
-def test_current_native_circulation_change_creates_fresh_execution_epoch() -> None:
+def test_fresh_native_circulation_is_execution_source_without_external_event() -> None:
     module = _load_module()
     runtime, _, authority, coordinator, driver = _runtime(module)
     native_at = NOW + timedelta(seconds=5)
@@ -200,12 +200,10 @@ def test_current_native_circulation_change_creates_fresh_execution_epoch() -> No
         generated_at=native_at,
         observations=(SimpleNamespace(observation_id="pool.active", value=True),),
     )
-    event = SimpleNamespace(concept="pool.active", observed_at=native_at)
-
     runtime.observe(
-        _snapshot(NOW),
+        _snapshot(native_at + timedelta(seconds=1)),
         _orchestration("policy-epoch"),
-        external_changes=ExternalChangeBatch((event,)),
+        external_changes=ExternalChangeBatch(()),
     )
 
     expected = f"policy-epoch:native:{native_at.isoformat()}"
@@ -213,8 +211,31 @@ def test_current_native_circulation_change_creates_fresh_execution_epoch() -> No
     assert authority.epochs == [expected]
     frame = runtime._latest_frame
     assert frame is not None
-    assert frame.observed_at == native_at
+    assert frame.observed_at == native_at + timedelta(seconds=1)
     assert frame.observations == coordinator.native_intellicenter_snapshot.observations
+
+
+def test_stale_native_circulation_does_not_replace_current_policy_snapshot() -> None:
+    module = _load_module()
+    runtime, _, authority, coordinator, driver = _runtime(module)
+    coordinator.native_intellicenter_snapshot = SimpleNamespace(
+        generated_at=NOW,
+        observations=(SimpleNamespace(observation_id="pool.active", value=True),),
+    )
+    current = NOW + timedelta(seconds=121)
+
+    runtime.observe(
+        _snapshot(current),
+        _orchestration("policy-current"),
+        external_changes=ExternalChangeBatch(()),
+    )
+
+    assert driver.disabled_epochs == ["policy-current"]
+    assert authority.epochs == ["policy-current"]
+    frame = runtime._latest_frame
+    assert frame is not None
+    assert frame.observed_at == current
+    assert frame.observations == ()
 
 
 def test_sanitation_preempts_filtration_before_command_delivery() -> None:
