@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchPurpose,
     AutomaticThermalDispatchContext,
@@ -151,6 +152,143 @@ def test_manual_pump_request_fails_closed_after_session_transition() -> None:
     assert (
         authority.assess(request).reason
         is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+
+
+def test_unit_aware_manual_gpm_request_requires_exact_current_target_session() -> None:
+    authority = ready()
+    authority.synchronize_pump_target_session(
+        session_id="gpm-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+    )
+
+    allowed = PhysicalCommandRequest(
+        operation="pump_circuit_flow",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=42,
+        manual_pump_session_id="gpm-session",
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.ALLOWED
+
+    wrong_operation = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=42,
+        manual_pump_session_id="gpm-session",
+    )
+    assert (
+        authority.assess(wrong_operation).reason
+        is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+
+    wrong_value = replace(allowed, requested_value=45)
+    assert (
+        authority.assess(wrong_value).reason
+        is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+    wrong_circuit = replace(allowed, target="p0103")
+    assert (
+        authority.assess(wrong_circuit).reason
+        is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+    wrong_session = replace(allowed, manual_pump_session_id="older-session")
+    assert (
+        authority.assess(wrong_session).reason
+        is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+
+
+def test_legacy_rpm_session_mirrors_exact_generic_target_binding() -> None:
+    authority = ready()
+    authority.synchronize_pump_speed_session(
+        session_id="rpm-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_rpm=2600,
+    )
+
+    diagnostics = authority.diagnostics(now=NOW)
+    assert diagnostics["pump_target_session_binding"] == {
+        "session_id": "rpm-session",
+        "body": "pool",
+        "purpose": "ordinary_circulation",
+        "pump_circuit_id": "p0102",
+        "unit": "rpm",
+        "value": 2600,
+    }
+
+    request = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=2600,
+        manual_pump_session_id="rpm-session",
+    )
+    assert authority.assess(request).reason is PhysicalAuthorityReason.ALLOWED
+
+
+def test_gpm_target_session_retires_legacy_rpm_currentness() -> None:
+    authority = ready()
+    authority.synchronize_pump_speed_session(
+        session_id="rpm-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_rpm=2600,
+    )
+    old_rpm = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=2600,
+        manual_pump_session_id="rpm-session",
+    )
+    assert authority.assess(old_rpm).allowed
+
+    authority.synchronize_pump_target_session(
+        session_id="gpm-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+    )
+    assert (
+        authority.assess(old_rpm).reason
+        is PhysicalAuthorityReason.MANUAL_PUMP_SESSION_STALE
+    )
+
+
+def test_gpm_manual_request_remains_blocked_by_active_outage_rpm_ceiling() -> None:
+    authority = ready()
+    authority.configure_grid_outage_safety(enabled=True)
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage-1",
+        pump_ceiling_required=True,
+    )
+    authority.synchronize_pump_target_session(
+        session_id="gpm-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+    )
+    request = PhysicalCommandRequest(
+        operation="pump_circuit_flow",
+        target="p0102",
+        source=PhysicalRequestSource.MANUAL,
+        requested_value=42,
+        manual_pump_session_id="gpm-session",
+    )
+    assert (
+        authority.assess(request).reason
+        is PhysicalAuthorityReason.GRID_OUTAGE_SAFETY_ACTIVE
     )
 
 
