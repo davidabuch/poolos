@@ -12,6 +12,8 @@ from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
 
+from .pump_operating_target import PumpOperatingTarget, PumpTargetUnit
+
 
 class SanitationBody(StrEnum):
     POOL = "pool"
@@ -51,6 +53,8 @@ class SanitationSession:
     requested_at: datetime
     target_rpm: int
     configured_duration_seconds: int
+    target_unit: PumpTargetUnit = PumpTargetUnit.RPM
+    target_gpm: int | None = None
     remaining_seconds: float
     lifecycle: SanitationLifecycle = SanitationLifecycle.STARTING
     last_qualified_at: datetime | None = None
@@ -65,6 +69,12 @@ class SanitationSession:
             raise ValueError("sanitation requested_at must be timezone-aware")
         if self.target_rpm <= 0:
             raise ValueError("sanitation target_rpm must be positive")
+        object.__setattr__(self, "target_unit", PumpTargetUnit(self.target_unit))
+        if self.target_unit is PumpTargetUnit.GPM:
+            if self.target_gpm is None or self.target_gpm <= 0:
+                raise ValueError("sanitation target_gpm must be positive in GPM mode")
+        elif self.target_gpm is not None:
+            raise ValueError("sanitation target_gpm is valid only in GPM mode")
         if self.configured_duration_seconds <= 0:
             raise ValueError("sanitation duration must be positive")
         if not 0 <= self.remaining_seconds <= self.configured_duration_seconds:
@@ -83,9 +93,16 @@ class SanitationSession:
         requested_at: datetime,
         target_rpm: int,
         duration_seconds: int,
+        target: PumpOperatingTarget | None = None,
     ) -> "SanitationSession":
+        effective_target = (
+            PumpOperatingTarget(PumpTargetUnit.RPM, target_rpm)
+            if target is None
+            else target
+        )
         payload = (
-            f"{body.value}|{requested_at.isoformat()}|{target_rpm}|{duration_seconds}"
+            f"{body.value}|{requested_at.isoformat()}|"
+            f"{effective_target.unit.value}:{effective_target.value}|{duration_seconds}"
         )
         digest = sha256(payload.encode("utf-8")).hexdigest()[:20]
         return cls(
@@ -94,7 +111,22 @@ class SanitationSession:
             requested_at=requested_at,
             target_rpm=target_rpm,
             configured_duration_seconds=duration_seconds,
+            target_unit=effective_target.unit,
+            target_gpm=(
+                effective_target.value
+                if effective_target.unit is PumpTargetUnit.GPM
+                else None
+            ),
             remaining_seconds=float(duration_seconds),
+        )
+
+    @property
+    def pump_target(self) -> PumpOperatingTarget:
+        return PumpOperatingTarget(
+            self.target_unit,
+            self.target_rpm
+            if self.target_unit is PumpTargetUnit.RPM
+            else int(self.target_gpm),
         )
 
     @property
@@ -112,6 +144,8 @@ class SanitationSession:
             "body": self.body.value,
             "requested_at": self.requested_at.isoformat(),
             "target_rpm": self.target_rpm,
+            "target_unit": self.target_unit.value,
+            "target_gpm": self.target_gpm,
             "configured_duration_seconds": self.configured_duration_seconds,
             "remaining_seconds": self.remaining_seconds,
             "lifecycle": self.lifecycle.value,
@@ -141,6 +175,12 @@ class SanitationSession:
             body=SanitationBody(str(payload["body"])),
             requested_at=datetime.fromisoformat(str(payload["requested_at"])),
             target_rpm=_stored_int(payload["target_rpm"], "target_rpm"),
+            target_unit=PumpTargetUnit(str(payload.get("target_unit", "rpm"))),
+            target_gpm=(
+                None
+                if payload.get("target_gpm") is None
+                else _stored_int(payload["target_gpm"], "target_gpm")
+            ),
             configured_duration_seconds=_stored_int(
                 payload["configured_duration_seconds"],
                 "configured_duration_seconds",
@@ -173,11 +213,13 @@ class SanitationObservation:
     other_body_active: bool | None
     heat_source_id: str | None
     pump_rpm: float | None
+    pump_gpm: float | None = None
     pump_evidence_usable: bool = True
     body_evidence_usable: bool = True
     thermal_evidence_usable: bool = True
     positive_manual_body_off: bool = False
     positive_manual_pump_change_rpm: int | None = None
+    positive_manual_pump_change_gpm: int | None = None
 
     def __post_init__(self) -> None:
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
@@ -212,6 +254,7 @@ class SanitationController:
         requested_at: datetime,
         target_rpm: int,
         duration_seconds: int,
+        target: PumpOperatingTarget | None = None,
     ) -> SanitationAssessment:
         if self.session is not None and self.session.active:
             raise ValueError("another sanitation session is already active")
@@ -220,6 +263,7 @@ class SanitationController:
             requested_at=requested_at,
             target_rpm=target_rpm,
             duration_seconds=duration_seconds,
+            target=target,
         )
         return self._assessment("sanitation_requested")
 
@@ -324,9 +368,16 @@ class SanitationController:
         session = self.session
         assert session is not None
 
-        manual_pump = observation.positive_manual_pump_change_rpm
+        if session.target_unit is PumpTargetUnit.GPM:
+            manual_pump = observation.positive_manual_pump_change_gpm
+            target_value = int(session.target_gpm)
+            tolerance = 2.0
+        else:
+            manual_pump = observation.positive_manual_pump_change_rpm
+            target_value = session.target_rpm
+            tolerance = float(self.pump_tolerance_rpm)
         if manual_pump is not None:
-            if abs(manual_pump - session.target_rpm) <= self.pump_tolerance_rpm:
+            if abs(manual_pump - target_value) <= tolerance:
                 session = replace(
                     session,
                     pump_override_external=False,
@@ -389,11 +440,21 @@ class SanitationController:
             )
             return self._assessment("sanitation_waiting_for_exclusive_hydraulics")
 
-        pump_matches = (
-            observation.pump_rpm is not None
-            and abs(observation.pump_rpm - session.target_rpm)
-            <= self.pump_tolerance_rpm
-        )
+        if session.target_unit is PumpTargetUnit.GPM:
+            target_value = int(session.target_gpm)
+            pump_matches = (
+                observation.pump_gpm is not None
+                and abs(observation.pump_gpm - target_value) <= 2.0
+            )
+            reason = "sanitation_set_pump_gpm"
+        else:
+            target_value = session.target_rpm
+            pump_matches = (
+                observation.pump_rpm is not None
+                and abs(observation.pump_rpm - target_value)
+                <= self.pump_tolerance_rpm
+            )
+            reason = "sanitation_set_pump_rpm"
         if not pump_matches:
             self.session = replace(
                 session,
@@ -402,8 +463,8 @@ class SanitationController:
             )
             return self._action(
                 SanitationActionKind.PUMP_SET,
-                session.target_rpm,
-                "sanitation_set_pump_rpm",
+                target_value,
+                reason,
             )
 
         remaining = session.remaining_seconds
