@@ -373,7 +373,6 @@ class AutomaticThermalDispatchContext:
     runtime_binding: str = ""
     pump_session_id: str | None = None
     effective_pump_rpm: int | None = None
-    effective_pump_target: PumpOperatingTarget | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -404,16 +403,7 @@ class AutomaticThermalDispatchContext:
             "priming",
         }:
             raise ValueError("unsupported thermal operating purpose")
-        if self.effective_pump_target is not None:
-            if self.pump_session_id is None:
-                raise ValueError("pump target session identity must be paired")
-            if (
-                self.effective_pump_target.unit is PumpTargetUnit.RPM
-                and self.effective_pump_rpm is not None
-                and self.effective_pump_target.value != self.effective_pump_rpm
-            ):
-                raise ValueError("automatic filtration RPM target bindings disagree")
-        elif (self.pump_session_id is None) != (self.effective_pump_rpm is None):
+        if (self.pump_session_id is None) != (self.effective_pump_rpm is None):
             raise ValueError("pump session identity and effective RPM must be paired")
         cleanup_purposes = {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
@@ -473,6 +463,7 @@ class AutomaticFiltrationDispatchContext:
     runtime_binding: str = ""
     pump_session_id: str | None = None
     effective_pump_rpm: int | None = None
+    effective_pump_target: PumpOperatingTarget | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -490,7 +481,16 @@ class AutomaticFiltrationDispatchContext:
                 raise ValueError(f"{name} must not be empty")
         if not is_pmpcirc_native_id(self.pump_circuit_id):
             raise ValueError("automatic filtration requires a concrete Pool PMPCIRC")
-        if (self.pump_session_id is None) != (self.effective_pump_rpm is None):
+        if self.effective_pump_target is not None:
+            if self.pump_session_id is None:
+                raise ValueError("pump target session identity must be paired")
+            if (
+                self.effective_pump_target.unit is PumpTargetUnit.RPM
+                and self.effective_pump_rpm is not None
+                and self.effective_pump_target.value != self.effective_pump_rpm
+            ):
+                raise ValueError("automatic filtration RPM target bindings disagree")
+        elif (self.pump_session_id is None) != (self.effective_pump_rpm is None):
             raise ValueError("pump session identity and effective RPM must be paired")
         object.__setattr__(
             self,
@@ -1310,6 +1310,7 @@ class PoolOSPhysicalCommandAuthority:
             runtime_binding=self._runtime_binding,
             pump_session_id=pump_session_id,
             effective_pump_rpm=effective_pump_rpm,
+            effective_pump_target=effective_pump_target,
         )
         self._automatic_filtration_context = context
         return context
