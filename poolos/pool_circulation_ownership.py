@@ -120,18 +120,22 @@ class FiltrationCirculationLease:
             raise ValueError("filtration session RPM must be a positive integer")
         if self.pump_setpoint is not None and self.pump_session_effective_rpm is not None:
             raise ValueError("filtration pump provenance and session binding are exclusive")
-        if self.verified and (
-            not self.body_verified
-            or (
-                self.body_activation is None
-                and self.body_adoption is None
+        if self.verified:
+            body_origin_present = (
+                self.body_activation is not None or self.body_adoption is not None
             )
-            or (
-                self.pump_setpoint is None
-                and self.pump_session_effective_rpm is None
+            pump_origin_present = (
+                self.pump_setpoint is not None
+                or self.pump_session_effective_rpm is not None
             )
-        ):
-            raise ValueError("verified filtration ownership requires body and pump proof")
+            if not pump_origin_present:
+                raise ValueError(
+                    "verified filtration ownership requires pump proof"
+                )
+            if body_origin_present and not self.body_verified:
+                raise ValueError(
+                    "verified filtration BODY ownership requires verified body proof"
+                )
         states = {item.domain: item for item in self.domain_states}
         for domain, origin in (
             (OwnershipDomain.BODY, self.body_activation or self.body_adoption),
@@ -429,17 +433,24 @@ class PoolCirculationOwnershipRegistry:
             self.owner = PoolCirculationOwner.FILTRATION
 
     def confirm_filtration(self, *, session_id: str, confirmed_at: datetime) -> None:
+        """Verify the exact filtration concepts PoolOS actually established."""
+
         _require_aware(confirmed_at)
         lease = self.filtration_lease
         if lease is None or lease.session_id != session_id:
             raise ValueError("filtration confirmation requires the current lease")
         if (
-            lease.body_activation is None
-            and lease.body_adoption is None
-        ) or lease.pump_setpoint is None:
-            raise ValueError("filtration confirmation requires body and pump provenance")
-        if not lease.body_verified:
-            raise ValueError("filtration confirmation requires verified body activation")
+            lease.pump_setpoint is None
+            and lease.pump_session_effective_rpm is None
+        ):
+            raise ValueError("filtration confirmation requires pump provenance")
+        body_origin_present = (
+            lease.body_activation is not None or lease.body_adoption is not None
+        )
+        if body_origin_present and not lease.body_verified:
+            raise ValueError(
+                "filtration BODY confirmation requires verified body activation"
+            )
         self.filtration_lease = replace(
             lease,
             verified=True,

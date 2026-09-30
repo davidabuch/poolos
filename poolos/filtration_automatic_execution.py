@@ -451,11 +451,6 @@ class FiltrationAutomaticExecutionDriver:
             if not self.requested_enabled:
                 return self._blocked(frame, "automatic_filtration_driver_disabled")
             if pool.value is True:
-                if not restart_recovery_adoption:
-                    return self._blocked(
-                        frame,
-                        "automatic_filtration_preexisting_body_unowned",
-                    )
                 if frame.thermal_candidate_ready:
                     return self._blocked(
                         frame,
@@ -463,13 +458,17 @@ class FiltrationAutomaticExecutionDriver:
                     )
                 assert frame.pool_pump_circuit_id is not None
                 self.session_id = _session_id(frame)
-                self.ownership.adopt_filtration_body(
-                    session_id=self.session_id,
-                    pool_pump_circuit_id=frame.pool_pump_circuit_id,
-                    adopted_at=frame.observed_at,
-                    epoch_identity=frame.epoch_identity,
-                    reason_code="restart_recovery_current_filtration_purpose",
-                )
+                if restart_recovery_adoption:
+                    self.ownership.adopt_filtration_body(
+                        session_id=self.session_id,
+                        pool_pump_circuit_id=frame.pool_pump_circuit_id,
+                        adopted_at=frame.observed_at,
+                        epoch_identity=frame.epoch_identity,
+                        reason_code="restart_recovery_current_filtration_purpose",
+                    )
+                # An externally activated Pool may still have an independently
+                # justified ordinary-filtration PUMP purpose. Establish only
+                # exact PUMP provenance here; never manufacture BODY ownership.
                 return await self._deliver_pump(frame, delivery_factory)
             self.session_id = _session_id(frame)
             return await self._deliver(

@@ -46,6 +46,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnershipEvidence,
 )
 from poolos.thermal_source_cleanup import ThermalSourceCleanupPolicy
+from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
@@ -351,6 +352,82 @@ def test_deferred_debt_is_not_immediate_filtration(
     assert result.filtration_immediate_need is False
     assert result.successor_kind is CirculationSuccessorKind.NONE
     assert result.body_deactivation_eligible
+
+
+
+def test_small_remaining_debt_becomes_finish_now_successor_after_solar() -> None:
+    tracker = FiltrationAccountingTracker(tou_profile=LADWP_INITIAL_PROFILE)
+    snapshot = tracker.observe(
+        FiltrationObservation(
+            observed_at=AT,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2900,
+            water_temperature_f=83,
+            circulation_evidence_usable=True,
+            temperature_evidence_usable=True,
+        ),
+        safely_deferrable=True,
+        higher_priority_requirement=True,
+    )
+    assert snapshot is not None
+    snapshot = replace(
+        snapshot,
+        required_runtime=timedelta(hours=9),
+        credited_runtime=timedelta(hours=8, minutes=40),
+        remaining_runtime=timedelta(minutes=20),
+        total_remaining_runtime=timedelta(minutes=20),
+        disposition=FiltrationDisposition.CREDITING,
+        independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        currently_earning_credit=True,
+    )
+
+    filtration = FiltrationSuccessorEvidence.from_accounting(snapshot)
+
+    assert filtration.finish_now_continuation is True
+    assert filtration.immediate_circulation_required is True
+    assert filtration.successor_target_rpm == 2600
+    result = _evaluate(filtration=filtration)
+    assert result.successor_kind is CirculationSuccessorKind.FILTRATION
+    assert result.keep_body_active is True
+    assert result.pump_handoff_eligible is True
+
+
+def test_debt_above_finish_now_threshold_remains_deferred_after_solar() -> None:
+    tracker = FiltrationAccountingTracker(tou_profile=LADWP_INITIAL_PROFILE)
+    snapshot = tracker.observe(
+        FiltrationObservation(
+            observed_at=AT,
+            pool_active=True,
+            spa_active=False,
+            pump_rpm=2900,
+            water_temperature_f=83,
+            circulation_evidence_usable=True,
+            temperature_evidence_usable=True,
+        ),
+        safely_deferrable=True,
+        higher_priority_requirement=True,
+    )
+    assert snapshot is not None
+    snapshot = replace(
+        snapshot,
+        required_runtime=timedelta(hours=9),
+        credited_runtime=timedelta(hours=8, minutes=29),
+        remaining_runtime=timedelta(minutes=31),
+        total_remaining_runtime=timedelta(minutes=31),
+        disposition=FiltrationDisposition.CREDITING,
+        independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+        currently_earning_credit=True,
+    )
+
+    filtration = FiltrationSuccessorEvidence.from_accounting(snapshot)
+
+    assert filtration.finish_now_continuation is False
+    assert filtration.immediate_circulation_required is False
+    assert filtration.successor_target_rpm is None
+    result = _evaluate(filtration=filtration)
+    assert result.successor_kind is CirculationSuccessorKind.NONE
+    assert result.body_deactivation_eligible is True
 
 
 def test_crediting_with_deferrable_counterfactual_is_not_a_successor() -> None:

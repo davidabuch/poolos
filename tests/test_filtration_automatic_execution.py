@@ -235,6 +235,75 @@ def _verified_filtration_driver(
     return driver, delivery, factory
 
 
+
+def test_external_pool_body_can_receive_pump_only_filtration_governance() -> None:
+    """Manual Pool ON remains external while justified filtration owns only PUMP."""
+
+    driver, delivery, factory = _enabled_driver()
+
+    first = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW,
+                pool=True,
+                rpm=2900,
+                configured=2900,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert first.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert first.command_delivery_performed
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpSpeed)
+    assert delivery.operations[0].rpm == 2600
+
+    acquiring = driver.ownership.filtration_lease
+    assert acquiring is not None
+    assert acquiring.body_activation is None
+    assert acquiring.body_adoption is None
+    assert acquiring.pump_setpoint is not None
+
+    verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert verified.state is FiltrationAutomaticDriverState.OWNED
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.verified
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+    assert lease.pump_setpoint is not None
+
+    complete = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=2),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert complete.state is FiltrationAutomaticDriverState.BLOCKED
+    assert complete.blocker == "automatic_filtration_body_provenance_unavailable"
+    assert driver.ownership.filtration_lease is None
+    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert len(delivery.operations) == 1
+    assert all(not isinstance(operation, SetBodyActive) for operation in delivery.operations)
+
 def test_verified_filtration_tolerates_one_native_keepalive_cadence_without_suspension() -> None:
     driver, delivery, factory = _verified_filtration_driver()
     commands_before = len(delivery.operations)
@@ -1084,7 +1153,7 @@ def test_complete_off_filtration_thermal_filtration_off_ownership_lifecycle() ->
     assert ownership.filtration_lease is None
 
 
-def test_preexisting_matching_pool_circulation_is_never_adopted() -> None:
+def test_preexisting_matching_pool_is_not_body_adopted_but_pump_is_governed() -> None:
     driver, delivery, factory = _enabled_driver()
     result = asyncio.run(
         driver.process_epoch(
@@ -1092,9 +1161,15 @@ def test_preexisting_matching_pool_circulation_is_never_adopted() -> None:
             delivery_factory=factory,
         )
     )
-    assert result.blocker == "automatic_filtration_preexisting_body_unowned"
-    assert not delivery.operations
-    assert driver.ownership.filtration_lease is None
+    assert result.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpSpeed)
+    assert delivery.operations[0].rpm == 2600
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+    assert lease.pump_setpoint is not None
 
 
 def test_thermal_candidate_preempts_new_filtration_delivery() -> None:

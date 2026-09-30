@@ -13,7 +13,11 @@ from .external_change import (
     POOL_CIRCULATION_TAKEOVER_CONCEPTS,
 )
 from .ownership_evidence import OwnershipDomain
-from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
+from .filtration_policy import (
+    FiltrationAccountingSnapshot,
+    FiltrationDisposition,
+    FiltrationSchedulingMode,
+)
 from .grid_outage_confirmation import GridOutageAssessment, GridOutageDisposition
 from .integration import ThermalBody
 from .thermal_runtime_ownership import (
@@ -65,6 +69,7 @@ class FiltrationSuccessorEvidence:
     immediate_circulation_required: bool | None
     successor_target_rpm: int | None
     target_semantics: FiltrationTargetSemantics
+    finish_now_continuation: bool = False
     authority: str = "none"
     command_delivery_enabled: bool = False
 
@@ -89,11 +94,22 @@ class FiltrationSuccessorEvidence:
             None
             if self.independent_disposition
             is FiltrationDisposition.EVIDENCE_UNAVAILABLE
-            else self.independent_disposition is FiltrationDisposition.RUN_NOW
+            else (
+                self.independent_disposition is FiltrationDisposition.RUN_NOW
+                or self.finish_now_continuation
+            )
         )
         if self.immediate_circulation_required is not expected_immediate:
             raise ValueError(
-                "immediate need must match independent filtration disposition"
+                "immediate need must match independent disposition or explicit "
+                "finish-now continuation"
+            )
+        if self.finish_now_continuation and (
+            self.independent_disposition is FiltrationDisposition.RUN_NOW
+            or self.total_remaining_runtime <= timedelta(0)
+        ):
+            raise ValueError(
+                "finish-now continuation requires positive deferred filtration debt"
             )
         if self.currently_earning_credit != (
             self.disposition is FiltrationDisposition.CREDITING
@@ -117,7 +133,19 @@ class FiltrationSuccessorEvidence:
         *,
         include_target: bool = True,
     ) -> FiltrationSuccessorEvidence:
-        immediate = assessment.immediate_circulation_required
+        finish_now = bool(
+            assessment.scheduling_mode
+            is FiltrationSchedulingMode.SOLAR_TOU_OPTIMIZED
+            and assessment.total_remaining_runtime > timedelta(0)
+            and assessment.total_remaining_runtime
+            <= assessment.solar_loss_finish_now_threshold
+            and assessment.immediate_circulation_required is False
+        )
+        immediate = (
+            assessment.immediate_circulation_required
+            if assessment.immediate_circulation_required is not False
+            else finish_now
+        )
         target = assessment.ordinary_filtration_rpm if immediate and include_target else None
         return cls(
             evaluated_at=assessment.evaluated_at,
@@ -126,6 +154,7 @@ class FiltrationSuccessorEvidence:
             total_remaining_runtime=assessment.total_remaining_runtime,
             currently_earning_credit=assessment.currently_earning_credit,
             immediate_circulation_required=immediate,
+            finish_now_continuation=finish_now,
             successor_target_rpm=target,
             target_semantics=(
                 FiltrationTargetSemantics.ORDINARY_POLICY_BASELINE
