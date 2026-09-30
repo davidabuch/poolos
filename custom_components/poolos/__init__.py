@@ -587,6 +587,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         synchronize_pump_session(native, transport, connection_generation)
         external_change_runtime.process(native, transport, connection_generation)
 
+        # A verified external Pool BODY OFF->ON transition starts a new operator
+        # session. Retire only a transient manual/external BODY-OFF cancellation
+        # from the prior session; this does not create BODY ownership or issue
+        # any equipment command.
+        external_pool_on = any(
+            event.concept == "pool.active"
+            and event.previous_value is False
+            and event.new_value is True
+            and event.observed_at == native.generated_at
+            for event in external_change_runtime.latest_batch.events
+        )
+        if (
+            external_pool_on
+            and pool_automatic_control.state.suppressed
+            and pool_automatic_control.state.source
+            in {
+                PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+                PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
+            }
+        ):
+            pool_automatic_control.resume(resumed_at=native.generated_at)
+
         # Consume commissioned configured PUMP/source intent before evaluation.
         # Native motor consequences must not move purpose ahead of hand-back;
         # Thermal policy evaluation must see the current domain override.
