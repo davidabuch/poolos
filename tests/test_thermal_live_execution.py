@@ -869,7 +869,20 @@ def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
             delivery=FakeThermalDelivery(),
         )
     )
-    correct = store("pump.gpm", 43, at=NOW + timedelta(seconds=2))
+    # GPM controls the target, but actual RPM remains independent hydraulic
+    # continuity evidence that the pump is physically running.
+    correct = store("pump.rpm", 2500, at=NOW + timedelta(seconds=2))
+    correct.put(
+        PoolObservation(
+            observation_id="pump.gpm",
+            value=43,
+            observed_at=NOW + timedelta(seconds=2),
+            source_kind=ObservationSourceKind.LIVE,
+            source_id="native-intellicenter",
+            quality=ObservationQuality.GOOD,
+            confidence=1.0,
+        )
+    )
     correct.put(
         PoolObservation(
             observation_id=POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
