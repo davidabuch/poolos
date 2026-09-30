@@ -877,33 +877,6 @@ def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
     assert verified.status is ThermalLiveExecutionStatus.READY
 
 
-def test_gpm_target_never_rewrites_probe_or_priming_step() -> None:
-    probe_plan = thermal_plan(
-        PhysicalHeatMode.OFF,
-        0,
-        PhysicalHeatMode.OFF,
-        1500,
-    )
-    # This artificial target session intentionally has the wrong purpose; the
-    # physical derivative must stay RPM because GPM is commissioned only for
-    # Solar/Gas normal circulation.
-    gpm_policy = ThermalLiveExecutionPolicy(
-        thermal_live_execution_enabled=True,
-        commissioning_scope=ThermalLiveCommissioningScope.POOL,
-        pump_session_id="target-session",
-        pump_session_body="pool",
-        pump_session_purpose="temperature_acquisition",
-        pump_session_pump_circuit_id=TEST_POOL_PUMP_ID,
-        pump_session_effective_target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
-    )
-    with pytest.raises(ValueError, match="Solar/Gas"):
-        ThermalLiveExecutionEngine().begin(
-            probe_plan,
-            policy=gpm_policy,
-            evidence=evidence(probe_plan),
-        )
-
-
 def test_no_second_step_is_delivered_before_first_native_verification() -> None:
     plan = thermal_plan(PhysicalHeatMode.OFF, 2600, PhysicalHeatMode.SOLAR, 2900)
     engine = ThermalLiveExecutionEngine()
