@@ -46,6 +46,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnershipEvidence,
 )
 from poolos.thermal_source_cleanup import ThermalSourceCleanupPolicy
+from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
