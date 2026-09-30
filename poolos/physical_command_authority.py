@@ -323,6 +323,7 @@ class SanitationDispatchContext:
     requested_value: bool | int | str
     pump_circuit_id: str
     sanitation_rpm: int
+    sanitation_target: PumpOperatingTarget | None = None
     runtime_binding: str = ""
 
     def __post_init__(self) -> None:
@@ -337,7 +338,17 @@ class SanitationDispatchContext:
             raise ValueError("sanitation requires a concrete PMPCIRC identity")
         if self.sanitation_rpm <= 0:
             raise ValueError("sanitation RPM must be positive")
+        effective_target = (
+            PumpOperatingTarget(PumpTargetUnit.RPM, self.sanitation_rpm)
+            if self.sanitation_target is None
+            else self.sanitation_target
+        )
         body_target = "B1101" if self.body == "pool" else "B1202"
+        pump_operation = (
+            "pump_circuit_speed"
+            if effective_target.unit is PumpTargetUnit.RPM
+            else "pump_circuit_flow"
+        )
         allowed = (
             self.operation == "body_heat_source"
             and self.target == body_target
@@ -347,10 +358,10 @@ class SanitationDispatchContext:
             and self.target == body_target
             and type(self.requested_value) is bool
         ) or (
-            self.operation == "pump_circuit_speed"
+            self.operation == pump_operation
             and self.target == self.pump_circuit_id
             and type(self.requested_value) is int
-            and self.requested_value == self.sanitation_rpm
+            and self.requested_value == effective_target.value
         )
         if not allowed:
             raise ValueError("operation exceeds exact sanitation envelope")
@@ -804,6 +815,9 @@ class PoolOSPhysicalCommandAuthority:
     _sanitation_body: str | None = field(default=None, init=False, repr=False)
     _sanitation_session_id: str | None = field(default=None, init=False, repr=False)
     _sanitation_rpm: int | None = field(default=None, init=False, repr=False)
+    _sanitation_target: PumpOperatingTarget | None = field(
+        default=None, init=False, repr=False
+    )
     _sanitation_context: SanitationDispatchContext | None = field(
         default=None, init=False, repr=False
     )
@@ -1355,6 +1369,7 @@ class PoolOSPhysicalCommandAuthority:
         body: str,
         session_id: str,
         sanitation_rpm: int,
+        sanitation_target: PumpOperatingTarget | None = None,
     ) -> int:
         """Fence normal automatic work for one explicit sanitation session."""
 
@@ -1365,6 +1380,11 @@ class PoolOSPhysicalCommandAuthority:
             raise ValueError("sanitation session_id must not be empty")
         if sanitation_rpm <= 0:
             raise ValueError("sanitation RPM must be positive")
+        effective_target = (
+            PumpOperatingTarget(PumpTargetUnit.RPM, sanitation_rpm)
+            if sanitation_target is None
+            else sanitation_target
+        )
         if (
             self._sanitation_active
             and (
@@ -1378,6 +1398,7 @@ class PoolOSPhysicalCommandAuthority:
         self._sanitation_body = normalized_body
         self._sanitation_session_id = session_id
         self._sanitation_rpm = int(sanitation_rpm)
+        self._sanitation_target = effective_target
         if changed:
             self._sanitation_generation += 1
         self._sanitation_context = None
@@ -1398,6 +1419,7 @@ class PoolOSPhysicalCommandAuthority:
         self._sanitation_body = None
         self._sanitation_session_id = None
         self._sanitation_rpm = None
+        self._sanitation_target = None
         self._sanitation_generation += 1
         self._sanitation_context = None
         self._invalidate_undispatched_sanitation_expectations()
@@ -1422,6 +1444,7 @@ class PoolOSPhysicalCommandAuthority:
         requested_value: bool | int | str,
         pump_circuit_id: str,
         sanitation_rpm: int,
+        sanitation_target: PumpOperatingTarget | None = None,
     ) -> SanitationDispatchContext:
         """Bind one operation to the exact current sanitation generation."""
 
@@ -1430,6 +1453,10 @@ class PoolOSPhysicalCommandAuthority:
             or session_id != self._sanitation_session_id
             or body != self._sanitation_body
             or sanitation_rpm != self._sanitation_rpm
+            or (
+                sanitation_target is not None
+                and sanitation_target != self._sanitation_target
+            )
         ):
             raise ValueError("sanitation session is not current")
         context = SanitationDispatchContext(
@@ -1441,6 +1468,11 @@ class PoolOSPhysicalCommandAuthority:
             requested_value=requested_value,
             pump_circuit_id=pump_circuit_id,
             sanitation_rpm=sanitation_rpm,
+            sanitation_target=(
+                self._sanitation_target
+                if sanitation_target is None
+                else sanitation_target
+            ),
             runtime_binding=self._runtime_binding,
         )
         self._sanitation_context = context
