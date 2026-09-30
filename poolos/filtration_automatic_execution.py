@@ -637,6 +637,7 @@ class FiltrationAutomaticExecutionDriver:
         if pool.value is not True:
             raise AssertionError("usable Pool activity must be an exact boolean")
         pump_provenance = lease.pump_setpoint
+        expected_target: object
         if pump_provenance is not None:
             target_unit = _provenance_target_unit(pump_provenance)
             expected_target = pump_provenance.intended_value
