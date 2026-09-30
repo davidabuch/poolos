@@ -29,6 +29,11 @@ from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
 
+from poolos.capabilities import Capability
+from poolos.pump_capability import (
+    PumpCapabilityEvidenceSource,
+    PumpCapabilityProfile,
+)
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchContext,
     AutomaticThermalDispatchContext,
@@ -854,8 +859,90 @@ class ManualIntelliCenterControl:
             request_id=request.request_id,
         )
 
+    def pump_capability_profile(
+        self,
+        *,
+        body: str,
+    ) -> PumpCapabilityProfile | None:
+        """Return the unique vendor-neutral capability profile for one body pump."""
+
+        if body not in {"pool", "hot_tub"}:
+            raise ValueError("body must be pool or hot_tub")
+        if not self.available:
+            return None
+
+        circuit_id = (
+            SPA_CIRCUIT_NATIVE_ID
+            if body == "hot_tub"
+            else POOL_CIRCUIT_NATIVE_ID
+        )
+        profiles: list[PumpCapabilityProfile] = []
+        for candidate in self._model.get_by_type(PMPCIRC_TYPE):
+            if (
+                candidate is None
+                or str(candidate.objtype).upper()
+                != str(PMPCIRC_TYPE).upper()
+                or not is_pmpcirc_native_id(str(candidate.objnam))
+                or str(candidate[CIRCUIT_ATTR] or "") != circuit_id
+            ):
+                continue
+
+            parent_id = str(candidate[PARENT_ATTR] or "").strip()
+            if not parent_id:
+                continue
+            parent = self._model[parent_id]
+            if (
+                parent is None
+                or str(parent.objtype).upper() != str(PUMP_TYPE).upper()
+            ):
+                continue
+
+            minimum_rpm = self._coerce_positive_int(parent[MIN_ATTR])
+            maximum_rpm = self._coerce_positive_int(parent[MAX_ATTR])
+            minimum_gpm = self._coerce_positive_int(parent[_PUMP_MIN_FLOW_ATTR])
+            maximum_gpm = self._coerce_positive_int(parent[_PUMP_MAX_FLOW_ATTR])
+
+            if (
+                minimum_rpm is None
+                or maximum_rpm is None
+                or minimum_rpm > maximum_rpm
+            ):
+                minimum_rpm = maximum_rpm = None
+            if (
+                minimum_gpm is None
+                or maximum_gpm is None
+                or minimum_gpm > maximum_gpm
+            ):
+                minimum_gpm = maximum_gpm = None
+
+            capabilities: set[Capability] = set()
+            if minimum_rpm is not None:
+                capabilities.add(Capability.RPM_CONTROL)
+            if parent["RPM"] is not None:
+                capabilities.add(Capability.RPM_SENSING)
+            if minimum_gpm is not None:
+                capabilities.add(Capability.FLOW_CONTROL)
+            if parent["GPM"] is not None:
+                capabilities.add(Capability.FLOW_SENSING)
+
+            profiles.append(
+                PumpCapabilityProfile(
+                    pump_id=parent_id,
+                    pump_circuit_id=str(candidate.objnam),
+                    provider="intellicenter",
+                    evidence_source=PumpCapabilityEvidenceSource.NATIVE,
+                    capabilities=frozenset(capabilities),
+                    minimum_rpm=minimum_rpm,
+                    maximum_rpm=maximum_rpm,
+                    minimum_gpm=minimum_gpm,
+                    maximum_gpm=maximum_gpm,
+                )
+            )
+
+        return profiles[0] if len(profiles) == 1 else None
+
     def pump_flow_capability(self, *, body: str) -> Mapping[str, Any]:
-        """Return bounded live GPM capability for one exact hydraulic body."""
+        """Compatibility view of the canonical pump capability profile."""
 
         if body not in {"pool", "hot_tub"}:
             raise ValueError("body must be pool or hot_tub")
@@ -866,23 +953,26 @@ class ManualIntelliCenterControl:
                     "reason": "manual_transport_unavailable",
                 }
             )
-        matches = self._flow_capable_body_pump_circuits(body=body)
-        if len(matches) != 1:
+
+        profile = self.pump_capability_profile(body=body)
+        if profile is None or not profile.supports(Capability.FLOW_CONTROL):
             return MappingProxyType(
                 {
                     "supported": False,
                     "reason": "unique_flow_capable_pmpcirc_not_proven",
                 }
             )
-        candidate_id, parent_id, minimum, maximum = matches[0]
+
         return MappingProxyType(
             {
                 "supported": True,
                 "reason": "live_native_flow_limits_proven",
-                "pump_circuit_id": candidate_id,
-                "parent_pump_id": parent_id,
-                "minimum_gpm": minimum,
-                "maximum_gpm": maximum,
+                "pump_circuit_id": profile.pump_circuit_id,
+                "parent_pump_id": profile.pump_id,
+                "minimum_gpm": profile.minimum_gpm,
+                "maximum_gpm": profile.maximum_gpm,
+                "provider": profile.provider,
+                "evidence_source": profile.evidence_source.value,
             }
         )
 
@@ -1092,17 +1182,22 @@ class ManualIntelliCenterControl:
         *,
         body: str,
     ) -> tuple[str, int, int]:
-        """Validate one exact body-bound flow-capable PMPCIRC."""
+        """Validate GPM authority against the canonical pump capability profile."""
 
         body_label = "Hot Tub" if body == "hot_tub" else "Pool"
-        matches = self._flow_capable_body_pump_circuits(body=body)
-        if len(matches) != 1 or matches[0][0] != pump_circuit_objnam:
+        profile = self.pump_capability_profile(body=body)
+        if (
+            profile is None
+            or profile.pump_circuit_id != pump_circuit_objnam
+            or not profile.supports(Capability.FLOW_CONTROL)
+            or profile.minimum_gpm is None
+            or profile.maximum_gpm is None
+        ):
             raise ManualIntelliCenterCommandError(
                 f"{pump_circuit_objnam} is not the unique live flow-capable "
                 f"{body_label} PMPCIRC object"
             )
-        _candidate_id, parent_id, minimum, maximum = matches[0]
-        return parent_id, minimum, maximum
+        return profile.pump_id, profile.minimum_gpm, profile.maximum_gpm
 
     def _pump_circuit_rpm_limits(
         self,
