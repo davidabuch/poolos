@@ -1827,7 +1827,7 @@ class PoolOSPhysicalCommandAuthority:
         if context.policy_fingerprint != self.baselines.fingerprint:
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
         if (
-            request.operation in {"pump_circuit_speed", "pump_circuit_flow"}
+            request.operation == "pump_circuit_speed"
             and not self._pump_session_context_current(context)
         ):
             return PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
@@ -1905,7 +1905,7 @@ class PoolOSPhysicalCommandAuthority:
         if context.policy_fingerprint != self.baselines.fingerprint:
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
         if (
-            request.operation == "pump_circuit_speed"
+            request.operation in {"pump_circuit_speed", "pump_circuit_flow"}
             and not self._pump_session_context_current(context)
         ):
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
