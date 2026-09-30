@@ -18,8 +18,19 @@ from .clock import FixedClock
 from .external_change import ExternalChangeBatch, POOL_CIRCULATION_TAKEOVER_CONCEPTS
 from .filtration_policy import FiltrationAccountingSnapshot
 from .hal import CommandReceipt
-from .integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
-from .intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, is_pmpcirc_native_id
+from .integration import (
+    PoolOperation,
+    SetBodyActive,
+    SetPumpFlow,
+    SetPumpSpeed,
+    ThermalBody,
+)
+from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    is_pmpcirc_native_id,
+)
+from .pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from .native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from .observations import (
     ObservationFreshness,
@@ -76,6 +87,7 @@ class FiltrationAutomaticExecutionFrame:
     pool_automatic_control_suppressed: bool = False
     pump_session_id: str | None = None
     pump_session_effective_rpm: int | None = None
+    pump_session_effective_target: PumpOperatingTarget | None = None
     pump_session_override_current: bool = False
 
     def __post_init__(self) -> None:
@@ -88,7 +100,17 @@ class FiltrationAutomaticExecutionFrame:
             self.pool_pump_circuit_id
         ):
             raise ValueError("filtration requires a concrete Pool PMPCIRC identity")
-        if (self.pump_session_id is None) != (
+        if self.pump_session_effective_target is not None:
+            if self.pump_session_id is None:
+                raise ValueError("filtration target session identity must be paired")
+            if (
+                self.pump_session_effective_target.unit is PumpTargetUnit.RPM
+                and self.pump_session_effective_rpm is not None
+                and self.pump_session_effective_target.value
+                != self.pump_session_effective_rpm
+            ):
+                raise ValueError("filtration RPM target bindings disagree")
+        elif (self.pump_session_id is None) != (
             self.pump_session_effective_rpm is None
         ):
             raise ValueError("filtration pump session binding must be paired")
@@ -683,21 +705,36 @@ class FiltrationAutomaticExecutionDriver:
                 and _later(actual.observed_at, attempt.delivered_at)
             )
         else:
-            configured = _live_state(
-                by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
-                frame.observed_at,
-            )
-            actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
             operation = attempt.operation
-            assert isinstance(operation, SetPumpSpeed)
-            verified = bool(
-                configured.value == operation.rpm
-                and _later(configured.observed_at, attempt.delivered_at)
-                and isinstance(actual.value, (int, float))
-                and not isinstance(actual.value, bool)
-                and abs(float(actual.value) - operation.rpm) <= self.pump_rpm_tolerance
-                and _later(actual.observed_at, attempt.delivered_at)
-            )
+            if isinstance(operation, SetPumpFlow):
+                configured = _live_state(
+                    by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT),
+                    frame.observed_at,
+                )
+                actual = _live_state(by_id.get("pump.gpm"), frame.observed_at)
+                verified = bool(
+                    configured.value == operation.gpm
+                    and _later(configured.observed_at, attempt.delivered_at)
+                    and isinstance(actual.value, (int, float))
+                    and not isinstance(actual.value, bool)
+                    and abs(float(actual.value) - operation.gpm) <= 2.0
+                    and _later(actual.observed_at, attempt.delivered_at)
+                )
+            else:
+                assert isinstance(operation, SetPumpSpeed)
+                configured = _live_state(
+                    by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
+                    frame.observed_at,
+                )
+                actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+                verified = bool(
+                    configured.value == operation.rpm
+                    and _later(configured.observed_at, attempt.delivered_at)
+                    and isinstance(actual.value, (int, float))
+                    and not isinstance(actual.value, bool)
+                    and abs(float(actual.value) - operation.rpm) <= self.pump_rpm_tolerance
+                    and _later(actual.observed_at, attempt.delivered_at)
+                )
         if verified:
             self.attempt = None
             if attempt.step is FiltrationExecutionStep.BODY_OFF:
@@ -762,15 +799,30 @@ class FiltrationAutomaticExecutionDriver:
         assert frame.filtration is not None
         if frame.pool_pump_circuit_id is None:
             return self._blocked(frame, "automatic_filtration_pool_pump_circuit_unresolved")
+        target = frame.pump_session_effective_target
+        operation: PoolOperation
+        if target is not None and target.unit is PumpTargetUnit.GPM:
+            operation = SetPumpFlow(
+                equipment_id=frame.pool_pump_circuit_id,
+                gpm=target.value,
+                metadata={"reason_code": "automatic_filtration_pump_flow_target"},
+            )
+        else:
+            rpm = (
+                target.value
+                if target is not None and target.unit is PumpTargetUnit.RPM
+                else frame.filtration.ordinary_filtration_rpm
+            )
+            operation = SetPumpSpeed(
+                equipment_id=frame.pool_pump_circuit_id,
+                rpm=rpm,
+                metadata={"reason_code": "automatic_filtration_pump_baseline"},
+            )
         return await self._deliver(
             frame,
             delivery_factory,
             FiltrationExecutionStep.PUMP_SETPOINT,
-            SetPumpSpeed(
-                equipment_id=frame.pool_pump_circuit_id,
-                rpm=frame.filtration.ordinary_filtration_rpm,
-                metadata={"reason_code": "automatic_filtration_pump_baseline"},
-            ),
+            operation,
             cleanup=False,
         )
 
@@ -784,7 +836,11 @@ class FiltrationAutomaticExecutionDriver:
         cleanup: bool,
     ) -> FiltrationAutomaticAssessment:
         assert self.session_id is not None
-        domain = OwnershipDomain.PUMP if isinstance(operation, SetPumpSpeed) else OwnershipDomain.BODY
+        domain = (
+            OwnershipDomain.PUMP
+            if isinstance(operation, (SetPumpSpeed, SetPumpFlow))
+            else OwnershipDomain.BODY
+        )
         blocker = self.ownership.domain_permission_blocker(domain)
         if blocker is not None:
             return self._blocked(frame, blocker)
@@ -836,8 +892,12 @@ class FiltrationAutomaticExecutionDriver:
             if step is FiltrationExecutionStep.BODY_ON:
                 intended: bool | int = True
             else:
-                assert isinstance(operation, SetPumpSpeed)
-                intended = operation.rpm
+                assert isinstance(operation, (SetPumpSpeed, SetPumpFlow))
+                intended = (
+                    operation.rpm
+                    if isinstance(operation, SetPumpSpeed)
+                    else operation.gpm
+                )
             self.ownership.record_filtration_delivery(
                 session_id=self.session_id,
                 pool_pump_circuit_id=frame.pool_pump_circuit_id,
