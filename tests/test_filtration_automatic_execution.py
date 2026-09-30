@@ -105,6 +105,8 @@ def _frame(
     pump_session_id: str | None = None,
     pump_session_effective_rpm: int | None = None,
     pump_session_override_current: bool = False,
+    solar_active: bool | None = None,
+    heater_active: bool | None = None,
 ) -> FiltrationAutomaticExecutionFrame:
     values = (
         ("pool.active", pool),
@@ -114,6 +116,8 @@ def _frame(
         ("waterfall.active", False),
         ("jets.active", False),
         ("slide.active", False),
+        *(() if solar_active is None else (("solar.active", solar_active),)),
+        *(() if heater_active is None else (("heater.active", heater_active),)),
     )
     observations = tuple(
         PoolObservation(
@@ -234,6 +238,82 @@ def _verified_filtration_driver(
     assert driver.ownership.filtration_lease.verified
     return driver, delivery, factory
 
+
+
+def test_manual_plain_pool_with_satisfied_debt_normalizes_to_filtration_rpm() -> None:
+    """Operator BODY remains external while plain circulation gets 2600 PUMP governance."""
+
+    driver, delivery, factory = _enabled_driver()
+
+    first = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW,
+                pool=True,
+                rpm=2900,
+                configured=2900,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert first.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpSpeed)
+    assert delivery.operations[0].rpm == 2600
+
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+    assert lease.pump_setpoint is not None
+
+    verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert verified.state is FiltrationAutomaticDriverState.OWNED
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.verified
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+
+
+def test_manual_pool_with_active_heat_source_is_not_plain_circulation_normalized() -> None:
+    driver, delivery, factory = _enabled_driver()
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW,
+                pool=True,
+                rpm=2900,
+                configured=2900,
+                satisfied=True,
+                solar_active=True,
+                heater_active=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert result.blocker == "automatic_filtration_not_immediately_required"
+    assert not delivery.operations
+    assert driver.ownership.filtration_lease is None
 
 
 def test_external_pool_body_can_receive_pump_only_filtration_governance() -> None:
