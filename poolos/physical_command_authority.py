@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .operating_baselines import PumpOperatingBaselines
+from .pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from .intellicenter_readonly import is_pmpcirc_native_id
 
 
@@ -553,7 +554,7 @@ class PhysicalCommandRequest:
             raise ValueError("physical command request_id is required")
         if self.manual_pump_session_id is not None and not (
             self.source is PhysicalRequestSource.MANUAL
-            and self.operation == "pump_circuit_speed"
+            and self.operation in {"pump_circuit_speed", "pump_circuit_flow"}
             and self.manual_pump_session_id.strip()
         ):
             raise ValueError(
@@ -697,6 +698,9 @@ class PoolOSPhysicalCommandAuthority:
         default_factory=dict, init=False, repr=False
     )
     _pump_session_binding: tuple[str, str, str, str, int] | None = field(
+        default=None, init=False, repr=False
+    )
+    _pump_target_session_binding: tuple[str, str, str, str, str, int] | None = field(
         default=None, init=False, repr=False
     )
     _automatic_thermal_driver_enabled: bool = field(
@@ -964,11 +968,12 @@ class PoolOSPhysicalCommandAuthority:
         pump_circuit_id: str | None,
         effective_rpm: int | None,
     ) -> None:
-        """Bind exact current pump intent without granting physical authority."""
+        """Bind the commissioned RPM session and mirror generic target currentness."""
 
         values = (session_id, body, purpose, pump_circuit_id, effective_rpm)
         if all(value is None for value in values):
             self._pump_session_binding = None
+            self._pump_target_session_binding = None
             return
         if any(value is None for value in values):
             raise ValueError("pump session authority binding must be complete")
@@ -977,7 +982,11 @@ class PoolOSPhysicalCommandAuthority:
         assert purpose is not None
         assert pump_circuit_id is not None
         assert effective_rpm is not None
-        if body not in {"pool", "hot_tub"} or effective_rpm <= 0:
+        if (
+            body not in {"pool", "hot_tub"}
+            or effective_rpm <= 0
+            or not is_pmpcirc_native_id(pump_circuit_id)
+        ):
             raise ValueError("invalid pump session authority binding")
         self._pump_session_binding = (
             session_id,
@@ -986,6 +995,60 @@ class PoolOSPhysicalCommandAuthority:
             pump_circuit_id,
             effective_rpm,
         )
+        self._pump_target_session_binding = (
+            session_id,
+            body,
+            purpose,
+            pump_circuit_id,
+            PumpTargetUnit.RPM.value,
+            effective_rpm,
+        )
+
+    def synchronize_pump_target_session(
+        self,
+        *,
+        session_id: str | None,
+        body: str | None,
+        purpose: str | None,
+        pump_circuit_id: str | None,
+        effective_target: PumpOperatingTarget | None,
+    ) -> None:
+        """Bind exact unit-aware PUMP currentness without granting automation."""
+
+        values = (session_id, body, purpose, pump_circuit_id, effective_target)
+        if all(value is None for value in values):
+            self._pump_target_session_binding = None
+            self._pump_session_binding = None
+            return
+        if any(value is None for value in values):
+            raise ValueError("pump target session authority binding must be complete")
+        assert session_id is not None
+        assert body is not None
+        assert purpose is not None
+        assert pump_circuit_id is not None
+        assert effective_target is not None
+        if body not in {"pool", "hot_tub"} or not is_pmpcirc_native_id(pump_circuit_id):
+            raise ValueError("invalid pump target session authority binding")
+        self._pump_target_session_binding = (
+            session_id,
+            body,
+            purpose,
+            pump_circuit_id,
+            effective_target.unit.value,
+            effective_target.value,
+        )
+        if effective_target.unit is PumpTargetUnit.RPM:
+            self._pump_session_binding = (
+                session_id,
+                body,
+                purpose,
+                pump_circuit_id,
+                effective_target.value,
+            )
+        else:
+            # A GPM session must make legacy RPM currentness unavailable rather
+            # than leaving a stale RPM authority tuple behind.
+            self._pump_session_binding = None
 
     def begin_automatic_thermal_epoch(self, epoch_identity: str) -> None:
         """Invalidate older queued work at each authoritative runtime epoch."""
@@ -1595,7 +1658,7 @@ class PoolOSPhysicalCommandAuthority:
         if (
             reason is PhysicalAuthorityReason.ALLOWED
             and request.source is PhysicalRequestSource.MANUAL
-            and request.operation == "pump_circuit_speed"
+            and request.operation in {"pump_circuit_speed", "pump_circuit_flow"}
             and request.manual_pump_session_id is not None
             and not self._manual_pump_session_request_current(request)
         ):
@@ -1665,13 +1728,20 @@ class PoolOSPhysicalCommandAuthority:
         self,
         request: PhysicalCommandRequest,
     ) -> bool:
-        binding = self._pump_session_binding
+        binding = self._pump_target_session_binding
+        if binding is None:
+            return False
+        expected_operation = (
+            "pump_circuit_speed"
+            if binding[4] == PumpTargetUnit.RPM.value
+            else "pump_circuit_flow"
+        )
         return bool(
-            binding is not None
-            and request.manual_pump_session_id == binding[0]
+            request.manual_pump_session_id == binding[0]
             and request.target == binding[3]
+            and request.operation == expected_operation
             and type(request.requested_value) is int
-            and request.requested_value == binding[4]
+            and request.requested_value == binding[5]
         )
 
     @property
@@ -1961,6 +2031,18 @@ class PoolOSPhysicalCommandAuthority:
                 ),
                 "pump_operating_baselines": dict(self.baselines.as_dict()),
                 "pump_operating_baselines_fingerprint": self.baselines.fingerprint,
+                "pump_target_session_binding": (
+                    None
+                    if self._pump_target_session_binding is None
+                    else {
+                        "session_id": self._pump_target_session_binding[0],
+                        "body": self._pump_target_session_binding[1],
+                        "purpose": self._pump_target_session_binding[2],
+                        "pump_circuit_id": self._pump_target_session_binding[3],
+                        "unit": self._pump_target_session_binding[4],
+                        "value": self._pump_target_session_binding[5],
+                    }
+                ),
                 "pool_automatic_control_suppressed": (
                     self._pool_automatic_control_suppressed
                 ),
