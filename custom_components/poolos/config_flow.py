@@ -19,13 +19,19 @@ from .const import (
     CONF_FILTRATION_SCHEDULING_MODE,
     CONF_TRADITIONAL_FILTRATION_START,
     CONF_PUMP_FILTRATION_RPM,
+    CONF_PUMP_FILTRATION_UNIT,
+    CONF_PUMP_FILTRATION_GPM,
     CONF_PUMP_GAS_HEATING_RPM,
+    CONF_PUMP_GAS_HEATING_UNIT,
+    CONF_PUMP_GAS_HEATING_GPM,
     CONF_PUMP_GRID_OUTAGE_RPM,
     CONF_SANITATION_RPM,
     CONF_POOL_SANITATION_DURATION_MINUTES,
     CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
     CONF_PUMP_PRIMING_RPM,
     CONF_PUMP_SOLAR_HEATING_RPM,
+    CONF_PUMP_SOLAR_HEATING_UNIT,
+    CONF_PUMP_SOLAR_HEATING_GPM,
     CONF_PUMP_TEMPERATURE_PROBE_RPM,
     CONF_SPA_SOLAR_ROOF_F,
     CONF_HEATER_ACTIVE_ENTITY,
@@ -58,6 +64,8 @@ from .const import (
     DEFAULT_POOL_SANITATION_DURATION_MINUTES,
     DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
     DEFAULT_OPERATING_MODE,
+    DEFAULT_PUMP_TARGET_UNIT,
+    PUMP_TARGET_UNIT_OPTIONS,
     DOMAIN,
     MAX_SPA_SOLAR_ROOF_F,
     MIN_SPA_SOLAR_ROOF_F,
@@ -279,4 +287,40 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
         )
     ] = vol.In(INTELLICENTER_TRANSPORT_OPTIONS)
     assert set(ALL_ENTITY_OPTIONS) == required.keys() | optional.keys()
+    return vol.Schema(fields)
+
+
+def _positive_whole_gpm(value: Any) -> int:
+    """Validate a user-facing whole-number GPM target without unit conversion."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise vol.Invalid("GPM target must be a whole number")
+    numeric = float(value)
+    result = int(numeric)
+    if numeric != float(result) or result <= 0:
+        raise vol.Invalid("GPM target must be a positive whole number")
+    return result
+
+
+def _settings_schema(current: dict[str, Any]) -> vol.Schema:
+    """Extend the legacy RPM settings with commissioned GPM purposes only."""
+
+    fields = dict(_mapping_schema(current).schema)
+    for unit_key, gpm_key in (
+        (CONF_PUMP_FILTRATION_UNIT, CONF_PUMP_FILTRATION_GPM),
+        (CONF_PUMP_SOLAR_HEATING_UNIT, CONF_PUMP_SOLAR_HEATING_GPM),
+        (CONF_PUMP_GAS_HEATING_UNIT, CONF_PUMP_GAS_HEATING_GPM),
+    ):
+        fields[
+            vol.Required(
+                unit_key,
+                default=current.get(unit_key, DEFAULT_PUMP_TARGET_UNIT),
+            )
+        ] = vol.In(PUMP_TARGET_UNIT_OPTIONS)
+        fields[
+            vol.Optional(
+                gpm_key,
+                default=current.get(gpm_key, vol.UNDEFINED),
+            )
+        ] = _positive_whole_gpm
     return vol.Schema(fields)

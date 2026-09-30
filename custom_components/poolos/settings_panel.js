@@ -4,9 +4,15 @@ const LABELS = {
   filtration_scheduling_mode: "Filtration strategy",
   preferred_filtration_catchup_start: "TOU catch-up start",
   traditional_filtration_start: "Traditional filtration start",
+  pump_filtration_unit: "Filtration pump target",
   pump_filtration_rpm: "Filtration RPM",
+  pump_filtration_gpm: "Filtration flow",
+  pump_solar_heating_unit: "Solar heating pump target",
   pump_solar_heating_rpm: "Solar heating RPM",
+  pump_solar_heating_gpm: "Solar heating flow",
+  pump_gas_heating_unit: "Gas heating pump target",
   pump_gas_heating_rpm: "Gas heating RPM",
+  pump_gas_heating_gpm: "Gas heating flow",
   pump_temperature_probe_rpm: "Temperature probe RPM",
   pump_priming_rpm: "Priming RPM",
   pump_grid_outage_rpm: "Grid outage RPM",
@@ -61,7 +67,32 @@ const entitySelector = (domain) => ({
 
 const timeSelector = () => ({ selector: { time: {} } });
 
-const SCHEMA = [
+const unitSelector = (gpmSupported) => ({
+  selector: {
+    select: {
+      options: [
+        { value: "rpm", label: "RPM" },
+        ...(gpmSupported ? [{ value: "gpm", label: "GPM" }] : []),
+      ],
+      mode: "dropdown",
+      multiple: false,
+      custom_value: false,
+    },
+  },
+});
+
+const gpmSelector = (capability) => numberSelector(
+  Number(capability?.minimum_gpm ?? 1),
+  Number(capability?.maximum_gpm ?? 200),
+  1,
+  "gpm",
+);
+
+const buildSchema = (capabilities = {}) => {
+  const filtrationGpm = capabilities.filtration ?? {};
+  const solarGpm = capabilities.solar_heating ?? {};
+  const gasGpm = capabilities.gas_heating ?? {};
+  return [
   {
     type: "expandable",
     name: "filtration",
@@ -106,9 +137,29 @@ const SCHEMA = [
         },
       },
       {
+        name: "pump_filtration_unit",
+        required: true,
+        ...unitSelector(Boolean(filtrationGpm.supported)),
+      },
+      {
         name: "pump_filtration_rpm",
         required: true,
         ...numberSelector(450, 3450, 10, "rpm"),
+        visible: {
+          field: "pump_filtration_unit",
+          operator: "eq",
+          value: "rpm",
+        },
+      },
+      {
+        name: "pump_filtration_gpm",
+        required: true,
+        ...gpmSelector(filtrationGpm),
+        visible: {
+          field: "pump_filtration_unit",
+          operator: "eq",
+          value: "gpm",
+        },
       },
     ],
   },
@@ -126,14 +177,54 @@ const SCHEMA = [
         ...numberSelector(110, 150, 1, "°F"),
       },
       {
+        name: "pump_solar_heating_unit",
+        required: true,
+        ...unitSelector(Boolean(solarGpm.supported)),
+      },
+      {
         name: "pump_solar_heating_rpm",
         required: true,
         ...numberSelector(450, 3450, 10, "rpm"),
+        visible: {
+          field: "pump_solar_heating_unit",
+          operator: "eq",
+          value: "rpm",
+        },
+      },
+      {
+        name: "pump_solar_heating_gpm",
+        required: true,
+        ...gpmSelector(solarGpm),
+        visible: {
+          field: "pump_solar_heating_unit",
+          operator: "eq",
+          value: "gpm",
+        },
+      },
+      {
+        name: "pump_gas_heating_unit",
+        required: true,
+        ...unitSelector(Boolean(gasGpm.supported)),
       },
       {
         name: "pump_gas_heating_rpm",
         required: true,
         ...numberSelector(450, 3450, 10, "rpm"),
+        visible: {
+          field: "pump_gas_heating_unit",
+          operator: "eq",
+          value: "rpm",
+        },
+      },
+      {
+        name: "pump_gas_heating_gpm",
+        required: true,
+        ...gpmSelector(gasGpm),
+        visible: {
+          field: "pump_gas_heating_unit",
+          operator: "eq",
+          value: "gpm",
+        },
       },
       {
         name: "pump_temperature_probe_rpm",
@@ -274,7 +365,8 @@ const SCHEMA = [
       },
     ],
   },
-];
+  ];
+};
 
 class PoolOSSettingsPanel extends HTMLElement {
   constructor() {
@@ -287,6 +379,7 @@ class PoolOSSettingsPanel extends HTMLElement {
     this._loading = false;
     this._saving = false;
     this._message = "";
+    this._capabilities = {};
   }
 
   set hass(value) {
@@ -328,6 +421,7 @@ class PoolOSSettingsPanel extends HTMLElement {
       this._data = { ...response.settings };
       this._initial = JSON.stringify(this._data);
       this._version = response.version;
+      this._capabilities = { ...(response.pump_target_capabilities ?? {}) };
     } catch (err) {
       this._message = `Unable to load PoolOS settings: ${err?.message ?? err}`;
     } finally {
@@ -348,6 +442,7 @@ class PoolOSSettingsPanel extends HTMLElement {
       });
       this._data = { ...response.settings };
       this._initial = JSON.stringify(this._data);
+      this._capabilities = { ...(response.pump_target_capabilities ?? this._capabilities) };
       this._message = "Saved. PoolOS is reloading with the new configuration.";
     } catch (err) {
       this._message = `Save failed: ${err?.message ?? err}`;
@@ -469,7 +564,7 @@ class PoolOSSettingsPanel extends HTMLElement {
     if (!form) return;
     form.hass = this._hass;
     form.data = this._data;
-    form.schema = SCHEMA;
+    form.schema = buildSchema(this._capabilities);
     form.computeLabel = (schema) => LABELS[schema.name] ?? schema.title ?? schema.name;
     if (!form._poolosBound) {
       form._poolosBound = true;

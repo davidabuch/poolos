@@ -848,6 +848,38 @@ class ManualIntelliCenterControl:
             request_id=request.request_id,
         )
 
+    def pump_flow_capability(self, *, body: str) -> Mapping[str, Any]:
+        """Return bounded live GPM capability for one exact hydraulic body."""
+
+        if body not in {"pool", "hot_tub"}:
+            raise ValueError("body must be pool or hot_tub")
+        if not self.available:
+            return MappingProxyType(
+                {
+                    "supported": False,
+                    "reason": "manual_transport_unavailable",
+                }
+            )
+        matches = self._flow_capable_body_pump_circuits(body=body)
+        if len(matches) != 1:
+            return MappingProxyType(
+                {
+                    "supported": False,
+                    "reason": "unique_flow_capable_pmpcirc_not_proven",
+                }
+            )
+        candidate_id, parent_id, minimum, maximum = matches[0]
+        return MappingProxyType(
+            {
+                "supported": True,
+                "reason": "live_native_flow_limits_proven",
+                "pump_circuit_id": candidate_id,
+                "parent_pump_id": parent_id,
+                "minimum_gpm": minimum,
+                "maximum_gpm": maximum,
+            }
+        )
+
     def diagnostics(self) -> Mapping[str, Any]:
         """Return bounded diagnostics without exposing a generic command API."""
 
@@ -876,7 +908,7 @@ class ManualIntelliCenterControl:
                 "pump_rpm_requires_explicit_rpm_mode": True,
                 "pump_gpm_requires_native_flow_limits": True,
                 "pump_gpm_requires_flow_capable_parent": True,
-                "pump_gpm_user_facing_control_enabled": False,
+                "pump_gpm_user_facing_control_enabled": True,
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
                 "target_temperature_max": _MAX_TARGET_TEMPERATURE,
                 "last_error_code": self._last_error_code,
@@ -1007,23 +1039,25 @@ class ManualIntelliCenterControl:
                 matches.append(parent_id)
         return matches[0] if len(matches) == 1 else None
 
-    def _pump_circuit_flow_limits(
+    def _flow_capable_body_pump_circuits(
         self,
-        pump_circuit_objnam: str,
         *,
         body: str,
-    ) -> tuple[str, int, int]:
-        """Validate one exact body-bound flow-capable PMPCIRC."""
+    ) -> tuple[tuple[str, str, int, int], ...]:
+        """Return exact body-bound PMPCIRC candidates with live parent GPM limits."""
 
         circuit_id = (
             SPA_CIRCUIT_NATIVE_ID
             if body == "hot_tub"
             else POOL_CIRCUIT_NATIVE_ID
         )
-        body_label = "Hot Tub" if body == "hot_tub" else "Pool"
         matches: list[tuple[str, str, int, int]] = []
         for candidate in self._model.get_by_type(PMPCIRC_TYPE):
-            if candidate is None or str(candidate.objtype).upper() != str(PMPCIRC_TYPE).upper():
+            if (
+                candidate is None
+                or str(candidate.objtype).upper()
+                != str(PMPCIRC_TYPE).upper()
+            ):
                 continue
             candidate_id = str(candidate.objnam)
             if not is_pmpcirc_native_id(candidate_id):
@@ -1034,13 +1068,28 @@ class ManualIntelliCenterControl:
             if not parent_id:
                 continue
             parent = self._model[parent_id]
-            if parent is None or str(parent.objtype).upper() != str(PUMP_TYPE).upper():
+            if (
+                parent is None
+                or str(parent.objtype).upper() != str(PUMP_TYPE).upper()
+            ):
                 continue
             minimum = self._coerce_positive_int(parent[_PUMP_MIN_FLOW_ATTR])
             maximum = self._coerce_positive_int(parent[_PUMP_MAX_FLOW_ATTR])
             if minimum is None or maximum is None or minimum > maximum:
                 continue
             matches.append((candidate_id, parent_id, minimum, maximum))
+        return tuple(matches)
+
+    def _pump_circuit_flow_limits(
+        self,
+        pump_circuit_objnam: str,
+        *,
+        body: str,
+    ) -> tuple[str, int, int]:
+        """Validate one exact body-bound flow-capable PMPCIRC."""
+
+        body_label = "Hot Tub" if body == "hot_tub" else "Pool"
+        matches = self._flow_capable_body_pump_circuits(body=body)
         if len(matches) != 1 or matches[0][0] != pump_circuit_objnam:
             raise ManualIntelliCenterCommandError(
                 f"{pump_circuit_objnam} is not the unique live flow-capable "
