@@ -618,13 +618,12 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_autonomous_pool_control"
 
     async def async_added_to_hass(self) -> None:
-        """Restore only the restraint, never execution or equipment ownership."""
+        """Restore persistent enablement separately from transient session cancellation."""
 
         await super().async_added_to_hass()
         previous = await self.async_get_last_state()
         if (
             previous is not None
-            and previous.state == "off"
             and not self._runtime.pool_automatic_control.state.suppressed
         ):
             source_value = previous.attributes.get(
@@ -633,31 +632,59 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
             try:
                 source = PoolAutomaticControlSuppressionSource(str(source_value))
             except ValueError:
-                source = PoolAutomaticControlSuppressionSource.RESTORED
-            at_value = previous.attributes.get("pool_manual_off_suppression_at")
-            try:
-                suppressed_at = datetime.fromisoformat(str(at_value))
-                if suppressed_at.tzinfo is None:
-                    raise ValueError
-            except (TypeError, ValueError):
-                suppressed_at = datetime.now(UTC)
-            reason = str(
-                previous.attributes.get("pool_manual_off_suppression_reason")
-                or "restored_manual_pool_off_suppression"
-            )
-            restored = self._runtime.pool_automatic_control.suppress(
-                source=source,
-                suppressed_at=suppressed_at,
-                reason=reason,
-            )
-            if not pool_suppression_is_current(
-                restored,
-                evaluated_at=datetime.now(UTC),
-                timezone=self._runtime.coordinator.local_timezone,
-            ):
-                self._runtime.pool_automatic_control.resume(
-                    resumed_at=datetime.now(UTC)
+                source = (
+                    PoolAutomaticControlSuppressionSource.RESTORED
+                    if previous.state == "off"
+                    else None
                 )
+            if source is not None:
+                transient = source in {
+                    PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+                    PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
+                }
+                restore = (
+                    transient
+                    or (
+                        previous.state == "off"
+                        and source
+                        in {
+                            PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+                            PoolAutomaticControlSuppressionSource.RESTORED,
+                        }
+                    )
+                )
+                if restore:
+                    at_value = previous.attributes.get(
+                        "pool_manual_off_suppression_at"
+                    )
+                    try:
+                        suppressed_at = datetime.fromisoformat(str(at_value))
+                        if suppressed_at.tzinfo is None:
+                            raise ValueError
+                    except (TypeError, ValueError):
+                        suppressed_at = datetime.now(UTC)
+                    reason = str(
+                        previous.attributes.get(
+                            "pool_manual_off_suppression_reason"
+                        )
+                        or "restored_pool_control_restraint"
+                    )
+                    restored = self._runtime.pool_automatic_control.suppress(
+                        source=source,
+                        suppressed_at=suppressed_at,
+                        reason=reason,
+                    )
+                    if (
+                        transient
+                        and not pool_suppression_is_current(
+                            restored,
+                            evaluated_at=datetime.now(UTC),
+                            timezone=self._runtime.coordinator.local_timezone,
+                        )
+                    ):
+                        self._runtime.pool_automatic_control.resume(
+                            resumed_at=datetime.now(UTC)
+                        )
         self._runtime.physical_command_authority.resolve_pool_automatic_control_suppressed(
             self._runtime.pool_automatic_control.globally_suppressed
         )
@@ -669,9 +696,9 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """On means autonomous Pool control is eligible for fresh evaluation."""
+        """Reflect persistent operator enablement, not transient session cancellation."""
 
-        return not self._runtime.pool_automatic_control.state.suppressed
+        return not self._runtime.pool_automatic_control.globally_suppressed
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Explicitly resume future automation without issuing a command."""
@@ -699,6 +726,8 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
             "resume_creates_ownership": False,
             "manual_controls_remain_available": True,
             "baseline_off_creates_suppression": False,
+            "transient_session_cancellation_changes_switch_state": False,
+            "persistent_operator_restraint_controls_switch_state": True,
             "suppression_persists_across_restart": True,
             "offline_operator_off_detection_possible": False,
         }
