@@ -832,7 +832,10 @@ def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
         )
     )
 
-    wrong = store("pump.rpm", 42, at=NOW + timedelta(seconds=1))
+    # Keep hydraulics physically valid in RPM telemetry, but omit pump.gpm.
+    # The GPM step must not be verified merely because unrelated RPM telemetry
+    # happens to be fresh and healthy.
+    wrong = store("pump.rpm", 2900, at=NOW + timedelta(seconds=1))
     wrong.put(
         PoolObservation(
             observation_id=POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
@@ -844,7 +847,7 @@ def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
             confidence=1.0,
         )
     )
-    still_waiting = engine.verify_current_step(
+    not_verified = engine.verify_current_step(
         waiting,
         wrong,
         current_context=waiting.originating_context,
@@ -852,8 +855,20 @@ def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
         evaluated_at=NOW + timedelta(seconds=1),
         source_id="native-intellicenter",
     )
-    assert still_waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert not_verified.status is not ThermalLiveExecutionStatus.READY
+    assert not_verified.status is not ThermalLiveExecutionStatus.COMPLETED
 
+    # Verification failure/supersession is intentionally fail-closed, so prove
+    # successful GPM convergence in an independent fresh execution session.
+    session2 = engine.begin(plan, policy=gpm_policy, evidence=evidence(plan))
+    waiting2 = asyncio.run(
+        engine.deliver_current_step(
+            session2,
+            policy=gpm_policy,
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
     correct = store("pump.gpm", 43, at=NOW + timedelta(seconds=2))
     correct.put(
         PoolObservation(
@@ -867,9 +882,9 @@ def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
         )
     )
     verified = engine.verify_current_step(
-        still_waiting,
+        waiting2,
         correct,
-        current_context=still_waiting.originating_context,
+        current_context=waiting2.originating_context,
         policy=gpm_policy,
         evaluated_at=NOW + timedelta(seconds=2),
         source_id="native-intellicenter",
