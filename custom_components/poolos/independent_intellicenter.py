@@ -32,7 +32,9 @@ from pyintellicenter import (
     LOTMP_ATTR,
     LSTTMP_ATTR,
     MAX_ATTR,
+    MAXF_ATTR,
     MIN_ATTR,
+    MINF_ATTR,
     MODE_ATTR,
     OBJTYP_ATTR,
     PARENT_ATTR,
@@ -1081,6 +1083,8 @@ def _copy_pump(item: PoolObject) -> NativePumpState | None:
         power_watts=_number(item[PWR_ATTR]),
         minimum_rpm=minimum_rpm,
         maximum_rpm=maximum_rpm,
+        minimum_gpm=_positive_number(item[MINF_ATTR]),
+        maximum_gpm=_positive_number(item[MAXF_ATTR]),
     )
 
 
