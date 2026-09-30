@@ -214,10 +214,42 @@ class PoolOSFiltrationAutomaticRuntime:
                     filtration,
                     ordinary_filtration_rpm=session_rpm,
                 )
+        native = self.coordinator.native_intellicenter_snapshot
+        native_relevant = bool(
+            native is not None
+            and any(
+                event.observed_at == native.generated_at
+                and event.concept
+                in {
+                    "pool.active",
+                    "pump.rpm",
+                    "pool.pump_circuit_configured_speed",
+                    "solar.active",
+                    "heater.active",
+                    "spa.active",
+                    "waterfall.active",
+                    "jets.active",
+                    "slide.active",
+                }
+                for event in external_changes.events
+            )
+        )
+        execution_epoch_identity = orchestration.snapshot_identity
+        execution_observed_at = snapshot.generated_at
+        execution_observations = tuple(snapshot.observations)
+        if native_relevant:
+            assert native is not None
+            execution_epoch_identity = (
+                f"{orchestration.snapshot_identity}:native:"
+                f"{native.generated_at.isoformat()}"
+            )
+            execution_observed_at = native.generated_at
+            execution_observations = tuple(native.observations)
+
         frame = FiltrationAutomaticExecutionFrame(
-            epoch_identity=orchestration.snapshot_identity,
-            observed_at=snapshot.generated_at,
-            observations=tuple(snapshot.observations),
+            epoch_identity=execution_epoch_identity,
+            observed_at=execution_observed_at,
+            observations=execution_observations,
             filtration=filtration,
             pool_pump_circuit_id=(
                 None if thermal is None else thermal.pool_pump_circuit_id
