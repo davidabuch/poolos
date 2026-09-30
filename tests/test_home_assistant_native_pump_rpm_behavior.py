@@ -1307,7 +1307,17 @@ def test_gpm_capability_reports_exact_live_body_bound_limits(
         "parent_pump_id": "PMP01",
         "minimum_gpm": 15,
         "maximum_gpm": 130,
+        "provider": "intellicenter",
+        "evidence_source": "native",
     }
+
+    profile = gateway.pump_capability_profile(body="pool")
+    assert profile is not None
+    profile_data = dict(profile.as_mapping())
+    assert profile_data["rpm_control"] is True
+    assert profile_data["gpm_control"] is True
+    assert profile_data["provider"] == "intellicenter"
+    assert profile_data["evidence_source"] == "native"
 
 
 def test_gpm_capability_fails_closed_without_unique_live_flow_assignment(
@@ -1331,6 +1341,12 @@ def test_gpm_capability_fails_closed_without_unique_live_flow_assignment(
 
     assert capability["supported"] is False
     assert capability["reason"] == "unique_flow_capable_pmpcirc_not_proven"
+
+    profile = gateway.pump_capability_profile(body="pool")
+    assert profile is not None
+    profile_data = dict(profile.as_mapping())
+    assert profile_data["rpm_control"] is True
+    assert profile_data["gpm_control"] is False
 
 
 def test_gpm_gateway_uses_atomic_mode_and_setpoint_payload_on_flow_capable_pump(

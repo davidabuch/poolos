@@ -89,6 +89,7 @@ from poolos.native_circulation_change import (  # noqa: E402
     NativeCirculationChangeTracker,
 )
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
+from poolos.pump_capability import PumpCapabilityProvider  # noqa: E402
 from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
@@ -120,6 +121,7 @@ class PoolOSRuntimeData:
     loaded_at: str
     operating_mode: str
     manual_intellicenter: ManualIntelliCenterControl | None
+    pump_capability_provider: PumpCapabilityProvider | None
     filtration_runtime: PoolOSFiltrationRuntime
     thermal_runtime: PoolOSThermalRuntime
     physical_command_authority: PoolOSPhysicalCommandAuthority
@@ -536,6 +538,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
         manual_intellicenter=manual_intellicenter,
+        pump_capability_provider=manual_intellicenter,
         filtration_runtime=filtration_runtime,
         thermal_runtime=thermal_runtime,
         physical_command_authority=physical_command_authority,
