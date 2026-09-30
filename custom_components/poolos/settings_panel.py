@@ -52,11 +52,11 @@ def _pump_target_capabilities(entry: ConfigEntry) -> dict[str, dict[str, Any]]:
     """Return fail-closed live GPM capability for exposed automatic purposes."""
 
     runtime = getattr(entry, "runtime_data", None)
-    manual = (
-        None if runtime is None else getattr(runtime, "manual_intellicenter", None)
+    provider = (
+        None if runtime is None else getattr(runtime, "pump_capability_provider", None)
     )
-    if manual is None:
-        unavailable = _unsupported_capability("manual_transport_not_configured")
+    if provider is None:
+        unavailable = _unsupported_capability("pump_capability_provider_not_configured")
         return {
             "filtration": dict(unavailable),
             "solar_heating": dict(unavailable),
@@ -65,8 +65,8 @@ def _pump_target_capabilities(entry: ConfigEntry) -> dict[str, dict[str, Any]]:
             "sanitation": dict(unavailable),
         }
 
-    pool_profile = manual.pump_capability_profile(body="pool")
-    spa_profile = manual.pump_capability_profile(body="hot_tub")
+    pool_profile = provider.pump_capability_profile(body="pool")
+    spa_profile = provider.pump_capability_profile(body="hot_tub")
 
     pool = (
         _unsupported_capability("pool_pump_capability_not_proven")
