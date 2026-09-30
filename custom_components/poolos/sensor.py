@@ -1308,13 +1308,34 @@ class PoolOSControlCenterSensor(CoordinatorEntity[PoolOSCoordinator], SensorEnti
             "model": "Operational Commissioning Runtime",
             "sw_version": INTEGRATION_VERSION,
         }
+        self._cached_value: str | int | float | datetime | None = None
+        self._cached_attributes: dict[str, Any] | None = None
+
+    def _handle_coordinator_update(self) -> None:
+        """Snapshot diagnostics once per coordinator publication.
+
+        Home Assistant reads state and attributes separately while updating each
+        entity.  Some PoolOS diagnostics contain large nested ownership/runtime
+        summaries; rebuilding them repeatedly across one fan-out can block the
+        event loop.  Snapshotting here preserves the exact published semantics
+        while bounding each entity update to one computation.
+        """
+
+        self._cached_value = self._description.value(
+            self.coordinator,
+            self._runtime,
+        )
+        self._cached_attributes = (
+            None
+            if self._description.attributes is None
+            else self._description.attributes(self.coordinator, self._runtime)
+        )
+        super()._handle_coordinator_update()
 
     @property
     def native_value(self) -> str | int | float | datetime | None:
-        return self._description.value(self.coordinator, self._runtime)
+        return self._cached_value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if self._description.attributes is None:
-            return None
-        return self._description.attributes(self.coordinator, self._runtime)
+        return self._cached_attributes
