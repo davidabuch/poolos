@@ -2277,6 +2277,11 @@ def _manual_request_violates_grid_outage_safety(
             and type(request.requested_value) is int
             and request.requested_value > outage_rpm
         )
+    if request.operation == "pump_circuit_flow":
+        # The reviewed outage safety ceiling is expressed in RPM. Until an
+        # explicit flow-domain outage policy exists, a GPM write cannot prove
+        # that it remains below that ceiling and therefore fails closed.
+        return pump_ceiling_required
     return False
 
 
