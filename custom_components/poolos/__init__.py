@@ -94,6 +94,7 @@ from poolos.pool_circulation_ownership import (  # noqa: E402
 from poolos.pool_automatic_control_suppression import (  # noqa: E402
     PoolAutomaticControlSuppression,
     PoolAutomaticControlSuppressionSource,
+    PoolBodySessionBoundaryTracker,
     SpaAutomaticControlSuppression,
     SpaAutomaticControlSuppressionSource,
     pool_suppression_is_current,
@@ -220,6 +221,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
+    pool_body_session_boundary = PoolBodySessionBoundaryTracker()
     spa_automatic_control = SpaAutomaticControlSuppression()
     def initial_spa_session_kind():
         return None
@@ -585,21 +587,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             spa_automatic_control.resume(resumed_at=evaluated_at)
 
         synchronize_pump_session(native, transport, connection_generation)
+        pool_active = next(
+            (
+                item.value
+                for item in native.observations
+                if item.observation_id == "pool.active"
+            ),
+            None,
+        )
+        new_operator_pool_session = pool_body_session_boundary.observe(
+            pool_active=pool_active if isinstance(pool_active, bool) else None
+        )
+
         external_change_runtime.process(native, transport, connection_generation)
 
-        # A verified external Pool BODY OFF->ON transition starts a new operator
-        # session. Retire only a transient manual/external BODY-OFF cancellation
-        # from the prior session; this does not create BODY ownership or issue
-        # any equipment command.
-        external_pool_on = any(
-            event.concept == "pool.active"
-            and event.previous_value is False
-            and event.new_value is True
-            and event.observed_at == native.generated_at
-            for event in external_change_runtime.latest_batch.events
-        )
         if (
-            external_pool_on
+            new_operator_pool_session
             and pool_automatic_control.state.suppressed
             and pool_automatic_control.state.source
             in {
@@ -607,6 +610,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
                 PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
             }
         ):
+            # Session lifecycle comes from authoritative native BODY truth,
+            # not from the optional external-change diagnostic event stream.
             pool_automatic_control.resume(resumed_at=native.generated_at)
 
         # Consume commissioned configured PUMP/source intent before evaluation.
