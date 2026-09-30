@@ -13,11 +13,15 @@ const LABELS = {
   pump_gas_heating_unit: "Gas heating pump target",
   pump_gas_heating_rpm: "Gas heating RPM",
   pump_gas_heating_gpm: "Gas heating flow",
+  pump_temperature_probe_unit: "Temperature probe target",
   pump_temperature_probe_rpm: "Temperature probe RPM",
+  pump_temperature_probe_gpm: "Temperature probe flow",
   pump_priming_rpm: "Priming RPM",
   pump_grid_outage_rpm: "Grid outage RPM",
   spa_solar_roof_f: "Spa Solar roof threshold",
+  sanitation_unit: "Sanitation pump target",
   sanitation_rpm: "Sanitation RPM",
+  sanitation_gpm: "Sanitation flow",
   pool_sanitation_duration_minutes: "Pool sanitation duration",
   hot_tub_sanitation_duration_minutes: "Hot Tub sanitation duration",
   diagnostics_enabled: "Diagnostics enabled",
@@ -92,6 +96,8 @@ const buildSchema = (capabilities = {}) => {
   const filtrationGpm = capabilities.filtration ?? {};
   const solarGpm = capabilities.solar_heating ?? {};
   const gasGpm = capabilities.gas_heating ?? {};
+  const probeGpm = capabilities.temperature_probe ?? {};
+  const sanitationGpm = capabilities.sanitation ?? {};
   return [
   {
     type: "expandable",
@@ -227,9 +233,29 @@ const buildSchema = (capabilities = {}) => {
         },
       },
       {
+        name: "pump_temperature_probe_unit",
+        required: true,
+        ...unitSelector(Boolean(probeGpm.supported)),
+      },
+      {
         name: "pump_temperature_probe_rpm",
         required: true,
         ...numberSelector(450, 3450, 10, "rpm"),
+        visible: {
+          field: "pump_temperature_probe_unit",
+          operator: "eq",
+          value: "rpm",
+        },
+      },
+      {
+        name: "pump_temperature_probe_gpm",
+        required: true,
+        ...gpmSelector(probeGpm),
+        visible: {
+          field: "pump_temperature_probe_unit",
+          operator: "eq",
+          value: "gpm",
+        },
       },
     ],
   },
@@ -260,9 +286,29 @@ const buildSchema = (capabilities = {}) => {
     flatten: true,
     schema: [
       {
+        name: "sanitation_unit",
+        required: true,
+        ...unitSelector(Boolean(sanitationGpm.supported)),
+      },
+      {
         name: "sanitation_rpm",
         required: true,
         ...numberSelector(450, 3450, 10, "rpm"),
+        visible: {
+          field: "sanitation_unit",
+          operator: "eq",
+          value: "rpm",
+        },
+      },
+      {
+        name: "sanitation_gpm",
+        required: true,
+        ...gpmSelector(sanitationGpm),
+        visible: {
+          field: "sanitation_unit",
+          operator: "eq",
+          value: "gpm",
+        },
       },
       {
         name: "pool_sanitation_duration_minutes",
