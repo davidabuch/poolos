@@ -745,7 +745,7 @@ class ManualIntelliCenterControl:
             request_id=request.request_id,
         )
 
-    async def async_set_pump_circuit_flow(
+    async def async__set_pump_circuit_flow(
         self,
         pump_circuit_objnam: str,
         gpm: int | float,
