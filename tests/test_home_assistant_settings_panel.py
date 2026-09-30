@@ -54,3 +54,47 @@ def test_settings_panel_dependencies_are_declared() -> None:
     source = MANIFEST.read_text(encoding="utf-8")
     for dependency in ('"frontend"', '"http"', '"panel_custom"', '"websocket_api"'):
         assert dependency in source
+
+
+def test_settings_panel_exposes_only_commissioned_gpm_purposes() -> None:
+    backend = PANEL_BACKEND.read_text(encoding="utf-8")
+    frontend = PANEL_FRONTEND.read_text(encoding="utf-8")
+
+    for key in (
+        "pump_filtration_unit",
+        "pump_filtration_gpm",
+        "pump_solar_heating_unit",
+        "pump_solar_heating_gpm",
+        "pump_gas_heating_unit",
+        "pump_gas_heating_gpm",
+    ):
+        assert key in frontend
+    assert "_settings_schema(current)" in backend
+    assert "_validate_live_gpm_settings" in backend
+    assert "pump_target_capabilities" in backend
+    assert 'pump_flow_capability(body="pool")' in backend
+    assert 'pump_flow_capability(body="hot_tub")' in backend
+
+    # Probe, priming, outage, and sanitation remain RPM-only until separately
+    # commissioned; their latent core target keys must not leak into the UI.
+    for forbidden in (
+        "pump_temperature_probe_unit",
+        "pump_temperature_probe_gpm",
+        "pump_priming_unit",
+        "pump_priming_gpm",
+        "pump_grid_outage_unit",
+        "pump_grid_outage_gpm",
+        "sanitation_unit",
+        "sanitation_gpm",
+    ):
+        assert forbidden not in frontend
+
+
+def test_settings_panel_gpm_selector_uses_live_native_limits() -> None:
+    source = PANEL_FRONTEND.read_text(encoding="utf-8")
+    assert "capability?.minimum_gpm" in source
+    assert "capability?.maximum_gpm" in source
+    assert "unitSelector(Boolean(filtrationGpm.supported))" in source
+    assert "unitSelector(Boolean(solarGpm.supported))" in source
+    assert "unitSelector(Boolean(gasGpm.supported))" in source
+    assert "pump_target_capabilities" in source
