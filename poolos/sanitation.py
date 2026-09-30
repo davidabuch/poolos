@@ -53,9 +53,9 @@ class SanitationSession:
     requested_at: datetime
     target_rpm: int
     configured_duration_seconds: int
+    remaining_seconds: float
     target_unit: PumpTargetUnit = PumpTargetUnit.RPM
     target_gpm: int | None = None
-    remaining_seconds: float
     lifecycle: SanitationLifecycle = SanitationLifecycle.STARTING
     last_qualified_at: datetime | None = None
     pump_override_external: bool = False
@@ -121,13 +121,15 @@ class SanitationSession:
         )
 
     @property
+    def target_value(self) -> int:
+        if self.target_unit is PumpTargetUnit.RPM:
+            return self.target_rpm
+        assert self.target_gpm is not None
+        return self.target_gpm
+
+    @property
     def pump_target(self) -> PumpOperatingTarget:
-        return PumpOperatingTarget(
-            self.target_unit,
-            self.target_rpm
-            if self.target_unit is PumpTargetUnit.RPM
-            else int(self.target_gpm),
-        )
+        return PumpOperatingTarget(self.target_unit, self.target_value)
 
     @property
     def active(self) -> bool:
@@ -370,7 +372,7 @@ class SanitationController:
 
         if session.target_unit is PumpTargetUnit.GPM:
             manual_pump = observation.positive_manual_pump_change_gpm
-            target_value = int(session.target_gpm)
+            target_value = session.target_value
             tolerance = 2.0
         else:
             manual_pump = observation.positive_manual_pump_change_rpm
@@ -441,7 +443,7 @@ class SanitationController:
             return self._assessment("sanitation_waiting_for_exclusive_hydraulics")
 
         if session.target_unit is PumpTargetUnit.GPM:
-            target_value = int(session.target_gpm)
+            target_value = session.target_value
             pump_matches = (
                 observation.pump_gpm is not None
                 and abs(observation.pump_gpm - target_value) <= 2.0
