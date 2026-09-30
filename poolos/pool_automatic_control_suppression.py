@@ -102,6 +102,24 @@ def spa_suppression_is_current(
     )
 
 
+
+
+
+@dataclass(slots=True)
+class PoolBodySessionBoundaryTracker:
+    """Track authoritative Pool BODY session boundaries from native truth only."""
+
+    previous_pool_active: bool | None = None
+
+    def observe(self, *, pool_active: bool | None) -> bool:
+        """Return True only for an observed False -> True Pool BODY transition."""
+
+        if pool_active is None:
+            return False
+        boundary = self.previous_pool_active is False and pool_active is True
+        self.previous_pool_active = pool_active
+        return boundary
+
 @dataclass(frozen=True, slots=True)
 class PoolAutomaticControlSuppressionState:
     """Immutable current restraint; it carries no equipment authority."""
@@ -439,6 +457,7 @@ __all__ = [
     "PoolAutomaticControlSuppression",
     "PoolAutomaticControlSuppressionSource",
     "PoolAutomaticControlSuppressionState",
+    "PoolBodySessionBoundaryTracker",
     "pool_suppression_is_current",
     "SpaAutomaticControlSuppression",
     "SpaAutomaticControlSuppressionSource",
