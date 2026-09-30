@@ -226,8 +226,8 @@ def test_restart_with_current_filtration_need_adopts_body_then_owns_shutdown() -
     assert driver.ownership.filtration_lease is None
 
 
-def test_matching_preexisting_pool_is_not_adopted_after_recovery_boundary() -> None:
-    """Matching physical state alone remains insufficient after startup recovery."""
+def test_matching_preexisting_pool_is_not_body_adopted_after_recovery_boundary() -> None:
+    """Matching BODY state remains external while current filtration may own PUMP."""
 
     driver, delivery, factory = _restarted_enabled_driver()
 
@@ -257,9 +257,14 @@ def test_matching_preexisting_pool_is_not_adopted_after_recovery_boundary() -> N
             delivery_factory=factory,
         )
     )
-    assert later.blocker == "automatic_filtration_preexisting_body_unowned"
-    assert not delivery.operations
-    assert driver.ownership.owner is PoolCirculationOwner.NONE
+    assert later.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpSpeed)
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+    assert lease.pump_setpoint is not None
 
 
 def test_restart_adoption_refreshes_body_provenance_before_thermal_handoff() -> None:
