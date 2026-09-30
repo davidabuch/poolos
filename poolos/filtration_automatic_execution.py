@@ -637,23 +637,24 @@ class FiltrationAutomaticExecutionDriver:
         if pool.value is not True:
             raise AssertionError("usable Pool activity must be an exact boolean")
         pump_provenance = lease.pump_setpoint
-        configured = _live_state(
-            by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
-            frame.observed_at,
+        if pump_provenance is not None:
+            target_unit = _provenance_target_unit(pump_provenance)
+            expected_target = pump_provenance.intended_value
+        else:
+            target_unit = PumpTargetUnit.RPM
+            expected_target = lease.pump_session_effective_rpm
+        configured_concept, actual_concept, tolerance = _target_observation_contract(
+            target_unit,
+            rpm_tolerance=self.pump_rpm_tolerance,
         )
-        actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
-        expected_rpm = (
-            pump_provenance.intended_value
-            if pump_provenance is not None
-            else lease.pump_session_effective_rpm
-        )
+        configured = _live_state(by_id.get(configured_concept), frame.observed_at)
+        actual = _live_state(by_id.get(actual_concept), frame.observed_at)
         if (
-            type(expected_rpm) is not int
-            or configured.value != expected_rpm
+            type(expected_target) is not int
+            or configured.value != expected_target
             or isinstance(actual.value, bool)
             or not isinstance(actual.value, (int, float))
-            or abs(float(actual.value) - expected_rpm)
-            > self.pump_rpm_tolerance
+            or abs(float(actual.value) - expected_target) > tolerance
         ):
             return self._fail(
                 frame,
@@ -908,6 +909,15 @@ class FiltrationAutomaticExecutionDriver:
                     receipt_id=receipt.command_id,
                     correlation_id=correlation_id,
                     intended_value=intended,
+                    pump_target_unit=(
+                        None
+                        if step is FiltrationExecutionStep.BODY_ON
+                        else (
+                            PumpTargetUnit.RPM.value
+                            if isinstance(operation, SetPumpSpeed)
+                            else PumpTargetUnit.GPM.value
+                        )
+                    ),
                 ),
             )
         self.attempt = FiltrationExecutionAttempt(
@@ -946,10 +956,18 @@ class FiltrationAutomaticExecutionDriver:
         pool = _live_state(by_id.get("pool.active"), frame.observed_at)
         spa = _live_state(by_id.get("spa.active"), frame.observed_at)
         pump = _live_state(by_id.get("pump.rpm"), frame.observed_at)
-        configured = _live_state(
-            by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT),
-            frame.observed_at,
+        target_unit = (
+            frame.pump_session_effective_target.unit
+            if frame.pump_session_effective_target is not None
+            else PumpTargetUnit.RPM
         )
+        configured_concept, _actual_concept, _tolerance = (
+            _target_observation_contract(
+                target_unit,
+                rpm_tolerance=self.pump_rpm_tolerance,
+            )
+        )
+        configured = _live_state(by_id.get(configured_concept), frame.observed_at)
         if not pool.usable or (pool.value is not False and pool.value is not True):
             return "automatic_filtration_pool_activity_unusable"
         if not spa.usable:
@@ -967,7 +985,11 @@ class FiltrationAutomaticExecutionDriver:
             or isinstance(configured.value, bool)
             or not isinstance(configured.value, (int, float))
         ):
-            return "automatic_filtration_configured_speed_unusable"
+            return (
+                "automatic_filtration_configured_flow_unusable"
+                if target_unit is PumpTargetUnit.GPM
+                else "automatic_filtration_configured_speed_unusable"
+            )
         if (
             self.ownership.filtration_lease is None
             and pool.value is False
@@ -1050,7 +1072,23 @@ class FiltrationAutomaticExecutionDriver:
             ):
                 continue
 
-            if (
+            session_target = frame.pump_session_effective_target
+            if session_target is not None:
+                session_configured, _session_actual, _session_tolerance = (
+                    _target_observation_contract(
+                        session_target.unit,
+                        rpm_tolerance=self.pump_rpm_tolerance,
+                    )
+                )
+                if (
+                    event.concept == session_configured
+                    and frame.pump_session_id is not None
+                    and isinstance(event.new_value, (int, float))
+                    and not isinstance(event.new_value, bool)
+                    and float(event.new_value) == float(session_target.value)
+                ):
+                    continue
+            elif (
                 event.concept == POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
                 and frame.pump_session_id is not None
                 and frame.pump_session_effective_rpm is not None
@@ -1060,22 +1098,29 @@ class FiltrationAutomaticExecutionDriver:
                 == float(frame.pump_session_effective_rpm)
             ):
                 continue
-            if event.concept == "pump.rpm":
-                pump = lease.pump_setpoint
-                if (
-                    pump is None
-                    or lease.pump_established_at is None
-                    or event.observed_at <= lease.pump_established_at
-                ):
-                    continue
-                if (
-                    type(pump.intended_value) is int
-                    and isinstance(event.new_value, (int, float))
-                    and not isinstance(event.new_value, bool)
-                    and abs(float(event.new_value) - pump.intended_value)
-                    <= self.pump_rpm_tolerance
-                ):
-                    continue
+            pump = lease.pump_setpoint
+            if pump is not None:
+                pump_unit = _provenance_target_unit(pump)
+                _pump_configured, pump_actual, pump_tolerance = (
+                    _target_observation_contract(
+                        pump_unit,
+                        rpm_tolerance=self.pump_rpm_tolerance,
+                    )
+                )
+                if event.concept == pump_actual:
+                    if (
+                        lease.pump_established_at is None
+                        or event.observed_at <= lease.pump_established_at
+                    ):
+                        continue
+                    if (
+                        type(pump.intended_value) is int
+                        and isinstance(event.new_value, (int, float))
+                        and not isinstance(event.new_value, bool)
+                        and abs(float(event.new_value) - pump.intended_value)
+                        <= pump_tolerance
+                    ):
+                        continue
             return True
         return False
 
@@ -1093,14 +1138,26 @@ class FiltrationAutomaticExecutionDriver:
         if lease.pump_setpoint is None:
             return
         by_id = {item.observation_id: item for item in frame.observations}
-        actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
-        configured = _live_state(by_id.get(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT), frame.observed_at)
+        pump_unit = _provenance_target_unit(lease.pump_setpoint)
+        configured_concept, actual_concept, tolerance = _target_observation_contract(
+            pump_unit,
+            rpm_tolerance=self.pump_rpm_tolerance,
+        )
+        actual = _live_state(by_id.get(actual_concept), frame.observed_at)
+        configured = _live_state(by_id.get(configured_concept), frame.observed_at)
         target = lease.pump_setpoint.intended_value
         assert type(target) is int
-        usable = actual.usable and configured.usable and type(actual.value) in {int, float}
-        matches = bool(usable and configured.value == target
-                       and isinstance(actual.value, (int, float))
-                       and abs(float(actual.value) - target) <= self.pump_rpm_tolerance)
+        usable = (
+            actual.usable
+            and configured.usable
+            and type(actual.value) in {int, float}
+        )
+        matches = bool(
+            usable
+            and configured.value == target
+            and isinstance(actual.value, (int, float))
+            and abs(float(actual.value) - target) <= tolerance
+        )
         state = lease.domain_state(OwnershipDomain.PUMP).observe(
             at=frame.observed_at, observed_at=actual.observed_at,
             usable=usable, matches=matches,
@@ -1319,6 +1376,34 @@ class _LiveState:
     observed_at: datetime | None
 
 
+def _provenance_target_unit(
+    provenance: ThermalRuntimeConceptProvenance,
+) -> PumpTargetUnit:
+    """Legacy pump provenance without a unit is exact RPM provenance."""
+
+    if provenance.pump_target_unit is None:
+        return PumpTargetUnit.RPM
+    return PumpTargetUnit(provenance.pump_target_unit)
+
+
+def _target_observation_contract(
+    unit: PumpTargetUnit,
+    *,
+    rpm_tolerance: int,
+) -> tuple[str, str, float]:
+    if unit is PumpTargetUnit.GPM:
+        return (
+            POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+            "pump.gpm",
+            2.0,
+        )
+    return (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        "pump.rpm",
+        float(rpm_tolerance),
+    )
+
+
 def _live_state(observation: PoolObservation | None, at: datetime) -> _LiveState:
     if observation is None:
         return _LiveState(None, False, None)
@@ -1348,6 +1433,7 @@ def _transient_evidence_loss(blocker: str | None) -> bool:
         "automatic_filtration_spa_activity_unusable",
         "automatic_filtration_pump_observation_unusable",
         "automatic_filtration_configured_speed_unusable",
+        "automatic_filtration_configured_flow_unusable",
         "automatic_filtration_pool_pump_circuit_unresolved",
     } or blocker.startswith("automatic_filtration_shared_hydraulic_unusable:")
 
