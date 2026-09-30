@@ -95,6 +95,7 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
     PoolAutomaticControlSuppression,
     PoolAutomaticControlSuppressionSource,
     PoolBodySessionBoundaryTracker,
+    retire_transient_pool_suppression_for_new_session,
     SpaAutomaticControlSuppression,
     SpaAutomaticControlSuppressionSource,
     pool_suppression_is_current,
@@ -595,24 +596,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             ),
             None,
         )
-        new_operator_pool_session = pool_body_session_boundary.observe(
-            pool_active=pool_active if isinstance(pool_active, bool) else None
+        retire_transient_pool_suppression_for_new_session(
+            pool_automatic_control,
+            pool_body_session_boundary,
+            pool_active=pool_active if isinstance(pool_active, bool) else None,
+            observed_at=native.generated_at,
         )
 
         external_change_runtime.process(native, transport, connection_generation)
-
-        if (
-            new_operator_pool_session
-            and pool_automatic_control.state.suppressed
-            and pool_automatic_control.state.source
-            in {
-                PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
-                PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF,
-            }
-        ):
-            # Session lifecycle comes from authoritative native BODY truth,
-            # not from the optional external-change diagnostic event stream.
-            pool_automatic_control.resume(resumed_at=native.generated_at)
 
         # Consume commissioned configured PUMP/source intent before evaluation.
         # Native motor consequences must not move purpose ahead of hand-back;
