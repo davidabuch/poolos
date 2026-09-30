@@ -1308,8 +1308,15 @@ class PoolOSControlCenterSensor(CoordinatorEntity[PoolOSCoordinator], SensorEnti
             "model": "Operational Commissioning Runtime",
             "sw_version": INTEGRATION_VERSION,
         }
-        self._cached_value: str | int | float | datetime | None = None
-        self._cached_attributes: dict[str, Any] | None = None
+        self._cached_value = self._description.value(
+            self.coordinator,
+            self._runtime,
+        )
+        self._cached_attributes = (
+            None
+            if self._description.attributes is None
+            else self._description.attributes(self.coordinator, self._runtime)
+        )
 
     def _handle_coordinator_update(self) -> None:
         """Snapshot diagnostics once per coordinator publication.
