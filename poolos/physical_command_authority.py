@@ -1211,7 +1211,6 @@ class PoolOSPhysicalCommandAuthority:
             runtime_binding=self._runtime_binding,
             pump_session_id=pump_session_id,
             effective_pump_rpm=effective_pump_rpm,
-            effective_pump_target=effective_pump_target,
         )
 
     def unload_automatic_thermal_driver(self) -> None:
