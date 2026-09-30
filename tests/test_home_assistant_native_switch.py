@@ -336,9 +336,43 @@ def test_pool_autonomous_control_setup_preserves_preexisting_runtime_restraint()
 
         assert restraint.state.suppressed
         assert restraint.state.source is PoolAutomaticControlSuppressionSource.EXTERNAL_NATIVE_OFF
-        assert not entity.is_on
+        assert entity.is_on
         assert not authority.pool_automatic_control_suppressed
         assert restraint.blocks_opportunity("filtration")
+        assert entity.extra_state_attributes["pool_manual_off_resume_required"] is False
+
+    asyncio.run(run())
+
+
+def test_manual_pool_off_session_cancellation_keeps_autonomy_switch_on() -> None:
+    async def run() -> None:
+        module = _load_executable_switch_module()
+        authority = PoolOSPhysicalCommandAuthority()
+        restraint = PoolAutomaticControlSuppression()
+        restraint.suppress(
+            source=PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+            suppressed_at=datetime(2026, 9, 8, 16, 0, tzinfo=UTC),
+            reason="manual_pool_off",
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry",
+            runtime_data=SimpleNamespace(
+                physical_command_authority=authority,
+                pool_automatic_control=restraint,
+            ),
+        )
+        entity = module.PoolOSPoolAutonomousControlSwitch(entry)
+        entity.async_write_ha_state = lambda: None
+
+        assert restraint.state.suppressed
+        assert entity.is_on
+        assert entity.extra_state_attributes["pool_manual_off_resume_required"] is False
+        assert (
+            entity.extra_state_attributes[
+                "transient_session_cancellation_changes_switch_state"
+            ]
+            is False
+        )
 
     asyncio.run(run())
 
@@ -1471,9 +1505,10 @@ def test_pool_autonomous_control_keeps_same_day_manual_off_until_boundary(
         await entity.async_added_to_hass()
 
         assert restraint.state.suppressed
-        assert not entity.is_on
+        assert entity.is_on
         assert not authority.pool_automatic_control_suppressed
         assert restraint.blocks_opportunity("filtration")
+        assert entity.extra_state_attributes["pool_manual_off_resume_required"] is False
 
     asyncio.run(run())
 

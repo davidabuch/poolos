@@ -424,6 +424,17 @@ class FiltrationAutomaticExecutionDriver:
             frame.filtration
             and frame.filtration.immediate_circulation_required is True
         )
+        ordinary_pool_circulation = (
+            _ordinary_pool_circulation_requires_baseline(frame)
+            and (
+                lease is None
+                or (
+                    lease.body_activation is None
+                    and lease.body_adoption is None
+                )
+            )
+        )
+        circulation_required = immediate or ordinary_pool_circulation
         if not self.requested_enabled and lease is None:
             return self._publish(
                 FiltrationAutomaticDriverState.DISABLED,
@@ -437,7 +448,7 @@ class FiltrationAutomaticExecutionDriver:
                 frame,
                 "automatic_filtration_fresh_epoch_required_after_enable",
             )
-        if lease is None and not immediate:
+        if lease is None and not circulation_required:
             return self._blocked(frame, "automatic_filtration_not_immediately_required")
         if frame.thermal_owned or self.ownership.owner is PoolCirculationOwner.THERMAL:
             return self._blocked(frame, "automatic_filtration_thermal_owner_active")
@@ -483,7 +494,7 @@ class FiltrationAutomaticExecutionDriver:
                 cleanup=False,
             )
         self.session_id = lease.session_id
-        if not immediate or not self.requested_enabled:
+        if not circulation_required or not self.requested_enabled:
             if lease.body_activation is None and lease.body_adoption is None:
                 self.ownership.release_filtration(session_id=lease.session_id)
                 return self._blocked(
@@ -1292,6 +1303,45 @@ def _session_id(frame: FiltrationAutomaticExecutionFrame) -> str:
 
 def _bounded(value: str, limit: int = 256) -> str:
     return " ".join(value.split())[:limit]
+
+
+def _ordinary_pool_circulation_requires_baseline(
+    frame: FiltrationAutomaticExecutionFrame,
+) -> bool:
+    """Return whether plain operator Pool circulation requires the filtration RPM.
+
+    BODY ownership remains external. This purpose exists only while fresh native
+    truth shows Pool circulation with no heat source, no Spa/accessory topology,
+    and no higher-priority pump-speed session.
+    """
+
+    if (
+        frame.thermal_candidate_ready
+        or frame.thermal_owned
+        or frame.pump_session_effective_rpm is not None
+    ):
+        return False
+    by_id = {item.observation_id: item for item in frame.observations}
+    required = {
+        "pool.active": True,
+        "spa.active": False,
+        "solar.active": False,
+        "heater.active": False,
+        "waterfall.active": False,
+        "jets.active": False,
+        "slide.active": False,
+    }
+    for concept, expected in required.items():
+        state = _live_state(by_id.get(concept), frame.observed_at)
+        if not state.usable or state.value is not expected:
+            return False
+    pump = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+    return (
+        pump.usable
+        and not isinstance(pump.value, bool)
+        and isinstance(pump.value, (int, float))
+        and float(pump.value) > 0
+    )
 
 
 def _require_aware(value: datetime) -> None:
