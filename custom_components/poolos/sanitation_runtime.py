@@ -57,8 +57,8 @@ class PoolOSSanitationRuntime:
     manual: ManualIntelliCenterControl | None
     default_rpm: int
     pool_duration_seconds: int
-    default_target: PumpOperatingTarget | None = None
     hot_tub_duration_seconds: int
+    default_target: PumpOperatingTarget | None = None
     authority_boundary_changed: Callable[[datetime, bool], None] | None = None
     controller: SanitationController = field(default_factory=SanitationController)
     assessment: SanitationAssessment | None = None
