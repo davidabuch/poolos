@@ -24,7 +24,7 @@ def test_settings_panel_exposes_guarded_websocket_read_and_update() -> None:
     assert '"poolos/settings/update"' in source
     assert source.count("@websocket_api.require_admin") == 2
     assert "hass.config_entries.async_update_entry(entry, options=validated)" in source
-    assert "_mapping_schema(current)" in source
+    assert "_settings_schema(current)" in source
 
 
 def test_settings_panel_uses_native_ha_form_conditional_visibility() -> None:
