@@ -43,8 +43,12 @@ from poolos.physical_command_authority import (
 from poolos.intellicenter_readonly import (
     POOL_CIRCUIT_NATIVE_ID,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_CIRCUIT_NATIVE_ID,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     is_pmpcirc_native_id,
 )
 
@@ -91,6 +95,9 @@ _ALLOWED_HEAT_SOURCE_IDS = frozenset(
 # Automatic thermal delivery may bind either commissioned body; all other
 # callers retain the narrower Pool-only command surface.
 _PUMP_RPM_MODE = "RPM"
+_PUMP_GPM_MODE = "GPM"
+_PUMP_MIN_FLOW_ATTR = "MINF"
+_PUMP_MAX_FLOW_ATTR = "MAXF"
 
 _MIN_TARGET_TEMPERATURE = 40
 _MAX_TARGET_TEMPERATURE = 104
@@ -738,6 +745,99 @@ class ManualIntelliCenterControl:
             request_id=request.request_id,
         )
 
+    async def async_set_pump_circuit_flow(
+        self,
+        pump_circuit_objnam: str,
+        gpm: int | float,
+        *,
+        request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
+        manual_body: str | None = None,
+        request_id: str | None = None,
+    ) -> ManualCommandReceipt:
+        """Set one exact flow-capable PMPCIRC target in GPM.
+
+        This is intentionally not exposed by a Home Assistant entity yet.
+        Unit-aware session/ownership authority must be commissioned before a
+        user-facing GPM control is allowed to call this surface.
+        """
+
+        if isinstance(gpm, bool) or not isinstance(gpm, (int, float)):
+            raise ValueError("pump GPM must be numeric")
+        numeric = float(gpm)
+        target = int(round(numeric))
+        if numeric != float(target):
+            raise ValueError("pump GPM must be a whole number")
+        if manual_body not in {None, "pool", "hot_tub"}:
+            raise ValueError("manual_body must be pool or hot_tub")
+
+        await self._require_available()
+        body = "hot_tub" if manual_body == "hot_tub" else "pool"
+        parent_id, minimum, maximum = self._pump_circuit_flow_limits(
+            pump_circuit_objnam,
+            body=body,
+        )
+        if not minimum <= target <= maximum:
+            raise ValueError(
+                f"pump GPM must be between {minimum} and {maximum}"
+            )
+
+        mode_concept = (
+            SPA_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT
+            if body == "hot_tub"
+            else POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT
+        )
+        flow_concept = (
+            SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+            if body == "hot_tub"
+            else POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+        )
+        request = PhysicalCommandRequest(
+            operation="pump_circuit_flow",
+            target=pump_circuit_objnam,
+            source=request_source,
+            requested_value=target,
+            request_id=(request_id if request_id is not None else str(uuid4())),
+        )
+        await self._async_deliver(
+            request=request,
+            consequence=ExpectedNativeConsequence(
+                concept=mode_concept,
+                native_object_id=pump_circuit_objnam,
+                expected_value="gpm",
+            ),
+            additional_consequences=(
+                ExpectedNativeConsequence(
+                    concept=flow_concept,
+                    native_object_id=pump_circuit_objnam,
+                    expected_value=float(target),
+                ),
+                ExpectedNativeConsequence(
+                    concept="pump.gpm",
+                    native_object_id=parent_id,
+                    expected_value=float(target),
+                    numeric_tolerance=2.0,
+                    retain_matching_updates=True,
+                ),
+            ),
+            dispatch=lambda: self._controller.request_changes(
+                pump_circuit_objnam,
+                {
+                    SELECT_ATTR: _PUMP_GPM_MODE,
+                    SPEED_ATTR: str(target),
+                },
+            ),
+            failure_message=(
+                f"failed to set {pump_circuit_objnam} pump circuit flow"
+            ),
+        )
+        self._last_error_code = None
+        return ManualCommandReceipt(
+            body_objnam=pump_circuit_objnam,
+            operation="pump_circuit_flow",
+            value=target,
+            request_id=request.request_id,
+        )
+
     def diagnostics(self) -> Mapping[str, Any]:
         """Return bounded diagnostics without exposing a generic command API."""
 
@@ -754,6 +854,7 @@ class ManualIntelliCenterControl:
                     "circuit_active",
                     "light_effect",
                     "pump_circuit_speed",
+                    "pump_circuit_flow_internal",
                 ],
                 "allowed_body_ids": sorted(_ALLOWED_BODY_IDS),
                 "allowed_circuit_ids": sorted(_ALLOWED_CIRCUIT_IDS),
@@ -763,6 +864,9 @@ class ManualIntelliCenterControl:
                 "spa_circuit_objnam": SPA_CIRCUIT_NATIVE_ID,
                 "pump_rpm_requires_native_limits": True,
                 "pump_rpm_requires_explicit_rpm_mode": True,
+                "pump_gpm_requires_native_flow_limits": True,
+                "pump_gpm_requires_flow_capable_parent": True,
+                "pump_gpm_user_facing_control_enabled": False,
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
                 "target_temperature_max": _MAX_TARGET_TEMPERATURE,
                 "last_error_code": self._last_error_code,
@@ -892,6 +996,48 @@ class ManualIntelliCenterControl:
                 parent_id, _minimum, _maximum = resolved
                 matches.append(parent_id)
         return matches[0] if len(matches) == 1 else None
+
+    def _pump_circuit_flow_limits(
+        self,
+        pump_circuit_objnam: str,
+        *,
+        body: str,
+    ) -> tuple[str, int, int]:
+        """Validate one exact body-bound flow-capable PMPCIRC."""
+
+        circuit_id = (
+            SPA_CIRCUIT_NATIVE_ID
+            if body == "hot_tub"
+            else POOL_CIRCUIT_NATIVE_ID
+        )
+        body_label = "Hot Tub" if body == "hot_tub" else "Pool"
+        matches: list[tuple[str, str, int, int]] = []
+        for candidate in self._model.get_by_type(PMPCIRC_TYPE):
+            if candidate is None or str(candidate.objtype).upper() != str(PMPCIRC_TYPE).upper():
+                continue
+            candidate_id = str(candidate.objnam)
+            if not is_pmpcirc_native_id(candidate_id):
+                continue
+            if str(candidate[CIRCUIT_ATTR] or "") != circuit_id:
+                continue
+            parent_id = str(candidate[PARENT_ATTR] or "").strip()
+            if not parent_id:
+                continue
+            parent = self._model[parent_id]
+            if parent is None or str(parent.objtype).upper() != str(PUMP_TYPE).upper():
+                continue
+            minimum = self._coerce_positive_int(parent[_PUMP_MIN_FLOW_ATTR])
+            maximum = self._coerce_positive_int(parent[_PUMP_MAX_FLOW_ATTR])
+            if minimum is None or maximum is None or minimum > maximum:
+                continue
+            matches.append((candidate_id, parent_id, minimum, maximum))
+        if len(matches) != 1 or matches[0][0] != pump_circuit_objnam:
+            raise ManualIntelliCenterCommandError(
+                f"{pump_circuit_objnam} is not the unique live flow-capable "
+                f"{body_label} PMPCIRC object"
+            )
+        _candidate_id, parent_id, minimum, maximum = matches[0]
+        return parent_id, minimum, maximum
 
     def _pump_circuit_rpm_limits(
         self,
