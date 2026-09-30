@@ -8,7 +8,6 @@ from typing import Any
 from homeassistant.components import panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_TYPE
 from homeassistant.core import HomeAssistant
 import voluptuous as vol
 
@@ -29,7 +28,7 @@ def _entry(hass: HomeAssistant) -> ConfigEntry:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command({vol.Required(CONF_TYPE): "poolos/settings/get"})
+@websocket_api.websocket_command({vol.Required("type"): "poolos/settings/get"})
 @websocket_api.async_response
 async def websocket_settings_get(
     hass: HomeAssistant,
@@ -55,7 +54,7 @@ async def websocket_settings_get(
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {
-        vol.Required(CONF_TYPE): "poolos/settings/update",
+        vol.Required("type"): "poolos/settings/update",
         vol.Required("settings"): dict,
     }
 )
