@@ -287,16 +287,32 @@ class ManualIntelliCenterThermalLiveDelivery:
         if not is_pmpcirc_native_id(operation.equipment_id):
             raise ValueError("unsupported thermal pump circuit")
         context = self.automatic_thermal_context
+        normal_source = bool(
+            context is not None
+            and context.purpose is AutomaticThermalDispatchPurpose.NORMAL
+            and context.operating_purpose in {"solar_heating", "gas_heating"}
+        )
+        probe = bool(
+            context is not None
+            and context.purpose
+            is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+            and context.operating_purpose == "temperature_acquisition"
+            and context.probe_authority is not None
+            and context.probe_authority.operation == "pump_circuit_flow"
+            and context.probe_authority.target == operation.equipment_id
+            and context.probe_authority.requested_value == operation.gpm
+        )
         if (
             context is None
-            or context.purpose is not AutomaticThermalDispatchPurpose.NORMAL
-            or context.operating_purpose not in {"solar_heating", "gas_heating"}
+            or not (normal_source or probe)
             or context.pump_circuit_id != operation.equipment_id
             or context.effective_pump_target is None
             or context.effective_pump_target.unit is not PumpTargetUnit.GPM
             or context.effective_pump_target.value != operation.gpm
         ):
-            raise ValueError("thermal GPM requires exact normal Solar/Gas target authority")
+            raise ValueError(
+                "thermal GPM requires exact probe or Solar/Gas target authority"
+            )
 
     @staticmethod
     def _validate_heat_mode(operation: SetHeatMode) -> tuple[str, str]:
