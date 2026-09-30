@@ -6,7 +6,6 @@ from poolos.integration import (
     PhysicalHeatMode,
     SetBodyActive,
     SetHeatMode,
-    SetPumpFlow,
     SetPumpSpeed,
 )
 from poolos.physical_command_authority import (
