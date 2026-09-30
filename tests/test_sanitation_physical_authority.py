@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
@@ -241,23 +243,23 @@ def test_sanitation_exact_gpm_envelope_is_allowed_and_unit_bound() -> None:
     )
     assert authority.assess(allowed).allowed
 
-    wrong_value = sanitation_request(
-        authority,
-        operation="pump_circuit_flow",
-        target="p0103",
-        value=43,
-        sanitation_target=target,
-    )
-    assert not authority.assess(wrong_value).allowed
+    with pytest.raises(ValueError, match="exact sanitation envelope"):
+        sanitation_request(
+            authority,
+            operation="pump_circuit_flow",
+            target="p0103",
+            value=43,
+            sanitation_target=target,
+        )
 
-    wrong_unit = sanitation_request(
-        authority,
-        operation="pump_circuit_speed",
-        target="p0103",
-        value=42,
-        sanitation_target=target,
-    )
-    assert not authority.assess(wrong_unit).allowed
+    with pytest.raises(ValueError, match="exact sanitation envelope"):
+        sanitation_request(
+            authority,
+            operation="pump_circuit_speed",
+            target="p0103",
+            value=42,
+            sanitation_target=target,
+        )
 
 
 def test_grid_outage_preempts_gpm_sanitation_dispatch() -> None:
