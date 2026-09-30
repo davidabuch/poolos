@@ -177,13 +177,28 @@ class PoolAutomaticControlSuppression:
         if prior.observed_at is not None and observed_at <= prior.observed_at:
             return prior.opportunity_id
         current = replace(prior, observed_at=observed_at)
+        independent_boundary = False
         if eligible is not None:
             current = replace(current, eligible=eligible)
             if eligible and prior.eligible is not True:
                 current = replace(current, sequence=prior.sequence + 1)
             if not eligible:
                 current = replace(current, canceled=False)
+            independent_boundary = eligible and prior.eligible is False
         self._opportunities[family] = current
+        if (
+            independent_boundary
+            and self.state.suppressed
+            and self.state.source in _TRANSIENT_POOL_SOURCES
+        ):
+            # A positive manual/external BODY Off cancels the opportunity that
+            # existed at the time of the intervention. Once authoritative
+            # policy evidence proves that an affected family became ineligible
+            # and later independently eligible again, the canceled BODY session
+            # is over. Retire the transient restraint itself so HA state,
+            # restart persistence, and every execution gate agree that future
+            # autonomy no longer requires a human Resume action.
+            self.resume(resumed_at=observed_at)
         return current.opportunity_id
 
     def opportunity_id(self, family: str) -> str | None:
