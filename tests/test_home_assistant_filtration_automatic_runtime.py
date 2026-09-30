@@ -133,6 +133,7 @@ def _runtime(module: ModuleType):
     authority = FakeAuthority()
     coordinator = SimpleNamespace(
         listener_updates=0,
+        native_intellicenter_snapshot=None,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -189,6 +190,31 @@ def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_fram
     assert driver.disabled_epochs == ["epoch-1"]
     assert driver.processed == []
     assert hass.tasks == []
+
+
+def test_current_native_circulation_change_creates_fresh_execution_epoch() -> None:
+    module = _load_module()
+    runtime, _, authority, coordinator, driver = _runtime(module)
+    native_at = NOW + timedelta(seconds=5)
+    coordinator.native_intellicenter_snapshot = SimpleNamespace(
+        generated_at=native_at,
+        observations=(SimpleNamespace(observation_id="pool.active", value=True),),
+    )
+    event = SimpleNamespace(concept="pool.active", observed_at=native_at)
+
+    runtime.observe(
+        _snapshot(NOW),
+        _orchestration("policy-epoch"),
+        external_changes=ExternalChangeBatch((event,)),
+    )
+
+    expected = f"policy-epoch:native:{native_at.isoformat()}"
+    assert driver.disabled_epochs == [expected]
+    assert authority.epochs == [expected]
+    frame = runtime._latest_frame
+    assert frame is not None
+    assert frame.observed_at == native_at
+    assert frame.observations == coordinator.native_intellicenter_snapshot.observations
 
 
 def test_sanitation_preempts_filtration_before_command_delivery() -> None:
