@@ -15,10 +15,13 @@ from poolos.external_change import ExternalChangeBatch
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.hal import CommandReceipt, CommandStatus
 from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.sanitation import (
     SanitationAction,
     SanitationActionKind,
@@ -54,6 +57,7 @@ class PoolOSSanitationRuntime:
     manual: ManualIntelliCenterControl | None
     default_rpm: int
     pool_duration_seconds: int
+    default_target: PumpOperatingTarget | None = None
     hot_tub_duration_seconds: int
     authority_boundary_changed: Callable[[datetime, bool], None] | None = None
     controller: SanitationController = field(default_factory=SanitationController)
@@ -78,6 +82,11 @@ class PoolOSSanitationRuntime:
     def __post_init__(self) -> None:
         if self.default_rpm <= 0:
             raise ValueError("sanitation RPM must be positive")
+        if self.default_target is None:
+            self.default_target = PumpOperatingTarget(
+                PumpTargetUnit.RPM,
+                self.default_rpm,
+            )
         if self.pool_duration_seconds <= 0 or self.hot_tub_duration_seconds <= 0:
             raise ValueError("sanitation durations must be positive")
 
@@ -124,6 +133,7 @@ class PoolOSSanitationRuntime:
             body=session.body.value,
             session_id=session.session_id,
             sanitation_rpm=session.target_rpm,
+            sanitation_target=session.pump_target,
         )
         if self.authority_boundary_changed is not None:
             self.authority_boundary_changed(datetime.now(UTC), True)
@@ -146,6 +156,7 @@ class PoolOSSanitationRuntime:
             requested_at=now,
             target_rpm=self.default_rpm,
             duration_seconds=duration,
+            target=self.default_target,
         )
         session = self.controller.session
         assert session is not None
@@ -153,6 +164,7 @@ class PoolOSSanitationRuntime:
             body=body.value,
             session_id=session.session_id,
             sanitation_rpm=session.target_rpm,
+            sanitation_target=session.pump_target,
         )
         if self.authority_boundary_changed is not None:
             self.authority_boundary_changed(now, True)
@@ -233,9 +245,17 @@ class PoolOSSanitationRuntime:
         prefix = "pool" if session_before.body is SanitationBody.POOL else "spa"
         other_prefix = "spa" if prefix == "pool" else "pool"
         pump_concept = (
-            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
-            if session_before.body is SanitationBody.POOL
-            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            (
+                POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+                if session_before.body is SanitationBody.POOL
+                else SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+            )
+            if session_before.target_unit is PumpTargetUnit.GPM
+            else (
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                if session_before.body is SanitationBody.POOL
+                else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            )
         )
 
         manual_body_off = any(
@@ -276,6 +296,7 @@ class PoolOSSanitationRuntime:
             other_body_active=_bool_value(values.get(f"{other_prefix}.active")),
             heat_source_id=_str_value(values.get(f"{prefix}.raw_heater_id")),
             pump_rpm=_number_value(values.get("pump.rpm")),
+            pump_gpm=_number_value(values.get("pump.gpm")),
             body_evidence_usable=(
                 _usable(values.get(f"{prefix}.active"), snapshot)
                 and _usable(values.get(f"{other_prefix}.active"), snapshot)
@@ -285,7 +306,16 @@ class PoolOSSanitationRuntime:
             ),
             pump_evidence_usable=_usable(values.get("pump.rpm"), snapshot),
             positive_manual_body_off=manual_body_off,
-            positive_manual_pump_change_rpm=manual_pump_change,
+            positive_manual_pump_change_rpm=(
+                manual_pump_change
+                if session_before.target_unit is PumpTargetUnit.RPM
+                else None
+            ),
+            positive_manual_pump_change_gpm=(
+                manual_pump_change
+                if session_before.target_unit is PumpTargetUnit.GPM
+                else None
+            ),
         )
         self.assessment = self.controller.observe(observation)
 
@@ -320,7 +350,11 @@ class PoolOSSanitationRuntime:
             self._last_delivery_error = "sanitation_pump_circuit_unresolved"
             self.coordinator.async_update_listeners()
             return
-        operation, target = _action_identity(action, pump_circuit_id)
+        operation, target = _action_identity(
+            action,
+            pump_circuit_id,
+            session_after.pump_target,
+        )
         try:
             context = self.authority.bind_sanitation_dispatch(
                 session_id=session_after.session_id,
@@ -330,6 +364,7 @@ class PoolOSSanitationRuntime:
                 requested_value=action.requested_value,
                 pump_circuit_id=pump_circuit_id,
                 sanitation_rpm=session_after.target_rpm,
+                sanitation_target=session_after.pump_target,
             )
         except ValueError as exc:
             self._last_delivery_error = str(exc)
@@ -449,6 +484,10 @@ class PoolOSSanitationRuntime:
                 "body": None,
                 "remaining_seconds": 0,
                 "configured_rpm": self.default_rpm,
+                "configured_target": {
+                    "unit": self.default_target.unit.value,
+                    "value": self.default_target.value,
+                },
                 "body_owner": "none",
                 "pump_owner": "none",
                 "thermal_owner": "none",
@@ -464,6 +503,10 @@ class PoolOSSanitationRuntime:
             "remaining_seconds": round(session.remaining_seconds, 1),
             "configured_duration_seconds": session.configured_duration_seconds,
             "configured_rpm": session.target_rpm,
+            "configured_target": {
+                "unit": session.pump_target.unit.value,
+                "value": session.pump_target.value,
+            },
             "pump_override_external": session.pump_override_external,
             "reason_code": (
                 None if assessment is None else assessment.reason_code
@@ -523,6 +566,7 @@ def _usable(item: Any, snapshot: ObservationSnapshot) -> bool:
 def _action_identity(
     action: SanitationAction,
     pump_circuit_id: str,
+    pump_target: PumpOperatingTarget,
 ) -> tuple[str, str]:
     body_id = "B1101" if action.body is SanitationBody.POOL else "B1202"
     if action.kind is SanitationActionKind.HEAT_OFF:
@@ -533,7 +577,12 @@ def _action_identity(
     }:
         return "body_active", body_id
     if action.kind is SanitationActionKind.PUMP_SET:
-        return "pump_circuit_speed", pump_circuit_id
+        return (
+            "pump_circuit_speed"
+            if pump_target.unit is PumpTargetUnit.RPM
+            else "pump_circuit_flow",
+            pump_circuit_id,
+        )
     raise ValueError("unsupported sanitation action")
 
 
