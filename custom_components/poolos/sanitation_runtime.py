@@ -304,7 +304,13 @@ class PoolOSSanitationRuntime:
             thermal_evidence_usable=_usable(
                 values.get(f"{prefix}.raw_heater_id"), snapshot
             ),
-            pump_evidence_usable=_usable(values.get("pump.rpm"), snapshot),
+            pump_evidence_usable=(
+                _usable(values.get("pump.rpm"), snapshot)
+                and (
+                    session_before.target_unit is PumpTargetUnit.RPM
+                    or _usable(values.get("pump.gpm"), snapshot)
+                )
+            ),
             positive_manual_body_off=manual_body_off,
             positive_manual_pump_change_rpm=(
                 manual_pump_change
