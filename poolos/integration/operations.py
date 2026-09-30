@@ -76,6 +76,18 @@ class SetPumpSpeed(PoolOperation):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SetPumpFlow(PoolOperation):
+    """Request a variable-flow pump setpoint in gallons per minute."""
+
+    gpm: int
+
+    def __post_init__(self) -> None:
+        super(SetPumpFlow, self).__post_init__()
+        if isinstance(self.gpm, bool) or not isinstance(self.gpm, int) or self.gpm <= 0:
+            raise ValueError("gpm must be a positive integer")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StartPump(PoolOperation):
     """Request that a pump begin operating."""
 

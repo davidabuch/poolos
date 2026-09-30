@@ -24,6 +24,7 @@ from ..operations import (
     PoolOperation,
     SetHeatMode,
     SetHydraulicRoute,
+    SetPumpFlow,
     SetPumpSpeed,
     StartPump,
     StopPump,
@@ -36,6 +37,7 @@ from .capabilities import (
     PENTAIR_SHARED_EQUIPMENT_ROUTING,
     PENTAIR_START_STOP,
     PENTAIR_VARIABLE_SPEED,
+    PENTAIR_VARIABLE_FLOW,
 )
 from .commands import PentairCommandOperation, PentairCommandParameter
 
@@ -46,7 +48,14 @@ class PentairTranslator:
 
     vendor: str = "pentair"
 
-    _supported_types = (SetHeatMode, SetHydraulicRoute, SetPumpSpeed, StartPump, StopPump)
+    _supported_types = (
+        SetHeatMode,
+        SetHydraulicRoute,
+        SetPumpFlow,
+        SetPumpSpeed,
+        StartPump,
+        StopPump,
+    )
 
     _body_ids = {
         ThermalBody.POOL: "B1101",
@@ -78,6 +87,8 @@ class PentairTranslator:
         pump = self._resolve_equipment(operation.equipment_id, context, PentairPump)
         if isinstance(operation, SetPumpSpeed):
             return self._translate_set_speed(operation, pump)
+        if isinstance(operation, SetPumpFlow):
+            return self._translate_set_flow(operation, pump)
         if isinstance(operation, StartPump):
             return self._translate_start(operation, pump)
         if isinstance(operation, StopPump):
@@ -260,6 +271,29 @@ class PentairTranslator:
             pump,
             PentairCommandOperation.SET_PUMP_SPEED,
             parameters={PentairCommandParameter.RPM: operation.rpm},
+        )
+
+    def _translate_set_flow(
+        self,
+        operation: SetPumpFlow,
+        pump: PentairPump,
+    ) -> TranslationResult:
+        self._require_capability(pump, Capability.FLOW_CONTROL, PENTAIR_VARIABLE_FLOW)
+        if pump.minimum_gpm is None or pump.maximum_gpm is None:
+            raise MissingCapabilityError(operation.equipment_id, "pentair.gpm_bounds")
+        if not pump.minimum_gpm <= operation.gpm <= pump.maximum_gpm:
+            raise SetpointOutOfRangeError(
+                operation.equipment_id,
+                PentairCommandParameter.GPM,
+                operation.gpm,
+                pump.minimum_gpm,
+                pump.maximum_gpm,
+            )
+        return self._single_command(
+            operation,
+            pump,
+            PentairCommandOperation.SET_PUMP_FLOW,
+            parameters={PentairCommandParameter.GPM: operation.gpm},
         )
 
     @staticmethod
