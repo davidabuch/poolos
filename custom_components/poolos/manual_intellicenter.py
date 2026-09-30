@@ -908,7 +908,7 @@ class ManualIntelliCenterControl:
                 "pump_rpm_requires_explicit_rpm_mode": True,
                 "pump_gpm_requires_native_flow_limits": True,
                 "pump_gpm_requires_flow_capable_parent": True,
-                "pump_gpm_user_facing_control_enabled": False,
+                "pump_gpm_user_facing_control_enabled": True,
                 "target_temperature_min": _MIN_TARGET_TEMPERATURE,
                 "target_temperature_max": _MAX_TARGET_TEMPERATURE,
                 "last_error_code": self._last_error_code,
