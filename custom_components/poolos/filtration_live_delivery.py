@@ -7,7 +7,13 @@ from datetime import UTC, datetime
 
 from poolos.filtration_automatic_execution import FiltrationAutomaticDeliveryPort
 from poolos.hal import CommandReceipt, CommandStatus
-from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
+from poolos.integration import (
+    PoolOperation,
+    SetBodyActive,
+    SetPumpFlow,
+    SetPumpSpeed,
+    ThermalBody,
+)
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchContext,
@@ -48,14 +54,33 @@ class ManualIntelliCenterFiltrationDelivery(FiltrationAutomaticDeliveryPort):
                     request_source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
                     automatic_filtration_context=self.context,
                 )
+            elif isinstance(operation, SetPumpFlow):
+                target = self.context.effective_pump_target
+                if (
+                    operation.equipment_id != self.context.pump_circuit_id
+                    or target is None
+                    or target.unit.value != "gpm"
+                    or operation.gpm != target.value
+                ):
+                    raise ValueError("unsupported automatic filtration GPM target")
+                await self.manual.async__set_pump_circuit_flow(
+                    operation.equipment_id,
+                    operation.gpm,
+                    request_source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+                    automatic_filtration_context=self.context,
+                )
             elif isinstance(operation, SetPumpSpeed):
                 if (
                     operation.equipment_id != self.context.pump_circuit_id
                     or operation.rpm
                     != (
-                        self.baselines.filtration_rpm
-                        if self.context.effective_pump_rpm is None
-                        else self.context.effective_pump_rpm
+                        self.context.effective_pump_target.value
+                        if self.context.effective_pump_target is not None
+                        else (
+                            self.baselines.filtration_rpm
+                            if self.context.effective_pump_rpm is None
+                            else self.context.effective_pump_rpm
+                        )
                     )
                 ):
                     raise ValueError("unsupported automatic filtration pump target")

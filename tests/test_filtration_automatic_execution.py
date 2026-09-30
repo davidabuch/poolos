@@ -22,8 +22,12 @@ from poolos.filtration_policy import (
     FiltrationObservation,
 )
 from poolos.hal import CommandReceipt, CommandStatus
-from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed
-from poolos.intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+from poolos.integration import PoolOperation, SetBodyActive, SetPumpFlow, SetPumpSpeed
+from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
 from poolos.ownership_evidence import OwnershipDomain, OwnershipHealth
 from poolos.physical_command_authority import (
@@ -110,7 +114,10 @@ def _frame(
     pump_circuit_id: str | None = "p0102",
     pump_session_id: str | None = None,
     pump_session_effective_rpm: int | None = None,
+    pump_session_effective_target: PumpOperatingTarget | None = None,
     pump_session_override_current: bool = False,
+    gpm: int | None = None,
+    configured_gpm: int | None = None,
     solar_active: bool | None = None,
     heater_active: bool | None = None,
 ) -> FiltrationAutomaticExecutionFrame:
@@ -119,6 +126,12 @@ def _frame(
         ("spa.active", spa),
         ("pump.rpm", rpm),
         (POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, configured),
+        *((() if gpm is None else (("pump.gpm", gpm),))),
+        *((
+            ()
+            if configured_gpm is None
+            else ((POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT, configured_gpm),)
+        )),
         ("waterfall.active", False),
         ("jets.active", False),
         ("slide.active", False),
@@ -166,6 +179,7 @@ def _frame(
         external_changes=changes,
         pump_session_id=pump_session_id,
         pump_session_effective_rpm=pump_session_effective_rpm,
+        pump_session_effective_target=pump_session_effective_target,
         pump_session_override_current=pump_session_override_current,
     )
 
@@ -347,6 +361,102 @@ def test_new_manual_pool_session_does_not_clear_persistent_operator_restraint() 
     )
     assert restraint.state.suppressed
     assert restraint.state.source is PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT
+
+
+def test_manual_plain_pool_gpm_session_normalizes_and_verifies_in_flow_domain() -> None:
+    driver, delivery, factory = _enabled_driver()
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+
+    first = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW,
+                pool=True,
+                rpm=2200,
+                configured=2600,
+                gpm=50,
+                configured_gpm=50,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+                pump_session_id="gpm-session",
+                pump_session_effective_target=target,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert first.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpFlow)
+    assert delivery.operations[0].gpm == 42
+
+    verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=2050,
+                configured=2600,
+                gpm=43,
+                configured_gpm=42,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+                pump_session_id="gpm-session",
+                pump_session_effective_target=target,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert verified.state is FiltrationAutomaticDriverState.OWNED
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.verified
+
+
+def test_gpm_verification_does_not_accept_matching_rpm_without_flow_truth() -> None:
+    driver, delivery, factory = _enabled_driver()
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW,
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                gpm=50,
+                configured_gpm=50,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+                pump_session_id="gpm-session",
+                pump_session_effective_target=target,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    pending = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=42,
+                configured=42,
+                gpm=50,
+                configured_gpm=42,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+                pump_session_id="gpm-session",
+                pump_session_effective_target=target,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert pending.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert driver.ownership.filtration_lease is not None
+    assert not driver.ownership.filtration_lease.verified
 
 
 def test_manual_plain_pool_with_satisfied_debt_normalizes_to_filtration_rpm() -> None:
