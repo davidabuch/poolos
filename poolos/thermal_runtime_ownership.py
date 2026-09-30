@@ -163,10 +163,10 @@ class ThermalRuntimeConceptAdoption:
     concept: ThermalRuntimeOwnedConcept
     intended_value: int | PhysicalHeatMode
     observed_at: datetime
-    intended_unit: str | None = None
     opportunity_id: str
     reason_code: str
     adopted_at: datetime
+    intended_unit: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("adoption_id", "opportunity_id", "reason_code"):
