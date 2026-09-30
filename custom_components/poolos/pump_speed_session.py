@@ -12,8 +12,13 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     resolve_body_pump_circuit,
+    resolve_body_pump_target,
 )
 from poolos.ownership_evidence import OwnershipDomain
 from poolos.observations import (
@@ -23,12 +28,18 @@ from poolos.observations import (
     ObservationSourceKind,
     PoolObservation,
 )
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.pump_speed_session import (
     PumpSpeedNativeTransition,
     PumpSpeedSessionBody,
     PumpSpeedSessionEvidence,
     PumpSpeedSessionPurpose,
     PumpSpeedSessionRuntime,
+)
+from poolos.pump_target_session import (
+    PumpTargetNativeTransition,
+    PumpTargetSessionEvidence,
+    PumpTargetSessionRuntime,
 )
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
 from poolos.thermal_operating_purpose import (
@@ -50,6 +61,7 @@ class PoolOSPumpSpeedSessionRuntime:
 
     session: PumpSpeedSessionRuntime
     authority: PoolOSPhysicalCommandAuthority
+    target_session: PumpTargetSessionRuntime | None = None
 
     def synchronize(
         self,
@@ -67,6 +79,10 @@ class PoolOSPumpSpeedSessionRuntime:
         )
         if controller_mode != "auto":
             self.session.reset_currentness("controller_mode_not_current_auto")
+            if self.target_session is not None:
+                self.target_session.reset_currentness(
+                    "controller_mode_not_current_auto"
+                )
             self.synchronize_authority()
             return
         pool_active = _usable_boolean(by_id.get("pool.active"), native.generated_at)
@@ -79,6 +95,7 @@ class PoolOSPumpSpeedSessionRuntime:
         else:
             body = None
         if body is None:
+            usable = pool_active is not None and spa_active is not None
             self.session.observe(
                 PumpSpeedSessionEvidence(
                     observed_at=native.generated_at,
@@ -87,23 +104,29 @@ class PoolOSPumpSpeedSessionRuntime:
                     pump_circuit_id=None,
                     configured_speed_rpm=None,
                     connection_generation=connection_generation,
-                    evidence_usable=pool_active is not None and spa_active is not None,
+                    evidence_usable=usable,
                 )
             )
+            if self.target_session is not None:
+                self.target_session.observe(
+                    PumpTargetSessionEvidence(
+                        observed_at=native.generated_at,
+                        body=None,
+                        purpose=None,
+                        pump_circuit_id=None,
+                        configured_target=None,
+                        connection_generation=connection_generation,
+                        evidence_usable=usable,
+                    )
+                )
             self.synchronize_authority()
             return
+
         native_body = (
             NativeBodyKind.POOL
             if body is PumpSpeedSessionBody.POOL
             else NativeBodyKind.SPA
         )
-        identity = resolve_body_pump_circuit(transport, body=native_body)
-        concept = (
-            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
-            if body is PumpSpeedSessionBody.POOL
-            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
-        )
-        configured = _usable_integer(by_id.get(concept), native.generated_at)
         purpose = self._purpose(
             body,
             by_id,
@@ -112,19 +135,69 @@ class PoolOSPumpSpeedSessionRuntime:
             outage_active=outage_active,
             evaluated_at=native.generated_at,
         )
-        self.session.observe(
-            PumpSpeedSessionEvidence(
-                observed_at=native.generated_at,
-                body=body,
-                purpose=purpose,
-                pump_circuit_id=None if identity is None else identity.native_id,
-                configured_speed_rpm=configured,
-                connection_generation=connection_generation,
-                evidence_usable=(
-                    purpose is not None and identity is not None and configured is not None
-                ),
-            )
+        target_identity = resolve_body_pump_target(transport, body=native_body)
+        configured_target = _usable_configured_target(
+            body,
+            by_id,
+            native.generated_at,
         )
+
+        if self.target_session is not None:
+            self.target_session.observe(
+                PumpTargetSessionEvidence(
+                    observed_at=native.generated_at,
+                    body=body,
+                    purpose=purpose,
+                    pump_circuit_id=(
+                        None if target_identity is None else target_identity.native_id
+                    ),
+                    configured_target=configured_target,
+                    connection_generation=connection_generation,
+                    evidence_usable=(
+                        purpose is not None
+                        and target_identity is not None
+                        and configured_target is not None
+                        and target_identity.target == configured_target
+                    ),
+                )
+            )
+
+        target_effective = (
+            None
+            if self.target_session is None
+            else self.target_session.snapshot.effective_target
+        )
+        if (
+            self.target_session is not None
+            and target_effective is not None
+            and target_effective.unit is PumpTargetUnit.GPM
+        ):
+            # Do not leave the commissioned RPM session current when policy
+            # requires a flow target.
+            self.session.reset_currentness("unit_aware_gpm_session_active")
+        else:
+            identity = resolve_body_pump_circuit(transport, body=native_body)
+            concept = (
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                if body is PumpSpeedSessionBody.POOL
+                else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            )
+            configured = _usable_integer(by_id.get(concept), native.generated_at)
+            self.session.observe(
+                PumpSpeedSessionEvidence(
+                    observed_at=native.generated_at,
+                    body=body,
+                    purpose=purpose,
+                    pump_circuit_id=None if identity is None else identity.native_id,
+                    configured_speed_rpm=configured,
+                    connection_generation=connection_generation,
+                    evidence_usable=(
+                        purpose is not None
+                        and identity is not None
+                        and configured is not None
+                    ),
+                )
+            )
         self.synchronize_authority()
 
     def apply_external_changes(
@@ -199,6 +272,27 @@ class PoolOSPumpSpeedSessionRuntime:
         self.synchronize_authority()
 
     def synchronize_authority(self) -> None:
+        if self.target_session is not None:
+            target_state = self.target_session.snapshot
+            target = target_state.effective_target
+            if (
+                target_state.evidence_usable
+                and target_state.session_id is not None
+                and target_state.body is not None
+                and target_state.purpose is not None
+                and target_state.pump_circuit_id is not None
+                and target is not None
+                and target.unit is PumpTargetUnit.GPM
+            ):
+                self.authority.synchronize_pump_target_session(
+                    session_id=target_state.session_id,
+                    body=target_state.body.value,
+                    purpose=target_state.purpose.value,
+                    pump_circuit_id=target_state.pump_circuit_id,
+                    effective_target=target,
+                )
+                return
+
         state = self.session.snapshot
         if not state.evidence_usable:
             self.authority.synchronize_pump_speed_session(
@@ -281,6 +375,37 @@ class PoolOSPumpSpeedSessionRuntime:
             ThermalOperatingPurpose.SOLAR_HEATING: PumpSpeedSessionPurpose.SOLAR,
             ThermalOperatingPurpose.GAS_HEATING: PumpSpeedSessionPurpose.GAS,
         }.get(assessment.purpose)
+
+
+
+def _usable_configured_target(
+    body: PumpSpeedSessionBody,
+    observations: dict[str, PoolObservation],
+    evaluated_at: datetime,
+) -> PumpOperatingTarget | None:
+    mode_concept = (
+        POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT
+        if body is PumpSpeedSessionBody.POOL
+        else SPA_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT
+    )
+    mode = _usable_string(observations.get(mode_concept), evaluated_at)
+    if mode == PumpTargetUnit.RPM.value:
+        value_concept = (
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            if body is PumpSpeedSessionBody.POOL
+            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        )
+        value = _usable_integer(observations.get(value_concept), evaluated_at)
+        return None if value is None else PumpOperatingTarget(PumpTargetUnit.RPM, value)
+    if mode == PumpTargetUnit.GPM.value:
+        value_concept = (
+            POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+            if body is PumpSpeedSessionBody.POOL
+            else SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+        )
+        value = _usable_integer(observations.get(value_concept), evaluated_at)
+        return None if value is None else PumpOperatingTarget(PumpTargetUnit.GPM, value)
+    return None
 
 
 def _usable(item: PoolObservation, evaluated_at: datetime) -> bool:
