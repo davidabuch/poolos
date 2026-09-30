@@ -2421,21 +2421,29 @@ def _thermal_live_gpm_target(
     operation: PoolOperation,
     policy: ThermalLiveExecutionPolicy,
 ) -> PumpOperatingTarget | None:
-    """Late-bind only normal Solar/Gas pump delivery into the GPM domain."""
+    """Late-bind probe/Solar/Gas pump delivery into the GPM domain."""
 
     if not isinstance(operation, SetPumpSpeed):
         return None
     purpose_raw = operation.metadata.get("operating_purpose")
     purpose = purpose_raw if isinstance(purpose_raw, str) else ""
-    if purpose not in {"solar_heating", "gas_heating"}:
+    if purpose not in {
+        "temperature_acquisition",
+        "solar_heating",
+        "gas_heating",
+    }:
         return None
-    expected_source = (
-        PhysicalHeatMode.SOLAR
-        if purpose == "solar_heating"
-        else PhysicalHeatMode.GAS
-    )
-    if assessment.desired.selected_source is not expected_source:
-        return None
+    if purpose == "temperature_acquisition":
+        if operation.rpm != policy.baselines.temperature_probe_rpm:
+            return None
+    else:
+        expected_source = (
+            PhysicalHeatMode.SOLAR
+            if purpose == "solar_heating"
+            else PhysicalHeatMode.GAS
+        )
+        if assessment.desired.selected_source is not expected_source:
+            return None
     target = _session_effective_target(
         policy,
         body=assessment.desired.body,
