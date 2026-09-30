@@ -424,8 +424,15 @@ class FiltrationAutomaticExecutionDriver:
             frame.filtration
             and frame.filtration.immediate_circulation_required is True
         )
-        ordinary_pool_circulation = _ordinary_pool_circulation_requires_baseline(
-            frame
+        ordinary_pool_circulation = (
+            _ordinary_pool_circulation_requires_baseline(frame)
+            and (
+                lease is None
+                or (
+                    lease.body_activation is None
+                    and lease.body_adoption is None
+                )
+            )
         )
         circulation_required = immediate or ordinary_pool_circulation
         if not self.requested_enabled and lease is None:
@@ -492,11 +499,7 @@ class FiltrationAutomaticExecutionDriver:
                 self.ownership.release_filtration(session_id=lease.session_id)
                 return self._blocked(
                     frame,
-                    (
-                        "automatic_filtration_ordinary_pool_circulation_ended"
-                        if not immediate
-                        else "automatic_filtration_body_provenance_unavailable"
-                    ),
+                    "automatic_filtration_body_provenance_unavailable",
                 )
             return await self._deliver(
                 frame,
