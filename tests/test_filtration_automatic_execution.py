@@ -1153,7 +1153,7 @@ def test_complete_off_filtration_thermal_filtration_off_ownership_lifecycle() ->
     assert ownership.filtration_lease is None
 
 
-def test_preexisting_matching_pool_circulation_is_never_adopted() -> None:
+def test_preexisting_matching_pool_is_not_body_adopted_but_pump_is_governed() -> None:
     driver, delivery, factory = _enabled_driver()
     result = asyncio.run(
         driver.process_epoch(
@@ -1161,9 +1161,15 @@ def test_preexisting_matching_pool_circulation_is_never_adopted() -> None:
             delivery_factory=factory,
         )
     )
-    assert result.blocker == "automatic_filtration_preexisting_body_unowned"
-    assert not delivery.operations
-    assert driver.ownership.filtration_lease is None
+    assert result.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpSpeed)
+    assert delivery.operations[0].rpm == 2600
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+    assert lease.pump_setpoint is not None
 
 
 def test_thermal_candidate_preempts_new_filtration_delivery() -> None:
