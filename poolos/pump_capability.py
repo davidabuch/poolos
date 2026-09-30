@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from .capabilities import Capability
 
@@ -87,7 +87,19 @@ class PumpCapabilityProfile:
         )
 
 
+class PumpCapabilityProvider(Protocol):
+    """Adapter contract for vendor-neutral pump capability discovery."""
+
+    def pump_capability_profile(
+        self,
+        *,
+        body: str,
+    ) -> PumpCapabilityProfile | None:
+        """Return positive capability evidence for one hydraulic body."""
+
+
 __all__ = [
     "PumpCapabilityEvidenceSource",
     "PumpCapabilityProfile",
+    "PumpCapabilityProvider",
 ]
