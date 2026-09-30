@@ -176,11 +176,10 @@ def test_native_observer_expires_transient_manual_off_before_runtime_processing(
     assert pool_check < pool_resume < session_sync
     assert spa_check < spa_resume < session_sync
     assert session_sync < external_process
-    external_pool_on_boundary = observer.index("external_pool_on = any(")
-    transient_resume = observer.index(
-        "pool_automatic_control.resume(resumed_at=native.generated_at)"
+    native_session_boundary = observer.index(
+        "retire_transient_pool_suppression_for_new_session("
     )
-    assert external_process < external_pool_on_boundary < transient_resume
+    assert native_session_boundary < external_process
     native_refresh = observer.index("thermal_runtime.refresh(publish=True)")
     assert external_process < native_refresh
 
