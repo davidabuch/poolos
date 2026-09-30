@@ -121,6 +121,10 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 operation_name = "body_active"
                 authority_target = "B1101"
                 requested_value: bool | int | str = operation.active
+            elif isinstance(operation, SetPumpFlow):
+                operation_name = "pump_circuit_flow"
+                authority_target = operation.equipment_id
+                requested_value = operation.gpm
             elif isinstance(operation, SetPumpSpeed):
                 operation_name = "pump_circuit_speed"
                 authority_target = operation.equipment_id
@@ -161,7 +165,11 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 and target_state.pump_circuit_id == pump_circuit_id
                 and target_state.effective_target is not None
                 and target_state.effective_target.unit is PumpTargetUnit.GPM
-                and operating_purpose in {"solar_heating", "gas_heating"}
+                and operating_purpose in {
+                    "temperature_acquisition",
+                    "solar_heating",
+                    "gas_heating",
+                }
             ):
                 pump_session_id = target_state.session_id
                 effective_pump_target = target_state.effective_target
@@ -552,7 +560,11 @@ class PoolOSThermalAutomaticRuntime:
             and target_session.effective_target is not None
             and target_session.effective_target.unit is PumpTargetUnit.GPM
             and target_session.purpose is not None
-            and target_session.purpose.value in {"solar_heating", "gas_heating"}
+            and target_session.purpose.value in {
+                "temperature_acquisition",
+                "solar_heating",
+                "gas_heating",
+            }
         )
         frame = ThermalAutomaticExecutionFrame(
             epoch_identity=orchestration.snapshot_identity,
