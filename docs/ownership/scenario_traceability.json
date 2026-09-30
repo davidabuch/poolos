@@ -141,9 +141,11 @@
       {
         "scenario_id": 18,
         "implementation_status": "SATISFIED",
-        "mechanism": "Manual Body Off cancels the current opportunity identity; a later False-to-True independent filtration boundary creates a fresh eligible opportunity.",
+        "mechanism": "Manual Body Off cancels only the current opportunity identity; an authoritative later False-to-True Filtration or Thermal boundary retires the transient restraint itself so future autonomy no longer requires human Resume.",
         "regressions": [
-          "tests/test_ownership_opportunity_cancellation.py::test_manual_off_cancels_current_thermal_but_not_later_filtration_window",
+          "tests/test_ownership_opportunity_cancellation.py::test_manual_pool_on_off_then_later_tou_filtration_retires_transient_restraint",
+          "tests/test_ownership_opportunity_cancellation.py::test_manual_pool_on_off_then_next_day_solar_retires_transient_restraint",
+          "tests/test_home_assistant_filtration_automatic_runtime.py::test_future_independent_filtration_window_is_not_blocked_by_noon_off",
           "tests/test_ownership_lifecycle_reconciliation.py::test_full_pool_day_filtration_solar_filtration_shutdown_and_independent_restart"
         ]
       },

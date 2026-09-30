@@ -10,22 +10,67 @@ from poolos.pool_automatic_control_suppression import (
 NOW = datetime(2026, 9, 16, 19, tzinfo=UTC)
 
 
-def test_manual_off_cancels_current_thermal_but_not_later_filtration_window() -> None:
+def test_manual_pool_on_off_then_later_tou_filtration_retires_transient_restraint() -> None:
     restraint = PoolAutomaticControlSuppression()
     thermal = restraint.observe_opportunity("thermal", eligible=True, observed_at=NOW)
     restraint.observe_opportunity("filtration", eligible=False, observed_at=NOW)
-    restraint.suppress(source=Source.MANUAL_POOLOS_OFF_REQUEST,
-                      suppressed_at=NOW, reason="manual_pool_off")
+    restraint.suppress(
+        source=Source.MANUAL_POOLOS_OFF_REQUEST,
+        suppressed_at=NOW,
+        reason="manual_pool_off",
+    )
+
     for second in range(1, 10):
         assert restraint.observe_opportunity(
             "thermal", eligible=True, observed_at=NOW + timedelta(seconds=second)
         ) == thermal
         assert restraint.blocks_opportunity("thermal")
-    restraint.observe_opportunity("filtration", eligible=True,
-                                  observed_at=NOW + timedelta(hours=10))
+        assert restraint.state.suppressed
+
+    restraint.observe_opportunity(
+        "filtration",
+        eligible=True,
+        observed_at=NOW + timedelta(hours=10),
+    )
+
+    assert not restraint.state.suppressed
     assert not restraint.blocks_opportunity("filtration")
-    assert restraint.blocks_opportunity("thermal")
+    assert not restraint.blocks_opportunity("thermal")
+    assert restraint.diagnostics()["pool_manual_off_resume_required"] is False
+
+
+def test_manual_pool_on_off_then_next_day_solar_retires_transient_restraint() -> None:
+    restraint = PoolAutomaticControlSuppression()
+    original = restraint.observe_opportunity("thermal", eligible=True, observed_at=NOW)
+    restraint.suppress(
+        source=Source.MANUAL_POOLOS_OFF_REQUEST,
+        suppressed_at=NOW,
+        reason="manual_pool_off",
+    )
+
+    assert restraint.observe_opportunity(
+        "thermal",
+        eligible=True,
+        observed_at=NOW + timedelta(minutes=5),
+    ) == original
     assert restraint.state.suppressed
+    assert restraint.blocks_opportunity("thermal")
+
+    restraint.observe_opportunity(
+        "thermal",
+        eligible=False,
+        observed_at=NOW + timedelta(hours=2),
+    )
+    successor = restraint.observe_opportunity(
+        "thermal",
+        eligible=True,
+        observed_at=NOW + timedelta(days=1),
+    )
+
+    assert successor != original
+    assert not restraint.state.suppressed
+    assert not restraint.blocks_opportunity("thermal")
+    assert restraint.diagnostics()["pool_manual_off_resume_required"] is False
 
 
 def test_unknown_or_regressive_evidence_cannot_create_handback() -> None:
@@ -46,6 +91,7 @@ def test_unknown_or_regressive_evidence_cannot_create_handback() -> None:
     successor = restraint.observe_opportunity("filtration", eligible=True,
                                               observed_at=NOW + timedelta(seconds=4))
     assert successor != original
+    assert not restraint.state.suppressed
     assert not restraint.blocks_opportunity("filtration")
 
 
@@ -71,6 +117,7 @@ def test_restored_transient_restraint_requires_observed_boundary() -> None:
                                   observed_at=NOW + timedelta(seconds=2))
     restored.observe_opportunity("filtration", eligible=True,
                                   observed_at=NOW + timedelta(seconds=3))
+    assert not restored.state.suppressed
     assert not restored.blocks_opportunity("filtration")
 
 

@@ -322,4 +322,10 @@ def test_future_independent_filtration_window_is_not_blocked_by_noon_off() -> No
     runtime.observe(_snapshot(accounting.evaluated_at), _orchestration("debt-window"),
                     external_changes=ExternalChangeBatch(()))
     assert not runtime._latest_frame.pool_automatic_control_suppressed
-    assert runtime.pool_automatic_control.state.suppressed
+    assert not runtime.pool_automatic_control.state.suppressed
+    assert (
+        runtime.pool_automatic_control.diagnostics()[
+            "pool_manual_off_resume_required"
+        ]
+        is False
+    )
