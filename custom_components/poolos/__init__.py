@@ -609,6 +609,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             native,
         )
 
+        relevant_native_change = any(
+            event.concept
+            in {
+                "pool.active",
+                "pump.rpm",
+                "pool.pump_circuit_configured_speed",
+                "solar.active",
+                "heater.active",
+                "spa.active",
+                "waterfall.active",
+                "jets.active",
+                "slide.active",
+            }
+            and event.observed_at == native.generated_at
+            for event in external_change_runtime.latest_batch.events
+        )
+        if relevant_native_change:
+            # Native circulation/source changes can create or end an execution
+            # purpose even when HA policy inputs are otherwise unchanged.
+            # Re-run the policy/orchestration bridge so automatic filtration
+            # receives a fresh execution epoch from the authoritative native
+            # evidence instead of waiting for an unrelated HA state change.
+            thermal_runtime.refresh(publish=True)
+
     coordinator.set_native_snapshot_observer(observe_native_snapshot)
     thermal_runtime.set_assessment_observer(
         external_change_runtime.refresh_ownership
