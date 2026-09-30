@@ -83,35 +83,12 @@ class PoolOSConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="single_instance_allowed")
 
         if user_input is not None:
-            self._pending_user_input = {
-                "operating_mode": DEFAULT_OPERATING_MODE,
-                **user_input,
-            }
-            return await self.async_step_filtration_schedule()
-
-        return self.async_show_form(step_id="user", data_schema=_mapping_schema({}))
-
-    async def async_step_filtration_schedule(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Configure only the start time used by the selected filtration profile."""
-        pending = self._pending_user_input
-        mode = str(
-            pending.get(
-                CONF_FILTRATION_SCHEDULING_MODE,
-                DEFAULT_FILTRATION_SCHEDULING_MODE,
-            )
-        )
-        if user_input is not None:
             return self.async_create_entry(
                 title=NAME,
-                data={**pending, **user_input},
+                data={"operating_mode": DEFAULT_OPERATING_MODE, **user_input},
             )
-        return self.async_show_form(
-            step_id="filtration_schedule",
-            data_schema=_filtration_schedule_schema(pending, mode),
-            last_step=True,
-        )
+
+        return self.async_show_form(step_id="user", data_schema=_mapping_schema({}))
 
     @staticmethod
     @callback
@@ -129,65 +106,16 @@ class PoolOSOptionsFlow(OptionsFlow):
         """Update observation mappings without changing authority."""
         current = {**dict(self.config_entry.data), **dict(self.config_entry.options)}
         if user_input is not None:
-            self._pending_options = {**dict(self.config_entry.options), **user_input}
-            return await self.async_step_filtration_schedule()
+            return self.async_create_entry(data=user_input)
         return self.async_show_form(
             step_id="init",
             data_schema=_mapping_schema(current),
-        )
-
-    async def async_step_filtration_schedule(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Show only the start time that applies to the selected filtration profile."""
-        pending = self._pending_options
-        mode = str(
-            pending.get(
-                CONF_FILTRATION_SCHEDULING_MODE,
-                DEFAULT_FILTRATION_SCHEDULING_MODE,
-            )
-        )
-        if user_input is not None:
-            return self.async_create_entry(data={**pending, **user_input})
-        return self.async_show_form(
-            step_id="filtration_schedule",
-            data_schema=_filtration_schedule_schema(pending, mode),
-            last_step=True,
         )
 
 
 def _entity_selector(domains: list[str]) -> selector.EntitySelector:
     return selector.EntitySelector(
         selector.EntitySelectorConfig(domain=domains, multiple=False)
-    )
-
-
-def _filtration_schedule_schema(
-    current: dict[str, Any], mode: str
-) -> vol.Schema:
-    """Expose only the start time used by the selected filtration profile."""
-    if mode == "traditional_time_based":
-        return vol.Schema(
-            {
-                vol.Required(
-                    CONF_TRADITIONAL_FILTRATION_START,
-                    default=current.get(
-                        CONF_TRADITIONAL_FILTRATION_START,
-                        DEFAULT_TRADITIONAL_FILTRATION_START,
-                    ),
-                ): selector.TimeSelector()
-            }
-        )
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_PREFERRED_FILTRATION_CATCHUP_START,
-                default=current.get(
-                    CONF_PREFERRED_FILTRATION_CATCHUP_START,
-                    DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
-                ),
-            ): selector.TimeSelector()
-        }
     )
 
 
@@ -246,6 +174,25 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
             mode=selector.SelectSelectorMode.DROPDOWN,
         )
     )
+    fields[
+        vol.Required(
+            CONF_PREFERRED_FILTRATION_CATCHUP_START,
+            default=current.get(
+                CONF_PREFERRED_FILTRATION_CATCHUP_START,
+                DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+            ),
+        )
+    ] = selector.TimeSelector()
+    fields[
+        vol.Required(
+            CONF_TRADITIONAL_FILTRATION_START,
+            default=current.get(
+                CONF_TRADITIONAL_FILTRATION_START,
+                DEFAULT_TRADITIONAL_FILTRATION_START,
+            ),
+        )
+    ] = selector.TimeSelector()
+
     fields[
         vol.Required(
             CONF_SPA_SOLAR_ROOF_F,
