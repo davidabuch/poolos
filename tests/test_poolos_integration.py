@@ -16,6 +16,7 @@ from poolos.integration import (
     PoolOperation,
     SetHeatMode,
     SetHydraulicRoute,
+    SetPumpFlow,
     SetPumpSpeed,
     SetpointOutOfRangeError,
     StartPump,
@@ -84,6 +85,9 @@ def test_operations_are_typed_validated_and_immutable() -> None:
         operation.metadata["source"] = "changed"  # type: ignore[index]
     with pytest.raises(ValueError, match="rpm must be positive"):
         SetPumpSpeed(equipment_id="filter_pump", rpm=0)
+    assert SetPumpFlow(equipment_id="filter_pump", gpm=42).gpm == 42
+    with pytest.raises(ValueError, match="gpm must be a positive integer"):
+        SetPumpFlow(equipment_id="filter_pump", gpm=0)
     with pytest.raises(ValueError, match="equipment_id must not be empty"):
         StartPump(equipment_id=" ")
     with pytest.raises(ValueError, match="unsupported physical heat mode"):
@@ -201,6 +205,8 @@ def _pentair_pump(
     control_mode: PentairPumpControlMode = PentairPumpControlMode.VARIABLE_SPEED,
     minimum_rpm: int | None = 450,
     maximum_rpm: int | None = 3450,
+    minimum_gpm: float | None = None,
+    maximum_gpm: float | None = None,
 ) -> PentairPump:
     return PentairPump(
         address=PentairObjectAddress(
@@ -213,6 +219,8 @@ def _pentair_pump(
         control_mode=control_mode,
         minimum_rpm=minimum_rpm,
         maximum_rpm=maximum_rpm,
+        minimum_gpm=minimum_gpm,
+        maximum_gpm=maximum_gpm,
     )
 
 
@@ -490,4 +498,54 @@ def test_hydraulic_route_validates_body_inventory_and_group_membership() -> None
                 return_body_id="spa",
             ),
             bad_context,
+        )
+
+
+def test_pentair_flow_translation_requires_flow_capability_and_bounds() -> None:
+    translator = PentairTranslator()
+    operation = SetPumpFlow(equipment_id="pump", gpm=42)
+
+    rpm_only = _pentair_pump()
+    with pytest.raises(MissingCapabilityError, match="pentair.variable_flow"):
+        translator.translate(
+            operation,
+            TranslationContext(vendor="pentair", equipment={"pump": rpm_only}),
+        )
+
+    vsf = _pentair_pump(
+        control_mode=PentairPumpControlMode.VARIABLE_SPEED_FLOW,
+        minimum_gpm=15,
+        maximum_gpm=140,
+    )
+    result = translator.translate(
+        operation,
+        TranslationContext(vendor="pentair", equipment={"pump": vsf}),
+    )
+    assert result.commands[0].operation == PentairCommandOperation.SET_PUMP_FLOW
+    assert result.commands[0].parameters[PentairCommandParameter.GPM] == 42
+    assert result.metadata["source_operation"] == "SetPumpFlow"
+
+
+def test_pentair_flow_translation_fails_closed_without_or_outside_bounds() -> None:
+    translator = PentairTranslator()
+    operation = SetPumpFlow(equipment_id="pump", gpm=42)
+
+    without_bounds = _pentair_pump(
+        control_mode=PentairPumpControlMode.VARIABLE_SPEED_FLOW,
+    )
+    with pytest.raises(MissingCapabilityError, match="pentair.gpm_bounds"):
+        translator.translate(
+            operation,
+            TranslationContext(vendor="pentair", equipment={"pump": without_bounds}),
+        )
+
+    bounded = _pentair_pump(
+        control_mode=PentairPumpControlMode.VARIABLE_SPEED_FLOW,
+        minimum_gpm=45,
+        maximum_gpm=140,
+    )
+    with pytest.raises(SetpointOutOfRangeError):
+        translator.translate(
+            operation,
+            TranslationContext(vendor="pentair", equipment={"pump": bounded}),
         )
