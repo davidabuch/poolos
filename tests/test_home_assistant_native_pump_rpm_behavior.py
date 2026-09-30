@@ -1299,7 +1299,7 @@ def test_gpm_gateway_uses_atomic_mode_and_setpoint_payload_on_flow_capable_pump(
     gateway, recorder = _gateway([pump, circuit])
 
     receipt = _run(
-        gateway.async_set_pump_circuit_flow(
+        gateway.async__set_pump_circuit_flow(
             "p0102",
             42,
             manual_body="pool",
@@ -1335,7 +1335,7 @@ def test_gpm_gateway_fails_closed_without_parent_flow_limits(
         match="unique live flow-capable Pool PMPCIRC",
     ):
         _run(
-            gateway.async_set_pump_circuit_flow(
+            gateway.async__set_pump_circuit_flow(
                 "p0102",
                 42,
                 manual_body="pool",
@@ -1363,7 +1363,7 @@ def test_gpm_gateway_enforces_live_parent_flow_limits(
 
     with pytest.raises(ValueError, match="pump GPM must be between 15 and 130"):
         _run(
-            gateway.async_set_pump_circuit_flow(
+            gateway.async__set_pump_circuit_flow(
                 "p0102",
                 140,
                 manual_body="pool",
