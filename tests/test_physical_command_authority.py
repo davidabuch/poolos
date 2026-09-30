@@ -88,6 +88,90 @@ def test_automatic_filtration_override_requires_exact_current_pump_session() -> 
     assert authority.assess(allowed).reason is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
 
 
+def test_automatic_filtration_gpm_requires_exact_current_target_session() -> None:
+    authority = ready()
+    authority.configure_automatic_filtration(enabled=True)
+    authority.begin_automatic_filtration_epoch("gpm-epoch")
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    authority.synchronize_pump_target_session(
+        session_id="gpm-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_target=target,
+    )
+    context = authority.bind_automatic_filtration_dispatch(
+        epoch_identity="gpm-epoch",
+        session_identity="filtration-session",
+        operation_identity="flow-operation",
+        operation="pump_circuit_flow",
+        target="p0102",
+        requested_value=42,
+        pump_circuit_id="p0102",
+        pump_session_id="gpm-session",
+        effective_pump_target=target,
+    )
+    request = PhysicalCommandRequest(
+        operation="pump_circuit_flow",
+        target="p0102",
+        source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+        requested_value=42,
+        automatic_filtration_context=context,
+    )
+    assert authority.assess(request).reason is PhysicalAuthorityReason.ALLOWED
+
+    wrong = replace(request, requested_value=43)
+    assert (
+        authority.assess(wrong).reason
+        is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_OPERATION_UNAUTHORIZED
+    )
+
+    authority.synchronize_pump_target_session(
+        session_id="next-session",
+        body="pool",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0102",
+        effective_target=PumpOperatingTarget(PumpTargetUnit.GPM, 45),
+    )
+    assert (
+        authority.assess(request).reason
+        is PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
+    )
+
+
+def test_automatic_filtration_gpm_binding_rejects_unit_or_value_mismatch() -> None:
+    authority = ready()
+    authority.configure_automatic_filtration(enabled=True)
+    authority.begin_automatic_filtration_epoch("gpm-epoch")
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+
+    with pytest.raises(ValueError, match="target envelope"):
+        authority.bind_automatic_filtration_dispatch(
+            epoch_identity="gpm-epoch",
+            session_identity="filtration-session",
+            operation_identity="wrong-unit",
+            operation="pump_circuit_speed",
+            target="p0102",
+            requested_value=42,
+            pump_circuit_id="p0102",
+            pump_session_id="gpm-session",
+            effective_pump_target=target,
+        )
+
+    with pytest.raises(ValueError, match="target envelope"):
+        authority.bind_automatic_filtration_dispatch(
+            epoch_identity="gpm-epoch",
+            session_identity="filtration-session",
+            operation_identity="wrong-value",
+            operation="pump_circuit_flow",
+            target="p0102",
+            requested_value=45,
+            pump_circuit_id="p0102",
+            pump_session_id="gpm-session",
+            effective_pump_target=target,
+        )
+
+
 def test_automatic_thermal_override_is_exact_body_purpose_and_rpm_bound() -> None:
     authority = ready()
     authority.configure_automatic_thermal(
