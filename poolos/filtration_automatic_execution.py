@@ -986,11 +986,7 @@ class FiltrationAutomaticExecutionDriver:
             or isinstance(configured.value, bool)
             or not isinstance(configured.value, (int, float))
         ):
-            return (
-                "automatic_filtration_configured_flow_unusable"
-                if target_unit is PumpTargetUnit.GPM
-                else "automatic_filtration_configured_speed_unusable"
-            )
+            return "automatic_filtration_configured_speed_unusable"
         if (
             self.ownership.filtration_lease is None
             and pool.value is False
@@ -1434,7 +1430,6 @@ def _transient_evidence_loss(blocker: str | None) -> bool:
         "automatic_filtration_spa_activity_unusable",
         "automatic_filtration_pump_observation_unusable",
         "automatic_filtration_configured_speed_unusable",
-        "automatic_filtration_configured_flow_unusable",
         "automatic_filtration_pool_pump_circuit_unresolved",
     } or blocker.startswith("automatic_filtration_shared_hydraulic_unusable:")
 
