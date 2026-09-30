@@ -450,6 +450,36 @@ def test_same_timestamp_changed_observation_fails_closed(
     assert result.candidate_id is None
 
 
+def test_same_timestamp_conflict_after_newer_ownership_establishment_fails_closed_monotonically() -> None:
+    """Reproduce the live 09:30 race without weakening conflict detection."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    _refresh(orchestrator, NOW)
+    established_at = NOW + timedelta(milliseconds=50)
+    _establish_pool_full_ownership(orchestrator, at=established_at)
+
+    conflicting = tuple(
+        _observation(
+            item.observation_id,
+            False if item.observation_id == "pool.active" else item.value,
+            at=NOW,
+        )
+        for item in _observations(NOW)
+    )
+
+    result = _refresh(orchestrator, NOW, observations=conflicting)
+
+    assert result.lifecycle is ThermalOrchestrationLifecycle.BLOCKED
+    assert result.blocking_reason == "thermal_orchestration_snapshot_conflict"
+    assert result.evaluated_at == NOW
+    assert result.ownership_status is ThermalRuntimeOwnershipStatus.RELINQUISHED
+    lease = result.ownership_decision.current_state.lease
+    assert lease is not None
+    assert lease.established_at == established_at
+    assert lease.ownership_ended_at == established_at
+    assert lease.ownership_ended_at >= lease.established_at
+
+
 def test_same_timestamp_changed_plan_identity_fails_closed() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     first = _refresh(orchestrator, NOW)
