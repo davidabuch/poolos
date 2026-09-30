@@ -305,7 +305,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     thermal_runtime = PoolOSThermalRuntime(
         coordinator=coordinator,
         manual_intellicenter=manual_intellicenter,
-        pump_capability_provider=manual_intellicenter,
         filtration_runtime=filtration_runtime,
         baselines=pump_baselines,
         evaluator=pump_composition.thermal_evaluator,
@@ -539,6 +538,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
         manual_intellicenter=manual_intellicenter,
+        pump_capability_provider=manual_intellicenter,
         filtration_runtime=filtration_runtime,
         thermal_runtime=thermal_runtime,
         physical_command_authority=physical_command_authority,
