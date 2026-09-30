@@ -228,3 +228,17 @@ def test_recorder_facing_diagnostics_do_not_embed_bulk_evidence() -> None:
     assert '"solar_learning": data["solar_learning"]' not in retrospective
     assert '"incident_count"' in retrospective
     assert '"solar_learning_quality"' in retrospective
+
+
+def test_control_center_diagnostics_are_snapshotted_once_per_publication() -> None:
+    """Keep HA property reads cheap without changing published diagnostics."""
+
+    source = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
+    sensor_class = source.split("class PoolOSControlCenterSensor(", 1)[1]
+
+    assert "def _handle_coordinator_update(self) -> None:" in sensor_class
+    assert "self._cached_value = self._description.value(" in sensor_class
+    assert "self._cached_attributes = (" in sensor_class
+    assert "super()._handle_coordinator_update()" in sensor_class
+    assert "return self._cached_value" in sensor_class
+    assert "return self._cached_attributes" in sensor_class

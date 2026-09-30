@@ -304,9 +304,16 @@ class ThermalRuntimeOrchestrator:
         ownership_decision = None
         lease = self.ownership.state.lease
         if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
+            # The authoritative frame timestamp can legitimately predate a command
+            # acceptance that established this lease by a few milliseconds.  A
+            # later same-frame conflict must still fail closed, but ownership
+            # chronology itself must remain monotonic: never end a lease before
+            # it was established.  Preserve failed_at on the orchestration
+            # assessment while clamping only the ownership transition boundary.
+            relinquished_at = max(failed_at, lease.established_at)
             ownership_decision = self.ownership.relinquish(
                 lease_id=lease.lease_id,
-                relinquished_at=failed_at,
+                relinquished_at=relinquished_at,
                 reason_code="orchestration_processing_failed",
                 retain_termination_entitlement=True,
             )
