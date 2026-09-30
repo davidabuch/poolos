@@ -176,6 +176,8 @@ def test_native_observer_expires_transient_manual_off_before_runtime_processing(
     assert pool_check < pool_resume < session_sync
     assert spa_check < spa_resume < session_sync
     assert session_sync < external_process
+    native_refresh = observer.index("thermal_runtime.refresh(publish=True)")
+    assert external_process < native_refresh
 
     # Expiring a stale restraint only changes command eligibility.
     # The observer itself must not directly dispatch equipment.
