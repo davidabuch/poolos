@@ -533,7 +533,7 @@ def test_manual_pump_request_uses_current_session_equipment_after_plan_converges
     assert current.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.OPERATOR
 
 
-def test_final_domain_gate_preserves_cancellation_scope_across_independent_window() -> None:
+def test_independent_filtration_boundary_retires_pool_manual_off_gate() -> None:
     from poolos.physical_command_authority import PhysicalRequestSource
     from poolos.pool_automatic_control_suppression import PoolAutomaticControlSuppressionSource
     from poolos.thermal_runtime_ownership import ThermalRuntimeOwnershipManager
@@ -559,11 +559,12 @@ def test_final_domain_gate_preserves_cancellation_scope_across_independent_windo
     assert not runtime._domain_command_permitted(filtration)
     restraint.observe_opportunity("filtration", eligible=True,
                                   observed_at=NOW + timedelta(hours=10))
+    assert not restraint.state.suppressed
     assert runtime._domain_command_permitted(filtration)
-    assert not runtime._domain_command_permitted(thermal)
+    assert runtime._domain_command_permitted(thermal)
 
 
-def test_independent_filtration_keeps_source_neutralization_after_thermal_cancellation() -> None:
+def test_independent_filtration_boundary_retires_prior_thermal_cancellation() -> None:
     from poolos.filtration_policy import FiltrationDisposition
     from poolos.physical_command_authority import PhysicalRequestSource
     from poolos.pool_automatic_control_suppression import PoolAutomaticControlSuppressionSource
@@ -591,9 +592,10 @@ def test_independent_filtration_keeps_source_neutralization_after_thermal_cancel
         target="B1101", requested_value="00000",
         automatic_thermal_context=SimpleNamespace(body="pool", purpose="normal"),
     )
+    assert not restraint.state.suppressed
     assert runtime._domain_command_permitted(request)
     request.requested_value = "H0002"
-    assert not runtime._domain_command_permitted(request)
+    assert runtime._domain_command_permitted(request)
 
 
 def _quick_restart_thermal(at: datetime):
