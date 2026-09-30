@@ -752,7 +752,10 @@ class ManualIntelliCenterControl:
         *,
         request_source: PhysicalRequestSource = PhysicalRequestSource.MANUAL,
         manual_body: str | None = None,
+        automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
+        automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
         request_id: str | None = None,
+        pump_session_id: str | None = None,
     ) -> ManualCommandReceipt:
         """Set one exact flow-capable PMPCIRC target in GPM.
 
@@ -771,7 +774,11 @@ class ManualIntelliCenterControl:
             raise ValueError("manual_body must be pool or hot_tub")
 
         await self._require_available()
-        body = "hot_tub" if manual_body == "hot_tub" else "pool"
+        body = (
+            automatic_thermal_context.body
+            if automatic_thermal_context is not None
+            else ("hot_tub" if manual_body == "hot_tub" else "pool")
+        )
         parent_id, minimum, maximum = self._pump_circuit_flow_limits(
             pump_circuit_objnam,
             body=body,
@@ -797,6 +804,9 @@ class ManualIntelliCenterControl:
             source=request_source,
             requested_value=target,
             request_id=(request_id if request_id is not None else str(uuid4())),
+            manual_pump_session_id=pump_session_id,
+            automatic_thermal_context=automatic_thermal_context,
+            automatic_filtration_context=automatic_filtration_context,
         )
         await self._async_deliver(
             request=request,
