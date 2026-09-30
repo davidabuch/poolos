@@ -618,9 +618,6 @@ class FiltrationAccountingSnapshot:
     tou_tier: TimeOfUseTier
     next_suitable_at: datetime | None
     ordinary_filtration_rpm: int
-    scheduling_mode: FiltrationSchedulingMode
-    traditional_start_time: time | None
-    solar_loss_finish_now_threshold: timedelta
     reason_code: str
     rationale: tuple[str, ...]
     debt_days: tuple[date, ...]
@@ -636,6 +633,9 @@ class FiltrationAccountingSnapshot:
     observed_pump_rpm: float | None
     filtration_credit_factor: Fraction
     filtration_credit_band: FiltrationCreditBand
+    scheduling_mode: FiltrationSchedulingMode = FiltrationSchedulingMode.SOLAR_TOU_OPTIMIZED
+    traditional_start_time: time | None = None
+    solar_loss_finish_now_threshold: timedelta = DEFAULT_SOLAR_LOSS_FINISH_NOW_THRESHOLD
     authority: str = "none"
     command_delivery_enabled: bool = False
 
