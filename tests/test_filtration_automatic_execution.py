@@ -30,6 +30,12 @@ from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
 )
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppression,
+    PoolAutomaticControlSuppressionSource,
+    PoolBodySessionBoundaryTracker,
+    retire_transient_pool_suppression_for_new_session,
+)
 from poolos.pool_circulation_ownership import (
     PoolCirculationOwner,
     PoolCirculationOwnershipRegistry,
@@ -238,6 +244,109 @@ def _verified_filtration_driver(
     assert driver.ownership.filtration_lease.verified
     return driver, delivery, factory
 
+
+
+def test_restart_manual_off_then_new_manual_pool_session_reaches_verified_2600() -> None:
+    """High-fidelity commissioning chronology for manual BODY handback."""
+
+    restraint = PoolAutomaticControlSuppression()
+    restraint.suppress(
+        source=PoolAutomaticControlSuppressionSource.MANUAL_POOLOS_OFF_REQUEST,
+        suppressed_at=NOW,
+        reason="manual_pool_off_requested_before_delivery",
+    )
+    tracker = PoolBodySessionBoundaryTracker()
+
+    # Restart restoration sees Pool OFF first; equality cannot clear suppression.
+    assert not retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=False,
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    assert restraint.state.suppressed
+
+    # The next authoritative native OFF->ON transition is a new operator BODY session.
+    assert retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=True,
+        observed_at=NOW + timedelta(seconds=2),
+    )
+    assert not restraint.state.suppressed
+
+    # The new external BODY session has no heat source and native pump starts at 2900.
+    driver, delivery, factory = _enabled_driver()
+    acquiring = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2900,
+                configured=2900,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert acquiring.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetPumpSpeed)
+    assert delivery.operations[0].rpm == 2600
+    lease = driver.ownership.filtration_lease
+    assert lease is not None
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+    assert lease.pump_setpoint is not None
+
+    # Fresh native verification at 2600 completes PUMP-only acquisition.
+    verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=4),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                satisfied=True,
+                solar_active=False,
+                heater_active=False,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert verified.state is FiltrationAutomaticDriverState.OWNED
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.verified
+    assert lease.body_activation is None
+    assert lease.body_adoption is None
+
+
+def test_new_manual_pool_session_does_not_clear_persistent_operator_restraint() -> None:
+    restraint = PoolAutomaticControlSuppression()
+    restraint.suppress(
+        source=PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+        suppressed_at=NOW,
+        reason="operator_disabled",
+    )
+    tracker = PoolBodySessionBoundaryTracker()
+
+    assert not retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=False,
+        observed_at=NOW + timedelta(seconds=1),
+    )
+    assert not retire_transient_pool_suppression_for_new_session(
+        restraint,
+        tracker,
+        pool_active=True,
+        observed_at=NOW + timedelta(seconds=2),
+    )
+    assert restraint.state.suppressed
+    assert restraint.state.source is PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT
 
 
 def test_manual_plain_pool_with_satisfied_debt_normalizes_to_filtration_rpm() -> None:
