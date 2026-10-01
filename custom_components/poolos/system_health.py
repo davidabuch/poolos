@@ -8,6 +8,7 @@ from homeassistant.components import system_health
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN, INTEGRATION_VERSION
+from .control_status import runtime_control_status
 
 
 @callback
@@ -23,6 +24,11 @@ async def _async_system_health_info(hass: HomeAssistant) -> dict[str, Any]:
     entries = hass.config_entries.async_entries(DOMAIN)
     loaded = [entry for entry in entries if getattr(entry, "runtime_data", None)]
     snapshots = [entry.runtime_data.coordinator.data for entry in loaded]
+    control = (
+        runtime_control_status(loaded[0].runtime_data)
+        if loaded
+        else runtime_control_status(None)
+    )
     return {
         "integration_version": INTEGRATION_VERSION,
         "configured_entries": len(entries),
@@ -32,5 +38,5 @@ async def _async_system_health_info(hass: HomeAssistant) -> dict[str, Any]:
             snapshot is not None and snapshot.healthy for snapshot in snapshots
         ),
         "shadow_runtime_enabled": bool(loaded),
-        "command_delivery_enabled": False,
+        **control,
     }
