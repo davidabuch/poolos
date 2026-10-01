@@ -31,8 +31,11 @@ from uuid import uuid4
 
 from poolos.capabilities import Capability
 from poolos.pump_capability import (
+    CommissionedPumpCapability,
     PumpCapabilityEvidenceSource,
     PumpCapabilityProfile,
+    PumpCapabilitySupport,
+    resolve_commissioned_pump_capability,
 )
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchContext,
@@ -201,6 +204,7 @@ class ManualIntelliCenterControl:
         reconnect_delay: int = 30,
         pool_manual_off_requested: Callable[[datetime], None] | None = None,
         spa_manual_off_requested: Callable[[datetime], None] | None = None,
+        commissioned_pump_capability: CommissionedPumpCapability | None = None,
     ) -> None:
         normalized_host = host.strip()
         if not normalized_host:
@@ -216,6 +220,7 @@ class ManualIntelliCenterControl:
         self._command_authority = command_authority
         self._pool_manual_off_requested = pool_manual_off_requested
         self._spa_manual_off_requested = spa_manual_off_requested
+        self._commissioned_pump_capability = commissioned_pump_capability
         self._transport_name = transport
         self._model = PoolModel()
         self._controller = ICModelController(
@@ -859,12 +864,12 @@ class ManualIntelliCenterControl:
             request_id=request.request_id,
         )
 
-    def pump_capability_profile(
+    def native_pump_capability_profile(
         self,
         *,
         body: str,
     ) -> PumpCapabilityProfile | None:
-        """Return the unique vendor-neutral capability profile for one body pump."""
+        """Return native/adapter capability evidence before commissioning."""
 
         if body not in {"pool", "hot_tub"}:
             raise ValueError("body must be pool or hot_tub")
@@ -925,6 +930,18 @@ class ManualIntelliCenterControl:
             if parent["GPM"] is not None:
                 capabilities.add(Capability.FLOW_SENSING)
 
+            subtype = (
+                str(parent.subtype or "").strip().casefold()
+                if hasattr(parent, "subtype")
+                else ""
+            )
+            if minimum_gpm is not None:
+                flow_support = PumpCapabilitySupport.SUPPORTED
+            elif subtype in {"speed", "vs"}:
+                flow_support = PumpCapabilitySupport.UNSUPPORTED
+            else:
+                flow_support = PumpCapabilitySupport.UNKNOWN
+
             profiles.append(
                 PumpCapabilityProfile(
                     pump_id=parent_id,
@@ -936,10 +953,23 @@ class ManualIntelliCenterControl:
                     maximum_rpm=maximum_rpm,
                     minimum_gpm=minimum_gpm,
                     maximum_gpm=maximum_gpm,
+                    flow_control_support=flow_support,
                 )
             )
 
         return profiles[0] if len(profiles) == 1 else None
+
+    def pump_capability_profile(
+        self,
+        *,
+        body: str,
+    ) -> PumpCapabilityProfile | None:
+        """Return resolved native plus commissioned pump capability evidence."""
+
+        return resolve_commissioned_pump_capability(
+            self.native_pump_capability_profile(body=body),
+            self._commissioned_pump_capability,
+        )
 
     def pump_flow_capability(self, *, body: str) -> Mapping[str, Any]:
         """Compatibility view of the canonical pump capability profile."""
