@@ -136,7 +136,7 @@ contract, and runtime-focused tests.
 | Grid-outage physical safety | Live behind its dedicated gate |
 | Sanitation sessions | Live / operator initiated |
 | Vendor-neutral RPM/GPM capability model | Complete for current production scope |
-| 1.0 release-readiness reconciliation | In progress |
+| 1.0 release-readiness reconciliation | Complete |
 
 ## Roadmap
 
