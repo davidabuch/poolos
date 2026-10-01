@@ -204,7 +204,7 @@ class ManualIntelliCenterControl:
         reconnect_delay: int = 30,
         pool_manual_off_requested: Callable[[datetime], None] | None = None,
         spa_manual_off_requested: Callable[[datetime], None] | None = None,
-        commissioned_pump_capability: CommissionedPumpCapability | None = None,
+        commissioned_pump_capabilities: Mapping[str, CommissionedPumpCapability] | None = None,
     ) -> None:
         normalized_host = host.strip()
         if not normalized_host:
@@ -220,7 +220,7 @@ class ManualIntelliCenterControl:
         self._command_authority = command_authority
         self._pool_manual_off_requested = pool_manual_off_requested
         self._spa_manual_off_requested = spa_manual_off_requested
-        self._commissioned_pump_capability = commissioned_pump_capability
+        self._commissioned_pump_capabilities = dict(commissioned_pump_capabilities or {})
         self._transport_name = transport
         self._model = PoolModel()
         self._controller = ICModelController(
@@ -968,7 +968,7 @@ class ManualIntelliCenterControl:
 
         return resolve_commissioned_pump_capability(
             self.native_pump_capability_profile(body=body),
-            self._commissioned_pump_capability,
+            self._commissioned_pump_capabilities.get(body),
         )
 
     def pump_flow_capability(self, *, body: str) -> Mapping[str, Any]:
