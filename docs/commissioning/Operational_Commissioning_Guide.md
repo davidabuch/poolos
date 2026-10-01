@@ -2,167 +2,109 @@
 
 ## Purpose
 
-This guide defines the staged process for introducing PoolOS to a real pool or
-spa system. It applies first to Home Assistant and IntelliCenter, but the process
-is runtime-neutral.
+This guide defines how new PoolOS capabilities are introduced to real pool and spa
+equipment. PoolOS no longer uses a global OBSERVE/LEARN/ADVISE/SHADOW/ASSIST/CONTROL
+mode ladder in production. Authority is **domain-scoped**.
 
-PoolOS begins without authority. It earns eligibility for greater authority by
-producing healthy, continuous, explainable evidence. The operator explicitly
-approves every increase in authority.
+A capability becomes physically active only after its own evidence, ownership,
+transport, policy, safety, and verification requirements are satisfied and the
+operator explicitly enables the corresponding production gate.
 
-## Commissioning Sequence
+## Current production control model
 
-### 1. Prepare the existing system
+The top-level runtime profile is descriptive:
 
-Before installing PoolOS:
+- `SCOPED_LIVE` — command transport is available and at least one autonomous
+  physical-control domain is enabled;
+- `MANUAL_CONTROL` — command transport is available but no autonomous domain is enabled;
+- `OBSERVE_ONLY` — no physical command-delivery transport is available.
 
-- keep the existing controller and Home Assistant integration operational;
-- inventory all entities that observe or control pool equipment;
-- identify schedules, automations, applications, and physical controls that may
-  change equipment state;
-- document existing safety behavior and manual recovery procedures;
-- confirm that observation sources expose stable entity identity and timestamps.
+These are runtime descriptions, not a single authority selector.
 
-Do not disable existing schedules or automations during initial commissioning.
+Current production gates include:
 
-### 2. Install in OBSERVE mode
+- Automatic Filtration Execution;
+- Automatic Thermal Execution;
+- Thermal Live Execution;
+- Grid Outage Physical Safety;
+- Pool / Hot Tub sanitation sessions;
+- PoolOS Maintenance Mode as a global physical-command deny.
 
-The initial installation must be read-only. PoolOS may:
+Manual climate/equipment controls use the same command transport but remain subject to
+physical-command authority, controller mode, and safety checks.
 
-- discover configured observation entities;
-- normalize them into canonical observations;
-- evaluate availability, quality, and freshness;
-- publish PoolOS diagnostic entities;
-- write observations and health evidence to the Flight Recorder.
+## Commissioning a new capability
 
-The initial installation must not contain an enabled command-delivery path.
-Possession of a Home Assistant token does not authorize actuation.
+### 1. Define the capability contract
 
-### 3. Validate observation health
+Before physical work:
 
-Observation commissioning is complete only when:
+- name the exact equipment and authority domain;
+- define positive operator intent and external-preemption semantics;
+- define accepted evidence and currentness bounds;
+- define command eligibility and fail-closed cases;
+- define post-delivery verification;
+- define termination, restart, and rollback behavior;
+- add deterministic regression coverage.
 
-- required entities are mapped to the correct physical equipment;
-- state, units, timestamps, and availability are correct;
-- restarts preserve or safely reconstruct observation state;
-- manual changes from the IntelliCenter panel and application are observed;
-- conflicting or unavailable data fails closed;
-- Flight Recorder evidence is complete and reviewable.
+### 2. Validate without physical authority
 
-### 4. Enter LEARN mode
+Use unit, integration, scenario, and CI validation first. Shadow/advisory engines may still
+be used as non-authoritative analytical tools, but their existence does not define the
+top-level PoolOS operating mode.
 
-LEARN mode may derive deterministic characteristics such as:
+### 3. Enable only the new scoped gate
 
-- pump power or flow behavior by RPM;
-- heating and cooling rates under defined conditions;
-- solar gain and loss;
-- equipment transition latency;
-- normal filtration and spa-use patterns;
-- observation lag and integration reliability.
+Do not broaden unrelated authority. Establish the live baseline immediately before
+commissioning and identify STOP conditions.
 
-Every learned characteristic must expose its evidence window, derivation,
-freshness, and confidence. Learning must not silently alter control policy.
+### 4. Physically commission
 
-### 5. Enter ADVISE mode
+For each commanded transition verify:
 
-Recommendations must include:
+1. pre-command authoritative state;
+2. exact accepted command;
+3. later authoritative physical consequence;
+4. correct ownership/provenance;
+5. convergence or bounded failure;
+6. safe termination / hand-back;
+7. restart behavior when applicable.
 
-- the proposed outcome;
-- the reason and relevant policies;
-- assumptions and blockers;
-- alternatives considered when available;
-- expected energy, runtime, temperature, or safety effect;
-- evidence freshness and uncertainty.
+A successful service/transport receipt is not physical success.
 
-Recommendations remain non-actuating and must be distinguishable from current
-controller behavior.
+### 5. Preserve operator override
 
-### 6. Enter SHADOW mode
+PoolOS yields only to positive intentional operator control, and only in the affected
+domain where possible. Mismatch, unavailable evidence, or command failure do not by
+themselves prove operator takeover.
 
-SHADOW mode runs the complete intended execution path without transport
-delivery. For each proposed action, PoolOS should record:
+### 6. Reacquire only at legitimate boundaries
 
-- what it observed;
-- what it decided;
-- the plan it would authorize;
-- the exact service call it would send;
-- the expected observation;
-- the reconciliation and recovery result it would expect.
+Reevaluation alone does not create new ownership. Reacquisition requires a legitimate
+new session, purpose, policy, or recovery boundary supported by current evidence.
 
-Shadow output must be compared with actual equipment behavior over representative
-conditions, including restarts, manual overrides, spa use, heating, solar,
-schedules, outages, and unavailable entities.
+## Rollback and global deny
 
-### 7. Enter ASSIST mode by capability
+For normal rollback, disable the affected scoped gate.
 
-ASSIST mode must be enabled one bounded capability at a time. Each capability
-requires:
+When a global PoolOS physical-command deny is required, enable **PoolOS Maintenance Mode**.
+Maintenance Mode is the production replacement for the old conceptual instruction to
+"return to OBSERVE." Observation and diagnostics continue while physical delivery is denied.
 
-- explicit operator approval;
-- a visible armed state;
-- a narrow ownership boundary;
-- preflight safety checks;
-- post-delivery observation verification;
-- immediate rollback;
-- documented failure and manual recovery procedures.
+Reset PoolOS Control is a bounded recovery mechanism and must not be used as a substitute for
+diagnosis or as a generic mode switch.
 
-A capability not explicitly approved remains in SHADOW mode.
+## Release evidence
 
-### 8. Enter CONTROL mode
+Before a newly commissioned capability is treated as production-ready retain:
 
-CONTROL mode is appropriate only after the commissioned capabilities have shown
-stable assisted operation and the operator deliberately transfers authority.
-Conflicting schedules and automations may be retired only after their behavior
-has been replaced, validated, and documented.
+- regression tests;
+- CI/Hassfest/HACS results where applicable;
+- release/tag identity;
+- loaded Home Assistant version;
+- live system health;
+- physical commissioning evidence;
+- known residual edge cases;
+- rollback path.
 
-## Mode Eligibility
-
-PoolOS must distinguish between:
-
-- **Current mode:** authority presently granted by the operator.
-- **Eligible mode:** highest mode supported by current technical evidence.
-- **Requested mode:** mode the operator is asking to activate.
-
-Eligibility never changes the current mode automatically.
-
-## Rollback
-
-Rollback to `OBSERVE` must:
-
-- stop new PoolOS actuation immediately;
-- preserve diagnostic and Flight Recorder evidence;
-- release PoolOS operational ownership safely;
-- leave the underlying controller available for manual or native operation;
-- require no source-code edit or repository deployment.
-
-Rollback must not attempt to restore stale pre-PoolOS state. The current physical
-state must be observed and handled explicitly.
-
-## Commissioning Evidence Package
-
-Before advancing a mode, retain:
-
-- mode-readiness results;
-- entity mapping and health summary;
-- representative Flight Recorder evidence;
-- known limitations and unresolved anomalies;
-- rollback test result;
-- operator approval identity and time;
-- capability scope for `ASSIST` or `CONTROL`.
-
-## Home Assistant Initial Deployment
-
-For the first Home Assistant deployment, the existing IntelliCenter integration
-remains the hardware-facing source of truth:
-
-```text
-IntelliCenter hardware
-    -> Home Assistant IntelliCenter integration
-    -> Home Assistant entity observations
-    -> PoolOS observation bridge
-    -> canonical PoolOS state, learning, and shadow decisions
-```
-
-PoolOS must not replace or disable the current integration during observation
-commissioning. Later control may use the same entities as a transport boundary,
-but only after explicit capability commissioning.
+Repository tests, CI, deployed runtime, and physical commissioning are separate evidence levels.
