@@ -28,11 +28,16 @@ from .const import (
     CONF_SANITATION_RPM,
     CONF_SANITATION_UNIT,
     CONF_SANITATION_GPM,
-    CONF_COMMISSIONED_PUMP_MODE,
-    CONF_COMMISSIONED_PUMP_PROVIDER,
-    CONF_COMMISSIONED_PUMP_ID,
-    CONF_COMMISSIONED_PUMP_MIN_GPM,
-    CONF_COMMISSIONED_PUMP_MAX_GPM,
+    CONF_POOL_COMMISSIONED_PUMP_MODE,
+    CONF_POOL_COMMISSIONED_PUMP_PROVIDER,
+    CONF_POOL_COMMISSIONED_PUMP_ID,
+    CONF_POOL_COMMISSIONED_PUMP_MIN_GPM,
+    CONF_POOL_COMMISSIONED_PUMP_MAX_GPM,
+    CONF_SPA_COMMISSIONED_PUMP_MODE,
+    CONF_SPA_COMMISSIONED_PUMP_PROVIDER,
+    CONF_SPA_COMMISSIONED_PUMP_ID,
+    CONF_SPA_COMMISSIONED_PUMP_MIN_GPM,
+    CONF_SPA_COMMISSIONED_PUMP_MAX_GPM,
     CONF_POOL_SANITATION_DURATION_MINUTES,
     CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
     CONF_PUMP_PRIMING_RPM,
@@ -317,39 +322,58 @@ def _settings_schema(current: dict[str, Any]) -> vol.Schema:
     """Extend the legacy RPM settings with commissioned GPM purposes only."""
 
     fields = dict(_mapping_schema(current).schema)
-    fields[
-        vol.Required(
-            CONF_COMMISSIONED_PUMP_MODE,
-            default=current.get(
-                CONF_COMMISSIONED_PUMP_MODE,
-                DEFAULT_COMMISSIONED_PUMP_MODE,
-            ),
-        )
-    ] = vol.In(COMMISSIONED_PUMP_MODE_OPTIONS)
-    fields[
-        vol.Optional(
-            CONF_COMMISSIONED_PUMP_PROVIDER,
-            default=current.get(CONF_COMMISSIONED_PUMP_PROVIDER, vol.UNDEFINED),
-        )
-    ] = str
-    fields[
-        vol.Optional(
-            CONF_COMMISSIONED_PUMP_ID,
-            default=current.get(CONF_COMMISSIONED_PUMP_ID, vol.UNDEFINED),
-        )
-    ] = str
-    fields[
-        vol.Optional(
-            CONF_COMMISSIONED_PUMP_MIN_GPM,
-            default=current.get(CONF_COMMISSIONED_PUMP_MIN_GPM, vol.UNDEFINED),
-        )
-    ] = _positive_whole_gpm
-    fields[
-        vol.Optional(
-            CONF_COMMISSIONED_PUMP_MAX_GPM,
-            default=current.get(CONF_COMMISSIONED_PUMP_MAX_GPM, vol.UNDEFINED),
-        )
-    ] = _positive_whole_gpm
+    for (
+        mode_key,
+        provider_key,
+        pump_id_key,
+        minimum_key,
+        maximum_key,
+    ) in (
+        (
+            CONF_POOL_COMMISSIONED_PUMP_MODE,
+            CONF_POOL_COMMISSIONED_PUMP_PROVIDER,
+            CONF_POOL_COMMISSIONED_PUMP_ID,
+            CONF_POOL_COMMISSIONED_PUMP_MIN_GPM,
+            CONF_POOL_COMMISSIONED_PUMP_MAX_GPM,
+        ),
+        (
+            CONF_SPA_COMMISSIONED_PUMP_MODE,
+            CONF_SPA_COMMISSIONED_PUMP_PROVIDER,
+            CONF_SPA_COMMISSIONED_PUMP_ID,
+            CONF_SPA_COMMISSIONED_PUMP_MIN_GPM,
+            CONF_SPA_COMMISSIONED_PUMP_MAX_GPM,
+        ),
+    ):
+        fields[
+            vol.Required(
+                mode_key,
+                default=current.get(mode_key, DEFAULT_COMMISSIONED_PUMP_MODE),
+            )
+        ] = vol.In(COMMISSIONED_PUMP_MODE_OPTIONS)
+        fields[
+            vol.Optional(
+                provider_key,
+                default=current.get(provider_key, vol.UNDEFINED),
+            )
+        ] = str
+        fields[
+            vol.Optional(
+                pump_id_key,
+                default=current.get(pump_id_key, vol.UNDEFINED),
+            )
+        ] = str
+        fields[
+            vol.Optional(
+                minimum_key,
+                default=current.get(minimum_key, vol.UNDEFINED),
+            )
+        ] = _positive_whole_gpm
+        fields[
+            vol.Optional(
+                maximum_key,
+                default=current.get(maximum_key, vol.UNDEFINED),
+            )
+        ] = _positive_whole_gpm
 
     for unit_key, gpm_key in (
         (CONF_PUMP_FILTRATION_UNIT, CONF_PUMP_FILTRATION_GPM),
