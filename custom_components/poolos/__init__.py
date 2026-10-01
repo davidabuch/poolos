@@ -35,6 +35,13 @@ from .const import (  # noqa: E402
     CONF_SANITATION_RPM,
     CONF_POOL_SANITATION_DURATION_MINUTES,
     CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
+    CONF_COMMISSIONED_PUMP_MODE,
+    CONF_COMMISSIONED_PUMP_PROVIDER,
+    CONF_COMMISSIONED_PUMP_ID,
+    CONF_COMMISSIONED_PUMP_MIN_GPM,
+    CONF_COMMISSIONED_PUMP_MAX_GPM,
+    COMMISSIONED_PUMP_MODE_AUTOMATIC,
+    COMMISSIONED_PUMP_MODE_RPM_GPM,
     DEFAULT_OPERATING_MODE,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     DEFAULT_FILTRATION_SCHEDULING_MODE,
@@ -89,7 +96,10 @@ from poolos.native_circulation_change import (  # noqa: E402
     NativeCirculationChangeTracker,
 )
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
-from poolos.pump_capability import PumpCapabilityProvider  # noqa: E402
+from poolos.pump_capability import (  # noqa: E402
+    CommissionedPumpCapability,
+    PumpCapabilityProvider,
+)
 from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
@@ -149,6 +159,44 @@ async def async_migrate_entry(
     """Remove retired legacy IntelliCenter HA shadow mappings."""
 
     return migrate_config_entry(hass, entry)
+
+
+def _commissioned_pump_capability(
+    configured: dict[str, object],
+) -> CommissionedPumpCapability | None:
+    """Build exact-identity commissioned evidence or fail closed."""
+
+    mode = str(
+        configured.get(CONF_COMMISSIONED_PUMP_MODE, COMMISSIONED_PUMP_MODE_AUTOMATIC)
+    ).strip()
+    if mode == COMMISSIONED_PUMP_MODE_AUTOMATIC:
+        return None
+
+    provider = str(configured.get(CONF_COMMISSIONED_PUMP_PROVIDER, "")).strip()
+    pump_id = str(configured.get(CONF_COMMISSIONED_PUMP_ID, "")).strip()
+    if not provider or not pump_id:
+        return None
+
+    try:
+        return CommissionedPumpCapability(
+            provider=provider,
+            pump_id=pump_id,
+            flow_control_supported=mode == COMMISSIONED_PUMP_MODE_RPM_GPM,
+            minimum_gpm=(
+                int(configured[CONF_COMMISSIONED_PUMP_MIN_GPM])
+                if mode == COMMISSIONED_PUMP_MODE_RPM_GPM
+                and CONF_COMMISSIONED_PUMP_MIN_GPM in configured
+                else None
+            ),
+            maximum_gpm=(
+                int(configured[CONF_COMMISSIONED_PUMP_MAX_GPM])
+                if mode == COMMISSIONED_PUMP_MODE_RPM_GPM
+                and CONF_COMMISSIONED_PUMP_MAX_GPM in configured
+                else None
+            ),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
@@ -297,6 +345,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             host=manual_host,
             command_authority=physical_command_authority,
             transport=str(configured.get("intellicenter_transport", "tcp")),
+            commissioned_pump_capability=_commissioned_pump_capability(configured),
             pool_manual_off_requested=arm_manual_pool_off,
             spa_manual_off_requested=arm_manual_spa_off,
         )
