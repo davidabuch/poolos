@@ -8,11 +8,22 @@ PoolOS is a deterministic automation platform that separates automation policy f
 Applications define *what* should happen, while PoolOS determines *how* to evaluate, explain,
 record, publish, and eventually deliver those actions through vendor-specific boundaries.
 
-PoolOS currently stops before live automatic actuation. Its production safety boundary is:
+PoolOS is a vendor-independent pool and spa control platform with both observation/intelligence
+and physically commissioned control domains. Live control is intentionally scoped rather than
+governed by one global actuation switch: manual control, automatic filtration, automatic thermal
+execution, sanitation, and grid-outage safety retain independent authority and safety gates.
+
+Its runtime model is:
 
 ```text
-OBSERVE -> EVALUATE -> DECIDE -> EXPLAIN -> RECORD -> PUBLISH
+OBSERVE -> EVALUATE -> DECIDE -> AUTHORIZE -> DELIVER -> VERIFY
+                              |
+                              +-> EXPLAIN / RECORD / PUBLISH
 ```
+
+A domain may deliver a physical command only when its own authority, ownership, evidence,
+transport, safety, and verification requirements are satisfied. Read-only advisory subsystems
+remain non-authoritative by design.
 
 ## Features
 
@@ -43,8 +54,8 @@ Home Assistant and vendor observations
        explain / record / publish
                  |
                  v
-     Command-delivery boundary
-        (live actuation disabled)
+     Scoped command-delivery boundaries
+   (domain authority + safety + verification)
 ```
 
 ## Repository Structure
@@ -122,9 +133,15 @@ Home Assistant-aware typing boundary may be added when integration deployment wo
 | Persistent observation/event history | Complete |
 | Behavioral inference and daily retrospective | Complete |
 | High-fidelity event-driven HA observation | Complete |
-| IntelliCenter immutable read model | In development |
-| IntelliCenter Home Assistant deployment | Not yet installed |
-| Live automatic actuation | Disabled |
+| IntelliCenter immutable/native read model | Complete for current production scope |
+| Home Assistant PoolOS deployment | Live / HACS-managed |
+| Manual equipment control | Live |
+| Automatic filtration | Live behind its dedicated gate |
+| Automatic thermal execution | Live behind dedicated automatic + thermal-live gates |
+| Grid-outage physical safety | Live behind its dedicated gate |
+| Sanitation sessions | Live / operator initiated |
+| Vendor-neutral RPM/GPM capability model | Complete for current production scope |
+| 1.0 release-readiness reconciliation | In progress |
 
 ## Roadmap
 
