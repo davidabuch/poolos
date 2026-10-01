@@ -3,8 +3,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Install PoolOS high-fidelity observation bridge",
-        "description": "Map existing Home Assistant entities to PoolOS canonical observations. PoolOS uses event-driven observation plus periodic reconciliation, remains in OBSERVE mode, and cannot send commands.",
+        "title": "Install PoolOS",
+        "description": "Configure PoolOS observation sources and controller access. PoolOS uses event-driven observation plus periodic reconciliation and supports scoped live control through independently gated safety and ownership domains.",
         "data": {
           "pool_thermostat_entity": "Pool thermostat entity",
           "spa_thermostat_entity": "Spa thermostat entity",
@@ -48,8 +48,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "PoolOS high-fidelity observation mappings",
-        "description": "Update observation sources and operating policy used after the config entry reloads. Saving options does not directly issue equipment commands. Hot Tub Solar accepts a configurable 110–150°F roof threshold. The same configured threshold applies to normal Eco Heat Hot Tub sessions and opportunistic Solar heating. PoolOS automatically continues Solar until the roof falls 10°F below the configured threshold when the applicable policy allows hysteresis.",
+        "title": "PoolOS settings",
+        "description": "Update PoolOS observation sources and operating policy used after the config entry reloads. Saving options does not directly issue equipment commands. Live equipment control remains subject to each domain's authority, ownership, evidence, safety, and verification gates.",
         "data": {
           "pool_thermostat_entity": "Pool thermostat entity",
           "spa_thermostat_entity": "Spa thermostat entity",
@@ -94,7 +94,15 @@
       "loaded_entries": "Loaded entries",
       "observation_enabled": "Observation enabled",
       "observation_healthy": "Observation healthy",
-      "command_delivery_enabled": "Command delivery enabled"
+      "command_delivery_enabled": "Physical command delivery available",
+      "control_profile": "Control profile",
+      "manual_command_delivery_available": "Manual command delivery available",
+      "autonomous_command_delivery_enabled": "Autonomous command delivery enabled",
+      "automatic_filtration_execution_enabled": "Automatic filtration enabled",
+      "automatic_thermal_execution_enabled": "Automatic thermal enabled",
+      "thermal_live_execution_enabled": "Thermal live execution enabled",
+      "grid_outage_physical_safety_enabled": "Grid outage physical safety enabled",
+      "sanitation_control_available": "Sanitation control available"
     }
   }
 }
