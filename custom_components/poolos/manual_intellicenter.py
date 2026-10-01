@@ -966,10 +966,21 @@ class ManualIntelliCenterControl:
     ) -> PumpCapabilityProfile | None:
         """Return resolved native plus commissioned pump capability evidence."""
 
-        return resolve_commissioned_pump_capability(
-            self.native_pump_capability_profile(body=body),
-            self._commissioned_pump_capabilities.get(body),
-        )
+        native = self.native_pump_capability_profile(body=body)
+        if native is None:
+            return None
+        matches = [
+            commissioned
+            for commissioned in self._commissioned_pump_capabilities.values()
+            if commissioned.provider == native.provider
+            and commissioned.pump_id == native.pump_id
+        ]
+        if not matches:
+            return native
+        first = matches[0]
+        if any(candidate != first for candidate in matches[1:]):
+            return native
+        return resolve_commissioned_pump_capability(native, first)
 
     def pump_flow_capability(self, *, body: str) -> Mapping[str, Any]:
         """Compatibility view of the canonical pump capability profile."""
