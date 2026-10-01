@@ -1,86 +1,90 @@
 # PoolOS Commissioning Safety Checklist
 
-Use this checklist before every operating-mode advancement. A checked item must
-be supported by current evidence, not assumption.
+Use this checklist before enabling or expanding any physical-control capability.
 
-## Universal Requirements
+## Universal requirements
 
-- [ ] Current operating mode is visible and correct.
-- [ ] Requested target mode is explicit.
-- [ ] Operator approval is recorded for the requested advancement.
-- [ ] Required observations are mapped to the correct physical equipment.
-- [ ] Required observations are available, fresh, and unit-correct.
-- [ ] Contradictory or unknown evidence fails closed.
-- [ ] Flight Recorder is healthy and writing complete evidence.
-- [ ] Restart behavior has been tested for the current mode.
-- [ ] Manual IntelliCenter panel and application changes are observed correctly.
-- [ ] Human override and ownership behavior are understood.
-- [ ] Rollback to `OBSERVE` has been tested.
-- [ ] Native safety features remain operational unless formally replaced.
-- [ ] Known limitations and unresolved anomalies are documented.
+- [ ] Exact capability/domain being commissioned is named.
+- [ ] Current physical baseline is captured.
+- [ ] Intended operator approval is explicit.
+- [ ] Relevant observations are mapped to the correct equipment.
+- [ ] Required evidence is current, available, and unit-correct.
+- [ ] Unknown, stale, contradictory, or incomplete evidence fails closed.
+- [ ] Ownership/preemption rules are documented.
+- [ ] Exact command eligibility is bounded.
+- [ ] Accepted delivery requires later authoritative verification.
+- [ ] Failure/timeout/mismatch behavior is bounded.
+- [ ] Termination and hand-back are defined.
+- [ ] Restart behavior is covered.
+- [ ] Maintenance Mode provides a known global physical-command deny.
+- [ ] Manual/native recovery remains available.
+- [ ] Regression tests and CI are green.
 
-## Before LEARN
+## Before enabling automatic filtration
 
-- [ ] Observation coverage is continuous over a representative period.
-- [ ] Data gaps and unavailable entities are identifiable.
-- [ ] Learning outputs expose evidence window, derivation, freshness, and confidence.
-- [ ] Learned values cannot alter control policy silently.
+- [ ] Filtration obligation/debt is correct.
+- [ ] Scheduling mode and catch-up boundary are correct.
+- [ ] Thermal/sanitation/outage interactions are covered.
+- [ ] Pump target and session identity are correct.
+- [ ] Manual body OFF cancellation and later legitimate reacquisition are tested.
 
-## Before ADVISE
+## Before enabling automatic thermal
 
-- [ ] Recommendations identify reasons, assumptions, blockers, and expected outcomes.
-- [ ] Recommendations clearly distinguish current behavior from proposed behavior.
-- [ ] Uncertainty and stale evidence are visible.
-- [ ] Operators can inspect supporting evidence.
+- [ ] Automatic Thermal Execution and Thermal Live Execution semantics are understood separately.
+- [ ] Pool and Hot Tub ownership behavior is tested independently.
+- [ ] Solar/Gas source selection and source-Off cleanup are verified.
+- [ ] Probe, priming, heating, maintenance, termination, and pump-zero behavior are covered.
+- [ ] Positive operator heat/source changes preempt correctly.
+- [ ] Opportunistic Hot Tub behavior is physically commissioned before production reliance.
 
-## Before SHADOW
+## Before enabling Grid Outage Physical Safety
 
-- [ ] Complete hypothetical service calls are generated without delivery.
-- [ ] Expected observations and verification windows are defined.
-- [ ] Shadow plans preserve deterministic identity and provenance.
-- [ ] Representative success and failure scenarios have been reviewed.
-- [ ] No transport credential or configuration can bypass shadow blocking.
+- [ ] Authoritative grid evidence source is correct.
+- [ ] Confirmation timing is correct.
+- [ ] Reduction-only command set is verified.
+- [ ] Required circulation is reduced only to the configured outage baseline.
+- [ ] Pool/Spa/features/light reduction behavior is verified.
+- [ ] Grid return causes fresh reevaluation, not stale-state restoration.
+- [ ] Restart during outage cannot replay stale authority.
 
-## Before ASSIST
+## Before enabling sanitation
 
-Complete this section separately for each capability.
+- [ ] Body, duration, and pump target are correct.
+- [ ] Session is bounded and body-specific.
+- [ ] Grid outage preempts sanitation.
+- [ ] Manual body OFF cancels the session.
+- [ ] Filtration credit semantics are correct.
+- [ ] Completion and hand-back are verified.
 
-- [ ] Capability name and equipment scope are documented.
-- [ ] Capability is explicitly approved by the operator.
-- [ ] Capability has a visible armed state.
-- [ ] Capability has a narrow ownership boundary.
-- [ ] Preflight safety checks are defined and tested.
-- [ ] Post-delivery observation verification is required.
-- [ ] Failure, timeout, mismatch, and unavailable behavior are tested.
-- [ ] Immediate capability rollback is tested.
-- [ ] Manual recovery procedure is documented.
-- [ ] Conflicting schedules and automations are identified.
+## Pump target / RPM-GPM capability changes
 
-## Before CONTROL
+- [ ] Adapter positively proves the controllable unit.
+- [ ] GPM telemetry is not mistaken for GPM setpoint capability.
+- [ ] Trustworthy native min/max limits are known before GPM is exposed.
+- [ ] Unknown capability fails closed to the proven unit, normally RPM.
+- [ ] Manual override and return-to-baseline hand-back are tested per session.
+- [ ] Session boundaries clear non-durable manual target overrides.
 
-- [ ] All controlled capabilities completed assisted commissioning.
-- [ ] No unexplained command, verification, or recovery behavior remains.
-- [ ] Long-running observation and shadow evidence is satisfactory.
-- [ ] Assisted operation has covered representative operating conditions.
-- [ ] Ownership transfer and manual override behavior are tested.
-- [ ] Safety regression and restart tests are complete.
-- [ ] Conflicting native schedules or automations are retired deliberately.
-- [ ] Full-system rollback to `OBSERVE` is tested.
-- [ ] Operator explicitly approves CONTROL mode and its capability scope.
+## Physical commissioning evidence
 
-## Automatic Regression Triggers
+For every important transition capture:
 
-PoolOS should reduce authority or block action when any applicable condition is
-present:
+- [ ] pre-command authoritative state;
+- [ ] accepted command identity and time;
+- [ ] later authoritative consequence;
+- [ ] ownership/provenance result;
+- [ ] final converged state;
+- [ ] any unexpected native controller behavior.
 
-- [ ] Required observation unavailable or stale.
-- [ ] Contradictory evidence or identity mismatch.
-- [ ] Flight Recorder or required diagnostics unhealthy.
-- [ ] Ownership cannot be established safely.
-- [ ] Verification repeatedly fails or times out.
-- [ ] Safety posture is unknown or blocked.
-- [ ] Restart recovery cannot reconstruct valid current state.
-- [ ] Operator requests rollback.
+## STOP conditions
 
-Automatic regression never authorizes automatic re-advancement. New operator
-approval is required after health and readiness are restored.
+Stop physical commissioning if:
+
+- [ ] body/topology evidence is contradictory;
+- [ ] PoolOS repeatedly commands without converging;
+- [ ] verification chronology is ambiguous;
+- [ ] pump/source/body state cannot be confidently attributed;
+- [ ] equipment behaves outside the accepted safety envelope;
+- [ ] native controller state cannot be recovered manually.
+
+A STOP condition is not evidence of operator takeover and must not be converted into fabricated ownership.
