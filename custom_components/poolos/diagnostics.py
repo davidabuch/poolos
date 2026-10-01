@@ -44,7 +44,7 @@ async def async_get_config_entry_diagnostics(
         if runtime is None
         else {
             "loaded_at": runtime.loaded_at,
-            "operating_mode": runtime.operating_mode,
+            "operating_mode": runtime_control_status(runtime)["control_profile"],
             "lifecycle": coordinator.lifecycle_diagnostics(),
             "observation": None if snapshot is None else snapshot.diagnostics(),
             "shadow_runtime": coordinator.shadow_runtime.diagnostics(),
