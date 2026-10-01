@@ -47,7 +47,6 @@ from .const import (  # noqa: E402
     CONF_SPA_COMMISSIONED_PUMP_MAX_GPM,
     COMMISSIONED_PUMP_MODE_AUTOMATIC,
     COMMISSIONED_PUMP_MODE_RPM_GPM,
-    DEFAULT_OPERATING_MODE,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     DEFAULT_FILTRATION_SCHEDULING_MODE,
     DEFAULT_TRADITIONAL_FILTRATION_START,
@@ -134,7 +133,6 @@ class PoolOSRuntimeData:
 
     coordinator: PoolOSCoordinator
     loaded_at: str
-    operating_mode: str
     manual_intellicenter: ManualIntelliCenterControl | None
     pump_capability_provider: PumpCapabilityProvider | None
     filtration_runtime: PoolOSFiltrationRuntime
@@ -611,7 +609,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
-        operating_mode=DEFAULT_OPERATING_MODE,
         manual_intellicenter=manual_intellicenter,
         pump_capability_provider=manual_intellicenter,
         filtration_runtime=filtration_runtime,
