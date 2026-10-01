@@ -5,8 +5,8 @@
 ![CI](https://github.com/davidabuch/poolos/actions/workflows/tests.yml/badge.svg)
 
 PoolOS is a deterministic automation platform that separates automation policy from hardware.
-Applications define *what* should happen, while PoolOS determines *how* to evaluate, explain,
-record, publish, and eventually deliver those actions through vendor-specific boundaries.
+Applications define *what* should happen, while PoolOS determines *how* to evaluate, authorize,
+deliver, verify, explain, record, and publish those actions through vendor-specific boundaries.
 
 PoolOS is a vendor-independent pool and spa control platform with both observation/intelligence
 and physically commissioned control domains. Live control is intentionally scoped rather than
@@ -72,15 +72,10 @@ config/                     Example installation configuration
 The repository root and the nested `poolos/` Python package intentionally share the same name.
 They are not accidental duplicates.
 
-The root `intellicenter/` directory is a future Home Assistant custom integration. It is not
-included in the PoolOS Python distribution. When deployment begins, the complete directory will
-be installed as:
-
-```text
-/config/custom_components/intellicenter/
-```
-
-See `docs/INTELLICENTER_DEPLOYMENT.md` for the planned deployment boundary.
+The root `intellicenter/` directory contains the retained IntelliCenter protocol/read-model source
+used by PoolOS development and contract testing. The production PoolOS Home Assistant integration
+ships under `custom_components/poolos/` and uses the pinned `pyintellicenter` dependency for its
+native controller transport.
 
 ## Development
 
@@ -114,9 +109,9 @@ python -m mypy poolos
 python -m pytest
 ```
 
-MyPy currently checks only the installable `poolos` package. The IntelliCenter integration is
-still checked by compilation, Ruff, structural tests, and its read-model unit tests. A separate
-Home Assistant-aware typing boundary may be added when integration deployment work begins.
+MyPy currently checks the installable `poolos` package. Home Assistant adapter code and the
+IntelliCenter read-model boundary are additionally protected by compilation, Ruff, structural,
+contract, and runtime-focused tests.
 
 ## Current Status
 
@@ -147,8 +142,8 @@ Home Assistant-aware typing boundary may be added when integration deployment wo
 
 The current roadmap is maintained in `docs/ROADMAP.md`.
 
-Before live control is enabled, PoolOS must retain explicit command-delivery, runtime-mode,
-ownership, safety, validation, and audit boundaries.
+Live control must retain explicit scoped command-delivery, ownership, safety, validation,
+verification, and audit boundaries.
 
 ## Philosophy
 
