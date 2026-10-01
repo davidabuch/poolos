@@ -8,6 +8,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from . import PoolOSConfigEntry
+from .control_status import runtime_control_status
 from .const import (
     CONF_DIAGNOSTICS_ENABLED,
     CONF_INTELLICENTER_HOST,
@@ -43,7 +44,7 @@ async def async_get_config_entry_diagnostics(
         if runtime is None
         else {
             "loaded_at": runtime.loaded_at,
-            "operating_mode": runtime.operating_mode,
+            "operating_mode": runtime_control_status(runtime)["control_profile"],
             "lifecycle": coordinator.lifecycle_diagnostics(),
             "observation": None if snapshot is None else snapshot.diagnostics(),
             "shadow_runtime": coordinator.shadow_runtime.diagnostics(),
@@ -51,8 +52,8 @@ async def async_get_config_entry_diagnostics(
         "diagnostics_enabled": entry.options.get(CONF_DIAGNOSTICS_ENABLED, True),
         "safety": {
             "observation_enabled": runtime is not None,
-            "command_delivery_enabled": False,
             "shadow_runtime_enabled": runtime is not None,
+            **runtime_control_status(runtime),
         },
     }
     return dict(async_redact_data(payload, _TO_REDACT))

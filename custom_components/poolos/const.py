@@ -8,7 +8,7 @@ DOMAIN = "poolos"
 NAME = "PoolOS"
 INTEGRATION_VERSION = "0.11.103"
 CONFIG_ENTRY_VERSION = 2
-CONFIG_ENTRY_MINOR_VERSION = 1
+CONFIG_ENTRY_MINOR_VERSION = 2
 
 CONF_DIAGNOSTICS_ENABLED = "diagnostics_enabled"
 DEFAULT_DIAGNOSTICS_ENABLED = True
@@ -115,6 +115,8 @@ CONF_POOL_LIGHT_ENTITY = "pool_light_entity"
 
 # Removed in config-entry schema 2.1. Native IntelliCenter observations remain;
 # only the obsolete Home Assistant shadow/parity mappings are retired.
+RETIRED_LEGACY_RUNTIME_OPTIONS = frozenset({"operating_mode"})
+
 RETIRED_LEGACY_INTELLICENTER_ENTITY_OPTIONS = frozenset(
     {
         "firmware_version_entity",
@@ -164,7 +166,5 @@ OBSERVATION_STALE_AFTER = timedelta(minutes=5)
 STARTUP_HEALTH_GRACE = timedelta(seconds=60)
 MULTIDAY_COMMISSIONING_WINDOW_DAYS = 14
 
-OPERATING_MODE_OBSERVE = "OBSERVE"
-DEFAULT_OPERATING_MODE = OPERATING_MODE_OBSERVE
 
 PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light", "number", "select")

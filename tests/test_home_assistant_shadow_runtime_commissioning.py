@@ -45,11 +45,11 @@ def test_shadow_adapter_uses_canonical_observation_snapshot() -> None:
     assert "observation_fingerprint" in source
 
 
-def test_diagnostics_include_shadow_status_without_control() -> None:
+def test_diagnostics_include_shadow_status_and_current_control_truth() -> None:
     source = (COMPONENT / "diagnostics.py").read_text(encoding="utf-8")
     assert '"shadow_runtime"' in source
     assert '"shadow_runtime_enabled"' in source
-    assert '"command_delivery_enabled": False' in source
+    assert "runtime_control_status(runtime)" in source
 
 
 def test_no_control_platform_or_service_is_added() -> None:

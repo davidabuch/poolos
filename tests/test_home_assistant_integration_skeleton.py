@@ -26,6 +26,7 @@ def test_required_integration_files_exist() -> None:
             "config_entry_migration.py",
             "configured_thermal.py",
             "const.py",
+            "control_status.py",
         "coordinator.py",
             "diagnostics.py",
             "filtration_automatic_runtime.py",
@@ -85,10 +86,11 @@ def test_all_python_modules_parse() -> None:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_config_flow_is_single_instance_and_observe_only() -> None:
+def test_config_flow_is_single_instance_and_does_not_store_runtime_control_mode() -> None:
     source = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
     assert "self._async_current_entries()" in source
-    assert '"operating_mode": DEFAULT_OPERATING_MODE' in source
+    assert '"operating_mode":' not in source
+    assert "DEFAULT_OPERATING_MODE" not in source
     assert "single_instance_allowed" in source
     assert "CONF_DIAGNOSTICS_ENABLED" in source
     assert "services.async_call" not in source
@@ -106,7 +108,7 @@ def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
     assert "thermal_runtime_orchestrator.unload(" in source
 
 
-def test_coordinator_performs_no_external_io_and_disables_actuation() -> None:
+def test_observation_coordinator_performs_no_physical_delivery_itself() -> None:
     source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
     assert "update_interval=OBSERVATION_UPDATE_INTERVAL" in source
     assert "self.hass.states.get" in source

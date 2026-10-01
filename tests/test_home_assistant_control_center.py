@@ -119,11 +119,12 @@ def test_grid_evidence_source_exposes_simulated_provenance() -> None:
     assert '"simulated"' in source
 
 
-def test_dashboard_explains_future_powerwall_conservation_without_actuation() -> None:
+def test_dashboard_describes_live_grid_outage_safety() -> None:
     text = DASHBOARD.read_text(encoding="utf-8")
     assert "Grid & Resilience" in text
-    assert "1800 RPM" in text
-    assert "observation-only" in text
+    assert "1500 RPM" in text
+    assert "Grid-outage safety" in text
+    assert "stale-state restoration" in text
 
 
 def test_control_center_normalizes_boolean_and_pool_light_display_values() -> None:

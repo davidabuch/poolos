@@ -62,7 +62,7 @@ def test_control_center_exposes_daily_actual_and_counterfactual_read_only() -> N
     dashboard = (ROOT / "dashboards" / "poolos_control_center.yaml").read_text(encoding="utf-8")
     assert "sensor.poolos_control_center_daily_operational_retrospective" in dashboard
     assert "sensor.poolos_control_center_daily_counterfactual_report" in dashboard
-    assert "No actuation occurs" in dashboard
+    assert "No actuation occurs from recommendations or retrospective analysis" in dashboard
 
 
 def test_retrospective_language_refuses_unsupported_daily_differences() -> None:
@@ -97,11 +97,11 @@ def test_component_python_still_parses() -> None:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_roadmap_marks_113d_done_and_commissioning_is_next_decision() -> None:
+def test_roadmap_marks_113d_done_and_release_readiness_is_current() -> None:
     roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
     assert "| 11.3D | Daily operational retrospective + counterfactual report | DONE |" in roadmap
     assert "### Epic 11.3D — Daily Operational Retrospective + Counterfactual Report" in roadmap
     sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
-    assert '"11.3A", "11.3B", "11.3C", "11.3D"' in sensor
-    assert 'lambda coordinator, runtime: "HIGH_FIDELITY_OBSERVATION_READY"' in sensor
-    assert '"next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT"' in sensor
+    assert '"V1_RELEASE_CANDIDATE"' in sensor
+    assert '"release_line": "1.0"' in sensor
+    assert '"runtime_truth_cleanup_in_progress"' in sensor

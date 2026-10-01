@@ -77,7 +77,6 @@ from .const import (
     DEFAULT_SANITATION_RPM,
     DEFAULT_POOL_SANITATION_DURATION_MINUTES,
     DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
-    DEFAULT_OPERATING_MODE,
     DEFAULT_COMMISSIONED_PUMP_MODE,
     COMMISSIONED_PUMP_MODE_OPTIONS,
     DEFAULT_PUMP_TARGET_UNIT,
@@ -109,7 +108,7 @@ class PoolOSConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             return self.async_create_entry(
                 title=NAME,
-                data={"operating_mode": DEFAULT_OPERATING_MODE, **user_input},
+                data=dict(user_input),
             )
 
         return self.async_show_form(step_id="user", data_schema=_mapping_schema({}))

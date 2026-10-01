@@ -8,6 +8,7 @@ from .const import (
     CONFIG_ENTRY_MINOR_VERSION,
     CONFIG_ENTRY_VERSION,
     RETIRED_LEGACY_INTELLICENTER_ENTITY_OPTIONS,
+    RETIRED_LEGACY_RUNTIME_OPTIONS,
 )
 
 
@@ -27,7 +28,7 @@ class _HomeAssistant(Protocol):
 
 
 def migrate_config_entry(hass: _HomeAssistant, entry: _ConfigEntry) -> bool:
-    """Remove retired legacy shadow mappings from config data and options."""
+    """Remove retired commissioning-era config data and shadow mappings."""
 
     if entry.version != CONFIG_ENTRY_VERSION:
         return False
@@ -55,5 +56,8 @@ def _without_retired_options(values: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in values.items()
-        if key not in RETIRED_LEGACY_INTELLICENTER_ENTITY_OPTIONS
+        if key not in (
+            RETIRED_LEGACY_INTELLICENTER_ENTITY_OPTIONS
+            | RETIRED_LEGACY_RUNTIME_OPTIONS
+        )
     }

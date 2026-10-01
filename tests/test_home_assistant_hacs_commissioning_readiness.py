@@ -1,4 +1,4 @@
-"""HACS packaging and safety contract tests for milestone 11.3A."""
+"""HACS packaging and current PoolOS runtime safety contract tests."""
 
 from __future__ import annotations
 
@@ -70,18 +70,22 @@ def test_component_registers_no_home_assistant_service_calls() -> None:
         assert all(token not in source for token in prohibited_calls), path.name
 
 
-def test_coordinator_declares_command_delivery_disabled() -> None:
-    source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
-    assert '"command_delivery_enabled": False' in source
-    assert "self.hass.states.get" in source
+def test_control_status_reports_scoped_runtime_instead_of_global_disabled_flag() -> None:
+    source = (COMPONENT / "control_status.py").read_text(encoding="utf-8")
+    health = (COMPONENT / "system_health.py").read_text(encoding="utf-8")
+    assert '"SCOPED_LIVE"' in source
+    assert '"MANUAL_CONTROL"' in source
+    assert '"OBSERVE_ONLY"' in source
+    assert '"autonomous_domains"' in source
+    assert "runtime_control_status" in health
 
 
-def test_configured_operating_mode_is_still_observe_only() -> None:
+def test_legacy_observe_config_is_retired() -> None:
     const = (COMPONENT / "const.py").read_text(encoding="utf-8")
     flow = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
-    assert 'OPERATING_MODE_OBSERVE = "OBSERVE"' in const
-    assert "DEFAULT_OPERATING_MODE = OPERATING_MODE_OBSERVE" in const
-    assert '"operating_mode": DEFAULT_OPERATING_MODE' in flow
+    assert 'RETIRED_LEGACY_RUNTIME_OPTIONS = frozenset({"operating_mode"})' in const
+    assert "DEFAULT_OPERATING_MODE" not in const
+    assert '"operating_mode":' not in flow
 
 
 def test_all_component_python_modules_parse_after_packaging_changes() -> None:
@@ -107,13 +111,14 @@ def test_hassfest_validation_runs_on_repository_changes() -> None:
     assert "home-assistant/actions/hassfest@master" in workflow
 
 
-def test_commissioning_documentation_records_public_repo_and_no_actuation_boundary() -> None:
+def test_current_deployment_documentation_records_scoped_live_boundary() -> None:
     guide = (ROOT / "docs" / "HOME_ASSISTANT_HACS_COMMISSIONING.md").read_text(encoding="utf-8")
     lowered = guide.lower()
-    assert "repository to be public" in lowered
-    assert "command delivery: disabled" in lowered
-    assert "home assistant service calls: none" in lowered
-    assert "complete and merge\n11.3a through 11.4a first" in lowered
+    assert "scoped live control" in lowered
+    assert "manual_control" in lowered
+    assert "observe_only" in lowered
+    assert "maintenance mode" in lowered
+    assert "physical-control domains" in lowered
 
 
 def test_adr_records_single_source_core_and_pinned_release_strategy() -> None:
