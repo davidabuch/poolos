@@ -17,9 +17,9 @@ def test_113d_core_tests_and_adr_exist() -> None:
 
 def test_manifest_advances_to_090_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.11.104"
+    assert manifest["version"] == "1.0.0"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.104",
+        "poolos@git+https://github.com/davidabuch/poolos.git@v1.0.0",
         "pyintellicenter==0.1.20",
     ]
     assert manifest["iot_class"] == "local_push"
@@ -102,6 +102,6 @@ def test_roadmap_marks_113d_done_and_release_readiness_is_current() -> None:
     assert "| 11.3D | Daily operational retrospective + counterfactual report | DONE |" in roadmap
     assert "### Epic 11.3D — Daily Operational Retrospective + Counterfactual Report" in roadmap
     sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
-    assert '"V1_RELEASE_CANDIDATE"' in sensor
+    assert '"V1_RELEASE"' in sensor
     assert '"release_line": "1.0"' in sensor
-    assert '"runtime_truth_cleanup_in_progress"' in sensor
+    assert '"production_release"' in sensor

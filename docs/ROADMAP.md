@@ -39,10 +39,10 @@ not construction of the core autonomous controller.
 | Scoped-live System Health and diagnostics | DONE |
 | Operations Center terminology reconciliation | DONE |
 | HACS/current deployment documentation reconciliation | DONE |
-| Legacy roadmap reconciliation | IN PROGRESS |
-| Local-package documentation reconciliation | IN PROGRESS |
-| Package / integration version alignment | IN PROGRESS |
-| Development-status classifier and release metadata | IN PROGRESS |
+| Legacy roadmap reconciliation | DONE |
+| Local-package documentation reconciliation | DONE |
+| Package / integration version alignment | DONE |
+| Development-status classifier and release metadata | DONE |
 | Final 1.0 regression, deployment, and physical-runtime verification | IN PROGRESS |
 
 ## Legacy Command Center roadmap

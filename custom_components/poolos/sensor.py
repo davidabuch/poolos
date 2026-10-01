@@ -893,14 +893,13 @@ SENSORS = (
     PoolOSControlCenterSensorDescription(
         "commissioning_stage",
         "Release Readiness",
-        lambda coordinator, runtime: "V1_RELEASE_CANDIDATE",
+        lambda coordinator, runtime: "V1_RELEASE",
         lambda coordinator, runtime: {
             "release_line": "1.0",
-            "status": "runtime_truth_cleanup_in_progress",
+            "status": "production_release",
             "remaining_work": [
-                "retire_obsolete_commissioning_language",
-                "reconcile_public_documentation",
-                "complete_v1_release_readiness_audit",
+                "minor_edge_case_hardening",
+                "future_capability_expansion_requires_commissioning",
             ],
             "authority_increase_requires_approval": True,
         },
