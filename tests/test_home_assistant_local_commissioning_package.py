@@ -1,4 +1,4 @@
-"""Local-only Home Assistant commissioning package contract tests."""
+"""Local/self-contained Home Assistant development package contract tests."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def test_local_vendor_bootstrap_runs_before_coordinator_import() -> None:
     assert source.index("_enable_local_vendored_core()") < source.index("from .coordinator import PoolOSCoordinator")
 
 
-def test_source_manifest_remains_release_pinned_for_future_distribution() -> None:
+def test_source_manifest_remains_release_pinned_for_hacs_distribution() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["requirements"] == [
         "poolos@git+https://github.com/davidabuch/poolos.git@v0.11.104",
@@ -52,12 +52,14 @@ def test_local_builder_produces_self_contained_custom_component(tmp_path: Path) 
         assert not any("/.git/" in f"/{name}" or "/.venv/" in f"/{name}" for name in names)
 
 
-def test_local_commissioning_documentation_preserves_observation_only_boundary() -> None:
+def test_local_package_documentation_matches_scoped_live_runtime() -> None:
     guide = (ROOT / "docs" / "LOCAL_HOME_ASSISTANT_COMMISSIONING.md").read_text(encoding="utf-8").lower()
-    assert "authority: none" in guide
-    assert "command delivery: disabled" in guide
-    assert "control entities: none" in guide
-    assert "existing intellicenter integration remains authoritative" in guide
+    assert "legacy/self-contained local deployment package" in guide
+    assert "scoped and independently gated" in guide
+    assert "scoped_live" in guide
+    assert "manual_control" in guide
+    assert "observe_only" in guide
+    assert "hacs release workflow" in guide
 
 
 def test_validator_rejects_artifact_missing_vendor(tmp_path: Path) -> None:
