@@ -29,8 +29,8 @@ def test_coordinator_stores_advisory_evidence_without_execution() -> None:
 def test_dashboard_displays_recommendation_and_advisory_warning() -> None:
     text = (ROOT / "dashboards" / "poolos_control_center.yaml").read_text(encoding="utf-8")
     assert "sensor.poolos_control_center_operator_recommendation" in text
-    assert "advisory commissioning evidence only" in text
-    assert "cannot actuate equipment" in text
+    assert "advisory recommendations and retrospective analysis remain read-only" in text
+    assert "No actuation occurs from recommendations or retrospective analysis" in text
 
 
 def test_adr_and_roadmap_record_11_2d() -> None:
