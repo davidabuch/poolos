@@ -48,7 +48,7 @@ def test_config_flow_exposes_required_and_optional_entity_mappings() -> None:
     ):
         assert key in source
     assert "EntitySelector" in source
-    assert "DEFAULT_OPERATING_MODE" in source
+    assert "DEFAULT_OPERATING_MODE" not in source
 
 
 def test_observation_mapping_uses_existing_canonical_models() -> None:
@@ -90,15 +90,15 @@ def test_diagnostics_report_mapping_health_without_state_values() -> None:
     assert '"value"' not in observation.split("def diagnostics", 1)[1].split("def configured_entity_mapping", 1)[0]
 
 
-def test_runtime_translation_is_present_without_core_build_strings() -> None:
+def test_runtime_translation_describes_scoped_live_control() -> None:
     assert not (COMPONENT / "strings.json").exists()
     translation = json.loads(
         (COMPONENT / "translations" / "en.json").read_text(encoding="utf-8")
     )
     assert "config" in translation
     description = translation["config"]["step"]["user"]["description"]
-    assert "OBSERVE" in description
-    assert "cannot send commands" in description
+    assert "scoped live control" in description
+    assert "independently gated" in description
 
 
 def test_no_control_platform_or_service_is_added() -> None:
