@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol
@@ -18,6 +18,45 @@ class PumpCapabilityEvidenceSource(StrEnum):
     COMMISSIONED_OVERRIDE = "commissioned_override"
 
 
+class PumpCapabilitySupport(StrEnum):
+    """Tri-state support evidence for capabilities that can be commissioned."""
+
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class CommissionedPumpCapability:
+    """Persisted installer evidence bound to one exact provider pump identity."""
+
+    provider: str
+    pump_id: str
+    flow_control_supported: bool
+    minimum_gpm: int | None = None
+    maximum_gpm: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.provider.strip():
+            raise ValueError("commissioned pump provider must not be blank")
+        if not self.pump_id.strip():
+            raise ValueError("commissioned pump_id must not be blank")
+        if self.flow_control_supported:
+            PumpCapabilityProfile._validate_range(
+                self.minimum_gpm,
+                self.maximum_gpm,
+                "commissioned GPM",
+            )
+            if self.minimum_gpm is None or self.maximum_gpm is None:
+                raise ValueError(
+                    "commissioned GPM support requires complete positive limits"
+                )
+        elif self.minimum_gpm is not None or self.maximum_gpm is not None:
+            raise ValueError(
+                "commissioned RPM-only capability must not include GPM limits"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class PumpCapabilityProfile:
     """Typed, vendor-neutral control and sensing capabilities for one pump."""
@@ -31,6 +70,7 @@ class PumpCapabilityProfile:
     maximum_rpm: int | None = None
     minimum_gpm: int | None = None
     maximum_gpm: int | None = None
+    flow_control_support: PumpCapabilitySupport = PumpCapabilitySupport.UNKNOWN
 
     def __post_init__(self) -> None:
         if not self.pump_id.strip():
@@ -47,6 +87,11 @@ class PumpCapabilityProfile:
             self.minimum_gpm is None or self.maximum_gpm is None
         ):
             raise ValueError("flow control capability requires proven GPM limits")
+        if (
+            Capability.FLOW_CONTROL in self.capabilities
+            and self.flow_control_support is PumpCapabilitySupport.UNSUPPORTED
+        ):
+            raise ValueError("flow control cannot be both supported and unsupported")
 
     @staticmethod
     def _validate_range(
@@ -67,6 +112,14 @@ class PumpCapabilityProfile:
 
         return capability in self.capabilities
 
+    @property
+    def effective_flow_control_support(self) -> PumpCapabilitySupport:
+        """Return the resolved tri-state flow-control evidence."""
+
+        if self.supports(Capability.FLOW_CONTROL):
+            return PumpCapabilitySupport.SUPPORTED
+        return self.flow_control_support
+
     def as_mapping(self) -> Mapping[str, Any]:
         """Return an immutable HA/diagnostics representation."""
 
@@ -79,6 +132,7 @@ class PumpCapabilityProfile:
                 "rpm_control": self.supports(Capability.RPM_CONTROL),
                 "rpm_sensing": self.supports(Capability.RPM_SENSING),
                 "gpm_control": self.supports(Capability.FLOW_CONTROL),
+                "gpm_control_status": self.effective_flow_control_support.value,
                 "gpm_sensing": self.supports(Capability.FLOW_SENSING),
                 "minimum_rpm": self.minimum_rpm,
                 "maximum_rpm": self.maximum_rpm,
@@ -86,6 +140,37 @@ class PumpCapabilityProfile:
                 "maximum_gpm": self.maximum_gpm,
             }
         )
+
+
+def resolve_commissioned_pump_capability(
+    profile: PumpCapabilityProfile | None,
+    commissioned: CommissionedPumpCapability | None,
+) -> PumpCapabilityProfile | None:
+    """Apply exact-identity commissioning only when native/adapter evidence is unknown."""
+
+    if profile is None or commissioned is None:
+        return profile
+    if profile.provider != commissioned.provider or profile.pump_id != commissioned.pump_id:
+        return profile
+    if profile.effective_flow_control_support is not PumpCapabilitySupport.UNKNOWN:
+        return profile
+
+    if commissioned.flow_control_supported:
+        return replace(
+            profile,
+            evidence_source=PumpCapabilityEvidenceSource.COMMISSIONED_OVERRIDE,
+            capabilities=frozenset(
+                set(profile.capabilities) | {Capability.FLOW_CONTROL}
+            ),
+            minimum_gpm=commissioned.minimum_gpm,
+            maximum_gpm=commissioned.maximum_gpm,
+            flow_control_support=PumpCapabilitySupport.SUPPORTED,
+        )
+    return replace(
+        profile,
+        evidence_source=PumpCapabilityEvidenceSource.COMMISSIONED_OVERRIDE,
+        flow_control_support=PumpCapabilitySupport.UNSUPPORTED,
+    )
 
 
 class PumpCapabilityProvider(Protocol):
@@ -96,11 +181,14 @@ class PumpCapabilityProvider(Protocol):
         *,
         body: str,
     ) -> PumpCapabilityProfile | None:
-        """Return positive capability evidence for one hydraulic body."""
+        """Return resolved capability evidence for one hydraulic body."""
 
 
 __all__ = [
+    "CommissionedPumpCapability",
     "PumpCapabilityEvidenceSource",
     "PumpCapabilityProfile",
     "PumpCapabilityProvider",
+    "PumpCapabilitySupport",
+    "resolve_commissioned_pump_capability",
 ]
