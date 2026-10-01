@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
+from .control_status import runtime_control_status
 from .coordinator import PoolOSCoordinator
 from poolos.integration import ThermalBody
 from poolos.solar_recorder_diagnostics import (
@@ -880,27 +881,27 @@ SENSORS = (
     PoolOSControlCenterSensorDescription(
         "operating_mode",
         "Operating Mode",
-        lambda coordinator, runtime: runtime.operating_mode,
+        lambda coordinator, runtime: runtime_control_status(runtime)[
+            "control_profile"
+        ],
         lambda coordinator, runtime: {
-            "authority": "none",
-            "command_delivery_enabled": False,
+            **runtime_control_status(runtime),
             "integration_version": INTEGRATION_VERSION,
         },
-        "mdi:shield-eye",
+        "mdi:shield-check",
     ),
     PoolOSControlCenterSensorDescription(
         "commissioning_stage",
-        "Commissioning Stage",
-        lambda coordinator, runtime: "HIGH_FIDELITY_OBSERVATION_READY",
+        "Release Readiness",
+        lambda coordinator, runtime: "V1_RELEASE_CANDIDATE",
         lambda coordinator, runtime: {
-            "completed_milestones": [
-                "11.1A", "11.1B", "11.1C", "11.1D", "11.1E",
-                "11.2A", "11.2B", "11.2C", "11.2D", "11.2E",
-                "11.3A", "11.3B", "11.3C", "11.3D", "11.4A",
-                "11.5",
-                "11.5.1", "11.6", "11.6.1", "12.0A",
+            "release_line": "1.0",
+            "status": "runtime_truth_cleanup_in_progress",
+            "remaining_work": [
+                "retire_obsolete_commissioning_language",
+                "reconcile_public_documentation",
+                "complete_v1_release_readiness_audit",
             ],
-            "next_stage": "PUBLIC_RELEASE_AND_HA_COMMISSIONING_AUDIT",
             "authority_increase_requires_approval": True,
         },
         "mdi:progress-check",
