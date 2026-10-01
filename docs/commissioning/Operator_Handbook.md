@@ -1,124 +1,122 @@
 # PoolOS Operator Handbook
 
-## What PoolOS Is
+## What PoolOS is
 
-PoolOS is an evidence-driven operating system that observes, models, explains,
-and optimizes pool and spa operation. It begins as an observer and gains authority
-only when the operator explicitly approves it.
+PoolOS is the active pool and spa controller for its commissioned domains. It observes native
+controller state, evaluates policy, manages scoped ownership, issues eligible commands, verifies
+physical consequences, and records evidence.
 
-## Operating Modes
+It is not governed by one global "CONTROL" switch. Physical authority is intentionally split by
+domain so one subsystem can be live while another remains disabled or advisory.
 
-| Mode | What PoolOS may do | What PoolOS may not do |
-|---|---|---|
-| OBSERVE | Read, normalize, diagnose, and record | Recommend or command |
-| LEARN | Derive inspectable operating characteristics | Recommend or command |
-| ADVISE | Present recommendations and alternatives | Send commands |
-| SHADOW | Build complete hypothetical execution plans | Deliver commands |
-| ASSIST | Execute approved bounded capabilities | Control unapproved capabilities |
-| CONTROL | Operate within approved policy and safety limits | Exceed configured authority |
+## Operating status
 
-## Why PoolOS Has Not Acted
+The **Operating Mode** diagnostic reports the current control profile:
+
+| Profile | Meaning |
+|---|---|
+| `SCOPED_LIVE` | Command transport is available and one or more autonomous control domains are enabled |
+| `MANUAL_CONTROL` | Command transport is available, autonomous domains are disabled |
+| `OBSERVE_ONLY` | No physical command-delivery transport is available |
+
+The profile is descriptive. Use the individual domain gates to understand or change authority.
+
+## Main control gates
+
+- **Automatic Filtration Execution** — permits automatic filtration purposes.
+- **Automatic Thermal Execution** — permits the automatic thermal driver.
+- **Thermal Live Execution** — permits physical thermal delivery; both thermal gates are required for autonomous thermal control.
+- **Grid Outage Physical Safety** — permits reduction-only confirmed-outage protection.
+- **Pool / Hot Tub Sanitation** — operator-started bounded maintenance sessions.
+- **PoolOS Maintenance Mode** — global PoolOS physical-command deny.
+
+A switch being ON does not guarantee a command will be issued. Current evidence, ownership,
+policy, safety, transport readiness, and verification rules still apply.
+
+## Why PoolOS has not acted
 
 Common reasons include:
 
-- the current mode does not permit actuation;
-- the capability is not armed;
+- the relevant scoped gate is OFF;
+- Maintenance Mode is ON;
 - required evidence is missing, stale, unavailable, or contradictory;
-- an external or manual owner currently has authority;
-- a safety or policy gate blocked the action;
-- PoolOS delivered a command but has not verified the physical result;
-- the system requires operator intervention.
+- an intentional operator action owns or restrains the affected domain;
+- controller mode or topology is incompatible;
+- a safety or policy rule blocks the action;
+- a prior command is still awaiting authoritative verification;
+- the current policy simply does not require action.
 
-The dashboard and Flight Recorder should expose the exact reason.
+Use the Operations Center diagnostics and reason codes rather than inferring from equipment state alone.
 
-## Eligibility Versus Activation
+## Human override
 
-PoolOS may report that a higher mode is eligible. This means the technical
-criteria are satisfied. It does not mean PoolOS changed modes.
+Manual operation is respected according to the ownership contracts. PoolOS must not treat every
+physical mismatch as operator intent. Positive intentional operator control can preempt the
+affected domain; unrelated domains should remain autonomous where safe.
 
-Every increase in authority requires explicit operator approval. PoolOS may
-automatically lower authority when safety or health requires it.
+A manual OFF can cancel the current session without permanently disabling future PoolOS policy.
 
-## Human Override
+## Maintenance Mode
 
-Manual operation remains authoritative within the safety model. PoolOS must not
-fight an unexplained operator or equipment-panel change. It should observe the
-change, classify ownership, and explain what it is doing.
+Use **PoolOS Maintenance Mode** when PoolOS must be prevented from issuing physical commands
+globally while observation continues.
 
-Safety constraints may still stop an unsafe condition. Such intervention must be
-visible and recorded.
+After enabling Maintenance Mode:
 
-## Returning to OBSERVE
+- confirm the switch is ON;
+- verify no new PoolOS physical delivery is permitted;
+- leave native/manual controller access available;
+- diagnose the underlying issue before clearing the deny.
 
-Use the PoolOS operating-mode control to select `OBSERVE`. The rollback action
-should immediately block new PoolOS commands while preserving observations,
-diagnostics, and Flight Recorder evidence.
+Clearing Maintenance Mode restores eligibility, not stale ownership or stale commands.
 
-After rollback:
+## Reset PoolOS Control
 
-- confirm the displayed current mode is `OBSERVE`;
-- confirm PoolOS owns no active equipment capability;
-- verify the native controller or manual controls remain available;
-- review the recorded reason for rollback before rearming.
+**Reset PoolOS Control** creates a new authority epoch and drives a verified safe baseline for
+PoolOS-owned control state. It is a recovery tool, not a routine mode selector.
 
-## Understanding a Recommendation
+Use it only when a reset of PoolOS authority/session state is intentionally required.
 
-A recommendation should answer:
+## Understanding command status
 
-- What is PoolOS proposing?
-- Why now?
-- Which observations and policies support it?
-- What assumptions were made?
-- What alternatives were considered?
-- What outcome is expected?
-- How fresh and reliable is the evidence?
+PoolOS separates:
 
-Do not approve a recommendation that cannot answer these questions.
+1. **eligible / authorized** — policy and authority permit the command;
+2. **accepted** — the transport accepted the exact command;
+3. **observed** — later authoritative evidence arrived;
+4. **verified** — physical state matches the expected result;
+5. **converged / handed back** — the purpose completed safely.
 
-## Understanding Command Status
+Accepted delivery alone is not physical success.
 
-PoolOS separates command delivery from physical success:
+## Restart behavior
 
-1. **Delivered:** Home Assistant accepted the service call.
-2. **Observed:** relevant state evidence arrived.
-3. **Verified:** observed state matches the expectation.
-4. **Reconciled:** PoolOS determined what should happen next.
-5. **Recovery directed:** policy allowed a next-step directive.
+A restart does not fabricate operator intent or reconstruct arbitrary stale authority. PoolOS may
+restore only specifically supported durable intent or bounded recovery state, and otherwise
+requires fresh authoritative evidence and legitimate acquisition boundaries.
 
-A delivered command is not automatically a successful equipment change.
+After a restart verify:
 
-## When PoolOS Disagrees With IntelliCenter
+- Observation Health;
+- Operating Mode / control profile;
+- domain gates;
+- ownership diagnostics;
+- current Pool/Spa topology and pump state;
+- any pending cleanup/recovery state.
 
-During ADVISE or SHADOW mode, disagreement is expected and useful. Review:
+## Recommendations and retrospectives
 
-- whether both systems used the same current facts;
-- whether IntelliCenter followed a native schedule or manual command;
-- whether PoolOS identified a safety, cost, energy, or runtime concern;
-- whether any observation was stale or unavailable;
-- whether the recommendation remains explainable after the actual outcome.
+Recommendations, behavioral inference, daily retrospective analysis, and similar intelligence
+surfaces are advisory/read-only unless a separate production executor explicitly owns the action.
+Their presence does not imply equipment authority.
 
-Do not transfer authority merely because PoolOS produced a different answer.
-
-## After a Restart or Outage
-
-PoolOS should reconstruct state from current observations and persisted evidence.
-It must not assume that a prior command or schedule remains valid. Confirm:
-
-- operating mode;
-- entity health and freshness;
-- ownership state;
-- armed capabilities;
-- pending verification or recovery evidence.
-
-If these cannot be confirmed, remain in or return to `OBSERVE`.
-
-## Operator Responsibilities
+## Operator responsibilities
 
 The operator remains responsible for:
 
-- approving authority changes;
-- reviewing unresolved anomalies;
-- maintaining valid entity mappings and credentials;
-- testing rollback and manual control;
-- keeping native safety functions operational unless formally replaced;
-- deciding when conflicting schedules or automations may be retired.
+- deciding which scoped capabilities are enabled;
+- preserving native safety systems unless formally replaced;
+- reviewing unresolved physical anomalies;
+- testing manual recovery and Maintenance Mode;
+- validating equipment changes after controller/firmware/hardware changes;
+- physically commissioning newly expanded authority.
