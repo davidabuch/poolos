@@ -28,6 +28,11 @@ from .const import (
     CONF_SANITATION_RPM,
     CONF_SANITATION_UNIT,
     CONF_SANITATION_GPM,
+    CONF_COMMISSIONED_PUMP_MODE,
+    CONF_COMMISSIONED_PUMP_PROVIDER,
+    CONF_COMMISSIONED_PUMP_ID,
+    CONF_COMMISSIONED_PUMP_MIN_GPM,
+    CONF_COMMISSIONED_PUMP_MAX_GPM,
     CONF_POOL_SANITATION_DURATION_MINUTES,
     CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
     CONF_PUMP_PRIMING_RPM,
@@ -68,6 +73,8 @@ from .const import (
     DEFAULT_POOL_SANITATION_DURATION_MINUTES,
     DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
     DEFAULT_OPERATING_MODE,
+    DEFAULT_COMMISSIONED_PUMP_MODE,
+    COMMISSIONED_PUMP_MODE_OPTIONS,
     DEFAULT_PUMP_TARGET_UNIT,
     PUMP_TARGET_UNIT_OPTIONS,
     DOMAIN,
@@ -310,6 +317,40 @@ def _settings_schema(current: dict[str, Any]) -> vol.Schema:
     """Extend the legacy RPM settings with commissioned GPM purposes only."""
 
     fields = dict(_mapping_schema(current).schema)
+    fields[
+        vol.Required(
+            CONF_COMMISSIONED_PUMP_MODE,
+            default=current.get(
+                CONF_COMMISSIONED_PUMP_MODE,
+                DEFAULT_COMMISSIONED_PUMP_MODE,
+            ),
+        )
+    ] = vol.In(COMMISSIONED_PUMP_MODE_OPTIONS)
+    fields[
+        vol.Optional(
+            CONF_COMMISSIONED_PUMP_PROVIDER,
+            default=current.get(CONF_COMMISSIONED_PUMP_PROVIDER, vol.UNDEFINED),
+        )
+    ] = str
+    fields[
+        vol.Optional(
+            CONF_COMMISSIONED_PUMP_ID,
+            default=current.get(CONF_COMMISSIONED_PUMP_ID, vol.UNDEFINED),
+        )
+    ] = str
+    fields[
+        vol.Optional(
+            CONF_COMMISSIONED_PUMP_MIN_GPM,
+            default=current.get(CONF_COMMISSIONED_PUMP_MIN_GPM, vol.UNDEFINED),
+        )
+    ] = _positive_whole_gpm
+    fields[
+        vol.Optional(
+            CONF_COMMISSIONED_PUMP_MAX_GPM,
+            default=current.get(CONF_COMMISSIONED_PUMP_MAX_GPM, vol.UNDEFINED),
+        )
+    ] = _positive_whole_gpm
+
     for unit_key, gpm_key in (
         (CONF_PUMP_FILTRATION_UNIT, CONF_PUMP_FILTRATION_GPM),
         (CONF_PUMP_SOLAR_HEATING_UNIT, CONF_PUMP_SOLAR_HEATING_GPM),
