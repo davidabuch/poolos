@@ -102,6 +102,6 @@ def test_roadmap_marks_113d_done_and_release_readiness_is_current() -> None:
     assert "| 11.3D | Daily operational retrospective + counterfactual report | DONE |" in roadmap
     assert "### Epic 11.3D — Daily Operational Retrospective + Counterfactual Report" in roadmap
     sensor = (COMPONENT / "sensor.py").read_text(encoding="utf-8")
-    assert '"V1_RELEASE_CANDIDATE"' in sensor
+    assert '"V1_RELEASE"' in sensor
     assert '"release_line": "1.0"' in sensor
-    assert '"runtime_truth_cleanup_in_progress"' in sensor
+    assert '"production_release"' in sensor
