@@ -62,7 +62,7 @@ def test_control_center_exposes_daily_actual_and_counterfactual_read_only() -> N
     dashboard = (ROOT / "dashboards" / "poolos_control_center.yaml").read_text(encoding="utf-8")
     assert "sensor.poolos_control_center_daily_operational_retrospective" in dashboard
     assert "sensor.poolos_control_center_daily_counterfactual_report" in dashboard
-    assert "No actuation occurs" in dashboard
+    assert "No actuation occurs from recommendations or retrospective analysis" in dashboard
 
 
 def test_retrospective_language_refuses_unsupported_daily_differences() -> None:
