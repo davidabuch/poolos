@@ -14,7 +14,7 @@ views:
               ## SCOPED LIVE CONTROL
               **Physical authority is domain-scoped, evidence-bound, and independently gated.**
 
-              PoolOS can control commissioned equipment domains while advisory recommendations and retrospective analysis remain read-only.
+              PoolOS can control commissioned equipment domains while advisory recommendations and retrospective analysis remain read-only. No actuation occurs from recommendations or retrospective analysis.
           - type: tile
             entity: sensor.poolos_control_center_observation_health
             name: Observation Health
