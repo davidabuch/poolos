@@ -1,4 +1,4 @@
-"""Regression contracts for retired legacy IntelliCenter HA mappings."""
+"""Regression contracts for retired commissioning-era HA configuration."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from poolos.observations import ObservationQuality, ObservationSourceKind, PoolO
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
 TEST_PACKAGE = "_poolos_component_config_cleanup_test"
+
+RETIRED_RUNTIME_KEYS = frozenset({"operating_mode"})
 
 RETIRED_KEYS = frozenset(
     {
@@ -79,6 +81,7 @@ def test_retired_selectors_are_absent_while_current_mapping_surface_remains() ->
     option_fields = translations["options"]["step"]["init"]["data"]
 
     assert CONST.RETIRED_LEGACY_INTELLICENTER_ENTITY_OPTIONS == RETIRED_KEYS
+    assert CONST.RETIRED_LEGACY_RUNTIME_OPTIONS == RETIRED_RUNTIME_KEYS
     assert RETIRED_KEYS.isdisjoint(CONST.ALL_ENTITY_OPTIONS)
     assert RETIRED_KEYS.isdisjoint(config_fields)
     assert RETIRED_KEYS.isdisjoint(option_fields)
@@ -138,7 +141,6 @@ def test_migration_removes_only_retired_data_and_options() -> None:
     assert updated_entry is entry
     assert changes == {
         "data": {
-            "operating_mode": "OBSERVE",
             "diagnostics_enabled": False,
             "grid_status_entity": "binary_sensor.grid",
             "pool_thermostat_entity": "climate.pool",
@@ -150,15 +152,15 @@ def test_migration_removes_only_retired_data_and_options() -> None:
             "pump_rpm_entity": "sensor.pump_rpm",
         },
         "version": 2,
-        "minor_version": 1,
+        "minor_version": 2,
     }
 
 
 def test_migration_is_idempotent_and_rejects_unsupported_schema_versions() -> None:
     current = SimpleNamespace(
         version=2,
-        minor_version=1,
-        data={"operating_mode": "OBSERVE"},
+        minor_version=2,
+        data={},
         options={"diagnostics_enabled": True},
     )
     hass = _hass()
@@ -169,18 +171,18 @@ def test_migration_is_idempotent_and_rejects_unsupported_schema_versions() -> No
     for entry in (
         SimpleNamespace(version=1, minor_version=0, data={}, options={}),
         SimpleNamespace(version=3, minor_version=0, data={}, options={}),
-        SimpleNamespace(version=2, minor_version=2, data={}, options={}),
+        SimpleNamespace(version=2, minor_version=3, data={}, options={}),
     ):
         assert MIGRATION.migrate_config_entry(hass, entry) is False
     assert hass.config_entries.updates == []
 
 
-def test_config_flow_and_supported_migration_publish_schema_2_1() -> None:
+def test_config_flow_and_supported_migration_publish_schema_2_2() -> None:
     flow = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
     integration = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
 
     assert CONST.CONFIG_ENTRY_VERSION == 2
-    assert CONST.CONFIG_ENTRY_MINOR_VERSION == 1
+    assert CONST.CONFIG_ENTRY_MINOR_VERSION == 2
     assert "VERSION = CONFIG_ENTRY_VERSION" in flow
     assert "MINOR_VERSION = CONFIG_ENTRY_MINOR_VERSION" in flow
     assert "async def async_migrate_entry(" in integration
