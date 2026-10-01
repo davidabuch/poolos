@@ -61,11 +61,6 @@ CONF_SANITATION_UNIT = "sanitation_unit"
 CONF_SANITATION_GPM = "sanitation_gpm"
 
 # Optional installer commissioning used only when automatic adapter evidence is UNKNOWN.
-CONF_COMMISSIONED_PUMP_MODE = "commissioned_pump_mode"
-CONF_COMMISSIONED_PUMP_PROVIDER = "commissioned_pump_provider"
-CONF_COMMISSIONED_PUMP_ID = "commissioned_pump_id"
-CONF_COMMISSIONED_PUMP_MIN_GPM = "commissioned_pump_min_gpm"
-CONF_COMMISSIONED_PUMP_MAX_GPM = "commissioned_pump_max_gpm"
 COMMISSIONED_PUMP_MODE_AUTOMATIC = "automatic"
 COMMISSIONED_PUMP_MODE_RPM_ONLY = "rpm_only"
 COMMISSIONED_PUMP_MODE_RPM_GPM = "rpm_gpm"
@@ -75,6 +70,17 @@ COMMISSIONED_PUMP_MODE_OPTIONS = (
     COMMISSIONED_PUMP_MODE_RPM_GPM,
 )
 DEFAULT_COMMISSIONED_PUMP_MODE = COMMISSIONED_PUMP_MODE_AUTOMATIC
+
+CONF_POOL_COMMISSIONED_PUMP_MODE = "pool_commissioned_pump_mode"
+CONF_POOL_COMMISSIONED_PUMP_PROVIDER = "pool_commissioned_pump_provider"
+CONF_POOL_COMMISSIONED_PUMP_ID = "pool_commissioned_pump_id"
+CONF_POOL_COMMISSIONED_PUMP_MIN_GPM = "pool_commissioned_pump_min_gpm"
+CONF_POOL_COMMISSIONED_PUMP_MAX_GPM = "pool_commissioned_pump_max_gpm"
+CONF_SPA_COMMISSIONED_PUMP_MODE = "spa_commissioned_pump_mode"
+CONF_SPA_COMMISSIONED_PUMP_PROVIDER = "spa_commissioned_pump_provider"
+CONF_SPA_COMMISSIONED_PUMP_ID = "spa_commissioned_pump_id"
+CONF_SPA_COMMISSIONED_PUMP_MIN_GPM = "spa_commissioned_pump_min_gpm"
+CONF_SPA_COMMISSIONED_PUMP_MAX_GPM = "spa_commissioned_pump_max_gpm"
 CONF_POOL_SANITATION_DURATION_MINUTES = "pool_sanitation_duration_minutes"
 DEFAULT_POOL_SANITATION_DURATION_MINUTES = 240
 CONF_HOT_TUB_SANITATION_DURATION_MINUTES = "hot_tub_sanitation_duration_minutes"
