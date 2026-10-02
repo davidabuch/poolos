@@ -8,7 +8,7 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.3`; release candidate: `1.0.4`.
+Current production integration line: `1.0.4`; release candidate: `1.0.5`.
 
 PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
 chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
@@ -28,6 +28,16 @@ native safety-topology reobservation for that evidence epoch through the existin
 GetParamList path. It does not fabricate timestamps, restore ownership from state,
 add a polling loop, or command equipment. v1.0.4 packages that hotfix for continued
 physical re-commissioning.
+
+Phase 4 commissioning of v1.0.4 then exposed two additional compatibility/liveness defects. First,
+Reset could reach and verify the OFF/0 safe baseline, close Reset authority from its
+coordinator-listener fallback after a long-running service timeout/cancellation, yet fail to
+publish a subsequent normal authoritative epoch. PR #394 makes Reset closure itself schedule
+one fresh coordinator evaluation after the fence closes. Second, PMPCIRC identity resolution
+still compared each object timestamp to the whole transport snapshot timestamp, so unrelated
+native publications could make a valid Pool/Spa pump assignment disappear. PR #395 removes that
+obsolete whole-snapshot equality while preserving the configured target's own field chronology.
+v1.0.5 packages both fixes for continued physical re-commissioning.
 
 See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
 chronology model. PR #388 was closed as superseded by PR #389.
