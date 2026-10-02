@@ -8,7 +8,7 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.4`; release candidate: `1.0.5`.
+Current production integration line: `1.0.5`; release candidate: `1.0.6`.
 
 PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
 chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
@@ -38,6 +38,16 @@ still compared each object timestamp to the whole transport snapshot timestamp, 
 native publications could make a valid Pool/Spa pump assignment disappear. PR #395 removes that
 obsolete whole-snapshot equality while preserving the configured target's own field chronology.
 v1.0.5 packages both fixes for continued physical re-commissioning.
+
+Phase 4 commissioning of v1.0.5 then proved PMPCIRC identity and physical Pool Solar
+delivery but exposed one remaining accepted-step verification gap. PoolOS reached Pool ON,
+Solar ON, and 2900 RPM, yet unchanged BODY activity could age beyond the strict 30-second
+live freshness window before an accepted pump step finished verification. PR #399 adds one
+receipt-bound, bounded read-only native reobservation for every accepted thermal step.
+Stale BODY evidence remains fail-closed and cannot verify anything; it waits for genuine
+fresh evidence until the original fixed deadline. Fresh contradiction, unusable evidence,
+operator intervention, and safety blockers still fail normally. v1.0.6 packages this fix
+for continued physical re-commissioning.
 
 See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
 chronology model. PR #388 was closed as superseded by PR #389.
