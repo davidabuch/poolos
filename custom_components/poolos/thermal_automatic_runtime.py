@@ -59,6 +59,7 @@ from poolos.thermal_runtime_orchestration import (
 from poolos.thermal_runtime_ownership import (
     ThermalQuickRestartCheckpoint,
     ThermalRuntimeOwnershipDisposition,
+    ThermalRuntimeOwnershipStatus,
 )
 
 from .coordinator import PoolOSCoordinator
@@ -836,6 +837,21 @@ class PoolOSThermalAutomaticRuntime:
         if not self.driver.requested_enabled:
             return False
 
+        # Truthful per-concept chronology means a stable owned thermal session
+        # cannot retain authority indefinitely from unchanged cached BODY/PUMP/
+        # source evidence.  While PoolOS retains a live ownership lease, keep
+        # those unchanged native facts current through the same bounded read-only
+        # path already used by probe acquisition and priming.  The loop stops as
+        # soon as ownership ends and never grants ownership from matching state.
+        ownership = getattr(self.orchestrator, "ownership", None)
+        state = None if ownership is None else getattr(ownership, "state", None)
+        lease = None if state is None else getattr(state, "lease", None)
+        if (
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+        ):
+            return True
+
         probe = self.driver.probe_execution_evidence()
         if (
             probe is not None
@@ -861,7 +877,7 @@ class PoolOSThermalAutomaticRuntime:
         )
 
     async def _owned_pump_session_reobservation_loop(self) -> None:
-        """Keep unchanged owned pump-session evidence current without manufacturing truth."""
+        """Keep unchanged owned thermal evidence current without manufacturing truth."""
 
         try:
             while not self._unloaded and self._owned_pump_session_reobservation_required():
