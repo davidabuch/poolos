@@ -2,13 +2,11 @@
 
 ## Status
 
-Proposed implementation; software validation and human review precede merge.
-No deployment or physical commissioning is implied. Complements ADR-110 and
-clarifies the snapshot-conflict and acceptance-clock rules of ADR-108/ADR-109.
+Accepted in PoolOS v1.0.3 after Phase 1 forensic review, repository regression validation, and hosted CI review. Physical commissioning remains a separate evidence level. Complements ADR-110 and clarifies the snapshot-conflict and acceptance-clock rules of ADR-108/ADR-109.
 
 ## Context
 
-The October 2 forensic review of v1.0.2 (`99a9122d2f402b9b76bba4abe6ae295181f7181b`)
+The October 2 forensic review of v1.0.3 (`99a9122d2f402b9b76bba4abe6ae295181f7181b`)
 reproduced five failures. Native callbacks could recompute a new thermal plan
 under an earlier coordinator frame; an equal-time changed fingerprint could then
 retire ownership established by a later accepted receipt. Filtration dated
@@ -86,7 +84,7 @@ cover current publication of old BODY facts, delayed metadata overwrite, and
 filtration retirement by pre-acquisition facts. The complete existing autonomous
 Spa startup/cleanup test injects changed delayed callbacks after accepted commands
 for target satisfaction, Solar loss and Pool priority return. Those three variants
-fail against unmodified v1.0.2 and pass with this repair.
+fail against unmodified v1.0.3 and pass with this repair.
 
 Native NotifyList telemetry does not prove human origin or expose a device sampling
 clock. Its defensible observable boundary is receipt. Read replies provide a
