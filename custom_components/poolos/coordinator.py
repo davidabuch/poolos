@@ -218,9 +218,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         )
 
     async def async_refresh_native_thermal_topology_evidence(self) -> bool:
-        """Refresh BODY topology through the existing bounded read-only native path."""
+        """Refresh BODY and shared-hydraulic topology through one bounded native read."""
 
-        return await self._async_refresh_native_runtime_evidence()
+        transport = self.independent_intellicenter_transport
+        if transport is None or self._unloading:
+            return False
+        return await transport._async_refresh_owned_pump_session_evidence(
+            cleanup_topology=True
+        )
 
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run the periodic reconciliation/backstop observation refresh."""
