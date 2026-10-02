@@ -1671,30 +1671,32 @@ class ThermalLiveExecutionEngine:
                 source_id=source_id,
             )
         if hydraulic_failure is not None:
-            spa_startup_topology_refresh_pending = (
-                _opportunistic_spa_startup_step(attempt.step)
-                and hydraulic_failure.startswith(
-                    "hydraulic_activity_evidence_stale:"
-                )
+            hydraulic_reobservation_pending = hydraulic_failure.startswith(
+                "hydraulic_activity_evidence_stale:"
             )
-            if spa_startup_topology_refresh_pending:
+            if hydraulic_reobservation_pending:
                 deadline = accepted_step_boundary(attempt) + policy.verification_timeout
                 if evaluated_at >= deadline:
+                    timeout_reason = (
+                        "spa_startup_hydraulic_reobservation_timed_out"
+                        if _opportunistic_spa_startup_step(attempt.step)
+                        else "thermal_hydraulic_reobservation_timed_out"
+                    )
                     return self._terminal(
                         replace(
                             session,
                             current_attempt=replace(attempt, lifecycle=lifecycle),
                         ),
                         ThermalLiveExecutionStatus.TIMED_OUT,
-                        "spa_startup_hydraulic_reobservation_timed_out",
+                        timeout_reason,
                         evaluated_at,
                     )
-                # A stable inactive BODY can legitimately emit no native
-                # transition while PoolOS moves from clean Pool idle into the
-                # opportunistic Spa successor.  For these two exact startup
-                # steps only, stale activity evidence is neither positive
-                # topology proof nor a contradiction.  Remain fail-closed and
-                # wait for the HA bridge's bounded read-only native refresh.
+                # Stale BODY activity is absence of current proof, not a
+                # contradictory topology transition.  The HA bridge issues one
+                # bounded read-only native reobservation for every accepted
+                # thermal step. Preserve accepted provenance and remain
+                # fail-closed until that fresh successor evidence arrives or
+                # the original fixed verification deadline expires.
                 return replace(
                     session,
                     status=ThermalLiveExecutionStatus.AWAITING_VERIFICATION,
