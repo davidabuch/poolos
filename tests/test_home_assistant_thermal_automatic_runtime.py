@@ -549,6 +549,39 @@ def test_owned_priming_and_probe_sessions_actively_reobserve_unchanged_native_ev
     asyncio.run(scenario(priming=False))
 
 
+def test_stable_owned_thermal_lease_actively_reobserves_unchanged_native_evidence() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        runtime, _, _, coordinator, driver = _runtime(module)
+        driver.requested_enabled = True
+        lease = SimpleNamespace(status=module.ThermalRuntimeOwnershipStatus.OWNED)
+        runtime.orchestrator = SimpleNamespace(
+            ownership=SimpleNamespace(
+                state=SimpleNamespace(lease=lease),
+            )
+        )
+
+        runtime._sync_owned_pump_session_reobservation()
+        await asyncio.wait_for(
+            coordinator.pump_session_refresh_event.wait(),
+            timeout=1,
+        )
+
+        assert coordinator.pump_session_refresh_count >= 1
+        assert runtime._owned_pump_session_reobservation_task is not None
+
+        lease.status = module.ThermalRuntimeOwnershipStatus.PREEMPTED
+        await asyncio.sleep(0.01)
+
+        task = runtime._owned_pump_session_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+        assert runtime._owned_pump_session_reobservation_task is None
+
+    asyncio.run(scenario())
+
+
 def test_unload_invalidates_final_authority_and_waits_for_inflight_task() -> None:
     async def scenario() -> None:
         module = _load_module()
