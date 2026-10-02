@@ -169,6 +169,17 @@ class ThermalRuntimeOrchestrator:
                     return self.assessment
                 if frame_fingerprint == self._last_frame_fingerprint:
                     return self.assessment
+                lease = self.ownership.state.lease
+                if (
+                    lease is not None
+                    and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                    and generated_at < lease.established_at
+                ):
+                    # A command can be accepted after the observation frame that
+                    # authorized it. A same-timestamp callback from that older
+                    # frame is stale relative to the newly established ownership
+                    # generation and must not fail-close or reinterpret the lease.
+                    return self.assessment
                 conflict_identity = _conflict_snapshot_identity(
                     self._last_frame_fingerprint,
                     frame_fingerprint,
