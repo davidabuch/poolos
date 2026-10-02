@@ -319,6 +319,12 @@ class PoolOSThermalAutomaticRuntime:
     _spa_startup_topology_reobservation_token: str | None = field(
         default=None, init=False, repr=False
     )
+    _shared_hydraulic_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
+    _shared_hydraulic_reobservation_epoch_identity: str | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
@@ -731,6 +737,8 @@ class PoolOSThermalAutomaticRuntime:
             self.driver.note_disabled_epoch(frame)
             self.coordinator.async_update_listeners()
             return
+        if self._sync_shared_hydraulic_reobservation():
+            return
         self._schedule_if_idle()
 
     def orchestration_failed(self, snapshot: ObservationSnapshot, error: Exception) -> None:
@@ -784,6 +792,12 @@ class PoolOSThermalAutomaticRuntime:
             spa_topology_task.cancel()
             await asyncio.gather(spa_topology_task, return_exceptions=True)
         self._spa_startup_topology_reobservation_task = None
+        shared_hydraulic_task = self._shared_hydraulic_reobservation_task
+        if shared_hydraulic_task is not None and not shared_hydraulic_task.done():
+            shared_hydraulic_task.cancel()
+            await asyncio.gather(shared_hydraulic_task, return_exceptions=True)
+        self._shared_hydraulic_reobservation_task = None
+        self._shared_hydraulic_reobservation_epoch_identity = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -919,6 +933,60 @@ class PoolOSThermalAutomaticRuntime:
         finally:
             if asyncio.current_task() is self._cleanup_topology_reobservation_task:
                 self._cleanup_topology_reobservation_task = None
+
+    def _sync_shared_hydraulic_reobservation(self) -> bool:
+        """Request one genuine safety-topology read for a stale admission epoch."""
+
+        if self._unloaded or not self.driver.requested_enabled:
+            return False
+        frame = self._latest_frame
+        if (
+            frame is None
+            or getattr(frame.orchestration, "blocking_reason", None)
+            != "thermal_orchestration_shared_hydraulic_inventory_incomplete"
+        ):
+            self._shared_hydraulic_reobservation_epoch_identity = None
+            return False
+        token = frame.epoch_identity
+        if self._shared_hydraulic_reobservation_epoch_identity == token:
+            return False
+        task = self._shared_hydraulic_reobservation_task
+        if task is not None and not task.done():
+            return True
+        self._shared_hydraulic_reobservation_epoch_identity = token
+        self._shared_hydraulic_reobservation_task = self.hass.async_create_task(
+            self._refresh_shared_hydraulic_topology_once(token),
+            "PoolOS shared hydraulic safety native reobservation",
+        )
+        return True
+
+    async def _refresh_shared_hydraulic_topology_once(self, token: str) -> None:
+        """Acquire fresh Waterfall/Jets/Slide topology without equipment commands."""
+
+        try:
+            if self._unloaded:
+                return
+            frame = self._latest_frame
+            if frame is None or frame.epoch_identity != token:
+                return
+            refresh = getattr(
+                self.coordinator,
+                "async_refresh_native_thermal_safety_topology_evidence",
+                None,
+            )
+            if refresh is None:
+                return
+            await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS shared hydraulic safety reobservation failed")
+        finally:
+            if asyncio.current_task() is self._shared_hydraulic_reobservation_task:
+                self._shared_hydraulic_reobservation_task = None
+            # The read publishes through the coordinator, which creates a new
+            # coherent authoritative frame. Never run the stale blocked frame
+            # merely because the read task completed.
 
     def _sync_spa_startup_topology_reobservation(self) -> bool:
         """Start one immediate read-only BODY refresh per accepted Spa startup command."""

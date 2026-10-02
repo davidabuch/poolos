@@ -152,6 +152,7 @@ class FakeHass:
             "PoolOS owned pump-session native reobservation",
             "PoolOS cleanup topology native reobservation",
             "PoolOS Spa startup native topology reobservation",
+            "PoolOS shared hydraulic safety native reobservation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -177,6 +178,11 @@ def _runtime(module: ModuleType):
         coordinator.thermal_topology_refresh_event.set()
         return True
 
+    async def refresh_thermal_safety_topology_evidence() -> bool:
+        coordinator.thermal_safety_topology_refresh_count += 1
+        coordinator.thermal_safety_topology_refresh_event.set()
+        return True
+
     coordinator = SimpleNamespace(
         listener_updates=0,
         pump_session_refresh_count=0,
@@ -185,9 +191,14 @@ def _runtime(module: ModuleType):
         cleanup_topology_refresh_event=asyncio.Event(),
         thermal_topology_refresh_count=0,
         thermal_topology_refresh_event=asyncio.Event(),
+        thermal_safety_topology_refresh_count=0,
+        thermal_safety_topology_refresh_event=asyncio.Event(),
         async_refresh_native_owned_pump_session_evidence=refresh_owned_pump_session_evidence,
         async_refresh_native_cleanup_topology_evidence=refresh_cleanup_topology_evidence,
         async_refresh_native_thermal_topology_evidence=refresh_thermal_topology_evidence,
+        async_refresh_native_thermal_safety_topology_evidence=(
+            refresh_thermal_safety_topology_evidence
+        ),
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -216,8 +227,17 @@ def _snapshot(at: datetime) -> SimpleNamespace:
     return SimpleNamespace(generated_at=at, observations=())
 
 
-def _orchestration(at: datetime, identity: str) -> SimpleNamespace:
-    return SimpleNamespace(snapshot_identity=identity, evaluated_at=at)
+def _orchestration(
+    at: datetime,
+    identity: str,
+    *,
+    blocking_reason: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        snapshot_identity=identity,
+        evaluated_at=at,
+        blocking_reason=blocking_reason,
+    )
 
 
 def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_frame() -> None:
@@ -361,6 +381,57 @@ def test_cleanup_provenance_triggers_one_post_boundary_native_refresh() -> None:
 
         assert coordinator.cleanup_topology_refresh_count == 2
         assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-2"
+
+    asyncio.run(scenario())
+
+
+def test_stale_shared_hydraulic_admission_requests_one_genuine_native_reobservation() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, _, coordinator, driver = _runtime(module)
+        runtime.set_enabled(True)
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(
+                NOW,
+                "stale-safety-1",
+                blocking_reason="thermal_orchestration_shared_hydraulic_inventory_incomplete",
+            ),
+        )
+
+        assert len(hass.tasks) == 1
+        await asyncio.wait_for(
+            coordinator.thermal_safety_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await hass.tasks[0]
+        assert coordinator.thermal_safety_topology_refresh_count == 1
+        assert driver.processed == []
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(
+                NOW,
+                "stale-safety-1",
+                blocking_reason="thermal_orchestration_shared_hydraulic_inventory_incomplete",
+            ),
+        )
+        await asyncio.sleep(0)
+        assert coordinator.thermal_safety_topology_refresh_count == 1
+
+        coordinator.thermal_safety_topology_refresh_event.clear()
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=1)),
+            None,
+            _orchestration(NOW + timedelta(seconds=1), "fresh-safety-2"),
+        )
+        assert len(hass.tasks) == 2
+        driver.release.set()
+        await hass.tasks[-1]
+        assert driver.processed == ["fresh-safety-2"]
 
     asyncio.run(scenario())
 
