@@ -450,11 +450,11 @@ def test_same_timestamp_changed_observation_fails_closed(
     assert result.candidate_id is None
 
 
-def test_same_timestamp_conflict_after_newer_ownership_establishment_fails_closed_monotonically() -> None:
-    """Reproduce the live 09:30 race without weakening conflict detection."""
+def test_same_timestamp_conflict_before_newer_ownership_establishment_is_stale() -> None:
+    """A pre-acceptance frame cannot retire a newer accepted-command lease."""
 
     orchestrator = ThermalRuntimeOrchestrator()
-    _refresh(orchestrator, NOW)
+    first = _refresh(orchestrator, NOW)
     established_at = NOW + timedelta(milliseconds=50)
     _establish_pool_full_ownership(orchestrator, at=established_at)
 
@@ -469,15 +469,12 @@ def test_same_timestamp_conflict_after_newer_ownership_establishment_fails_close
 
     result = _refresh(orchestrator, NOW, observations=conflicting)
 
-    assert result.lifecycle is ThermalOrchestrationLifecycle.BLOCKED
-    assert result.blocking_reason == "thermal_orchestration_snapshot_conflict"
-    assert result.evaluated_at == NOW
-    assert result.ownership_status is ThermalRuntimeOwnershipStatus.RELINQUISHED
-    lease = result.ownership_decision.current_state.lease
+    assert result is first
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.OWNED
+    lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.established_at == established_at
-    assert lease.ended_at == established_at
-    assert lease.ended_at >= lease.established_at
+    assert lease.ended_at is None
 
 
 def test_same_timestamp_changed_plan_identity_fails_closed() -> None:
