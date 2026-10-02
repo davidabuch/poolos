@@ -984,13 +984,9 @@ class PoolOSThermalAutomaticRuntime:
         finally:
             if asyncio.current_task() is self._shared_hydraulic_reobservation_task:
                 self._shared_hydraulic_reobservation_task = None
-            if not self._unloaded and self.driver.requested_enabled:
-                latest = self._latest_frame
-                if (
-                    latest is not None
-                    and latest.epoch_identity != self.driver.last_epoch_identity
-                ):
-                    self._schedule_if_idle()
+            # The read publishes through the coordinator, which creates a new
+            # coherent authoritative frame. Never run the stale blocked frame
+            # merely because the read task completed.
 
     def _sync_spa_startup_topology_reobservation(self) -> bool:
         """Start one immediate read-only BODY refresh per accepted Spa startup command."""
