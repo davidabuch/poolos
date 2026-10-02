@@ -8,22 +8,30 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.3`.
+Current production integration line: `1.0.3`; release candidate: `1.0.4`.
 
-PoolOS 1.0 is released. Version 1.0.3 includes the filtration BODY_ON verification
-fix and chronology guards, but October 2 opportunistic Spa commissioning failed:
-the orchestrator could relinquish newer accepted BODY provenance before the driver
-saw an older conflicting callback. Healthy load/gates do not establish complete
-Spa commissioning.
+PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
+chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
+immutable authoritative input composition, and shared post-acceptance evidence
+admission across orchestration, ownership, thermal execution, cleanup, and filtration.
 
-The unmerged `fix/coherent-observation-command-chronology` candidate is based on
-`99a9122d2f402b9b76bba4abe6ae295181f7181b`. Its Phase 1 probes reproduce shared
-publication/observation/acceptance defects. The repair records per-field native
-chronology, pins immutable input composition, and shares accepted-command temporal
-admission across orchestration, ownership, thermal and filtration. See
-[ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md).
-PR #388 remains unmerged; its isolated guard does not address the complete boundary.
-No candidate deployment or physical commissioning has occurred.
+Phase 4 commissioning of v1.0.3 exposed one fail-closed liveness gap: Waterfall,
+Jets, and Slide could remain correctly OFF while their truthful startup observation
+timestamps aged past strict freshness. Periodic reconciliation republished cached
+native values without genuinely re-reading CIRCUIT STATUS, leaving Thermal blocked
+with `thermal_orchestration_shared_hydraulic_inventory_incomplete` despite a
+COMPLETE native inventory.
+
+PR #391 fixes that commissioning defect without weakening chronology or freshness.
+When shared-hydraulic safety evidence is stale, PoolOS performs one bounded read-only
+native safety-topology reobservation for that evidence epoch through the existing
+GetParamList path. It does not fabricate timestamps, restore ownership from state,
+add a polling loop, or command equipment. v1.0.4 packages that hotfix for continued
+physical re-commissioning.
+
+See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
+chronology model. PR #388 was closed as superseded by PR #389.
+
 
 ## Production control model
 
