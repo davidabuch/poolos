@@ -386,7 +386,11 @@ class FiltrationAutomaticExecutionDriver:
                 suspended
                 or (
                     self.attempt is not None
-                    and self.attempt.step is FiltrationExecutionStep.BODY_OFF
+                    and self.attempt.step
+                    in {
+                        FiltrationExecutionStep.BODY_ON,
+                        FiltrationExecutionStep.BODY_OFF,
+                    }
                 )
             ),
         )
