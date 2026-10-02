@@ -8,30 +8,36 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.3`; release candidate: `1.0.4`.
+Current production integration line: `1.0.4`; release candidate: `1.0.5`.
 
 PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
 chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
 immutable authoritative input composition, and shared post-acceptance evidence
 admission across orchestration, ownership, thermal execution, cleanup, and filtration.
 
-Phase 4 commissioning of v1.0.3 exposed one fail-closed liveness gap: Waterfall,
-Jets, and Slide could remain correctly OFF while their truthful startup observation
-timestamps aged past strict freshness. Periodic reconciliation republished cached
-native values without genuinely re-reading CIRCUIT STATUS, leaving Thermal blocked
-with `thermal_orchestration_shared_hydraulic_inventory_incomplete` despite a
-COMPLETE native inventory.
+Phase 4 commissioning then exposed two liveness defects that were consequences of moving
+to truthful per-concept chronology rather than reasons to weaken it.
 
-PR #391 fixes that commissioning defect without weakening chronology or freshness.
-When shared-hydraulic safety evidence is stale, PoolOS performs one bounded read-only
-native safety-topology reobservation for that evidence epoch through the existing
-GetParamList path. It does not fabricate timestamps, restore ownership from state,
-add a polling loop, or command equipment. v1.0.4 packages that hotfix for continued
-physical re-commissioning.
+PR #391, shipped in v1.0.4, fixes stale shared-hydraulic admission evidence. Waterfall,
+Jets, and Slide can remain correctly OFF while their original observations age; PoolOS
+now performs one bounded read-only native safety-topology reobservation for the blocked
+epoch through the existing GetParamList path. It does not fabricate timestamps, restore
+ownership from state, add a polling loop, or command equipment.
 
-See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
+PR #394 fixes Reset completion liveness. When Reset reaches its verified OFF/0 baseline
+and closes authority through the coordinator-listener fallback, it now guarantees one
+fresh authoritative evaluation instead of leaving Thermal indefinitely waiting for a
+post-authority-change epoch.
+
+PR #395 fixes PMPCIRC identity resolution under per-concept chronology. An unrelated
+later native publication no longer makes the current Pool/Spa PMPCIRC assignment
+disappear merely because the whole snapshot publication time advanced. The configured
+mode/setpoint keeps its actual contributing field timestamp, so downstream freshness,
+ownership, accepted-command consequence, and verification gates remain authoritative.
+
+v1.0.5 packages PRs #394 and #395 for continued physical re-commissioning. See
+[ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
 chronology model. PR #388 was closed as superseded by PR #389.
-
 
 ## Production control model
 
