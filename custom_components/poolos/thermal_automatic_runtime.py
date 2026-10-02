@@ -1178,8 +1178,6 @@ class PoolOSThermalAutomaticRuntime:
             return
         if self._sync_verification_topology_reobservation():
             return
-        if self._sync_spa_startup_topology_reobservation():
-            return
         latest = self._latest_frame
         if (
             latest is not None
