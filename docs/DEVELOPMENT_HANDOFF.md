@@ -8,9 +8,9 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.1`.
+Current production integration line: `1.0.2`.
 
-PoolOS 1.0 is released. Version 1.0.1 fixes the automatic-filtration BODY_ON verification race exposed on the first overnight cycle after the Sep 30 native-execution changes.
+PoolOS 1.0 is released. Version 1.0.2 includes the filtration BODY_ON verification fix and fixes a thermal ownership chronology race where a stale observation frame could terminate a lease before its accepted-command establishment boundary.
 
 ## Production control model
 
