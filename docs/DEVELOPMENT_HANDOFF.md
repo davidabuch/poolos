@@ -8,11 +8,9 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `0.11.104`.
+Current production integration line: `1.0.1`.
 
-The vendor-independent Python package metadata already identifies the core as `1.0.0`; final
-1.0 work is aligning the Home Assistant release line and production metadata after the
-release-readiness audit.
+PoolOS 1.0 is released. Version 1.0.1 fixes the automatic-filtration BODY_ON verification race exposed on the first overnight cycle after the Sep 30 native-execution changes.
 
 ## Production control model
 
