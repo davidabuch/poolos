@@ -2013,23 +2013,20 @@ def test_priming_hold_fails_closed_if_rpm_deviates_before_completion() -> None:
 
 
 @pytest.mark.parametrize(
-    ("pool_active", "spa_active", "stale", "unusable"),
+    ("pool_active", "spa_active", "unusable"),
     (
-        (False, False, (), ()),
-        (False, True, (), ()),
-        (True, True, (), ()),
-        (None, False, (), ()),
-        (True, None, (), ()),
-        (True, False, ("pool.active",), ()),
-        (True, False, ("spa.active",), ()),
-        (True, False, (), ("pool.active",)),
-        (True, False, (), ("spa.active",)),
+        (False, False, ()),
+        (False, True, ()),
+        (True, True, ()),
+        (None, False, ()),
+        (True, None, ()),
+        (True, False, ("pool.active",)),
+        (True, False, ("spa.active",)),
     ),
 )
-def test_priming_hold_fails_closed_when_pool_hydraulics_lose_continuity(
+def test_priming_hold_fails_closed_on_contradictory_missing_or_unusable_hydraulics(
     pool_active: bool | None,
     spa_active: bool | None,
-    stale: tuple[str, ...],
     unusable: tuple[str, ...],
 ) -> None:
     plan = priming_plan()
@@ -2048,14 +2045,13 @@ def test_priming_hold_fails_closed_when_pool_hydraulics_lose_continuity(
     )
     assert session.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
 
-    broken_at = NOW + timedelta(seconds=62)
+    broken_at = NOW + timedelta(seconds=20)
     session = engine.verify_current_step(
         session,
         hydraulic_store(
             at=broken_at,
             pool_active=pool_active,
             spa_active=spa_active,
-            stale=stale,
             unusable=unusable,
         ),
         current_context=session.originating_context,
@@ -2067,6 +2063,109 @@ def test_priming_hold_fails_closed_when_pool_hydraulics_lose_continuity(
     assert session.status is ThermalLiveExecutionStatus.FAILED
     assert session.failure_reason is not None
     assert session.failure_reason.startswith("hydraulic_continuity_lost:")
+
+
+@pytest.mark.parametrize("stale_concept", ("pool.active", "spa.active"))
+def test_stale_hydraulic_evidence_waits_for_bounded_reobservation_then_times_out(
+    stale_concept: str,
+) -> None:
+    engine, live_policy, session = delivered_priming_session()
+    before_deadline = NOW + timedelta(seconds=20)
+
+    waiting = engine.verify_current_step(
+        session,
+        hydraulic_store(
+            at=before_deadline,
+            stale=(stale_concept,),
+        ),
+        current_context=session.originating_context,
+        policy=live_policy,
+        evaluated_at=before_deadline,
+        source_id="native-intellicenter",
+    )
+
+    assert waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert waiting.failure_reason is None
+
+    after_deadline = NOW + timedelta(seconds=32)
+    timed_out = engine.verify_current_step(
+        waiting,
+        hydraulic_store(
+            at=after_deadline,
+            stale=(stale_concept,),
+        ),
+        current_context=waiting.originating_context,
+        policy=live_policy,
+        evaluated_at=after_deadline,
+        source_id="native-intellicenter",
+    )
+
+    assert timed_out.status is ThermalLiveExecutionStatus.TIMED_OUT
+    assert timed_out.failure_reason == "thermal_hydraulic_reobservation_timed_out"
+
+
+def test_pool_pump_step_survives_stale_body_gap_and_verifies_on_fresh_reobservation() -> None:
+    """Reproduce the v1.0.5 accepted-2900 / unchanged-BODY commissioning race."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.SOLAR,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    assert len(plan.operations) == 1
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+
+    engine = ThermalLiveExecutionEngine()
+    live_policy = policy()
+    session = engine.begin(plan, policy=live_policy, evidence=evidence(plan))
+    delivered_at = NOW + timedelta(seconds=1)
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=live_policy,
+            evidence=evidence(plan, at=delivered_at),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    assert waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+
+    stale_check_at = NOW + timedelta(seconds=20)
+    still_waiting = engine.verify_current_step(
+        waiting,
+        store(
+            "pump.rpm",
+            2900,
+            at=stale_check_at,
+            hydraulics_at=NOW - timedelta(seconds=11),
+        ),
+        current_context=waiting.originating_context,
+        policy=live_policy,
+        evaluated_at=stale_check_at,
+        source_id="native-intellicenter",
+    )
+
+    assert still_waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert still_waiting.failure_reason is None
+    assert still_waiting.current_attempt is not None
+    assert waiting.current_attempt is not None
+    assert (
+        still_waiting.current_attempt.receipt.command_id
+        == waiting.current_attempt.receipt.command_id
+    )
+
+    refreshed_at = NOW + timedelta(seconds=21)
+    completed = engine.verify_current_step(
+        still_waiting,
+        store("pump.rpm", 2900, at=refreshed_at),
+        current_context=still_waiting.originating_context,
+        policy=live_policy,
+        evaluated_at=refreshed_at,
+        source_id="native-intellicenter",
+    )
+
+    assert completed.status is ThermalLiveExecutionStatus.COMPLETED
+    assert completed.failure_reason is None
 
 
 def test_priming_hold_fails_closed_when_pump_stops() -> None:

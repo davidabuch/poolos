@@ -69,6 +69,7 @@ class FakeDriver:
     pump_session_purpose: object | None = None
     probe_evidence: object | None = None
     cleanup_provenance: object | None = None
+    verification_topology_token: str | None = None
     spa_topology_token: str | None = None
 
     def set_enabled(self, enabled: bool, **_: object) -> None:
@@ -101,6 +102,9 @@ class FakeDriver:
 
     def active_pump_session_purpose(self) -> object | None:
         return self.pump_session_purpose
+
+    def verification_topology_reobservation_token(self) -> str | None:
+        return self.verification_topology_token
 
     def opportunistic_spa_topology_reobservation_token(self) -> str | None:
         return self.spa_topology_token
@@ -152,6 +156,7 @@ class FakeHass:
             "PoolOS owned pump-session native reobservation",
             "PoolOS cleanup topology native reobservation",
             "PoolOS Spa startup native topology reobservation",
+            "PoolOS thermal verification native reobservation",
             "PoolOS shared hydraulic safety native reobservation",
         }
         task = asyncio.create_task(coroutine)
@@ -432,6 +437,42 @@ def test_stale_shared_hydraulic_admission_requests_one_genuine_native_reobservat
         driver.release.set()
         await hass.tasks[-1]
         assert driver.processed == ["fresh-safety-2"]
+
+    asyncio.run(scenario())
+
+
+def test_each_accepted_thermal_step_requests_one_native_verification_reobservation() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, _, coordinator, driver = _runtime(module)
+        runtime.set_enabled(True)
+        driver.verification_topology_token = "receipt-pool-rpm-1"
+
+        started = runtime._sync_verification_topology_reobservation()
+
+        assert started is True
+        assert len(hass.tasks) == 1
+        await asyncio.wait_for(
+            coordinator.thermal_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await hass.tasks[0]
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        duplicate = runtime._sync_verification_topology_reobservation()
+        assert duplicate is False
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        coordinator.thermal_topology_refresh_event.clear()
+        driver.verification_topology_token = "receipt-pool-rpm-2"
+        restarted = runtime._sync_verification_topology_reobservation()
+        assert restarted is True
+        await asyncio.wait_for(
+            coordinator.thermal_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await hass.tasks[-1]
+        assert coordinator.thermal_topology_refresh_count == 2
 
     asyncio.run(scenario())
 
