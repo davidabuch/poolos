@@ -319,6 +319,12 @@ class PoolOSThermalAutomaticRuntime:
     _spa_startup_topology_reobservation_token: str | None = field(
         default=None, init=False, repr=False
     )
+    _shared_hydraulic_preflight_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
+    _shared_hydraulic_preflight_reobservation_epoch: str | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
@@ -731,6 +737,7 @@ class PoolOSThermalAutomaticRuntime:
             self.driver.note_disabled_epoch(frame)
             self.coordinator.async_update_listeners()
             return
+        self._sync_shared_hydraulic_preflight_reobservation()
         self._schedule_if_idle()
 
     def orchestration_failed(self, snapshot: ObservationSnapshot, error: Exception) -> None:
@@ -784,6 +791,11 @@ class PoolOSThermalAutomaticRuntime:
             spa_topology_task.cancel()
             await asyncio.gather(spa_topology_task, return_exceptions=True)
         self._spa_startup_topology_reobservation_task = None
+        preflight_task = self._shared_hydraulic_preflight_reobservation_task
+        if preflight_task is not None and not preflight_task.done():
+            preflight_task.cancel()
+            await asyncio.gather(preflight_task, return_exceptions=True)
+        self._shared_hydraulic_preflight_reobservation_task = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -919,6 +931,65 @@ class PoolOSThermalAutomaticRuntime:
         finally:
             if asyncio.current_task() is self._cleanup_topology_reobservation_task:
                 self._cleanup_topology_reobservation_task = None
+
+    def _sync_shared_hydraulic_preflight_reobservation(self) -> bool:
+        """Acquire truthful shared-hydraulic safety evidence for a blocked frame."""
+
+        if self._unloaded or not self.driver.requested_enabled:
+            return False
+        frame = self._latest_frame
+        if frame is None:
+            return False
+        blocker = getattr(frame.orchestration, "blocking_reason", None)
+        if blocker != "thermal_orchestration_shared_hydraulic_inventory_incomplete":
+            self._shared_hydraulic_preflight_reobservation_epoch = None
+            return False
+        epoch = frame.epoch_identity
+        if self._shared_hydraulic_preflight_reobservation_epoch == epoch:
+            return False
+        task = self._shared_hydraulic_preflight_reobservation_task
+        if task is not None and not task.done():
+            return True
+        self._shared_hydraulic_preflight_reobservation_epoch = epoch
+        self._shared_hydraulic_preflight_reobservation_task = self.hass.async_create_task(
+            self._refresh_shared_hydraulic_preflight_once(epoch),
+            "PoolOS shared hydraulic native preflight reobservation",
+        )
+        return True
+
+    async def _refresh_shared_hydraulic_preflight_once(self, epoch: str) -> None:
+        """Run one bounded read-only topology refresh for the blocked epoch."""
+
+        try:
+            if self._unloaded:
+                return
+            if self._shared_hydraulic_preflight_reobservation_epoch != epoch:
+                return
+            refresh = getattr(
+                self.coordinator,
+                "async_refresh_native_thermal_topology_evidence",
+                None,
+            )
+            if refresh is None:
+                return
+            await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS shared hydraulic native preflight reobservation failed")
+        finally:
+            if (
+                asyncio.current_task()
+                is self._shared_hydraulic_preflight_reobservation_task
+            ):
+                self._shared_hydraulic_preflight_reobservation_task = None
+            if not self._unloaded and self.driver.requested_enabled:
+                latest = self._latest_frame
+                if (
+                    latest is not None
+                    and latest.epoch_identity != self.driver.last_epoch_identity
+                ):
+                    self._schedule_if_idle()
 
     def _sync_spa_startup_topology_reobservation(self) -> bool:
         """Start one immediate read-only BODY refresh per accepted Spa startup command."""
