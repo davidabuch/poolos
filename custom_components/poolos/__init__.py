@@ -96,9 +96,6 @@ from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
 )
-from poolos.native_circulation_change import (  # noqa: E402
-    NativeCirculationChangeTracker,
-)
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
 from poolos.pump_capability import (  # noqa: E402
     CommissionedPumpCapability,
@@ -301,7 +298,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
     pool_body_session_boundary = PoolBodySessionBoundaryTracker()
-    native_circulation_change = NativeCirculationChangeTracker()
     spa_automatic_control = SpaAutomaticControlSuppression()
     def initial_spa_session_kind():
         return None
@@ -708,11 +704,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             native,
         )
 
-        if native_circulation_change.observe(native.observations):
-            # Native circulation/source truth is a first-class execution input.
-            # Re-run policy/orchestration whenever those authoritative facts
-            # change, independent of optional external-change diagnostics.
-            thermal_runtime.refresh(publish=True)
+        # The coordinator's already-scheduled authoritative refresh owns
+        # input composition and execution publication. Never recompute a new
+        # native plan under coordinator.data's previous evidence epoch.
 
     coordinator.set_native_snapshot_observer(observe_native_snapshot)
     thermal_runtime.set_assessment_observer(
@@ -729,18 +723,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             observations=snapshot.observations,
             thermal=assessment,
             external_changes=external_change_runtime.latest_batch,
+            evidence_identity=snapshot.evidence_identity,
         )
-        native = coordinator.native_intellicenter_snapshot
-        transport_runtime = coordinator.independent_intellicenter_transport
-        transport = (
-            None if transport_runtime is None else transport_runtime.latest_snapshot
-        )
+        native = snapshot.native_snapshot
+        transport = None if native is None else native.transport_snapshot
         if native is not None and transport is not None:
-            synchronize_pump_session(
-                native,
-                transport,
-                getattr(transport_runtime, "discovery_generation", 0),
-            )
+            synchronize_pump_session(native, transport, transport.discovery_generation)
         # Safety synchronizes first. On outage entry this establishes the
         # canonical Safety fence before normal executors can dispatch; on
         # authoritative grid return it clears Safety and invalidates stale

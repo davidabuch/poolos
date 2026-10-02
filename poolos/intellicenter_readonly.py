@@ -83,10 +83,13 @@ class NativeRawAttribute:
 
     name: str
     value: NativeRawScalar
+    observed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("native raw attribute name must not be blank")
+        if self.observed_at is not None and self.observed_at.utcoffset() is None:
+            raise ValueError("native attribute observation must be timezone-aware")
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +264,8 @@ class NativeIntelliCenterTransportSnapshot:
     intellichlors: tuple[NativeIntelliChlorState, ...] = ()
     systems: tuple[NativeSystemState, ...] = ()
     raw_inventory: tuple[NativeRawObject, ...] = ()
+    inventory_observed_at: datetime | None = None
+    discovery_generation: int = 0
 
     def __post_init__(self) -> None:
         if not self.source_id.strip():
@@ -358,6 +363,7 @@ class NativeIntelliCenterObservationSnapshot:
     observations: tuple[PoolObservation, ...]
     missing_concepts: tuple[str, ...]
     failure_reason_code: str | None = None
+    transport_snapshot: NativeIntelliCenterTransportSnapshot | None = None
 
     def __post_init__(self) -> None:
         if self.generated_at.tzinfo is None or self.generated_at.utcoffset() is None:
@@ -734,7 +740,7 @@ class NativeIntelliCenterReadAdapter:
                 value=value,
                 unit=unit,
                 truth_level=TruthLevel.MEASURED,
-                observed_at=transport.observed_at,
+                observed_at=_concept_observed_at(transport, concept, native_id),
                 source_kind=ObservationSourceKind.LIVE,
                 source_id=f"intellicenter_native:{transport.source_id}:{native_id}",
                 quality=ObservationQuality.GOOD,
@@ -746,6 +752,7 @@ class NativeIntelliCenterReadAdapter:
         return NativeIntelliCenterObservationSnapshot(
             generated_at=generated_at,
             status=NativeIntelliCenterStatus.AVAILABLE,
+            transport_snapshot=transport,
             source_id=transport.source_id,
             observations=observations,
             missing_concepts=tuple(
@@ -761,6 +768,52 @@ def _body(
         (item for item in sorted(bodies, key=lambda body: body.native_id) if item.kind is kind),
         None,
     )
+
+
+def _concept_observed_at(
+    transport: NativeIntelliCenterTransportSnapshot, concept: str, native_id: str,
+) -> datetime:
+    """Use actual contributing native fields, never the publication clock.
+
+    Legacy immutable transport fixtures without field clocks retain their
+    whole-read contract. Production transport always supplies field clocks.
+    """
+    def field_time(obj: NativeRawObject, keys: tuple[str, ...]) -> datetime:
+        attributes = {item.name: item for item in obj.attributes}
+        times = [
+            attributes[key].observed_at or obj.observed_at
+            for key in keys if key in attributes
+        ]
+        return min(times) if times else obj.observed_at
+
+    if native_id.startswith("authoritatively-absent:"):
+        return transport.inventory_observed_at or transport.observed_at
+    if native_id == "body-heat-source":
+        times = [field_time(obj, ("STATUS", "HTMODE", "HEATER"))
+                 for obj in transport.raw_inventory if obj.object_type == "BODY"]
+        return min(times) if times else transport.observed_at
+    obj = next((obj for obj in transport.raw_inventory if obj.native_id == native_id), None)
+    if obj is None:
+        return transport.observed_at
+    suffix = concept.split(".")[-1]
+    keys = {
+        "active": ("STATUS",), "heating_demand_active": ("STATUS", "HTMODE", "HEATER"),
+        "raw_heater_id": ("HEATER",), "raw_htmode": ("HTMODE",),
+        "temperature": ("LSTTMP",) if obj.object_type == "BODY" else ("SOURCE",),
+        "target_temperature": ("LOTMP",), "maximum_temperature": ("HITMP",),
+        "rpm": ("RPM",), "gpm": ("GPM",), "power": ("PWR",),
+        "minimum_rpm": ("MIN",), "maximum_rpm": ("MAX",),
+        "minimum_gpm": ("MINF",), "maximum_gpm": ("MAXF",),
+        "configured_speed_rpm": ("SPEED",),
+        "configured_flow_gpm": ("SPEED",),
+        "configured_mode": ("SELECT",), "effect": ("USE",),
+        "system_mode": ("SERVICE",), "firmware_version": ("VER",),
+        "salt_ppm": ("SALT",), "pool_output_percent": ("PRIM",),
+        "spa_output_percent": ("SEC",),
+    }.get(suffix, tuple(item.name for item in obj.attributes))
+    if concept == "water.temperature" and obj.object_type == "BODY":
+        keys = ("STATUS", "LSTTMP")
+    return field_time(obj, keys)
 
 
 def _body_values(

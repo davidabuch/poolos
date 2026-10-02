@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
 import json
 from typing import Iterable
+
+from .evidence_chronology import evidence_precedes_authority
 
 from .clock import FixedClock
 from .external_change import ExternalChangeBatch
@@ -135,6 +137,8 @@ class ThermalRuntimeOrchestrator:
     assessment: ThermalRuntimeOrchestrationAssessment | None = None
     _last_snapshot_at: datetime | None = field(default=None, init=False, repr=False)
     _last_frame_fingerprint: str | None = field(default=None, init=False, repr=False)
+    _last_observation_fingerprint: str | None = field(default=None, init=False, repr=False)
+    _last_evidence_identity: str | None = field(default=None, init=False, repr=False)
     _conflicting_snapshot_at: datetime | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
 
@@ -145,6 +149,7 @@ class ThermalRuntimeOrchestrator:
         observations: Iterable[PoolObservation],
         thermal: ThermalRuntimeAssessment | None,
         external_changes: ExternalChangeBatch = _EMPTY_EXTERNAL_CHANGES,
+        evidence_identity: str | None = None,
     ) -> ThermalRuntimeOrchestrationAssessment:
         """Process one already-created authoritative frame exactly once."""
 
@@ -152,12 +157,31 @@ class ThermalRuntimeOrchestrator:
         if self._unloaded:
             assert self.assessment is not None
             return self.assessment
+        lease = self.ownership.state.lease
+        if (lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and evidence_precedes_authority(generated_at, boundary=lease.last_confirmed_at)):
+            # Admission precedes fingerprint conflict processing. Retain the
+            # actual authority, but admit no candidate or new command from this
+            # stale callback. Do not consume/update the immutable input epoch.
+            assert self.assessment is not None
+            return replace(
+                self.assessment,
+                lifecycle=ThermalOrchestrationLifecycle.OWNED,
+                ownership_status=lease.status,
+                candidate_id=None,
+                candidate_body=None,
+                candidate_execution_purpose_id=None,
+            )
         observation_items = tuple(observations)
         frame_fingerprint = _frame_fingerprint(
             generated_at,
             observation_items,
             thermal,
             external_changes,
+        )
+        observation_fingerprint = _frame_fingerprint(
+            generated_at, observation_items, None, _EMPTY_EXTERNAL_CHANGES,
         )
         if self._last_snapshot_at is not None:
             if generated_at < self._last_snapshot_at:
@@ -169,17 +193,21 @@ class ThermalRuntimeOrchestrator:
                     return self.assessment
                 if frame_fingerprint == self._last_frame_fingerprint:
                     return self.assessment
-                conflict_identity = _conflict_snapshot_identity(
-                    self._last_frame_fingerprint,
-                    frame_fingerprint,
-                )
-                blocked = self.fail_closed(
-                    failed_at=generated_at,
-                    reason_code="thermal_orchestration_snapshot_conflict",
-                    snapshot_identity=conflict_identity,
-                )
-                self._conflicting_snapshot_at = generated_at
-                return blocked
+                if evidence_identity is None or (
+                    evidence_identity == self._last_evidence_identity
+                    and observation_fingerprint != self._last_observation_fingerprint
+                ):
+                    conflict_identity = _conflict_snapshot_identity(
+                        self._last_frame_fingerprint,
+                        frame_fingerprint,
+                    )
+                    blocked = self.fail_closed(
+                        failed_at=generated_at,
+                        reason_code="thermal_orchestration_snapshot_conflict",
+                        snapshot_identity=conflict_identity,
+                    )
+                    self._conflicting_snapshot_at = generated_at
+                    return blocked
 
         by_id = {item.observation_id: item for item in observation_items}
         outage = self.outage_confirmation.evaluate(
@@ -280,6 +308,8 @@ class ThermalRuntimeOrchestrator:
         )
         self._last_snapshot_at = generated_at
         self._last_frame_fingerprint = frame_fingerprint
+        self._last_observation_fingerprint = observation_fingerprint
+        self._last_evidence_identity = evidence_identity
         self._conflicting_snapshot_at = None
         return self.assessment
 
@@ -303,13 +333,11 @@ class ThermalRuntimeOrchestrator:
         prior = self.assessment
         ownership_decision = None
         lease = self.ownership.state.lease
-        if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
-            # The authoritative frame timestamp can legitimately predate a command
-            # acceptance that established this lease by a few milliseconds.  A
-            # later same-frame conflict must still fail closed, but ownership
-            # chronology itself must remain monotonic: never end a lease before
-            # it was established.  Preserve failed_at on the orchestration
-            # assessment while clamping only the ownership transition boundary.
+        if (lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and not evidence_precedes_authority(failed_at, boundary=lease.last_confirmed_at)):
+            # Only an admitted current conflict may retire this authority.
+            # An older callback is a command-permission denial, never grounds
+            # to end a newer accepted-command lease.
             relinquished_at = max(failed_at, lease.established_at)
             ownership_decision = self.ownership.relinquish(
                 lease_id=lease.lease_id,
@@ -354,6 +382,8 @@ class ThermalRuntimeOrchestrator:
         )
         self._last_snapshot_at = failed_at
         self._last_frame_fingerprint = None
+        self._last_observation_fingerprint = None
+        self._last_evidence_identity = None
         self._conflicting_snapshot_at = failed_at
         return self.assessment
 
@@ -369,6 +399,8 @@ class ThermalRuntimeOrchestrator:
         self._unloaded = True
         self._last_snapshot_at = unloaded_at
         self._last_frame_fingerprint = None
+        self._last_observation_fingerprint = None
+        self._last_evidence_identity = None
         self._conflicting_snapshot_at = None
         self.assessment = ThermalRuntimeOrchestrationAssessment(
             lifecycle=ThermalOrchestrationLifecycle.UNLOADED,
@@ -402,6 +434,8 @@ class ThermalRuntimeOrchestrator:
         self.ownership = ThermalRuntimeOwnershipManager()
         self._last_snapshot_at = None
         self._last_frame_fingerprint = None
+        self._last_observation_fingerprint = None
+        self._last_evidence_identity = None
         self._conflicting_snapshot_at = None
         self.assessment = None
 
@@ -510,6 +544,12 @@ class ThermalRuntimeOrchestrator:
                     None,
                 )
             if status is ThermalRuntimeOwnershipStatus.OWNED:
+                if ownership_decision.reason_code == "runtime_ownership_retained:stale_evidence_ignored":
+                    return (
+                        ThermalOrchestrationLifecycle.BLOCKED,
+                        ownership_decision.reason_code,
+                        None,
+                    )
                 lease = self.ownership.state.lease
                 assert lease is not None
                 return (

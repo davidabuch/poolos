@@ -204,7 +204,7 @@ class PoolOSThermalRuntime:
         """Recompute plans and dry-run readiness from current immutable evidence."""
 
         authoritative = self._select_authoritative_snapshot(snapshot)
-        native = self.coordinator.native_intellicenter_snapshot
+        native = getattr(authoritative, "native_snapshot", self.coordinator.native_intellicenter_snapshot)
         if authoritative is None:
             self.assessment = None
             self.last_error = "authoritative_observation_snapshot_unavailable"
@@ -285,7 +285,9 @@ class PoolOSThermalRuntime:
         try:
             transport = self.coordinator.independent_intellicenter_transport
             transport_snapshot = (
-                None if transport is None else transport.latest_snapshot
+                getattr(native, "transport_snapshot", None)
+                if hasattr(authoritative, "native_snapshot")
+                else None if transport is None else transport.latest_snapshot
             )
             pool_pump_circuit = (
                 None
@@ -318,7 +320,7 @@ class PoolOSThermalRuntime:
                     stale_native_concepts=stale,
                     missing_native_concepts=tuple(missing),
                     native_configuration=NativeConfigurationGuard().evaluate(
-                        self._native_configuration_input()
+                        self._native_configuration_input(transport_snapshot)
                     ),
                     pool_pump_circuit_id=(
                         None
@@ -449,9 +451,7 @@ class PoolOSThermalRuntime:
         self._latest_authoritative_snapshot = latest
         return latest
 
-    def _native_configuration_input(self) -> NativeConfigurationInput:
-        transport = self.coordinator.independent_intellicenter_transport
-        snapshot = None if transport is None else transport.latest_snapshot
+    def _native_configuration_input(self, snapshot=None) -> NativeConfigurationInput:
         if snapshot is None:
             return NativeConfigurationInput()
         solar_preferred = any(

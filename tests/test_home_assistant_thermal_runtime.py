@@ -587,7 +587,7 @@ def test_native_assignment_extraction_displays_nonthermal_conflict_without_autho
         subtype=None,
         attributes=(SimpleNamespace(name="RPM", value="2900"),),
     )
-    runtime, _, _ = runtime_fixture(raw_inventory=(spillway,))
+    runtime, coordinator, _ = runtime_fixture(raw_inventory=(spillway,))
     runtime.set_requested_mode(
         ThermalBody.POOL,
         ThermalRequestedMode.GAS,
@@ -598,7 +598,7 @@ def test_native_assignment_extraction_displays_nonthermal_conflict_without_autho
     assert "native_rpm_assignment_conflict" in runtime.assessment.native_conflict_codes
     assert runtime.assessment.pool.technical_preflight.ready
     configuration = NativeConfigurationGuard().evaluate(
-        runtime._native_configuration_input()
+        runtime._native_configuration_input(coordinator.independent_intellicenter_transport.latest_snapshot)
     )
     assert AutonomousCapability.SPILLWAY_PUMP_BASELINE in (
         configuration.disabled_capabilities

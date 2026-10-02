@@ -9,7 +9,7 @@
     "ARCHITECTURAL MISMATCH",
     "MISSING IMPLEMENTATION",
     "SATISFIED",
-    "UNCLEAR — requires deterministic test or additional tracing",
+    "UNCLEAR \u2014 requires deterministic test or additional tracing",
     "MISSING PERSISTENCE/GENERATION SAFETY",
     "MISSING RECOVERY/LIVENESS",
     "MISSING OBSERVABILITY"
@@ -1727,7 +1727,7 @@
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
       "current_behavior_and_gap": "Pump purpose transitions clear overrides, but native intent versus boundary ordering needs composed proof.",
-      "implementation_status": "UNCLEAR — requires deterministic test or additional tracing",
+      "implementation_status": "UNCLEAR \u2014 requires deterministic test or additional tracing",
       "required_future_regressions": [
         {
           "id": "OWN-034",
@@ -2338,7 +2338,7 @@
         {
           "id": "OWN-049",
           "behavior": "Cancel current Spa session, prevent refresh restart, permit genuinely new later opportunity.",
-          "status": "PARTIALLY IMPLEMENTED — USER-SESSION OFF AUTONOMY PRESERVATION PERMANENTLY GATED"
+          "status": "PARTIALLY IMPLEMENTED \u2014 USER-SESSION OFF AUTONOMY PRESERVATION PERMANENTLY GATED"
         }
       ],
       "specific_baseline_test_nodes": [
@@ -3755,7 +3755,7 @@
       ],
       "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
       "current_behavior_and_gap": "Purpose-boundary reset can race configured override classification; composed positive-origin test needed.",
-      "implementation_status": "UNCLEAR — requires deterministic test or additional tracing",
+      "implementation_status": "UNCLEAR \u2014 requires deterministic test or additional tracing",
       "required_future_regressions": [
         {
           "id": "OWN-086",
@@ -3831,17 +3831,23 @@
         "tests/test_filtration_automatic_execution.py",
         "tests/test_filtration_restart_prospective_adoption.py"
       ],
-      "current_test_evidence_scope": "Related baseline tests; audit classification is not a claim that the complete future scenario regression exists.",
-      "current_behavior_and_gap": "Generation/acceptance chronology is strong but contradictory delayed events may be called takeover.",
+      "current_test_evidence_scope": "Deterministic stale/equal/current observation, accepted-receipt, operator, restart and complete Spa callback-race regressions; not a claim of full 90-scenario compliance.",
+      "current_behavior_and_gap": "Candidate chronology repair admits per-concept facts and accepted consequences consistently; old callbacks cannot retire newer accepted authority. Production transport cannot infer device sampling time or human origin from native telemetry. Physical behavior and comprehensive scenario coverage remain separate.",
       "implementation_status": "PARTIALLY SATISFIED",
       "required_future_regressions": [
         {
           "id": "OWN-088",
           "behavior": "Old callbacks cannot grant or steal new authority; fresh safety contradictions block permission without invented manual origin.",
-          "status": "NOT IMPLEMENTED AS A CONTRACT REGRESSION"
+          "status": "PARTIAL \u2014 SOFTWARE CALLBACK AND ACCEPTANCE REGRESSIONS IMPLEMENTED; FULL PHYSICAL/TRANSPORT SCENARIO REMAINS"
         }
       ],
-      "specific_baseline_test_nodes": []
+      "specific_baseline_test_nodes": [
+        "tests/test_observation_command_chronology.py::test_old_same_timestamp_frame_cannot_end_newer_accepted_lease",
+        "tests/test_observation_command_chronology.py::test_filtration_preacceptance_observation_cannot_verify_body_on",
+        "tests/test_observation_command_chronology.py::test_current_publication_with_old_body_fact_cannot_retire_pending_driver",
+        "tests/test_observation_command_chronology.py::test_filtration_old_body_fact_cannot_preempt_newer_verified_acquisition",
+        "tests/test_thermal_automatic_execution.py::test_opportunistic_spa_idle_start_preserves_poolos_body_provenance"
+      ]
     },
     {
       "scenario_id": 89,

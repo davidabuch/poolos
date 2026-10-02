@@ -3568,13 +3568,14 @@ def test_duplicate_evidence_timestamp_is_idempotent_confirmation() -> None:
     assert second.current_state.lease == first.current_state.lease
 
 
-def test_temporal_regression_preempts_owned_runtime_lease() -> None:
+def test_temporal_regression_cannot_preempt_newer_owned_runtime_lease() -> None:
     manager = full_manager()
     manager.evaluate(evidence(at=NOW + timedelta(seconds=2)))
 
     decision = manager.evaluate(evidence(at=NOW + timedelta(seconds=1)))
 
-    assert decision.reason_code == "runtime_ownership_preempted:evidence_temporal_regression"
+    assert decision.reason_code == "runtime_ownership_retained:stale_evidence_ignored"
+    assert manager.state.status is ThermalRuntimeOwnershipStatus.OWNED
 
 
 def test_shared_hydraulic_inventory_must_be_explicitly_complete() -> None:

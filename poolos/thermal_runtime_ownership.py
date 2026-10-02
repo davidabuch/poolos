@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Mapping
 if TYPE_CHECKING:
     from .pool_circulation_ownership import FiltrationToThermalHandoff
 
+from .evidence_chronology import EvidenceAdmission, admit_evidence, evidence_precedes_authority
+
 from .external_change import (
     ExternalChangeBatch,
     ExternalChangeEvent,
@@ -1756,12 +1758,21 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 evidence.evaluated_at,
             )
-        self.record_operator_events(
-            evidence.external_changes,
-            evaluated_at=evidence.evaluated_at,
-        )
-        lease = self._state.lease
-        assert lease is not None
+        # Trusted current operator intent is independently admitted per domain;
+        # an older BODY fact must not hide a current PUMP/THERMAL intervention.
+        if not evidence_precedes_authority(evidence.evaluated_at, boundary=lease.last_confirmed_at):
+            self.record_operator_events(
+                evidence.external_changes, evaluated_at=evidence.evaluated_at,
+            )
+            lease = self._state.lease
+            assert lease is not None
+        if _runtime_evidence_is_stale(lease, evidence):
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.RETAINED,
+                "runtime_ownership_retained:stale_evidence_ignored",
+                previous,
+                evidence.evaluated_at,
+            )
         lease = self._confirm_accepted_consequence(lease, evidence)
         lease = self._observe_domains(lease, evidence)
         override_transition = _pump_session_override_transition(lease, evidence)
@@ -1991,7 +2002,7 @@ class ThermalRuntimeOwnershipManager:
                 and usable
                 and observed_at is not None
                 and accepted_at is not None
-                and observed_at > accepted_at
+                and admit_evidence(observed_at, boundary=accepted_at) is EvidenceAdmission.POST_BOUNDARY
             )
         elif accepted.role in {
             "priming",
@@ -2016,9 +2027,9 @@ class ThermalRuntimeOwnershipManager:
                 and evidence.pump_observation_usable
                 and evidence.configured_pump_speed_observed_at is not None
                 and evidence.pump_observed_at is not None
-                and evidence.configured_pump_speed_observed_at
-                > accepted_at
-                and evidence.pump_observed_at > accepted_at
+                and admit_evidence(evidence.configured_pump_speed_observed_at, boundary=accepted_at)
+                is EvidenceAdmission.POST_BOUNDARY
+                and admit_evidence(evidence.pump_observed_at, boundary=accepted_at) is EvidenceAdmission.POST_BOUNDARY
                 and evidence.configured_pump_speed_rpm == intended
                 and abs(evidence.pump_rpm - intended) <= self.pump_rpm_tolerance
             )
@@ -2034,7 +2045,7 @@ class ThermalRuntimeOwnershipManager:
                 and evidence.heat_source_observation_fresh
                 and evidence.heat_source_observation_usable
                 and evidence.heat_source_observed_at is not None
-                and evidence.heat_source_observed_at > accepted_at
+                and admit_evidence(evidence.heat_source_observed_at, boundary=accepted_at) is EvidenceAdmission.POST_BOUNDARY
             )
         if not proven or concept is None or concept in lease.verified_concepts:
             return lease
@@ -2747,12 +2758,21 @@ class ThermalRuntimeOwnershipManager:
                 previous,
                 evidence.evaluated_at,
             )
-        self.record_operator_events(
-            evidence.external_changes,
-            evaluated_at=evidence.evaluated_at,
-        )
-        lease = self._state.lease
-        assert lease is not None
+        # Trusted current operator intent is independently admitted per domain;
+        # an older BODY fact must not hide a current PUMP/THERMAL intervention.
+        if not evidence_precedes_authority(evidence.evaluated_at, boundary=lease.last_confirmed_at):
+            self.record_operator_events(
+                evidence.external_changes, evaluated_at=evidence.evaluated_at,
+            )
+            lease = self._state.lease
+            assert lease is not None
+        if _runtime_evidence_is_stale(lease, evidence):
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.RETAINED,
+                "runtime_ownership_retained:stale_evidence_ignored",
+                previous,
+                evidence.evaluated_at,
+            )
         lease = self._confirm_accepted_consequence(lease, evidence)
         lease = self._observe_domains(lease, evidence)
         failure = self._continuation_failure_reason(
@@ -4096,6 +4116,27 @@ def _required_datetime(value: datetime | None) -> datetime:
 def _require_aware(value: datetime, label: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{label} must be timezone-aware")
+
+
+def _runtime_evidence_is_stale(
+    lease: ThermalRuntimeOwnershipLease, evidence: ThermalRuntimeOwnershipEvidence,
+) -> bool:
+    if evidence_precedes_authority(evidence.evaluated_at, boundary=lease.last_confirmed_at):
+        return True
+    # A current evaluation clock cannot renew an older BODY contradiction.
+    # Trusted operator intent is independent evidence and retains its own gate.
+    if _external_preemption_reason(lease, evidence.external_changes, evaluated_at=evidence.evaluated_at) is not None:
+        return False
+    body_state = lease.domain_state(OwnershipDomain.BODY)
+    boundary = max(lease.established_at, body_state.observed_at or lease.established_at)
+    target_value = evidence.pool_active if lease.body is ThermalBody.POOL else evidence.spa_active
+    target_at = evidence.pool_activity_observed_at if lease.body is ThermalBody.POOL else evidence.spa_activity_observed_at
+    other_value = evidence.spa_active if lease.body is ThermalBody.POOL else evidence.pool_active
+    other_at = evidence.spa_activity_observed_at if lease.body is ThermalBody.POOL else evidence.pool_activity_observed_at
+    return any(
+        contradicts and at is not None and at <= boundary
+        for contradicts, at in ((target_value is False, target_at), (other_value is True, other_at))
+    )
 
 
 __all__ = [

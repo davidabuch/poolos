@@ -15,6 +15,10 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping, Protocol
 
+from .evidence_chronology import (
+    EvidenceAdmission, accepted_command_boundary, admit_evidence, evidence_precedes_authority,
+)
+
 from .circulation_successor import (
     CirculationSuccessorArbitrator,
     CirculationSuccessorAssessment,
@@ -66,6 +70,7 @@ from .thermal_live_execution import (
     ThermalLiveExecutionEngine,
     ThermalLiveExecutionOwnership,
     commissioning_scope_allows_body,
+    pending_verification_deadline,
     ThermalLiveExecutionPolicy,
     ThermalLiveExecutionSession,
     ThermalLiveExecutionStatus,
@@ -699,7 +704,7 @@ class ThermalAutomaticExecutionDriver:
         if (
             lease is not None
             and lease.status is ThermalRuntimeOwnershipStatus.OWNED
-            and frame.observed_at < lease.established_at
+            and evidence_precedes_authority(frame.observed_at, boundary=lease.last_confirmed_at)
         ):
             # A command may be accepted after the observation frame that
             # authorized it. Any callback carrying an observation timestamp
@@ -747,6 +752,19 @@ class ThermalAutomaticExecutionDriver:
                 frame,
                 "automatic_thermal_grid_not_authoritatively_on",
             )
+
+        decision = frame.orchestration.ownership_decision
+        if (decision is not None
+                and decision.reason_code == "runtime_ownership_retained:stale_evidence_ignored"):
+            # Retained provenance grants no command permission from this frame.
+            # A current publication clock cannot make an older BODY fact cancel
+            # a receipt-bound operation or authorize its successor. The original
+            # verification deadline still expires; refresh cannot renew it.
+            deadline = (None if self.active_session is None else
+                        pending_verification_deadline(self.active_session, frame.live_policy))
+            if deadline is not None and frame.observed_at >= deadline:
+                return self._terminate_for_frame(frame, "verification_deadline_reached")
+            return self._blocked(frame, decision.reason_code)
 
         engagement_result = self._process_solar_engagement(frame)
         if engagement_result is not None:
@@ -1852,8 +1870,9 @@ class ThermalAutomaticExecutionDriver:
             entitlement_generation=assessment.entitlement_generation,
             operation=assessment.operation,
             correlation_id=correlation_id,
-            delivered_at=frame.observed_at,
-            deadline=frame.observed_at + frame.live_policy.verification_timeout,
+            delivered_at=accepted_command_boundary(receipt, authorized_at=frame.observed_at),
+            deadline=accepted_command_boundary(receipt, authorized_at=frame.observed_at)
+            + frame.live_policy.verification_timeout,
         )
         self._accepted_delivery_count += 1
         self._last_accepted_correlation_id = correlation_id
@@ -1926,7 +1945,7 @@ class ThermalAutomaticExecutionDriver:
                     self.circulation_ownership.accept_thermal_to_filtration(
                         session_id=f"thermal-successor:{provenance.provenance_id}",
                         pool_pump_circuit_id=operation.equipment_id,
-                        accepted_at=frame.observed_at,
+                        accepted_at=attempt.delivered_at,
                         body_activation=provenance.body_activation,
                         body_session_id=provenance.body_session_id,
                         body_session_generation=provenance.body_session_generation,
@@ -2146,8 +2165,9 @@ class ThermalAutomaticExecutionDriver:
             candidate=candidate,
             correlation_id=correlation_id,
             receipt_id=receipt.command_id,
-            delivered_at=frame.observed_at,
-            deadline=frame.observed_at + frame.live_policy.verification_timeout,
+            delivered_at=accepted_command_boundary(receipt, authorized_at=frame.observed_at),
+            deadline=accepted_command_boundary(receipt, authorized_at=frame.observed_at)
+            + frame.live_policy.verification_timeout,
         )
         self._accepted_delivery_count += 1
         self._last_accepted_correlation_id = correlation_id
@@ -2353,7 +2373,7 @@ class ThermalAutomaticExecutionDriver:
                 and evidence.spa_activity_fresh
                 and evidence.spa_activity_usable
                 and evidence.spa_activity_observed_at is not None
-                and evidence.spa_activity_observed_at > attempt.delivered_at
+                and admit_evidence(evidence.spa_activity_observed_at, boundary=attempt.delivered_at) is EvidenceAdmission.POST_BOUNDARY
             )
             if (
                 commanded_body_off
@@ -2361,7 +2381,7 @@ class ThermalAutomaticExecutionDriver:
                 and evidence.pump_observation_fresh
                 and evidence.pump_observation_usable
                 and evidence.pump_observed_at is not None
-                and evidence.pump_observed_at > attempt.delivered_at
+                and admit_evidence(evidence.pump_observed_at, boundary=attempt.delivered_at) is EvidenceAdmission.POST_BOUNDARY
             ):
                 self._clear_cleanup()
                 self.circulation_ownership.release_thermal(
@@ -2528,8 +2548,9 @@ class ThermalAutomaticExecutionDriver:
             candidate=candidate,
             correlation_id=correlation_id,
             receipt_id=receipt.command_id,
-            delivered_at=frame.observed_at,
-            deadline=frame.observed_at + frame.live_policy.verification_timeout,
+            delivered_at=accepted_command_boundary(receipt, authorized_at=frame.observed_at),
+            deadline=accepted_command_boundary(receipt, authorized_at=frame.observed_at)
+            + frame.live_policy.verification_timeout,
         )
         self._accepted_delivery_count += 1
         self._last_accepted_correlation_id = correlation_id
@@ -2601,7 +2622,7 @@ class ThermalAutomaticExecutionDriver:
                 return "failed:thermal_cleanup_pool_topology_preempted"
             if (
                 evidence.pool_activity_observed_at is not None
-                and evidence.pool_activity_observed_at > attempt.delivered_at
+                and admit_evidence(evidence.pool_activity_observed_at, boundary=attempt.delivered_at) is EvidenceAdmission.POST_BOUNDARY
                 and evidence.pool_active is False
             ):
                 if (
@@ -2610,7 +2631,7 @@ class ThermalAutomaticExecutionDriver:
                     and evidence.pump_observation_fresh
                     and evidence.pump_observation_usable
                     and evidence.pump_observed_at is not None
-                    and evidence.pump_observed_at > attempt.delivered_at
+                    and admit_evidence(evidence.pump_observed_at, boundary=attempt.delivered_at) is EvidenceAdmission.POST_BOUNDARY
                 ):
                     return "verified"
                 return "pending"
@@ -2638,14 +2659,14 @@ class ThermalAutomaticExecutionDriver:
             return "failed:thermal_cleanup_pool_topology_preempted"
         configured_verified = (
             evidence.configured_pump_speed_observed_at is not None
-            and evidence.configured_pump_speed_observed_at > attempt.delivered_at
+            and admit_evidence(evidence.configured_pump_speed_observed_at, boundary=attempt.delivered_at) is EvidenceAdmission.POST_BOUNDARY
             and evidence.configured_pump_speed_observation_fresh
             and evidence.configured_pump_speed_observation_usable
             and evidence.configured_pump_speed_rpm == operation.rpm
         )
         actual_verified = (
             evidence.pump_observed_at is not None
-            and evidence.pump_observed_at > attempt.delivered_at
+            and admit_evidence(evidence.pump_observed_at, boundary=attempt.delivered_at) is EvidenceAdmission.POST_BOUNDARY
             and evidence.pump_observation_fresh
             and evidence.pump_observation_usable
             and evidence.pump_rpm is not None

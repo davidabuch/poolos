@@ -450,8 +450,8 @@ def test_same_timestamp_changed_observation_fails_closed(
     assert result.candidate_id is None
 
 
-def test_same_timestamp_conflict_after_newer_ownership_establishment_fails_closed_monotonically() -> None:
-    """Reproduce the live 09:30 race without weakening conflict detection."""
+def test_same_timestamp_conflict_cannot_retire_newer_accepted_ownership() -> None:
+    """Scenario 88: the Sep 30 older callback cannot end a later receipt."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     _refresh(orchestrator, NOW)
@@ -469,15 +469,14 @@ def test_same_timestamp_conflict_after_newer_ownership_establishment_fails_close
 
     result = _refresh(orchestrator, NOW, observations=conflicting)
 
-    assert result.lifecycle is ThermalOrchestrationLifecycle.BLOCKED
-    assert result.blocking_reason == "thermal_orchestration_snapshot_conflict"
+    assert result.lifecycle is ThermalOrchestrationLifecycle.OWNED
+    assert result.candidate_id is None
     assert result.evaluated_at == NOW
-    assert result.ownership_status is ThermalRuntimeOwnershipStatus.RELINQUISHED
-    lease = result.ownership_decision.current_state.lease
+    assert result.ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+    lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.established_at == established_at
-    assert lease.ended_at == established_at
-    assert lease.ended_at >= lease.established_at
+    assert lease.ended_at is None
 
 
 def test_same_timestamp_changed_plan_identity_fails_closed() -> None:

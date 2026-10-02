@@ -5038,8 +5038,11 @@ def test_opportunistic_spa_emits_no_command_until_fresh_idle_hydraulics() -> Non
     "shutdown_case",
     ("target_reached", "solar_loss", "pool_priority_return"),
 )
+@pytest.mark.parametrize("stale_callback", [False, True])
 def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
     shutdown_case: str,
+    stale_callback: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Idle Spa admission must own startup and autonomous completion."""
 
@@ -5048,6 +5051,44 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
     evaluator = ThermalRuntimeEvaluator()
     delivery = FakeDelivery()
     factory = FakeDeliveryFactory(delivery, driver=driver)
+
+    if stale_callback:
+        frame_at = [NOW]
+        ordinary_delivery = delivery.deliver
+        ordinary_process = type(driver).process_epoch
+
+        async def truthful_delivery(operation, *, correlation_id):
+            receipt = await ordinary_delivery(operation, correlation_id=correlation_id)
+            accepted_at = frame_at[0] + timedelta(milliseconds=50)
+            return replace(receipt, issued_at=accepted_at, acknowledged_at=accepted_at)
+
+        async def process_with_delayed_callback(self, frame, *, delivery_factory):
+            frame_at[0] = frame.observed_at
+            before_count = len(delivery.calls)
+            result = await ordinary_process(self, frame, delivery_factory=delivery_factory)
+            lease = orchestrator.ownership.state.lease
+            if (len(delivery.calls) > before_count and lease is not None
+                    and lease.status is ThermalRuntimeOwnershipStatus.OWNED):
+                session = driver.active_session
+                # The accepted receipt is later than its authorizing frame.
+                # A changed callback from that original input arrives before
+                # the later native consequence, exactly as in v1.0.2.
+                old = tuple(replace(item, value=True) if item.observation_id == "pool.active"
+                            else item for item in frame.observations)
+                replay = orchestrator.refresh(generated_at=frame.observed_at,
+                    observations=old, thermal=frame.thermal)
+                await ordinary_process(self, replace(frame,
+                    observations=old, orchestration=replay,
+                    epoch_identity=replay.snapshot_identity),
+                    delivery_factory=delivery_factory)
+                assert orchestrator.ownership.state.lease == lease
+                assert driver.active_session == session
+                assert len(delivery.calls) == before_count + 1
+                assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
+            return result
+
+        monkeypatch.setattr(delivery, "deliver", truthful_delivery)
+        monkeypatch.setattr(type(driver), "process_epoch", process_with_delayed_callback)
 
     baseline = _frame(
         orchestrator,

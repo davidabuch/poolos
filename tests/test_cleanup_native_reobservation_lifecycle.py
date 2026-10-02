@@ -90,6 +90,14 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
         runtime.driver = driver
         runtime.orchestrator = orchestrator
         native_module = load_transport(monkeypatch)
+        clock_at = [NOW]
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return clock_at[0]
+
+        monkeypatch.setattr(native_module, "datetime", Clock)
         objects = dict(_objects())
         objects["B1101"].update(STATUS="ON", HTMODE="0", HEATER="00000")
         objects["B1102"] = dict(objects["B1101"], SNAME="Spa", STATUS="OFF")
@@ -104,14 +112,7 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
                 and not transport._body_metadata_refresh_tasks
             ):
                 break
-        clock_at = [NOW + timedelta(seconds=125)]
-
-        class Clock(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return clock_at[0]
-
-        monkeypatch.setattr(native_module, "datetime", Clock)
+        clock_at[0] = NOW + timedelta(seconds=125)
         # The controller answers each requested key, including unchanged values.
         # No fake NotifyList is injected to rescue the lifecycle.
         requests = []
@@ -136,13 +137,15 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
         # pyintellicenter 0.1.20 only invokes its callback for CHANGED values.
         # Re-reading unchanged BODY STATUS therefore cannot be relied upon to
         # schedule the separate source-metadata RequestParamList worker.
-        def unchanged_updates(entries):
+        def unchanged_updates(_controller, entries):
             for entry in entries:
                 obj = transport._model[entry["objnam"]]
                 obj.properties.update(entry["params"])
             return {}
 
-        transport._controller._apply_updates = unchanged_updates
+        # Model the vendor's changed-only behavior below PoolOS's observation
+        # boundary, so genuine unchanged replies still enter field chronology.
+        monkeypatch.setattr(type(transport._controller).__mro__[1], "_apply_updates", unchanged_updates)
         coordinator_type = _load_coordinator_module().PoolOSCoordinator
         coordinator._unloading = False
         coordinator.independent_intellicenter_transport = transport
@@ -528,12 +531,12 @@ def test_cleanup_native_read_publishes_only_complete_current_replies(monkeypatch
 
         # Match the dependency's no-callback behavior for unchanged responses;
         # the transport's explicit complete-read publication is under test.
-        def apply(entries):
+        def apply(_controller, entries):
             for entry in entries:
                 transport._model[entry["objnam"]].properties.update(entry["params"])
             return {}
 
-        transport._controller._apply_updates = apply
+        monkeypatch.setattr(type(transport._controller).__mro__[1], "_apply_updates", apply)
         try:
             result = await transport._async_refresh_owned_pump_session_evidence(
                 cleanup_topology=True
