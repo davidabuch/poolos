@@ -1075,10 +1075,11 @@ def resolve_body_pump_target(
     for item in getattr(snapshot, "raw_inventory", ()):
         if item.object_type.upper() != "PMPCIRC":
             continue
-        item_observed_at = getattr(item, "observed_at", None)
-        snapshot_observed_at = getattr(snapshot, "observed_at", item_observed_at)
-        if item_observed_at is not None and item_observed_at != snapshot_observed_at:
-            continue
+        # PMPCIRC identity is current inventory topology, while its individual
+        # fields retain their own observation chronology.  An unrelated later
+        # native publication must not make the assignment disappear merely
+        # because snapshot.observed_at advanced.  Downstream consumers enforce
+        # freshness from the mapped concept's contributing field timestamp.
         if not is_pmpcirc_native_id(item.native_id):
             continue
         if str(_raw_attribute(item, "CIRCUIT") or "") != circuit_native_id:
