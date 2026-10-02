@@ -8,7 +8,7 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.5`; release candidate: `1.0.6`.
+Current production integration line: `1.0.6`; release candidate: `1.0.7`.
 
 PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
 chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
@@ -48,6 +48,16 @@ Stale BODY evidence remains fail-closed and cannot verify anything; it waits for
 fresh evidence until the original fixed deadline. Fresh contradiction, unusable evidence,
 operator intervention, and safety blockers still fail normally. v1.0.6 packages this fix
 for continued physical re-commissioning.
+
+Phase 4 commissioning of v1.0.6 then proved the accepted-step reobservation path but
+exposed the remaining stable-converged ownership case. A restart returned with Pool ON,
+Solar ON, and 2900 RPM already physically converged, so no new accepted command existed
+to trigger a one-shot receipt-bound read. The prospectively adopted Pool lease later
+preempted on stale `pool.active` evidence even though subsequent native reads confirmed
+the same topology. PR #401 extends the existing 15-second bounded read-only native
+reobservation loop from probe/priming to any live OWNED thermal lease. It stops when
+ownership ends and does not create or restore ownership from matching state. v1.0.7
+packages this stable-session evidence liveness fix for continued physical commissioning.
 
 See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
 chronology model. PR #388 was closed as superseded by PR #389.
