@@ -473,8 +473,13 @@ class ThermalAutomaticExecutionDriver:
             is OwnershipAuthority.OPERATOR
         )
 
-    def opportunistic_spa_topology_reobservation_token(self) -> str | None:
-        """Expose one accepted Spa-startup command that needs fresh BODY topology."""
+    def verification_topology_reobservation_token(self) -> str | None:
+        """Expose one accepted thermal step awaiting authoritative verification.
+
+        Every accepted step gets one bounded read-only native refresh so unchanged
+        BODY, PMPCIRC, pump, source, and temperature evidence can advance truthfully
+        without depending on an unsolicited NotifyList transition.
+        """
 
         session = self.active_session
         if (
@@ -484,13 +489,22 @@ class ThermalAutomaticExecutionDriver:
             or session.current_attempt.receipt is None
         ):
             return None
+        return session.current_attempt.receipt.command_id
+
+    def opportunistic_spa_topology_reobservation_token(self) -> str | None:
+        """Preserve the narrower Spa-startup token for diagnostics/tests."""
+
+        session = self.active_session
+        token = self.verification_topology_reobservation_token()
+        if token is None or session is None or session.current_attempt is None:
+            return None
         step = session.current_attempt.step
         if not (
             step.metadata.get("spa_opportunistic_source_precondition") == "true"
             or step.metadata.get("spa_opportunistic_body_activation") == "true"
         ):
             return None
-        return session.current_attempt.receipt.command_id
+        return token
 
     def active_pump_session_purpose(self) -> PumpSpeedSessionPurpose | None:
         """Expose only explicit probe/priming execution-purpose boundaries."""
