@@ -144,9 +144,15 @@ class PoolOSResetControlButton(
             return
         if self._safe_reset_baseline():
             authority.finish_reset_recovery()
-            # The current coordinator publication is already notifying normal
-            # runtime consumers. Closing Reset invalidates their old contexts;
-            # only a fresh normal evaluation may acquire command permission.
+            # Reset closure invalidates every pre-close runtime context. The
+            # publication that proved the safe baseline may already have passed
+            # normal runtime listeners before this button listener runs, so it
+            # cannot be relied on as the required post-Reset epoch. Always
+            # schedule one fresh coordinator evaluation after authority closes.
+            asyncio.get_running_loop().create_task(
+                self._async_request_post_reset_refresh(),
+                name="PoolOS post-reset authoritative refresh",
+            )
 
     @property
     def available(self) -> bool:
@@ -245,8 +251,15 @@ class PoolOSResetControlButton(
                         invalidated=self._reset_sessions_invalidated,
                     )
                     self._observe_reset_completion()
-                if not authority.reset_recovery_active:
-                    await self.coordinator.async_request_refresh()
+    async def _async_request_post_reset_refresh(self) -> None:
+        """Publish one fresh authoritative epoch after Reset authority closes."""
+
+        try:
+            await self.coordinator.async_request_refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS post-reset authoritative refresh failed")
 
     async def _async_verify_reset_baseline(self) -> bool:
         # IntelliCenter body/source shutdown is asynchronous and the pump can

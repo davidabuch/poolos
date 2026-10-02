@@ -69,6 +69,58 @@ def _snapshot(*, active, rpm):
     )
 
 
+def test_reset_listener_completion_schedules_fresh_post_close_epoch(monkeypatch):
+    """Listener fallback must publish a fresh epoch after Reset authority closes."""
+
+    module = _button_module(monkeypatch)
+
+    async def run():
+        listeners = []
+        authority = PoolOSPhysicalCommandAuthority()
+        runtime = SimpleNamespace(
+            physical_command_authority=authority,
+            manual_intellicenter=SimpleNamespace(
+                async_set_body_heat_source=AsyncMock(),
+                async_set_body_active=AsyncMock(),
+            ),
+            thermal_automatic_runtime=SimpleNamespace(
+                driver=Mock(),
+                circulation_ownership=Mock(),
+            ),
+            thermal_runtime_orchestrator=Mock(),
+            pool_automatic_control=Mock(),
+            spa_automatic_control=Mock(),
+        )
+        post_close_refresh = AsyncMock()
+        coordinator = SimpleNamespace(
+            native_intellicenter_snapshot=_snapshot(active=False, rpm=0),
+            async_request_refresh=post_close_refresh,
+            async_add_listener=lambda listener: (
+                listeners.append(listener) or (lambda: listeners.remove(listener))
+            ),
+        )
+        entry = SimpleNamespace(
+            runtime_data=runtime,
+            entry_id="test",
+            async_on_unload=Mock(),
+        )
+        button = module.PoolOSResetControlButton(coordinator, entry)
+
+        generation = authority.begin_reset_recovery()
+        button._reset_generation = generation
+        button._reset_observation_after = datetime.now(UTC) - timedelta(seconds=1)
+        button._reset_running = False
+        button._reset_sessions_invalidated = True
+
+        button._observe_reset_completion()
+        await asyncio.sleep(0)
+
+        assert not authority.reset_recovery_active
+        post_close_refresh.assert_awaited_once_with()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("exit_path", [
     "window_exhausted", "cancelled_final_refresh", "delivery_exception", "cancelled_reduction",
     "actual_task_cancel",
