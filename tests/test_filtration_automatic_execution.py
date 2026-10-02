@@ -258,6 +258,78 @@ def _verified_filtration_driver(
     assert driver.ownership.filtration_lease.verified
     return driver, delivery, factory
 
+def test_body_on_verification_survives_preconsequence_native_refresh() -> None:
+    """A fresh execution epoch must not preempt an accepted BODY_ON before verification."""
+
+    driver, delivery, factory = _enabled_driver()
+
+    started = asyncio.run(
+        driver.process_epoch(
+            _frame(NOW, pool=False, rpm=0, configured=2600),
+            delivery_factory=factory,
+        )
+    )
+    assert started.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert started.current_step is FiltrationExecutionStep.BODY_ON
+    assert len(delivery.operations) == 1
+    assert isinstance(delivery.operations[0], SetBodyActive)
+    assert delivery.operations[0].active is True
+
+    # Regression for the Sep 30 native-execution change: an event-driven
+    # execution epoch can arrive before the newly accepted Pool-ON consequence
+    # has propagated into the execution frame.  This is verification pending,
+    # not topology loss or external preemption.
+    pending = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=False,
+                rpm=0,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert pending.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert pending.current_step is FiltrationExecutionStep.BODY_ON
+    assert pending.blocker is None
+    assert pending.last_failure_reason is None
+    assert len(delivery.operations) == 1
+    assert driver.ownership.filtration_lease is not None
+
+    body_verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=2),
+                pool=True,
+                rpm=0,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert body_verified.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert body_verified.current_step is FiltrationExecutionStep.PUMP_SETPOINT
+    assert len(delivery.operations) == 2
+    assert isinstance(delivery.operations[1], SetPumpSpeed)
+    assert delivery.operations[1].rpm == 2600
+
+    completed = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert completed.state is FiltrationAutomaticDriverState.OWNED
+    assert completed.last_failure_reason is None
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION
+
+
 
 
 def test_restart_manual_off_then_new_manual_pool_session_reaches_verified_2600() -> None:

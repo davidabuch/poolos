@@ -386,7 +386,11 @@ class FiltrationAutomaticExecutionDriver:
                 suspended
                 or (
                     self.attempt is not None
-                    and self.attempt.step is FiltrationExecutionStep.BODY_OFF
+                    and self.attempt.step
+                    in {
+                        FiltrationExecutionStep.BODY_ON,
+                        FiltrationExecutionStep.BODY_OFF,
+                    }
                 )
             ),
         )
@@ -689,7 +693,14 @@ class FiltrationAutomaticExecutionDriver:
     ) -> FiltrationAutomaticAssessment:
         attempt = self.attempt
         assert attempt is not None
-        blocker = self._safety_blocker(frame, allow_pool_off=attempt.step is FiltrationExecutionStep.BODY_OFF)
+        blocker = self._safety_blocker(
+            frame,
+            allow_pool_off=attempt.step
+            in {
+                FiltrationExecutionStep.BODY_ON,
+                FiltrationExecutionStep.BODY_OFF,
+            },
+        )
         if blocker is not None:
             return self._fail(frame, blocker, preempted=True)
         by_id = {item.observation_id: item for item in frame.observations}
