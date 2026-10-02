@@ -88,3 +88,18 @@ def test_fail_closed_never_retires_before_ownership_establishment() -> None:
     assert lease is not None
     assert lease.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
     assert lease.ended_at == established_at
+
+
+def test_retire_session_clamps_to_current_lease_establishment() -> None:
+    established_at = NOW + timedelta(seconds=3)
+    driver = _owned_driver(established_at=established_at)
+
+    driver._retire_session(
+        at=NOW + timedelta(seconds=1),
+        reason="orchestration_processing_failed",
+    )
+
+    lease = driver.orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
+    assert lease.ended_at == established_at

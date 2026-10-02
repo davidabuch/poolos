@@ -3171,9 +3171,10 @@ class ThermalAutomaticExecutionDriver:
     def _retire_session(self, *, at: datetime, reason: str) -> None:
         lease = self.orchestrator.ownership.state.lease
         if lease is not None and lease.status is ThermalRuntimeOwnershipStatus.OWNED:
+            relinquished_at = max(at, lease.established_at)
             self.orchestrator.ownership.relinquish(
                 lease_id=lease.lease_id,
-                relinquished_at=at,
+                relinquished_at=relinquished_at,
                 reason_code=reason,
                 retain_termination_entitlement=True,
             )
