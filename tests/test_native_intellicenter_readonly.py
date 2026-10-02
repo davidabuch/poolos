@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -171,6 +171,38 @@ def test_body_specific_pmpcirc_identity_and_configured_speed_are_distinct() -> N
     assert by_id[SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT].source_id.endswith(
         ":p0198"
     )
+
+
+def test_pmpcirc_identity_survives_unrelated_later_snapshot_publication() -> None:
+    base = transport()
+    later = NOW + timedelta(seconds=10)
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=later,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        bodies=base.bodies,
+        pumps=base.pumps,
+        intellichlors=base.intellichlors,
+        systems=base.systems,
+        temperatures=base.temperatures,
+        circuits=base.circuits,
+        raw_inventory=base.raw_inventory,
+    )
+
+    target = resolve_body_pump_target(snapshot, body=NativeBodyKind.POOL)
+    assert target is not None
+    assert target.native_id == "p0102"
+
+    mapped = NativeIntelliCenterReadAdapter().map_snapshot(
+        snapshot,
+        generated_at=later,
+    )
+    by_id = {item.observation_id: item for item in mapped.observations}
+    configured = by_id[POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT]
+
+    assert configured.value == 2200.0
+    assert configured.observed_at == NOW
 
 
 def test_gpm_pmpcirc_resolves_only_through_unit_aware_target_identity() -> None:
