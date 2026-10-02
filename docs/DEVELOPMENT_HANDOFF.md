@@ -1,6 +1,6 @@
 # PoolOS Current Development Handoff
 
-## Current status — October 1, 2026
+## Current status — October 2, 2026
 
 PoolOS is in **1.0 release-candidate readiness**.
 
@@ -10,7 +10,20 @@ is historical and must not be used as current runtime truth.
 
 Current production integration line: `1.0.2`.
 
-PoolOS 1.0 is released. Version 1.0.2 includes the filtration BODY_ON verification fix and fixes a thermal ownership chronology race where a stale observation frame could terminate a lease before its accepted-command establishment boundary.
+PoolOS 1.0 is released. Version 1.0.2 includes the filtration BODY_ON verification
+fix and chronology guards, but October 2 opportunistic Spa commissioning failed:
+the orchestrator could relinquish newer accepted BODY provenance before the driver
+saw an older conflicting callback. Healthy load/gates do not establish complete
+Spa commissioning.
+
+The unmerged `fix/coherent-observation-command-chronology` candidate is based on
+`99a9122d2f402b9b76bba4abe6ae295181f7181b`. Its Phase 1 probes reproduce shared
+publication/observation/acceptance defects. The repair records per-field native
+chronology, pins immutable input composition, and shares accepted-command temporal
+admission across orchestration, ownership, thermal and filtration. See
+[ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md).
+PR #388 remains unmerged; its isolated guard does not address the complete boundary.
+No candidate deployment or physical commissioning has occurred.
 
 ## Production control model
 

@@ -17,6 +17,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .clock import FixedClock
+from .evidence_chronology import EvidenceAdmission, admit_evidence
 from .execution_models import ExecutionStep, VerificationStatus
 from .integration import SetBodyActive, SetHeatMode, SetPumpFlow, SetPumpSpeed
 from .observations import (
@@ -324,7 +325,8 @@ class ExecutionVerificationEngine:
         if (
             request.step.metadata.get("strict_post_delivery_observation") == "true"
             and observation.observed_at is not None
-            and observation.observed_at <= request.verification_started_at
+            and admit_evidence(observation.observed_at, boundary=request.verification_started_at)
+            is not EvidenceAdmission.POST_BOUNDARY
         ):
             return ExecutionVerificationEvidence(
                 **common,

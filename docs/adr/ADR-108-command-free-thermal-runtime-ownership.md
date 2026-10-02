@@ -193,6 +193,12 @@ contract. Low-confidence, non-live, stale, missing, suspect, or invalid body,
 pump, source, or shared-hydraulic evidence cannot support candidacy or retain
 runtime ownership.
 
+The snapshot paragraph below describes the original timestamp-indexed model.
+[ADR-111](ADR-111-observation-and-command-consequence-chronology.md) clarifies
+captured evidence versus policy/evaluation identity and temporal admission before
+conflict-driven ownership mutation. An old conflict cannot cancel newer accepted
+ownership; command permission remains fail-closed.
+
 Snapshot identity is a bounded deterministic fingerprint of the authoritative
 generation time, orchestration-relevant observation identity/value/time/source/
 quality/confidence, and current body evaluation, plan, requested-mode, and

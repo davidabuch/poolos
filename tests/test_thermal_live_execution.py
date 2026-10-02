@@ -1418,10 +1418,10 @@ def test_phase_one_order_is_preserved_by_live_coordinator(
         )
         session = engine.verify_current_step(
             session,
-            store(observation_id, expected, at=current_evidence.evaluated_at),
+            store(observation_id, expected, at=current_evidence.evaluated_at + timedelta(milliseconds=1)),
             current_context=session.originating_context,
             policy=policy(),
-            evaluated_at=current_evidence.evaluated_at,
+            evaluated_at=current_evidence.evaluated_at + timedelta(milliseconds=1),
             source_id="native-intellicenter",
         )
 
@@ -2192,10 +2192,10 @@ def test_nonpriming_verified_step_still_advances_immediately() -> None:
 
     session = engine.verify_current_step(
         session,
-        store("pump.rpm", 2900, at=at),
+        store("pump.rpm", 2900, at=at + timedelta(milliseconds=1)),
         current_context=session.originating_context,
         policy=policy(),
-        evaluated_at=at,
+        evaluated_at=at + timedelta(milliseconds=1),
         source_id="native-intellicenter",
     )
 

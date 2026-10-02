@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from hashlib import sha256
+import json
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -16,6 +18,7 @@ from poolos.homeassistant.observations import (
     HomeAssistantValueType,
 )
 from poolos.observations import FreshnessPolicy, ObservationFreshness, PoolObservation
+from poolos.intellicenter_readonly import NativeIntelliCenterObservationSnapshot
 
 from .const import (
     CONF_AIR_TEMPERATURE_ENTITY,
@@ -177,6 +180,7 @@ class ObservationSnapshot:
     stale_entities: tuple[str, ...]
     mapped_entities: Mapping[str, str]
     authoritative_source: str = "home_assistant"
+    native_snapshot: NativeIntelliCenterObservationSnapshot | None = None
 
     def __post_init__(self) -> None:
         if self.generated_at.tzinfo is None:
@@ -186,6 +190,19 @@ class ObservationSnapshot:
         object.__setattr__(self, "unavailable_entities", tuple(sorted(set(self.unavailable_entities))))
         object.__setattr__(self, "stale_entities", tuple(sorted(set(self.stale_entities))))
         object.__setattr__(self, "mapped_entities", MappingProxyType(dict(sorted(self.mapped_entities.items()))))
+
+    @property
+    def evidence_identity(self) -> str:
+        """Identify captured facts independently of policy evaluation changes."""
+        facts = [
+            (item.observation_id, item.value, str(item.observed_at), item.source_id,
+             item.source_kind.value, item.quality.value, item.confidence)
+            for item in sorted(self.observations, key=lambda item: item.observation_id)
+        ]
+        transport = None if self.native_snapshot is None else self.native_snapshot.transport_snapshot
+        generation = None if transport is None else transport.discovery_generation
+        payload = (self.generated_at.isoformat(), facts, self.authoritative_source, generation)
+        return sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
     @property
     def healthy(self) -> bool:

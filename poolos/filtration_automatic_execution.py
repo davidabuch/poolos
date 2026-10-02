@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Mapping, Protocol
 
 from .clock import FixedClock
+from .evidence_chronology import EvidenceAdmission, accepted_command_boundary, admit_evidence
 from .external_change import ExternalChangeBatch, POOL_CIRCULATION_TAKEOVER_CONCEPTS
 from .filtration_policy import FiltrationAccountingSnapshot
 from .hal import CommandReceipt
@@ -361,6 +362,23 @@ class FiltrationAutomaticExecutionDriver:
                 command=False,
                 failure="automatic_filtration_external_takeover",
             )
+        if lease is not None:
+            by_id = {item.observation_id: item for item in frame.observations}
+            body_fact = by_id.get("pool.active")
+            body_state = lease.domain_state(OwnershipDomain.BODY)
+            boundary = max(lease.established_at, body_state.observed_at or lease.established_at)
+            if (body_fact is not None and body_fact.value is False
+                    and admit_evidence(body_fact.observed_at, boundary=boundary)
+                    in {EvidenceAdmission.PRE_BOUNDARY, EvidenceAdmission.AT_BOUNDARY}):
+                # Current publication does not admit an older BODY contradiction.
+                # Trusted operator preemption above still wins. No command can
+                # use this frame, and an accepted attempt keeps its fixed bound.
+                if self.attempt is not None and frame.observed_at >= self.attempt.deadline:
+                    return self._fail(frame, "automatic_filtration_verification_timed_out",
+                        failed_domain=(OwnershipDomain.PUMP
+                            if self.attempt.step is FiltrationExecutionStep.PUMP_SETPOINT
+                            else OwnershipDomain.BODY))
+                return self._blocked(frame, "automatic_filtration_stale_body_evidence_ignored")
         if self._requires_reenable:
             return self._blocked(frame, "automatic_filtration_reenable_required")
         suspended = (
@@ -895,6 +913,7 @@ class FiltrationAutomaticExecutionDriver:
             return self._fail(frame, f"automatic_filtration_delivery_exception:{type(exc).__name__}", failed_domain=domain)
         if not receipt.accepted:
             return self._fail(frame, f"automatic_filtration_delivery_{receipt.status.value}", failed_domain=domain)
+        accepted_at = accepted_command_boundary(receipt, authorized_at=frame.observed_at)
         if step is not FiltrationExecutionStep.BODY_OFF:
             assert frame.pool_pump_circuit_id is not None
             concept = (
@@ -914,7 +933,7 @@ class FiltrationAutomaticExecutionDriver:
             self.ownership.record_filtration_delivery(
                 session_id=self.session_id,
                 pool_pump_circuit_id=frame.pool_pump_circuit_id,
-                accepted_at=frame.observed_at,
+                accepted_at=accepted_at,
                 provenance=ThermalRuntimeConceptProvenance(
                     concept=concept,
                     operation_id=operation.operation_id,
@@ -937,8 +956,8 @@ class FiltrationAutomaticExecutionDriver:
             operation=operation,
             correlation_id=correlation_id,
             receipt_id=receipt.command_id,
-            delivered_at=frame.observed_at,
-            deadline=frame.observed_at + self.verification_timeout,
+            delivered_at=accepted_at,
+            deadline=accepted_at + self.verification_timeout,
         )
         self._accepted_delivery_count += 1
         self._last_correlation_id = correlation_id
@@ -1181,11 +1200,18 @@ class FiltrationAutomaticExecutionDriver:
         by_id = {item.observation_id: item for item in frame.observations}
         pool = _live_state(by_id.get("pool.active"), frame.observed_at)
         spa = _live_state(by_id.get("spa.active"), frame.observed_at)
+        lease = self.ownership.filtration_lease
+        if lease is None:
+            return False
+        body_state = lease.domain_state(OwnershipDomain.BODY)
+        boundary = max(lease.established_at, body_state.observed_at or lease.established_at)
         return (
             pool.usable
             and pool.value is False
             and spa.usable
             and spa.value is True
+            and admit_evidence(pool.observed_at, boundary=boundary) is EvidenceAdmission.POST_BOUNDARY
+            and admit_evidence(spa.observed_at, boundary=boundary) is EvidenceAdmission.POST_BOUNDARY
         )
 
     def _fail(
@@ -1429,7 +1455,7 @@ def _live_state(observation: PoolObservation | None, at: datetime) -> _LiveState
 
 
 def _later(observed_at: datetime | None, delivered_at: datetime) -> bool:
-    return observed_at is not None and observed_at > delivered_at
+    return admit_evidence(observed_at, boundary=delivered_at) is EvidenceAdmission.POST_BOUNDARY
 
 
 def _transient_evidence_loss(blocker: str | None) -> bool:

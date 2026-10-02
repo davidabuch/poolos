@@ -192,7 +192,7 @@ def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_fram
     assert hass.tasks == []
 
 
-def test_fresh_native_circulation_is_execution_source_without_external_event() -> None:
+def test_coherent_native_circulation_is_execution_source_without_external_event() -> None:
     module = _load_module()
     runtime, _, authority, coordinator, driver = _runtime(module)
     native_at = NOW + timedelta(seconds=5)
@@ -200,13 +200,15 @@ def test_fresh_native_circulation_is_execution_source_without_external_event() -
         generated_at=native_at,
         observations=(SimpleNamespace(observation_id="pool.active", value=True),),
     )
+    snapshot = _snapshot(native_at + timedelta(seconds=1))
+    snapshot.observations = coordinator.native_intellicenter_snapshot.observations
     runtime.observe(
-        _snapshot(native_at + timedelta(seconds=1)),
+        snapshot,
         _orchestration("policy-epoch"),
         external_changes=ExternalChangeBatch(()),
     )
 
-    expected = f"policy-epoch:native:{native_at.isoformat()}"
+    expected = "policy-epoch"
     assert driver.disabled_epochs == [expected]
     assert authority.epochs == [expected]
     frame = runtime._latest_frame
@@ -215,11 +217,11 @@ def test_fresh_native_circulation_is_execution_source_without_external_event() -
     assert frame.observations == coordinator.native_intellicenter_snapshot.observations
 
 
-def test_stale_native_circulation_does_not_replace_current_policy_snapshot() -> None:
+def test_later_cached_native_circulation_cannot_replace_current_policy_snapshot() -> None:
     module = _load_module()
     runtime, _, authority, coordinator, driver = _runtime(module)
     coordinator.native_intellicenter_snapshot = SimpleNamespace(
-        generated_at=NOW,
+        generated_at=NOW + timedelta(seconds=122),
         observations=(SimpleNamespace(observation_id="pool.active", value=True),),
     )
     current = NOW + timedelta(seconds=121)

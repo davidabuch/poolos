@@ -361,6 +361,7 @@ def build_authoritative_snapshot(
     }
 
     return ObservationSnapshot(
+        native_snapshot=native_snapshot,
         generated_at=generated_at,
         observations=tuple(sorted(combined.values(), key=lambda item: item.observation_id)),
         missing_required=tuple(sorted(set(missing_required))),

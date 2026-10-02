@@ -59,6 +59,7 @@ from pyintellicenter import (
 from pyintellicenter.attributes import ALL_ATTRIBUTES_BY_TYPE
 from pyintellicenter.exceptions import ICConnectionError, ICTimeoutError
 
+from poolos.evidence_chronology import evidence_precedes_authority
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
     NativeBodyState,
@@ -204,6 +205,19 @@ class _DiscoveryPoolModel(PoolModel):
         return super().add_object(objnam, params)
 
 
+class _ReadOnlyReplyEntries(list[dict[str, Any]]):
+    """Vendor-compatible returned entries carrying their read-start boundary.
+
+    pyintellicenter applies startup/new-object monitoring replies separately
+    after send_cmd returns. Carry the boundary with that exact reply, rather
+    than keeping a second cache or dating its application as a new observation.
+    """
+
+    def __init__(self, entries: list[dict[str, Any]], *, observed_at: datetime) -> None:
+        super().__init__(entries)
+        self.observed_at = observed_at
+
+
 class _ReadOnlyModelController(ICModelController):
     """Guarded controller whose mutating command channel is structurally closed."""
 
@@ -223,12 +237,59 @@ class _ReadOnlyModelController(ICModelController):
             transport=transport,
         )
         self._read_only_guard = guard
+        self._evidence_observer: Callable[[dict[str, dict[str, Any]], datetime], None] | None = None
+        self._applying_observed_batch = False
+        self._evidence_admission: Callable[[str, str, datetime], bool] | None = None
+
+    def _apply_updates(
+        self, changes_as_list: list[dict[str, Any]], *, observed_at: datetime | None = None
+    ) -> dict[str, dict[str, Any]]:
+        """Retain returned fields even when pyintellicenter reports no change.
+
+        Only fields present in the reply acquire observation chronology. The
+        cached model, publication time and unrelated fields do not acquire it.
+        """
+        at = observed_at or getattr(changes_as_list, "observed_at", None) or datetime.now(UTC)
+        # A read started before a newer NotifyList may return afterward. Never
+        # pair its older value with the retained newer field timestamp.
+        reported = {}
+        admitted_entries = []
+        for entry in changes_as_list:
+            if (not isinstance(entry, dict) or entry.get("objnam") is None
+                    or not isinstance(entry.get("params"), dict)):
+                continue
+            native_id = str(entry["objnam"])
+            fields = {
+                name: value for name, value in entry["params"].items()
+                if self._evidence_admission is None
+                or self._evidence_admission(native_id, name, at)
+            }
+            if fields:
+                reported[native_id] = fields
+                admitted_entries.append({**entry, "params": fields})
+        if self._evidence_observer is not None:
+            self._evidence_observer(reported, at)
+        self._applying_observed_batch = True
+        try:
+            changes = super()._apply_updates(admitted_entries)
+            if not changes and reported and self._updated_callback is not None:
+                self._updated_callback(self, reported)
+            return changes
+        finally:
+            self._applying_observed_batch = False
 
     async def send_cmd(
         self, cmd: str, extra: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         self._read_only_guard.require_allowed(cmd)
-        return await super().send_cmd(cmd, extra)
+        read_started_at = datetime.now(UTC)
+        response = await super().send_cmd(cmd, extra)
+        entries = response.get("objectList")
+        if isinstance(entries, list):
+            response = {**response, "objectList": _ReadOnlyReplyEntries(
+                entries, observed_at=read_started_at,
+            )}
+        return response
 
     async def request_changes(
         self, objnam: str, changes: dict[str, Any]
@@ -273,12 +334,9 @@ class _ReadOnlyModelController(ICModelController):
                 "OBJTYP = SENSE",
                 (SOURCE_ATTR, SUBTYP_ATTR),
             ),
-            (
-                "OBJTYP = BODY",
-                (tuple(dict.fromkeys((*_BODY_MONITOR_ATTRIBUTES, SUBTYP_ATTR)))
-                 if cleanup_topology else (STATUS_ATTR, SUBTYP_ATTR, SNAME_ATTR)),
-            ),
+            ("OBJTYP = BODY", tuple(dict.fromkeys((*_BODY_MONITOR_ATTRIBUTES, SUBTYP_ATTR)))),
         )
+        read_started_at = datetime.now(UTC)
         if cleanup_topology:
             requests += (
                 ("OBJTYP = CIRCUIT", (STATUS_ATTR, SNAME_ATTR, SUBTYP_ATTR, "USE")),
@@ -330,14 +388,14 @@ class _ReadOnlyModelController(ICModelController):
                         raise NativeIntelliCenterReadError("CLEANUP_NATIVE_READ_INCOMPLETE")
                 cleanup_updates.extend(object_list)
             elif isinstance(object_list, list):
-                self._apply_updates(object_list)
-        if cleanup_topology and generation_is_current():
+                cleanup_updates.extend(object_list)
+        if generation_is_current():
             # Publish only once, from the transport after the complete batch.
             # This synchronous section cannot hide an unrelated notification.
             callback = self._updated_callback
             self._updated_callback = None
             try:
-                self._apply_updates(cleanup_updates)
+                self._apply_updates(cleanup_updates, observed_at=read_started_at)
             finally:
                 self._updated_callback = callback
 
@@ -352,6 +410,8 @@ class _ReadOnlyModelController(ICModelController):
 
         if not generation_is_current():
             return
+
+        read_started_at = datetime.now(UTC)
 
         # First refresh the BODY itself. HEATER must come from this fresh
         # response rather than from the cached model because gas/solar source
@@ -386,7 +446,7 @@ class _ReadOnlyModelController(ICModelController):
         # cannot be accidentally suppressed while network I/O is in flight.
         applying_body_ids.add(objnam)
         try:
-            self._apply_updates(object_list)
+            self._apply_updates(object_list, observed_at=read_started_at)
         finally:
             applying_body_ids.discard(objnam)
 
@@ -428,7 +488,7 @@ class _ReadOnlyModelController(ICModelController):
 
         object_list = response.get("objectList")
         if isinstance(object_list, list):
-            self._apply_updates(object_list)
+            self._apply_updates(object_list, observed_at=read_started_at)
 
 
 class _ReadOnlyConnectionHandler(ICConnectionHandler):
@@ -501,6 +561,10 @@ class IndependentIntelliCenterReadOnlyTransport:
             transport=transport,
             guard=self._guard,
         )
+        self._attribute_observed_at: dict[tuple[str, str], datetime] = {}
+        self._object_observed_at: dict[str, datetime] = {}
+        self._controller._evidence_observer = self._record_observed_fields
+        self._controller._evidence_admission = self._field_evidence_is_current
         self._handler = _ReadOnlyConnectionHandler(
             self,
             self._controller,
@@ -515,6 +579,7 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._reconnect_count = 0
         self._discovery_generation = 0
         self._inventory_completeness = NativeInventoryCompleteness.UNKNOWN
+        self._inventory_observed_at: datetime | None = None
         self._running = False
         self._body_metadata_refresh_pending: set[str] = set()
         self._body_metadata_refresh_dirty: set[str] = set()
@@ -611,9 +676,7 @@ class IndependentIntelliCenterReadOnlyTransport:
         originating_snapshot = self._latest_snapshot
 
         def read_is_current() -> bool:
-            return self._refresh_generation_is_current(generation) and (
-                not cleanup_topology or self._latest_snapshot is originating_snapshot
-            )
+            return self._refresh_generation_is_current(generation) and self._latest_snapshot is originating_snapshot
 
         try:
             arguments = {"cleanup_topology": True} if cleanup_topology else {}
@@ -630,6 +693,8 @@ class IndependentIntelliCenterReadOnlyTransport:
         # command or new entitlement created while queries are in flight cannot
         # be verified by an earlier reply merely because the batch finished later.
         observed_at = read_started_at if cleanup_topology else datetime.now(UTC)
+        if cleanup_topology:
+            self._inventory_observed_at = read_started_at
         self._last_native_update = observed_at
         self._last_error_code = None
         self._latest_snapshot = self._copy_snapshot(
@@ -712,11 +777,17 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._last_native_update = observed_at
         self._last_error_code = None
         self._discovery_generation += 1
+        self._attribute_observed_at.clear()
+        self._object_observed_at.clear()
+        self._record_observed_fields(
+            {str(item.objnam): dict(item.properties) for item in self._model}, observed_at
+        )
         # ICModelController.start() has completed its initial all-equipment
         # discovery before the handler invokes this successful lifecycle
         # callback. Completeness is therefore explicit and generation-bound;
         # connection state or object presence never establishes it.
         self._inventory_completeness = NativeInventoryCompleteness.COMPLETE
+        self._inventory_observed_at = observed_at
         if reconnected:
             self._reconnect_count += 1
         self._latest_snapshot = self._copy_snapshot(
@@ -757,12 +828,26 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._schedule_body_metadata_refreshes(updates)
 
         observed_at = datetime.now(UTC)
+        if not self._controller._applying_observed_batch:
+            self._record_observed_fields(updates, observed_at)
         self._last_native_update = observed_at
         self._latest_snapshot = self._copy_snapshot(
             observed_at=observed_at,
             connected=True,
         )
         self._notify_snapshot_updated()
+
+    def _field_evidence_is_current(self, native_id: str, name: str, at: datetime) -> bool:
+        previous = self._attribute_observed_at.get((native_id, name))
+        return previous is None or not evidence_precedes_authority(at, boundary=previous)
+
+    def _record_observed_fields(self, updates: dict[str, dict[str, Any]], at: datetime) -> None:
+        for native_id, fields in updates.items():
+            for name in fields:
+                key = (native_id, name)
+                self._attribute_observed_at[key] = max(at, self._attribute_observed_at.get(key, at))
+            if fields:
+                self._object_observed_at[native_id] = max(at, self._object_observed_at.get(native_id, at))
 
     def _refresh_generation_is_current(
         self,
@@ -964,7 +1049,13 @@ class IndependentIntelliCenterReadOnlyTransport:
     def _copy_snapshot(
         self, *, observed_at: datetime, connected: bool
     ) -> NativeIntelliCenterTransportSnapshot:
-        raw = tuple(_copy_raw_object(item, observed_at) for item in self._model)
+        raw = tuple(
+            _copy_raw_object(
+                item, self._object_observed_at.get(str(item.objnam), observed_at),
+                attribute_times=self._attribute_observed_at,
+            )
+            for item in self._model
+        )
         return NativeIntelliCenterTransportSnapshot(
             source_id="poolos.independent_intellicenter",
             observed_at=observed_at,
@@ -975,6 +1066,8 @@ class IndependentIntelliCenterReadOnlyTransport:
                 else "°F"
             ),
             inventory_completeness=self._inventory_completeness,
+            inventory_observed_at=self._inventory_observed_at,
+            discovery_generation=self._discovery_generation,
             bodies=tuple(
                 item
                 for obj in self._model.get_by_type(BODY_TYPE)
@@ -1007,7 +1100,10 @@ class IndependentIntelliCenterReadOnlyTransport:
         )
 
 
-def _copy_raw_object(item: PoolObject, observed_at: datetime) -> NativeRawObject:
+def _copy_raw_object(
+    item: PoolObject, observed_at: datetime,
+    *, attribute_times: Mapping[tuple[str, str], datetime] | None = None,
+) -> NativeRawObject:
     properties = dict(item.properties)
     return NativeRawObject(
         native_id=str(item.objnam),
@@ -1017,7 +1113,10 @@ def _copy_raw_object(item: PoolObject, observed_at: datetime) -> NativeRawObject
         parent_id=_optional_text(properties.get(PARENT_ATTR)),
         observed_at=observed_at,
         attributes=tuple(
-            NativeRawAttribute(str(name), _raw_scalar(value))
+            NativeRawAttribute(
+                str(name), _raw_scalar(value),
+                None if attribute_times is None else attribute_times.get((str(item.objnam), str(name))),
+            )
             for name, value in sorted(properties.items(), key=lambda pair: str(pair[0]))
         ),
     )

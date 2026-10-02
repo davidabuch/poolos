@@ -19,6 +19,8 @@ import json
 from types import MappingProxyType
 from typing import Mapping, Protocol
 
+from .evidence_chronology import accepted_command_boundary, evidence_precedes_authority
+
 from .clock import FixedClock
 from .environment import RuntimeMode
 from .execution_coordinator import (
@@ -469,8 +471,7 @@ class ThermalLiveExecutionOwnership:
         if not correlation_id.strip():
             raise ValueError("ownership requires delivery correlation")
         _require_aware(delivered_at, "delivered_at")
-        receipt_accepted_at = receipt.acknowledged_at or receipt.issued_at
-        accepted_at = max(delivered_at, receipt_accepted_at)
+        accepted_at = accepted_command_boundary(receipt, authorized_at=delivered_at)
         _require_aware(accepted_at, "receipt accepted_at")
         if isinstance(operation, SetBodyActive) and operation.active:
             if operation.equipment_id != self.target_body.value:
@@ -1537,10 +1538,11 @@ class ThermalLiveExecutionEngine:
                 failure_reason,
                 evidence.evaluated_at,
             )
+        accepted_at = accepted_command_boundary(receipt, authorized_at=evidence.evaluated_at)
         delivered = self.step_state_machine.transition(
             delivering.lifecycle,
             to_status=ExecutionStepStatus.DELIVERED,
-            occurred_at=evidence.evaluated_at,
+            occurred_at=accepted_at,
             reason="Thermal delivery accepted; native confirmation required.",
             actor="thermal-live-execution",
             metadata={"command_id": receipt.command_id},
@@ -1589,7 +1591,7 @@ class ThermalLiveExecutionEngine:
         return replace(
             session,
             status=ThermalLiveExecutionStatus.AWAITING_VERIFICATION,
-            updated_at=evidence.evaluated_at,
+            updated_at=accepted_at,
             current_attempt=attempt,
             ownership=ownership,
         )
@@ -1607,6 +1609,12 @@ class ThermalLiveExecutionEngine:
         if session.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
             raise ValueError("session is not awaiting verification")
         _require_aware(evaluated_at, "evaluated_at")
+        attempt = session.current_attempt
+        assert attempt is not None and attempt.receipt is not None
+        if evidence_precedes_authority(
+            evaluated_at, boundary=accepted_step_boundary(attempt)
+        ):
+            return session
         currentness = self._currentness_decision(
             session,
             current_context=current_context,
@@ -1626,8 +1634,6 @@ class ThermalLiveExecutionEngine:
                 currentness.reason_code,
                 evaluated_at,
             )
-        attempt = session.current_attempt
-        assert attempt is not None and attempt.receipt is not None
         lifecycle = attempt.lifecycle
         if lifecycle.status is ExecutionStepStatus.DELIVERED:
             verifying = self.step_state_machine.transition(
@@ -1672,7 +1678,7 @@ class ThermalLiveExecutionEngine:
                 )
             )
             if spa_startup_topology_refresh_pending:
-                deadline = attempt.receipt.issued_at + policy.verification_timeout
+                deadline = accepted_step_boundary(attempt) + policy.verification_timeout
                 if evaluated_at >= deadline:
                     return self._terminal(
                         replace(
@@ -1732,7 +1738,7 @@ class ThermalLiveExecutionEngine:
                 # Advancing this boundary to the prior verification timestamp
                 # incorrectly makes arbitrary evaluator cadence require a new
                 # native event on every epoch.
-                verification_started_at=attempt.receipt.issued_at,
+                verification_started_at=accepted_step_boundary(attempt),
                 evaluated_at=evaluated_at,
                 timeout=_step_verification_timeout(attempt.step, policy),
                 freshness_policy=FreshnessPolicy(
@@ -2470,6 +2476,28 @@ def _session_effective_rpm(
     ):
         return None
     return policy.pump_session_effective_rpm
+
+
+def accepted_step_boundary(attempt: ThermalLiveStepAttempt) -> datetime:
+    """Use the immutable DELIVERED transition and the truthful receipt together."""
+    assert attempt.receipt is not None
+    delivered_at = next(
+        (transition.occurred_at for transition in attempt.lifecycle.transitions
+         if transition.to_status is ExecutionStepStatus.DELIVERED),
+        attempt.receipt.issued_at,
+    )
+    return accepted_command_boundary(attempt.receipt, authorized_at=delivered_at)
+
+
+def pending_verification_deadline(
+    session: ThermalLiveExecutionSession,
+    policy: ThermalLiveExecutionPolicy,
+) -> datetime | None:
+    """Return the immutable receipt-bound deadline of the in-flight step."""
+    attempt = session.current_attempt
+    if attempt is None or attempt.receipt is None:
+        return None
+    return accepted_step_boundary(attempt) + _step_verification_timeout(attempt.step, policy)
 
 
 def _step_verification_timeout(

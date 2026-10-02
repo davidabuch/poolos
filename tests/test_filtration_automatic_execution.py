@@ -188,6 +188,7 @@ def _frame(
 class _Delivery:
     operations: list[PoolOperation]
     accepted: bool = True
+    issued_at: datetime = NOW
 
     @property
     def available(self) -> bool:
@@ -199,7 +200,7 @@ class _Delivery:
             status=(CommandStatus.ACKNOWLEDGED if self.accepted else CommandStatus.REJECTED),
             command_id=correlation_id,
             message="test",
-            issued_at=NOW,
+            issued_at=self.issued_at,
             verification_required=True,
         )
 
@@ -209,7 +210,11 @@ class _Factory:
     delivery: _Delivery
 
     def for_operation(self, **kwargs: object) -> _Delivery:
-        del kwargs
+        # Zero-latency fake delivery is tied to its authorizing frame, including
+        # callers that reuse this harness on another model day.
+        frame = kwargs.get("frame")
+        if isinstance(frame, FiltrationAutomaticExecutionFrame):
+            self.delivery.issued_at = frame.observed_at
         return self.delivery
 
 

@@ -184,6 +184,17 @@ operator evidence, generation and final delivery gateway. Zero-progress physical
 equality, an incompatible residual, or a material purpose change cannot refresh an
 old execution.
 
+Observation/publication/evaluation clocks are not interchangeable. The captured
+native evidence and its transport/configuration input must form one immutable
+policy input. Only a returned native field receives new observation chronology;
+a cached value does not become newly observed because another field changes.
+Accepted-command consequences share one temporal admission rule across ownership,
+thermal live/automatic execution and filtration. Older evidence cannot retire a
+newer accepted origin, and current publication of an older BODY contradiction
+blocks command permission without erasing provenance. Fixed receipt-bound deadlines
+still expire. Trusted current operator evidence is admitted separately per domain.
+See [ADR-111](../adr/ADR-111-observation-and-command-consequence-chronology.md).
+
 Every accepted thermal BODY, PUMP, and source operation requires a strictly later
 authoritative observation before it can enter the verified prefix. Semantic
 purpose compatibility never relaxes that chronology. A delayed consequence from

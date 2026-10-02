@@ -344,8 +344,8 @@ REASON_SIGNALS = (
 )
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
-REASON_FAMILY_COUNT = 226
-REASON_FAMILY_SHA256 = "a7986bdb0a288323c94c97257e2dff2962a83d2890b57475b89813424da8ea98"
+REASON_FAMILY_COUNT = 232
+REASON_FAMILY_SHA256 = "9c8830906792c3b5569138ccd49b391891b4f1f648c4f5ee3b10ef19783e3b5a"
 
 
 @cache
@@ -438,6 +438,12 @@ def _reason_classification(function: str, reason: str) -> ReasonClassification:
 
 
 def _reason_regression(source: str, reason: str) -> str:
+    if reason == "automatic_filtration_stale_body_evidence_ignored":
+        return "test_filtration_old_body_fact_cannot_preempt_newer_verified_acquisition"
+    if reason == "runtime_ownership_retained:stale_evidence_ignored":
+        return ("test_current_publication_with_old_body_fact_cannot_retire_pending_driver"
+                if source.endswith("thermal_automatic_execution.py") else
+                "test_old_manager_evidence_cannot_preempt_later_confirmed_lease")
     if (
         source.endswith("thermal_automatic_execution.py")
         and reason == "automatic_thermal_circulation_handoff_unavailable"
@@ -458,6 +464,8 @@ def _reason_regression(source: str, reason: str) -> str:
     if source.endswith("thermal_runtime_orchestration.py"):
         return "test_integer_native_configured_pump_speed_accepts_integral_float"
     if source.endswith("thermal_runtime_ownership.py"):
+        if reason == "runtime_ownership_retained:stale_evidence_ignored":
+            return "test_old_manager_evidence_cannot_preempt_later_confirmed_lease"
         if reason in {
             "runtime_ownership_adoption_denied:",
             "runtime_ownership_established:prospective_body_adoption",
