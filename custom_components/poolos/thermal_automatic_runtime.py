@@ -942,7 +942,7 @@ class PoolOSThermalAutomaticRuntime:
         frame = self._latest_frame
         if (
             frame is None
-            or frame.orchestration.blocking_reason
+            or getattr(frame.orchestration, "blocking_reason", None)
             != "thermal_orchestration_shared_hydraulic_inventory_incomplete"
         ):
             self._shared_hydraulic_reobservation_epoch_identity = None
