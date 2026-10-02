@@ -695,6 +695,19 @@ class ThermalAutomaticExecutionDriver:
         if self._last_epoch_at is not None and frame.observed_at < self._last_epoch_at:
             assert self.assessment is not None
             return self.assessment
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and frame.observed_at < lease.established_at
+        ):
+            # A command may be accepted after the observation frame that
+            # authorized it. Any callback carrying an observation timestamp
+            # from before that accepted-command boundary is stale relative to
+            # the new ownership generation and cannot terminate or reinterpret
+            # that lease.
+            assert self.assessment is not None
+            return self.assessment
         self._accept_epoch(frame)
         if not self.requested_enabled:
             return self.note_disabled_epoch(frame)
@@ -2658,7 +2671,16 @@ class ThermalAutomaticExecutionDriver:
         self._probe_acquisition = None
         self.solar_engagement_attempt = None
         self._solar_nonengagement_cleanup_purpose_id = None
-        self._retire_session(at=failed_at, reason=reason)
+        lease = self.orchestrator.ownership.state.lease
+        retirement_at = (
+            max(failed_at, lease.established_at)
+            if (
+                lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            )
+            else failed_at
+        )
+        self._retire_session(at=retirement_at, reason=reason)
         return self._publish(
             state=ThermalAutomaticDriverState.FAILED,
             evaluated_at=failed_at,
