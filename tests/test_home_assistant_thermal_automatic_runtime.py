@@ -152,6 +152,7 @@ class FakeHass:
             "PoolOS owned pump-session native reobservation",
             "PoolOS cleanup topology native reobservation",
             "PoolOS Spa startup native topology reobservation",
+            "PoolOS shared hydraulic native preflight reobservation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -216,8 +217,17 @@ def _snapshot(at: datetime) -> SimpleNamespace:
     return SimpleNamespace(generated_at=at, observations=())
 
 
-def _orchestration(at: datetime, identity: str) -> SimpleNamespace:
-    return SimpleNamespace(snapshot_identity=identity, evaluated_at=at)
+def _orchestration(
+    at: datetime,
+    identity: str,
+    *,
+    blocking_reason: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        snapshot_identity=identity,
+        evaluated_at=at,
+        blocking_reason=blocking_reason,
+    )
 
 
 def test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_frame() -> None:
@@ -361,6 +371,56 @@ def test_cleanup_provenance_triggers_one_post_boundary_native_refresh() -> None:
 
         assert coordinator.cleanup_topology_refresh_count == 2
         assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-2"
+
+    asyncio.run(scenario())
+
+
+def test_stale_shared_hydraulic_preflight_requests_one_truthful_native_refresh_per_epoch() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, _, coordinator, driver = _runtime(module)
+        runtime.set_enabled(True)
+        driver.release.set()
+        blocker = "thermal_orchestration_shared_hydraulic_inventory_incomplete"
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "hydraulic-1", blocking_reason=blocker),
+        )
+        await asyncio.wait_for(
+            coordinator.thermal_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await asyncio.gather(*tuple(hass.tasks), return_exceptions=True)
+
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "hydraulic-1", blocking_reason=blocker),
+        )
+        await asyncio.sleep(0)
+        assert coordinator.thermal_topology_refresh_count == 1
+
+        coordinator.thermal_topology_refresh_event = asyncio.Event()
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=1)),
+            None,
+            _orchestration(
+                NOW + timedelta(seconds=1),
+                "hydraulic-2",
+                blocking_reason=blocker,
+            ),
+        )
+        await asyncio.wait_for(
+            coordinator.thermal_topology_refresh_event.wait(),
+            timeout=1,
+        )
+        await asyncio.gather(*tuple(hass.tasks), return_exceptions=True)
+
+        assert coordinator.thermal_topology_refresh_count == 2
 
     asyncio.run(scenario())
 
