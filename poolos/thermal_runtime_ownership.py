@@ -1058,7 +1058,7 @@ class ThermalRuntimeOwnershipManager:
         if (
             self._state.status is not ThermalRuntimeOwnershipStatus.OWNED
             or lease is None
-            or lease.body is not ThermalBody.POOL
+            or lease.body not in {ThermalBody.POOL, ThermalBody.HOT_TUB}
             or lease.originating_currentness is None
         ):
             return None
@@ -1195,15 +1195,18 @@ class ThermalRuntimeOwnershipManager:
         if evidence.external_changes.events:
             return deny("external_change_present")
 
-        if checkpoint.body is not ThermalBody.POOL:
+        if checkpoint.body not in {ThermalBody.POOL, ThermalBody.HOT_TUB}:
             return deny("unsupported_body")
+
+        expected_pool_active = checkpoint.body is ThermalBody.POOL
+        expected_spa_active = checkpoint.body is ThermalBody.HOT_TUB
 
         if (
             not evidence.pool_activity_fresh
             or not evidence.pool_activity_usable
             or evidence.pool_activity_observed_at is None
             or evidence.pool_activity_observed_at <= checkpoint.captured_at
-            or evidence.pool_active is not True
+            or evidence.pool_active is not expected_pool_active
         ):
             return deny("pool_state_mismatch")
 
@@ -1212,7 +1215,7 @@ class ThermalRuntimeOwnershipManager:
             or not evidence.spa_activity_usable
             or evidence.spa_activity_observed_at is None
             or evidence.spa_activity_observed_at <= checkpoint.captured_at
-            or evidence.spa_active is not False
+            or evidence.spa_active is not expected_spa_active
         ):
             return deny("spa_state_mismatch")
 
