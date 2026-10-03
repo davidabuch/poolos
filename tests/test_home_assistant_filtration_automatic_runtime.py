@@ -122,7 +122,10 @@ class FakeHass:
         coroutine: object,
         name: str,
     ) -> asyncio.Task[object]:
-        assert name == "PoolOS automatic filtration execution epoch"
+        assert name in {
+            "PoolOS automatic filtration execution epoch",
+            "PoolOS owned filtration native reobservation",
+        }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
         return task
@@ -131,9 +134,17 @@ class FakeHass:
 def _runtime(module: ModuleType):
     hass = FakeHass()
     authority = FakeAuthority()
+    async def refresh_owned_filtration_evidence() -> bool:
+        coordinator.owned_filtration_refresh_count += 1
+        coordinator.owned_filtration_refresh_event.set()
+        return True
+
     coordinator = SimpleNamespace(
         listener_updates=0,
         native_intellicenter_snapshot=None,
+        owned_filtration_refresh_count=0,
+        owned_filtration_refresh_event=asyncio.Event(),
+        async_refresh_native_owned_pump_session_evidence=refresh_owned_filtration_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -378,3 +389,44 @@ def test_future_independent_filtration_window_is_not_blocked_by_noon_off() -> No
         ]
         is False
     )
+
+
+def test_verified_owned_filtration_reobserves_unchanged_native_state_before_freshness_loss() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        module._OWNED_FILTRATION_REOBSERVATION_INTERVAL_SECONDS = 0.01
+        runtime, _, _, coordinator, driver = _runtime(module)
+        from poolos.pool_circulation_ownership import PoolCirculationOwner
+
+        driver.requested_enabled = True
+        runtime.ownership.owner = PoolCirculationOwner.FILTRATION
+        runtime.ownership.filtration_lease = SimpleNamespace(verified=True)
+
+        runtime._sync_owned_filtration_reobservation()
+        await asyncio.wait_for(coordinator.owned_filtration_refresh_event.wait(), timeout=1)
+
+        assert coordinator.owned_filtration_refresh_count >= 1
+        assert runtime._owned_filtration_reobservation_task is not None
+
+        runtime.ownership.filtration_lease = None
+        task = runtime._owned_filtration_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+        assert runtime._owned_filtration_reobservation_task is None
+
+    asyncio.run(scenario())
+
+
+def test_filtration_reobservation_never_starts_without_verified_owned_lease() -> None:
+    module = _load_module()
+    runtime, _, _, coordinator, driver = _runtime(module)
+    from poolos.pool_circulation_ownership import PoolCirculationOwner
+
+    driver.requested_enabled = True
+    runtime.ownership.owner = PoolCirculationOwner.FILTRATION
+    runtime.ownership.filtration_lease = SimpleNamespace(verified=False)
+
+    runtime._sync_owned_filtration_reobservation()
+
+    assert runtime._owned_filtration_reobservation_task is None
+    assert coordinator.owned_filtration_refresh_count == 0
