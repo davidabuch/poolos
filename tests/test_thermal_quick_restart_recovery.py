@@ -244,6 +244,32 @@ def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
         ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
         ThermalRuntimeOwnedConcept.HEAT_SOURCE,
     }
+
+    # Match the Pool quick-restart contract: checkpoint export is allowed only
+    # after one later clean steady-state epoch has reconfirmed every owned
+    # domain as stable PoolOS authority.
+    stable_at = NOW + timedelta(seconds=10)
+    stable = manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=stable_at,
+            evaluation_id=currentness.evaluation_id,
+            plan_id=assessment.plan_id,
+            requested_mode="Solar Preferred",
+            pool_active=False,
+            spa_active=True,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+            execution_currentness=currentness,
+            pool_observed_at=stable_at,
+            spa_observed_at=stable_at,
+            pump_observed_at=stable_at,
+            configured_pump_observed_at=stable_at,
+            source_observed_at=stable_at,
+        )
+    )
+    assert stable.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
     return manager
 
 
