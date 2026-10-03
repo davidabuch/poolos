@@ -768,7 +768,12 @@ class PoolOSThermalAutomaticRuntime:
 
                 # Recovery itself is command-free.  Do not reserve, authorize,
                 # or schedule automatic delivery on the restoration epoch.
+                # A restored OWNED lease must still immediately resume the
+                # read-only steady-state evidence loop; otherwise unchanged
+                # BODY/PUMP/source/shared-hydraulic facts age out after startup
+                # and the freshly restored lease preempts itself.
                 self.coordinator.async_update_listeners()
+                self._sync_owned_pump_session_reobservation()
                 return
 
         reserve = getattr(self.driver, "reserve_circulation_candidate", None)
