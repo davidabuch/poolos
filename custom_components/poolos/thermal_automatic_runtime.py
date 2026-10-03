@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import logging
@@ -77,6 +78,8 @@ _OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 15.0
 def _bound_pump_operating_purpose(
     session: ThermalLiveExecutionSession,
     operation: SetPumpSpeed | SetPumpFlow,
+    *,
+    step_metadata: Mapping[str, object] | None = None,
 ) -> str | None:
     """Bind the final gateway to the canonical current pump purpose.
 
@@ -90,6 +93,8 @@ def _bound_pump_operating_purpose(
     if isinstance(purpose_value, str) and purpose_value:
         return purpose_value
     if operation.metadata.get("priming_step") == "true":
+        return "priming"
+    if step_metadata is not None and step_metadata.get("priming_step") == "true":
         return "priming"
     desired_evidence = getattr(session.assessment.desired, "evidence", {})
     desired_purpose = (
@@ -134,13 +139,13 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         operating_purpose = None
         current_sequence = session.coordination.current_step_sequence
         if current_sequence is not None:
-            current_operation = session.execution_plan.steps[
-                current_sequence - 1
-            ].operation
+            current_step = session.execution_plan.steps[current_sequence - 1]
+            current_operation = current_step.operation
             if isinstance(current_operation, (SetPumpSpeed, SetPumpFlow)):
                 operating_purpose = _bound_pump_operating_purpose(
                     session,
                     current_operation,
+                    step_metadata=current_step.metadata,
                 )
         currentness = session.originating_currentness
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
