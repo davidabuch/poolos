@@ -150,6 +150,7 @@ class ThermalRuntimeOrchestrator:
         thermal: ThermalRuntimeAssessment | None,
         external_changes: ExternalChangeBatch = _EMPTY_EXTERNAL_CHANGES,
         evidence_identity: str | None = None,
+        evaluation_identity: str | None = None,
     ) -> ThermalRuntimeOrchestrationAssessment:
         """Process one already-created authoritative frame exactly once."""
 
@@ -179,6 +180,7 @@ class ThermalRuntimeOrchestrator:
             observation_items,
             thermal,
             external_changes,
+            evaluation_identity=evaluation_identity,
         )
         observation_fingerprint = _frame_fingerprint(
             generated_at, observation_items, None, _EMPTY_EXTERNAL_CHANGES,
@@ -943,6 +945,8 @@ def _frame_fingerprint(
     observations: tuple[PoolObservation, ...],
     thermal: ThermalRuntimeAssessment | None,
     external_changes: ExternalChangeBatch,
+    *,
+    evaluation_identity: str | None = None,
 ) -> str:
     relevant = sorted(
         (
@@ -998,6 +1002,7 @@ def _frame_fingerprint(
             "thermal": bodies,
             "external": external,
             "correlated": correlated,
+            "evaluation_identity": _text_digest(evaluation_identity),
         },
         sort_keys=True,
         separators=(",", ":"),
