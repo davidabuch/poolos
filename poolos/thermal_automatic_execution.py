@@ -330,6 +330,9 @@ class ThermalAutomaticExecutionDriver:
     _spa_user_session_opportunity_id: str | None = field(
         default=None, init=False, repr=False
     )
+    _poolos_opportunistic_spa_session_active: bool = field(
+        default=False, init=False, repr=False
+    )
     _active_spa_restart_ambiguity: bool = field(
         default=False, init=False, repr=False
     )
@@ -446,22 +449,31 @@ class ThermalAutomaticExecutionDriver:
         )
 
     def spa_session_kind(self) -> SpaSessionKind | None:
-        """Return the positively proven origin of the current owned Spa BODY."""
+        """Return the positively proven origin of the current Spa BODY session.
+
+        BODY-session origin outlives a thermal ownership lease.  In particular,
+        a PoolOS-started opportunistic Spa remains PoolOS-originated while its
+        exact residual shutdown/handoff is in progress, even after the thermal
+        lease is superseded by returning Pool demand.  The origin latch is
+        cleared only by authoritative Spa-OFF observation, so physical Spa-ON
+        state alone never manufactures PoolOS ownership.
+        """
 
         lease = self.orchestrator.ownership.state.lease
         if (
-            lease is None
-            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
-            or lease.body is not ThermalBody.HOT_TUB
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.body is ThermalBody.HOT_TUB
         ):
-            return None
-        if lease.body_activation is not None:
+            if lease.body_activation is not None:
+                return SpaSessionKind.POOLOS_OPPORTUNISTIC
+            if (
+                lease.body_adoption is not None
+                and lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+            ):
+                return SpaSessionKind.EXTERNAL_USER
+        if self._poolos_opportunistic_spa_session_active:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
-        if (
-            lease.body_adoption is not None
-            and lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
-        ):
-            return SpaSessionKind.EXTERNAL_USER
         return None
 
     def spa_thermal_operator_owned(self) -> bool:
@@ -2915,6 +2927,7 @@ class ThermalAutomaticExecutionDriver:
             self._spa_off_observed_since_start = True
             self._active_spa_restart_ambiguity = False
             self._spa_user_session_opportunity_id = None
+            self._poolos_opportunistic_spa_session_active = False
         elif (
             spa_active is True
             and self._last_spa_active is False
@@ -2927,7 +2940,11 @@ class ThermalAutomaticExecutionDriver:
                 and lease.body is ThermalBody.HOT_TUB
                 and lease.body_activation is not None
             )
-            if not poolos_started_spa:
+            if poolos_started_spa:
+                # Preserve the positively witnessed BODY-session origin across
+                # later lease supersession until authoritative Spa OFF.
+                self._poolos_opportunistic_spa_session_active = True
+            else:
                 # This process observed the physical OFF -> ON boundary without
                 # PoolOS BODY-start provenance.  That is a fresh user-session
                 # opportunity from which BODY may be prospectively adopted.
