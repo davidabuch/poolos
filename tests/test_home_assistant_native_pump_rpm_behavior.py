@@ -299,6 +299,64 @@ def test_pool_pmpcirc_native_id_is_not_hard_coded(
     assert receipt.value == 2900
 
 
+def test_automatic_hot_tub_can_deliver_exact_priming_speed(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    """Central authority admits only the exact configured Hot Tub priming baseline."""
+
+    pump = pump_object_factory(
+        minimum_rpm=450,
+        maximum_rpm=3450,
+    )
+    spa_circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        circuit_id="C0001",
+        mode="RPM",
+        rpm_setpoint=2600,
+    )
+    gateway, recorder = _gateway([pump, spa_circuit])
+    authority = gateway._command_authority
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="hot_tub",
+    )
+    authority.begin_automatic_thermal_epoch("external-spa-prime")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="external-spa-prime",
+        session_identity="external-spa-prime-session",
+        body="hot_tub",
+        pump_circuit_id="p0102",
+        operating_purpose="priming",
+    )
+
+    receipt = _run(
+        gateway.async_set_pump_circuit_speed(
+            "p0102",
+            3000,
+            request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+            automatic_thermal_context=context,
+        )
+    )
+
+    assert recorder.calls == [("p0102", {"SPEED": "3000"})]
+    assert receipt.value == 3000
+
+    with pytest.raises(
+        ManualIntelliCenterCommandError,
+        match="physical command denied:automatic_thermal_operation_unauthorized",
+    ):
+        _run(
+            gateway.async_set_pump_circuit_speed(
+                "p0102",
+                2600,
+                request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+                automatic_thermal_context=context,
+            )
+        )
+
+
 def test_automatic_hot_tub_can_deliver_exact_dynamic_spa_pmpcirc_speed(
     pump_object_factory,
     pump_circuit_object_factory,
