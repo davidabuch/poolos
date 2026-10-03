@@ -141,6 +141,43 @@ def retire_transient_pool_suppression_for_new_session(
     return False
 
 
+@dataclass(slots=True)
+class SpaBodySessionBoundaryTracker:
+    """Track authoritative Spa BODY session boundaries from native truth only."""
+
+    previous_spa_active: bool | None = None
+
+    def observe(self, *, spa_active: bool | None) -> bool:
+        """Return True only for an observed False -> True Spa BODY transition."""
+
+        if spa_active is None:
+            return False
+        boundary = self.previous_spa_active is False and spa_active is True
+        self.previous_spa_active = spa_active
+        return boundary
+
+
+def retire_transient_spa_suppression_for_new_session(
+    restraint: "SpaAutomaticControlSuppression",
+    tracker: SpaBodySessionBoundaryTracker,
+    *,
+    spa_active: bool | None,
+    observed_at: datetime,
+) -> bool:
+    """Retire prior transient Spa-Off cancellation on a new native Spa session."""
+
+    _require_aware(observed_at)
+    if not tracker.observe(spa_active=spa_active):
+        return False
+    if (
+        restraint.state.suppressed
+        and restraint.state.source in _TRANSIENT_SPA_SOURCES
+    ):
+        restraint.resume(resumed_at=observed_at)
+        return True
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class PoolAutomaticControlSuppressionState:
     """Immutable current restraint; it carries no equipment authority."""
@@ -484,5 +521,7 @@ __all__ = [
     "SpaAutomaticControlSuppression",
     "SpaAutomaticControlSuppressionSource",
     "SpaAutomaticControlSuppressionState",
+    "SpaBodySessionBoundaryTracker",
+    "retire_transient_spa_suppression_for_new_session",
     "spa_suppression_is_current",
 ]
