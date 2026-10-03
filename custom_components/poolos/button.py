@@ -262,16 +262,25 @@ class PoolOSResetControlButton(
         except Exception:
             LOGGER.exception("PoolOS post-reset authoritative refresh failed")
 
+    async def _async_refresh_reset_baseline_evidence(self) -> None:
+        """Genuinely re-read the Reset proof set, then publish one coordinator epoch."""
+
+        await self.coordinator.async_refresh_native_reset_baseline_evidence()
+        await self.coordinator.async_request_refresh()
+
     async def _async_verify_reset_baseline(self) -> bool:
         # IntelliCenter body/source shutdown is asynchronous and the pump can
         # remain in a native transition for tens of seconds after the command
         # has been accepted. Do not strand Reset authority merely because the
         # first one or two coordinator snapshots arrive before that transition
-        # settles. Keep the Reset fence active and bound the wait.
+        # settles. Keep the Reset fence active and bound the wait. A coordinator
+        # refresh alone cannot prove unchanged OFF/0 facts after the Reset
+        # boundary, so every attempt first performs a bounded read-only native
+        # BODY/source/PUMP reobservation.
         for attempt in range(16):
             try:
                 await asyncio.wait_for(
-                    self.coordinator.async_request_refresh(),
+                    self._async_refresh_reset_baseline_evidence(),
                     timeout=_RESET_REFRESH_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
