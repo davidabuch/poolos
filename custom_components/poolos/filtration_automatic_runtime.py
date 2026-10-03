@@ -162,6 +162,12 @@ class PoolOSFiltrationAutomaticRuntime:
     _owned_filtration_reobservation_task: asyncio.Task[object] | None = field(
         default=None, init=False, repr=False
     )
+    _verification_topology_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
+    _verification_topology_reobservation_token: str | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
 
@@ -360,6 +366,12 @@ class PoolOSFiltrationAutomaticRuntime:
             reobservation_task.cancel()
             await asyncio.gather(reobservation_task, return_exceptions=True)
         self._owned_filtration_reobservation_task = None
+        verification_task = self._verification_topology_reobservation_task
+        if verification_task is not None and not verification_task.done():
+            verification_task.cancel()
+            await asyncio.gather(verification_task, return_exceptions=True)
+        self._verification_topology_reobservation_task = None
+        self._verification_topology_reobservation_token = None
         self.driver.unload(unloaded_at=datetime.now(UTC))
         task = self._task
         if task is not None and not task.done():
@@ -429,6 +441,58 @@ class PoolOSFiltrationAutomaticRuntime:
             if asyncio.current_task() is self._owned_filtration_reobservation_task:
                 self._owned_filtration_reobservation_task = None
 
+    def _sync_verification_topology_reobservation(self) -> bool:
+        """Request one genuine native read per accepted filtration step."""
+
+        if self._unloaded or not self.driver.requested_enabled:
+            return False
+        token = self.driver.verification_topology_reobservation_token()
+        if token is None:
+            self._verification_topology_reobservation_token = None
+            return False
+        if self._verification_topology_reobservation_token == token:
+            return False
+        task = self._verification_topology_reobservation_task
+        if task is not None and not task.done():
+            return True
+        self._verification_topology_reobservation_token = token
+        self._verification_topology_reobservation_task = self.hass.async_create_task(
+            self._refresh_verification_topology_once(token),
+            "PoolOS filtration verification native reobservation",
+        )
+        return True
+
+    async def _refresh_verification_topology_once(self, token: str) -> None:
+        """Acquire post-command filtration truth without equipment mutation."""
+
+        try:
+            if (
+                self._unloaded
+                or self.driver.verification_topology_reobservation_token() != token
+            ):
+                return
+            refresh = getattr(
+                self.coordinator,
+                "async_refresh_native_filtration_topology_evidence",
+                None,
+            )
+            if refresh is not None:
+                await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS filtration verification native reobservation failed")
+        finally:
+            if asyncio.current_task() is self._verification_topology_reobservation_task:
+                self._verification_topology_reobservation_task = None
+            if not self._unloaded and self.driver.requested_enabled:
+                latest = self._latest_frame
+                if (
+                    latest is not None
+                    and latest.epoch_identity != self.driver.last_epoch_identity
+                ):
+                    self._schedule_if_idle()
+
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
             return
@@ -469,6 +533,7 @@ class PoolOSFiltrationAutomaticRuntime:
                 reason=f"automatic_filtration_driver_exception:{type(exc).__name__}",
             )
         self.coordinator.async_update_listeners()
+        self._sync_verification_topology_reobservation()
         self._sync_owned_filtration_reobservation()
         latest = self._latest_frame
         if (
