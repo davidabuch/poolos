@@ -86,6 +86,7 @@ def test_reset_listener_completion_schedules_fresh_post_close_epoch(monkeypatch)
             thermal_automatic_runtime=SimpleNamespace(
                 driver=Mock(),
                 circulation_ownership=Mock(),
+                note_reset_authority_reopened=Mock(),
             ),
             thermal_runtime_orchestrator=Mock(),
             pool_automatic_control=Mock(),
@@ -116,6 +117,7 @@ def test_reset_listener_completion_schedules_fresh_post_close_epoch(monkeypatch)
         await asyncio.sleep(0)
 
         assert not authority.reset_recovery_active
+        runtime.thermal_automatic_runtime.note_reset_authority_reopened.assert_called_once_with()
         post_close_refresh.assert_awaited_once_with()
 
     asyncio.run(run())
@@ -138,7 +140,11 @@ def test_reset_safe_native_update_closes_fence_after_button_exits(monkeypatch, e
             manual_intellicenter=SimpleNamespace(
                 async_set_body_heat_source=AsyncMock(), async_set_body_active=AsyncMock()
             ),
-            thermal_automatic_runtime=SimpleNamespace(driver=Mock(), circulation_ownership=Mock()),
+            thermal_automatic_runtime=SimpleNamespace(
+                driver=Mock(),
+                circulation_ownership=Mock(),
+                note_reset_authority_reopened=Mock(),
+            ),
             thermal_runtime_orchestrator=Mock(),
             pool_automatic_control=Mock(), spa_automatic_control=Mock(),
         )
