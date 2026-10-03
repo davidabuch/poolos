@@ -1291,6 +1291,20 @@ class FiltrationAutomaticExecutionDriver:
             failure=_bounded(reason),
         )
 
+    def verification_topology_reobservation_token(self) -> str | None:
+        """Expose one accepted filtration step awaiting authoritative verification.
+
+        The token grants no authority. It only permits the HA runtime to request
+        one bounded read-only native refresh after an accepted command so
+        unchanged BODY, PMPCIRC, and pump truth can advance without relying on
+        an unsolicited IntelliCenter callback.
+        """
+
+        attempt = self.attempt
+        if attempt is None:
+            return None
+        return attempt.receipt_id
+
     def diagnostics(self) -> Mapping[str, object]:
         assessment = self.assessment
         if assessment is None:

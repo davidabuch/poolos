@@ -68,6 +68,7 @@ class FakeDriver:
     disabled_epochs: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     unloaded: bool = False
+    verification_token: str | None = None
     release: asyncio.Event = field(default_factory=asyncio.Event)
     started: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -90,6 +91,9 @@ class FakeDriver:
     def unload(self, **_: object) -> None:
         self.unloaded = True
         self.requested_enabled = False
+
+    def verification_topology_reobservation_token(self) -> str | None:
+        return self.verification_token
 
     def diagnostics(self) -> dict[str, object]:
         return {"state": "test", "requested_enabled": self.requested_enabled}
@@ -125,6 +129,7 @@ class FakeHass:
         assert name in {
             "PoolOS automatic filtration execution epoch",
             "PoolOS owned filtration native reobservation",
+            "PoolOS filtration verification native reobservation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -139,12 +144,20 @@ def _runtime(module: ModuleType):
         coordinator.owned_filtration_refresh_event.set()
         return True
 
+    async def refresh_filtration_verification_evidence() -> bool:
+        coordinator.filtration_verification_refresh_count += 1
+        coordinator.filtration_verification_refresh_event.set()
+        return True
+
     coordinator = SimpleNamespace(
         listener_updates=0,
         native_intellicenter_snapshot=None,
         owned_filtration_refresh_count=0,
         owned_filtration_refresh_event=asyncio.Event(),
+        filtration_verification_refresh_count=0,
+        filtration_verification_refresh_event=asyncio.Event(),
         async_refresh_native_owned_pump_session_evidence=refresh_owned_filtration_evidence,
+        async_refresh_native_filtration_topology_evidence=refresh_filtration_verification_evidence,
         async_update_listeners=lambda: setattr(
             coordinator,
             "listener_updates",
@@ -430,3 +443,42 @@ def test_filtration_reobservation_never_starts_without_verified_owned_lease() ->
 
     assert runtime._owned_filtration_reobservation_task is None
     assert coordinator.owned_filtration_refresh_count == 0
+
+
+def test_each_accepted_filtration_step_requests_one_native_verification_reobservation() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, _, _, coordinator, driver = _runtime(module)
+        driver.requested_enabled = True
+        driver.verification_token = "receipt-1"
+
+        assert runtime._sync_verification_topology_reobservation()
+        await asyncio.wait_for(
+            coordinator.filtration_verification_refresh_event.wait(),
+            timeout=1,
+        )
+        assert coordinator.filtration_verification_refresh_count == 1
+
+        assert not runtime._sync_verification_topology_reobservation()
+        assert coordinator.filtration_verification_refresh_count == 1
+
+        driver.verification_token = "receipt-2"
+        coordinator.filtration_verification_refresh_event.clear()
+        assert runtime._sync_verification_topology_reobservation()
+        await asyncio.wait_for(
+            coordinator.filtration_verification_refresh_event.wait(),
+            timeout=1,
+        )
+        assert coordinator.filtration_verification_refresh_count == 2
+
+    asyncio.run(scenario())
+
+
+def test_filtration_verification_reobservation_requires_live_accepted_attempt() -> None:
+    module = _load_module()
+    runtime, _, _, coordinator, driver = _runtime(module)
+    driver.requested_enabled = True
+
+    assert not runtime._sync_verification_topology_reobservation()
+    assert runtime._verification_topology_reobservation_task is None
+    assert coordinator.filtration_verification_refresh_count == 0
