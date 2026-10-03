@@ -3675,6 +3675,134 @@ def test_accepted_pool_pump_step_waits_for_post_receipt_rpm_then_verifies() -> N
     assert completed.failure_reason is None
 
 
+def test_accepted_pool_pump_step_waits_through_temporary_missing_rpm_evidence() -> None:
+    """Missing RPM during physical ramp is absence of proof until the fixed deadline."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.SOLAR,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    accepted_at = NOW + timedelta(seconds=10)
+
+    @dataclass
+    class TimedDelivery(FakeThermalDelivery):
+        async def deliver(
+            self,
+            operation: PoolOperation,
+            *,
+            correlation_id: str,
+        ) -> CommandReceipt:
+            self.calls.append((operation, correlation_id))
+            return CommandReceipt(
+                status=CommandStatus.ACKNOWLEDGED,
+                command_id="receipt-pool-2900-missing",
+                issued_at=accepted_at,
+                acknowledged_at=accepted_at,
+                verification_required=True,
+            )
+
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan, at=accepted_at),
+            delivery=TimedDelivery(),
+        )
+    )
+
+    missing = ObservationStore()
+    for observation_id, value in (("pool.active", True), ("spa.active", False)):
+        missing.put(
+            PoolObservation(
+                observation_id=observation_id,
+                value=value,
+                observed_at=accepted_at + timedelta(seconds=5),
+                source_kind=ObservationSourceKind.LIVE,
+                source_id="native-intellicenter",
+                quality=ObservationQuality.GOOD,
+                confidence=1.0,
+            )
+        )
+
+    pending = engine.verify_current_step(
+        waiting,
+        missing,
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=accepted_at + timedelta(seconds=5),
+        source_id="native-intellicenter",
+    )
+
+    assert pending.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert pending.failure_reason is None
+
+    completed = engine.verify_current_step(
+        pending,
+        store(
+            "pump.rpm",
+            2900,
+            at=accepted_at + timedelta(seconds=20),
+        ),
+        current_context=pending.originating_context,
+        policy=policy(),
+        evaluated_at=accepted_at + timedelta(seconds=20),
+        source_id="native-intellicenter",
+    )
+
+    assert completed.status is ThermalLiveExecutionStatus.COMPLETED
+    assert completed.failure_reason is None
+
+
+def test_accepted_pool_pump_missing_rpm_still_times_out_at_fixed_deadline() -> None:
+    """Evidence grace cannot extend or renew the immutable receipt-bound deadline."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.SOLAR,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+
+    missing = ObservationStore()
+    for observation_id, value in (("pool.active", True), ("spa.active", False)):
+        missing.put(
+            PoolObservation(
+                observation_id=observation_id,
+                value=value,
+                observed_at=NOW + timedelta(seconds=30),
+                source_kind=ObservationSourceKind.LIVE,
+                source_id="native-intellicenter",
+                quality=ObservationQuality.GOOD,
+                confidence=1.0,
+            )
+        )
+
+    timed_out = engine.verify_current_step(
+        waiting,
+        missing,
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=NOW + timedelta(seconds=30),
+        source_id="native-intellicenter",
+    )
+
+    assert timed_out.status is ThermalLiveExecutionStatus.TIMED_OUT
+
+
 def test_current_convergence_does_not_skip_delivered_step_verification() -> None:
     plan = thermal_plan(
         PhysicalHeatMode.OFF,
