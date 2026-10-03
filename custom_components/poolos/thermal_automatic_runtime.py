@@ -542,6 +542,14 @@ class PoolOSThermalAutomaticRuntime:
 
         self._authority_epoch_generation += 1
 
+    @property
+    def orchestration_evaluation_identity(self) -> str | None:
+        """Return current authority-generation token for orchestration reevaluation."""
+
+        if self._authority_epoch_generation == 0:
+            return None
+        return f"thermal-authority-generation:{self._authority_epoch_generation}"
+
     def observe(
         self,
         snapshot: ObservationSnapshot,
@@ -591,14 +599,8 @@ class PoolOSThermalAutomaticRuntime:
                 "gas_heating",
             }
         )
-        execution_epoch_identity = orchestration.snapshot_identity
-        if self._authority_epoch_generation:
-            execution_epoch_identity = (
-                f"{orchestration.snapshot_identity}:authority:"
-                f"{self._authority_epoch_generation}"
-            )
         frame = ThermalAutomaticExecutionFrame(
-            epoch_identity=execution_epoch_identity,
+            epoch_identity=orchestration.snapshot_identity,
             observed_at=snapshot.generated_at,
             observations=tuple(snapshot.observations),
             thermal=thermal,
