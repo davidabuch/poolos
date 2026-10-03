@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import timedelta
 
 from poolos.integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed, ThermalBody
-from poolos.thermal_execution_currentness import ThermalExecutionCurrentness
+from poolos.thermal_execution_currentness import ThermalExecutionCurrentness, ThermalExecutionProgress
 from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnedConcept,
     ThermalRuntimeOwnershipDisposition,
@@ -133,7 +133,7 @@ def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
             current.plan_id,
             current,
         ),
-        execution_progress=current.execution_progress,
+        execution_progress=ThermalExecutionProgress(),
     )
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
 
