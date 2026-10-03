@@ -1487,6 +1487,12 @@ class ThermalAutomaticExecutionDriver:
             self._delivery_in_flight = False
         rejected_attempt = delivered.current_attempt
         if (
+            rejected_attempt is None
+            and delivered.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+            and delivered.attempts
+        ):
+            rejected_attempt = delivered.attempts[-1]
+        if (
             delivered.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION
             and rejected_attempt is not None
             and rejected_attempt.receipt is not None
