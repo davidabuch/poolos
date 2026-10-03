@@ -150,8 +150,9 @@ claimed complete by this chronology recovery audit and must not be silently impl
 as part of the recovery deployment. They require separate architecture/commissioning
 work.
 
-**Pre-deployment gate:** PRs #407 and #408 must be merged, all required CI must be green,
-and the exact merged main SHA must pass post-merge CI before a recovery release is cut.
+**Pre-deployment gate:** PRs #407 and #408 are merged with required CI green. The recovery
+release candidate is v1.0.10; it must pass its complete version-aligned release CI before tagging
+and physical deployment.
 Physical commissioning after deployment must run the whole recovery matrix rather than
 only the last observed defect.
 
