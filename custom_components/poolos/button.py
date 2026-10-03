@@ -144,6 +144,7 @@ class PoolOSResetControlButton(
             return
         if self._safe_reset_baseline():
             authority.finish_reset_recovery()
+            self._runtime.thermal_automatic_runtime.note_reset_authority_reopened()
             # Reset closure invalidates every pre-close runtime context. The
             # publication that proved the safe baseline may already have passed
             # normal runtime listeners before this button listener runs, so it
