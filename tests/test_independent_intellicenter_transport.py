@@ -1508,6 +1508,99 @@ def test_owned_pump_session_refresh_uses_read_only_getparamlist_and_republishes(
     asyncio.run(exercise())
 
 
+def test_owned_pump_session_reread_advances_unchanged_mapped_rpm_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A genuine unchanged native RPM reply must become post-boundary evidence."""
+
+    module = _load_module(monkeypatch)
+    FakeModelController.initial_objects = _objects()
+
+    async def exercise() -> None:
+        transport = module.IndependentIntelliCenterReadOnlyTransport(
+            host="192.0.2.10"
+        )
+        await transport.async_start()
+
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        before = NativeIntelliCenterReadAdapter().map_snapshot(
+            transport.read_snapshot(),
+            generated_at=datetime.now(UTC),
+        )
+        before_rpm = next(
+            item for item in before.observations if item.observation_id == "pump.rpm"
+        )
+
+        transport._controller.command_response_queues["GetParamList"] = [
+            {
+                "objectList": [
+                    {
+                        "objnam": "PC001",
+                        "params": {
+                            "CIRCUIT": "C0006",
+                            "SELECT": "RPM",
+                            "PARENT": "P0001",
+                            "SPEED": "1500",
+                        },
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "P0001",
+                        "params": {"RPM": 2200, "STATUS": "10"},
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "S0001",
+                        "params": {"SOURCE": 78, "SUBTYP": "AIR"},
+                    }
+                ]
+            },
+            {
+                "objectList": [
+                    {
+                        "objnam": "B1101",
+                        "params": {
+                            "STATUS": "ON",
+                            "HTMODE": "1",
+                            "HEATER": "H0001",
+                        },
+                    }
+                ]
+            },
+        ]
+
+        await asyncio.sleep(0.001)
+        assert await transport._async_refresh_owned_pump_session_evidence()
+
+        after = NativeIntelliCenterReadAdapter().map_snapshot(
+            transport.read_snapshot(),
+            generated_at=datetime.now(UTC),
+        )
+        after_rpm = next(
+            item for item in after.observations if item.observation_id == "pump.rpm"
+        )
+
+        assert after_rpm.value == before_rpm.value == 2200.0
+        assert after_rpm.observed_at > before_rpm.observed_at
+
+        await transport.async_stop()
+
+    asyncio.run(exercise())
+
+
 def test_unsolicited_lotmp_and_heater_update_still_refreshes_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
