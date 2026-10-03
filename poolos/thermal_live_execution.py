@@ -1506,10 +1506,17 @@ class ThermalLiveExecutionEngine:
                 if isinstance(authority_reason, str) and authority_reason
                 else f"delivery_{receipt.status.value}"
             )
+            superseded_before_transport = (
+                authority_reason == "automatic_thermal_context_stale"
+            )
             status = (
-                ThermalLiveExecutionStatus.TIMED_OUT
-                if receipt.status is CommandStatus.TIMED_OUT
-                else ThermalLiveExecutionStatus.FAILED
+                ThermalLiveExecutionStatus.SUPERSEDED
+                if superseded_before_transport
+                else (
+                    ThermalLiveExecutionStatus.TIMED_OUT
+                    if receipt.status is CommandStatus.TIMED_OUT
+                    else ThermalLiveExecutionStatus.FAILED
+                )
             )
             step_status = (
                 ExecutionStepStatus.TIMED_OUT
