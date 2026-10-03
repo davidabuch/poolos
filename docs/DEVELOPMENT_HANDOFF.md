@@ -8,7 +8,7 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.6`; release candidate: `1.0.7`.
+Current production integration line: `1.0.7`; release candidate: `1.0.8`.
 
 PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
 chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
@@ -58,6 +58,20 @@ the same topology. PR #401 extends the existing 15-second bounded read-only nati
 reobservation loop from probe/priming to any live OWNED thermal lease. It stops when
 ownership ends and does not create or restore ownership from matching state. v1.0.7
 packages this stable-session evidence liveness fix for continued physical commissioning.
+
+Phase 4 commissioning of v1.0.7 then physically verified Reset reduction to Pool OFF,
+Spa OFF, Solar OFF, and pump 0 RPM, but Automatic Thermal remained blocked on
+`automatic_thermal_fresh_epoch_required_after_authority_change`. The post-close
+coordinator refresh from PR #394 did occur; the failure was identity, not missing
+evaluation. Because the safe-baseline native evidence was unchanged across Reset closure,
+the orchestration snapshot identity was unchanged and the automatic runtime correctly
+deduplicated what appeared to be the same execution epoch. PR #403 makes the chronology
+model explicit at this boundary: immutable native evidence retains its evidence identity,
+while Reset closure advances a separate authority/evaluation generation that participates
+in orchestration evaluation identity. The same safe evidence can therefore be reevaluated
+under newly reopened authority without fabricating observations, weakening freshness, or
+replaying a cached pre-Reset command candidate. v1.0.8 packages this fix for continued
+physical commissioning.
 
 See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
 chronology model. PR #388 was closed as superseded by PR #389.
