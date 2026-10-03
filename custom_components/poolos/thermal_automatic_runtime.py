@@ -145,7 +145,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 operating_purpose = _bound_pump_operating_purpose(
                     session,
                     current_operation,
-                    step_metadata=current_step.metadata,
+                    step_metadata=getattr(current_step, "metadata", {}),
                 )
         currentness = session.originating_currentness
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
