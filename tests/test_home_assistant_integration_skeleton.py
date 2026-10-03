@@ -178,10 +178,14 @@ def test_native_observer_expires_transient_manual_off_before_runtime_processing(
     assert pool_check < pool_resume < session_sync
     assert spa_check < spa_resume < session_sync
     assert session_sync < external_process
-    native_session_boundary = observer.index(
+    pool_session_boundary = observer.index(
         "retire_transient_pool_suppression_for_new_session("
     )
-    assert native_session_boundary < external_process
+    spa_session_boundary = observer.index(
+        "retire_transient_spa_suppression_for_new_session("
+    )
+    assert pool_session_boundary < external_process
+    assert spa_session_boundary < external_process
     # Native diagnostics/intent cannot recompute a new policy from a previous
     # authoritative frame. The coordinator owns coherent native composition.
     assert "thermal_runtime.refresh(" not in observer
