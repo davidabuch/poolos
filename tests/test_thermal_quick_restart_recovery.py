@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import timedelta
 
-from poolos.integration import PhysicalHeatMode
+from poolos.integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed, ThermalBody
 from poolos.thermal_execution_currentness import ThermalExecutionCurrentness
 from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnedConcept,
@@ -11,6 +11,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnershipManager,
     ThermalRuntimeOwnershipStatus,
 )
+from poolos.thermal_live_execution import ThermalLiveExecutionContext
 
 from test_thermal_runtime_ownership import (
     NOW,
@@ -93,6 +94,192 @@ def _fresh_matching_evidence(
         source_observed_at=at,
     )
 
+
+
+
+
+def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
+    """Return a fully verified PoolOS-started Hot Tub Solar lease."""
+
+    manager = ThermalRuntimeOwnershipManager()
+    current = ThermalExecutionCurrentness.from_assessment(
+        thermal_assessment(
+            at=NOW,
+            body=ThermalBody.HOT_TUB,
+            requested_mode="Solar Preferred",
+            source=PhysicalHeatMode.SOLAR,
+            rpm=2900,
+            current_source=PhysicalHeatMode.OFF,
+            current_rpm=2600,
+            current_body_active=False,
+        ),
+        evaluation_id="hot-tub-evaluation",
+    )
+    ownership = execution_ownership(
+        body=ThermalBody.HOT_TUB,
+        activation=True,
+        pump_rpm=2900,
+        source=PhysicalHeatMode.SOLAR,
+        evaluation_id=current.evaluation_id,
+        plan_id=current.plan_id,
+        execution_plan_id="hot-tub-execution-plan",
+    )
+    decision = manager.establish(
+        ownership,
+        established_at=NOW,
+        requested_mode="Solar Preferred",
+        current_context=ThermalLiveExecutionContext(
+            current.evaluation_id,
+            current.plan_id,
+            current,
+        ),
+    )
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+
+    accepted_base = NOW + timedelta(milliseconds=100)
+    for role, operation, accepted_at in (
+        ("body_activation", SetBodyActive("hot_tub", True), accepted_base),
+        ("pump_setpoint", SetPumpSpeed("p0198", 2900), accepted_base + timedelta(milliseconds=100)),
+        ("heat_source", SetHeatMode("hot_tub", PhysicalHeatMode.SOLAR), accepted_base + timedelta(milliseconds=200)),
+    ):
+        manager.accept_delivery(
+            ownership,
+            operation=operation,
+            receipt_id=f"{role}-receipt",
+            accepted_at=accepted_at,
+        )
+
+    at = NOW + timedelta(seconds=10)
+    retained = manager.evaluate(
+        evidence(
+            body=ThermalBody.HOT_TUB,
+            at=at,
+            evaluation_id=current.evaluation_id,
+            plan_id=current.plan_id,
+            requested_mode="Solar Preferred",
+            pool_active=False,
+            spa_active=True,
+            pump_rpm=2900,
+            configured_pump_rpm=2900,
+            heat_source=PhysicalHeatMode.SOLAR,
+            execution_currentness=current,
+            pool_observed_at=at,
+            spa_observed_at=at,
+            pump_observed_at=at,
+            configured_pump_observed_at=at,
+            source_observed_at=at,
+        )
+    )
+    assert retained.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+    lease = manager.state.lease
+    assert lease is not None
+    assert set(lease.verified_concepts) == {
+        ThermalRuntimeOwnedConcept.BODY_ACTIVATION,
+        ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+        ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+    }
+    return manager
+
+
+def _fresh_matching_hot_tub_evidence(
+    source: ThermalRuntimeOwnershipManager,
+    *,
+    at,
+    pool_active: bool = False,
+    spa_active: bool = True,
+):
+    lease = source.state.lease
+    assert lease is not None
+    assert lease.originating_currentness is not None
+    currentness = replace(
+        lease.originating_currentness,
+        evaluation_id="hot-tub-restart-evaluation",
+        plan_id="hot-tub-restart-plan",
+        evaluated_at=at,
+    )
+    return evidence(
+        body=ThermalBody.HOT_TUB,
+        at=at,
+        evaluation_id=currentness.evaluation_id,
+        plan_id=currentness.plan_id,
+        requested_mode=lease.requested_mode,
+        pool_active=pool_active,
+        spa_active=spa_active,
+        pump_rpm=2900,
+        configured_pump_rpm=2900,
+        heat_source=PhysicalHeatMode.SOLAR,
+        execution_currentness=currentness,
+        pool_observed_at=at,
+        spa_observed_at=at,
+        pump_observed_at=at,
+        configured_pump_observed_at=at,
+        source_observed_at=at,
+    )
+
+
+def test_fully_verified_hot_tub_solar_session_exports_restart_checkpoint() -> None:
+    manager = _stable_verified_hot_tub_solar_manager()
+
+    checkpoint = manager.export_restart_checkpoint(
+        captured_at=NOW + timedelta(seconds=11)
+    )
+
+    assert checkpoint is not None
+    assert checkpoint.body is ThermalBody.HOT_TUB
+    assert checkpoint.body_activation.intended_value is True
+    assert checkpoint.pump_setpoint.intended_value == 2900
+    assert checkpoint.heat_source.intended_value is PhysicalHeatMode.SOLAR
+
+
+def test_matching_fresh_hot_tub_restart_restores_same_provenance() -> None:
+    before = _stable_verified_hot_tub_solar_manager()
+    old_lease = before.state.lease
+    assert old_lease is not None
+    checkpoint = before.export_restart_checkpoint(
+        captured_at=NOW + timedelta(seconds=11)
+    )
+    assert checkpoint is not None
+
+    restarted = ThermalRuntimeOwnershipManager()
+    at = NOW + timedelta(seconds=40)
+    decision = restarted.restore_restart_checkpoint(
+        checkpoint,
+        evidence=_fresh_matching_hot_tub_evidence(before, at=at),
+        max_age=timedelta(minutes=5),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
+    lease = restarted.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_activation == old_lease.body_activation
+    assert lease.pump_setpoint == old_lease.pump_setpoint
+    assert lease.heat_source == old_lease.heat_source
+    assert lease.reason_code == "runtime_ownership_restored:quick_restart"
+
+
+def test_hot_tub_restart_topology_mismatch_fails_closed() -> None:
+    before = _stable_verified_hot_tub_solar_manager()
+    checkpoint = before.export_restart_checkpoint(
+        captured_at=NOW + timedelta(seconds=11)
+    )
+    assert checkpoint is not None
+
+    restarted = ThermalRuntimeOwnershipManager()
+    at = NOW + timedelta(seconds=40)
+    decision = restarted.restore_restart_checkpoint(
+        checkpoint,
+        evidence=_fresh_matching_hot_tub_evidence(
+            before,
+            at=at,
+            pool_active=True,
+            spa_active=True,
+        ),
+        max_age=timedelta(minutes=5),
+    )
+
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert restarted.state.status is ThermalRuntimeOwnershipStatus.UNOWNED
 
 def test_fully_verified_solar_session_exports_restart_checkpoint() -> None:
     manager = _stable_verified_solar_manager()
