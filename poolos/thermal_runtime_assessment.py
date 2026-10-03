@@ -1787,7 +1787,15 @@ class ThermalRuntimeEvaluator:
         elif not below_target and active_heat_source is ThermalHeatSource.NONE:
             required_rpm = self.baselines.filtration_rpm
             planned_purpose = "ordinary_circulation"
-            spa_desired = replace(spa_desired, selected_source=selected_source)
+            spa_desired = replace(
+                spa_desired,
+                selected_source=selected_source,
+                reason_code=(
+                    "opportunistic_residual_circulation_hold"
+                    if spa_session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+                    else spa_desired.reason_code
+                ),
+            )
         if (
             session_rpm is not None
             and required_rpm is not None

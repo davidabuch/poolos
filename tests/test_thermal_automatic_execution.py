@@ -5178,8 +5178,12 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
             before_count = len(delivery.calls)
             result = await ordinary_process(self, frame, delivery_factory=delivery_factory)
             lease = orchestrator.ownership.state.lease
-            if (len(delivery.calls) > before_count and lease is not None
-                    and lease.status is ThermalRuntimeOwnershipStatus.OWNED):
+            if (
+                len(delivery.calls) > before_count
+                and lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and lease.body is ThermalBody.HOT_TUB
+            ):
                 session = driver.active_session
                 # The accepted receipt is later than its authorizing frame.
                 # A changed callback from that original input arrives before
@@ -5586,6 +5590,10 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         shutdown.state,
         shutdown.blocker,
     )
+    # Returning Pool demand may supersede the thermal lease, but the still-
+    # active Spa BODY was positively started by PoolOS.  Its BODY-session
+    # origin must remain autonomous until Spa is physically observed OFF.
+    assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
     assert isinstance(delivery.calls[-1], SetHeatMode)
     assert delivery.calls[-1].mode is PhysicalHeatMode.OFF
 
@@ -5615,6 +5623,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         )
     )
     assert not source_off.command_delivery_performed
+    assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
     assert driver.cleanup_provenance is not None
     assert driver.cleanup_provenance.body is ThermalBody.HOT_TUB
     assert driver.cleanup_provenance.body_activation is not None
@@ -5649,6 +5658,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         spa_off.state,
         spa_off.blocker,
     )
+    assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
     assert isinstance(delivery.calls[-1], SetBodyActive)
     assert delivery.calls[-1].equipment_id == ThermalBody.HOT_TUB.value
     assert delivery.calls[-1].active is False
@@ -5680,17 +5690,47 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
     assert not cleanup_complete.command_delivery_performed
     assert driver.cleanup_provenance is None
     assert driver.cleanup_attempt is None
+    assert driver.spa_session_kind() is None
+
+    if shutdown_case == "pool_priority_return":
+        # Once the PoolOS-started Spa is authoritatively OFF, returning Pool
+        # demand must be free to proceed.  It must not be blocked by a false
+        # external-user Hot Tub classification left over from the superseded
+        # Spa lease.
+        pool_return = asyncio.run(
+            driver.process_epoch(
+                _frame(
+                    orchestrator,
+                    NOW + timedelta(seconds=shutdown_at + 4),
+                    pool_active=False,
+                    body=ThermalBody.POOL,
+                    spa_active=False,
+                    pump_rpm=0,
+                    configured_rpm=2600,
+                    spa_heater="00000",
+                    solar_active=False,
+                    pool_temperature=shutdown_pool_temperature,
+                    pool_target=shutdown_pool_target,
+                    spa_temperature=shutdown_temperature,
+                    spa_target=100.0,
+                    solar_temperature=shutdown_roof,
+                    mode=ThermalRequestedMode.SOLAR,
+                    evaluator=evaluator,
+                    driver=driver,
+                ),
+                delivery_factory=factory,
+            )
+        )
+        assert pool_return.blocker != "circulation_hot_tub_not_commissioned"
+
     assert not any(
         isinstance(operation, SetHeatMode)
         and operation.mode is PhysicalHeatMode.GAS
         for operation in delivery.calls
     )
-    if shutdown_case == "pool_priority_return":
-        assert not any(
-            isinstance(operation, SetBodyActive)
-            and operation.equipment_id == ThermalBody.POOL.value
-            for operation in delivery.calls
-        )
+    # The autonomous Spa shutdown itself must never smuggle Hot Tub BODY
+    # provenance into a Pool activation.  Pool activation is permitted only in
+    # the explicit successor epoch exercised above.
 
 
 
