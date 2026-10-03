@@ -28,7 +28,10 @@ from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
 )
-from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.pool_circulation_ownership import (
+    PoolCirculationOwner,
+    PoolCirculationOwnershipRegistry,
+)
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pump_operating_target import PumpTargetUnit
 from poolos.pump_speed_session import (
@@ -54,6 +57,8 @@ from .pump_speed_session import PoolOSPumpSpeedSessionRuntime
 from .thermal_runtime import PoolOSThermalRuntime
 
 LOGGER = logging.getLogger(__name__)
+
+_OWNED_FILTRATION_REOBSERVATION_INTERVAL_SECONDS = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +159,9 @@ class PoolOSFiltrationAutomaticRuntime:
         default=None, init=False, repr=False
     )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
+    _owned_filtration_reobservation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
 
@@ -180,6 +188,7 @@ class PoolOSFiltrationAutomaticRuntime:
             current_epoch_identity=current,
         )
         self.authority.configure_automatic_filtration(enabled=enabled)
+        self._sync_owned_filtration_reobservation()
         self.coordinator.async_update_listeners()
 
     def observe(
@@ -307,6 +316,7 @@ class PoolOSFiltrationAutomaticRuntime:
             return
         self._latest_frame = frame
         self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
+        self._sync_owned_filtration_reobservation()
         if not self.driver.requested_enabled and self.ownership.filtration_lease is None:
             self.driver.process_disabled_epoch(frame)
             self.coordinator.async_update_listeners()
@@ -345,6 +355,11 @@ class PoolOSFiltrationAutomaticRuntime:
             return
         self._unloaded = True
         self.authority.unload_automatic_filtration_driver()
+        reobservation_task = self._owned_filtration_reobservation_task
+        if reobservation_task is not None and not reobservation_task.done():
+            reobservation_task.cancel()
+            await asyncio.gather(reobservation_task, return_exceptions=True)
+        self._owned_filtration_reobservation_task = None
         self.driver.unload(unloaded_at=datetime.now(UTC))
         task = self._task
         if task is not None and not task.done():
@@ -355,6 +370,64 @@ class PoolOSFiltrationAutomaticRuntime:
             except Exception:
                 LOGGER.exception("PoolOS automatic filtration task failed during unload")
         self._task = None
+
+    def _cancel_owned_filtration_reobservation(self) -> None:
+        task = self._owned_filtration_reobservation_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._owned_filtration_reobservation_task = None
+
+    def _owned_filtration_reobservation_required(self) -> bool:
+        if self._unloaded or not self.driver.requested_enabled:
+            return False
+        lease = self.ownership.filtration_lease
+        if lease is None or not lease.verified:
+            return False
+        return self.ownership.owner in {
+            PoolCirculationOwner.FILTRATION,
+            PoolCirculationOwner.FILTRATION_SUSPENDED,
+        }
+
+    def _sync_owned_filtration_reobservation(self) -> None:
+        """Keep stable owned filtration truth current without fabricating callbacks."""
+
+        if not self._owned_filtration_reobservation_required():
+            self._cancel_owned_filtration_reobservation()
+            return
+        task = self._owned_filtration_reobservation_task
+        if task is not None and not task.done():
+            return
+        self._owned_filtration_reobservation_task = self.hass.async_create_task(
+            self._owned_filtration_reobservation_loop(),
+            "PoolOS owned filtration native reobservation",
+        )
+
+    async def _owned_filtration_reobservation_loop(self) -> None:
+        """Truthfully re-read unchanged native evidence while filtration owns circulation."""
+
+        try:
+            while (
+                not self._unloaded
+                and self._owned_filtration_reobservation_required()
+            ):
+                await asyncio.sleep(_OWNED_FILTRATION_REOBSERVATION_INTERVAL_SECONDS)
+                if self._unloaded or not self._owned_filtration_reobservation_required():
+                    return
+                refresh = getattr(
+                    self.coordinator,
+                    "async_refresh_native_owned_pump_session_evidence",
+                    None,
+                )
+                if refresh is None:
+                    return
+                await refresh()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("PoolOS owned filtration native reobservation failed")
+        finally:
+            if asyncio.current_task() is self._owned_filtration_reobservation_task:
+                self._owned_filtration_reobservation_task = None
 
     def _schedule_if_idle(self) -> None:
         if self._unloaded or self._task is not None or self._latest_frame is None:
@@ -396,6 +469,7 @@ class PoolOSFiltrationAutomaticRuntime:
                 reason=f"automatic_filtration_driver_exception:{type(exc).__name__}",
             )
         self.coordinator.async_update_listeners()
+        self._sync_owned_filtration_reobservation()
         latest = self._latest_frame
         if (
             not self._unloaded
