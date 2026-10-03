@@ -133,6 +133,7 @@ def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
             current.plan_id,
             current,
         ),
+        execution_progress=current.execution_progress,
     )
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
 
