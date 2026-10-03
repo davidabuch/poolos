@@ -277,6 +277,25 @@ class FakeDelivery:
 
 
 @dataclass
+class PredispatchStaleDelivery(FakeDelivery):
+    async def deliver(
+        self,
+        operation: PoolOperation,
+        *,
+        correlation_id: str,
+    ) -> CommandReceipt:
+        self.calls.append(operation)
+        self.correlation_ids.append(correlation_id)
+        return CommandReceipt(
+            status=CommandStatus.REJECTED,
+            command_id=correlation_id,
+            issued_at=NOW,
+            verification_required=True,
+            details={"authority_reason": "automatic_thermal_context_stale"},
+        )
+
+
+@dataclass
 class FakeDeliveryFactory:
     delivery: FakeDelivery
     bindings: list[tuple[str, str]] = field(default_factory=list)
@@ -4591,6 +4610,94 @@ def test_external_hot_tub_without_proven_circulation_fails_closed() -> None:
         == "automatic_thermal_external_hot_tub_circulation_not_established"
     )
     assert hot_tub_delivery.calls == []
+
+
+def test_user_spa_predispatch_supersession_preserves_adoption_and_newest_epoch() -> None:
+    """A Spa-start burst may supersede one frame without faulting the user session."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=3200,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    user_spa = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=0,
+        configured_rpm=3200,
+        spa_temperature=80.0,
+        spa_target=97.0,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    stale = PredispatchStaleDelivery()
+    first = asyncio.run(
+        driver.process_epoch(
+            user_spa,
+            delivery_factory=FakeDeliveryFactory(stale, driver=driver),
+        )
+    )
+
+    assert first.state is ThermalAutomaticDriverState.SUPERSEDED
+    assert first.blocker == "automatic_thermal_dispatch_context_superseded"
+    assert first.command_delivery_performed is False
+    assert driver.diagnostics()["automatic_thermal_reenable_required"] is False
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_adoption is not None
+    assert lease.body_activation is None
+    assert stale.calls and isinstance(stale.calls[0], SetPumpSpeed)
+    assert stale.calls[0].rpm == 2600
+
+    current = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=2),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=0,
+        configured_rpm=3200,
+        spa_temperature=80.0,
+        spa_target=97.0,
+        driver=driver,
+        evaluator=evaluator,
+    )
+    delivery = FakeDelivery()
+    resumed = asyncio.run(
+        driver.process_epoch(
+            current,
+            delivery_factory=FakeDeliveryFactory(delivery, driver=driver),
+        )
+    )
+
+    assert resumed.command_delivery_performed
+    assert isinstance(delivery.calls[-1], SetPumpSpeed)
+    assert delivery.calls[-1].rpm == 2600
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.body_adoption is not None
 
 
 def _assert_external_hot_tub_gas_lifecycle(
