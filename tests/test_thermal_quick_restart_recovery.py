@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import timedelta
 
-from poolos.integration import PhysicalHeatMode, SetBodyActive, SetHeatMode, SetPumpSpeed, ThermalBody
+from poolos.integration import PhysicalHeatMode, ThermalBody
 from poolos.thermal_execution_currentness import ThermalExecutionCurrentness, ThermalExecutionProgress
 from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnedConcept,
@@ -136,19 +136,6 @@ def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
         execution_progress=ThermalExecutionProgress(),
     )
     assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
-
-    accepted_base = NOW + timedelta(milliseconds=100)
-    for role, operation, accepted_at in (
-        ("body_activation", SetBodyActive(equipment_id="hot_tub", active=True), accepted_base),
-        ("pump_setpoint", SetPumpSpeed(equipment_id="p0198", rpm=2900), accepted_base + timedelta(milliseconds=100)),
-        ("heat_source", SetHeatMode(equipment_id="hot_tub", mode=PhysicalHeatMode.SOLAR), accepted_base + timedelta(milliseconds=200)),
-    ):
-        manager.accept_delivery(
-            ownership,
-            operation=operation,
-            receipt_id=f"{role}-receipt",
-            accepted_at=accepted_at,
-        )
 
     at = NOW + timedelta(seconds=10)
     retained = manager.evaluate(
