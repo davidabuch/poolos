@@ -863,136 +863,175 @@ def _quick_restart_thermal(at: datetime):
 
 
 def test_quick_restart_waits_for_startup_authority_before_adjudication() -> None:
-    from poolos.pool_circulation_ownership import PoolCirculationOwner
-    from poolos.thermal_runtime_ownership import (
-        ThermalRuntimeOwnershipDisposition,
-    )
+    async def scenario() -> None:
+        from poolos.pool_circulation_ownership import PoolCirculationOwner
+        from poolos.thermal_runtime_ownership import (
+            ThermalRuntimeOwnershipDisposition,
+            ThermalRuntimeOwnershipStatus,
+        )
 
-    module = _load_module()
-    runtime, hass, authority, coordinator, driver = _runtime(module)
+        module = _load_module()
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        runtime, hass, authority, coordinator, driver = _runtime(module)
 
-    checkpoint = SimpleNamespace()
-    runtime.arm_quick_restart_recovery(checkpoint)
-    runtime.set_enabled(True)
+        checkpoint = SimpleNamespace()
+        runtime.arm_quick_restart_recovery(checkpoint)
+        runtime.set_enabled(True)
 
-    lease = SimpleNamespace(lease_id="restored-thermal-lease")
-    restore_calls: list[str] = []
+        lease = SimpleNamespace(
+            lease_id="restored-thermal-lease",
+            status=ThermalRuntimeOwnershipStatus.OWNED,
+        )
+        restore_calls: list[str] = []
 
-    def restore_quick_restart(
-        supplied_checkpoint,
-        **_: object,
-    ):
-        assert supplied_checkpoint is checkpoint
-        restore_calls.append("restore")
-        return SimpleNamespace(
+        def restore_quick_restart(
+            supplied_checkpoint,
+            **_: object,
+        ):
+            assert supplied_checkpoint is checkpoint
+            restore_calls.append("restore")
+            return SimpleNamespace(
+                disposition=ThermalRuntimeOwnershipDisposition.ESTABLISHED
+            )
+
+        runtime.orchestrator = SimpleNamespace(
+            restore_quick_restart=restore_quick_restart,
+            ownership=SimpleNamespace(
+                state=SimpleNamespace(lease=lease),
+            ),
+        )
+
+        authority.base_authority_reason = (
+            PhysicalAuthorityReason.CONTROLLER_MODE_UNRESOLVED
+        )
+        pending_at = NOW + timedelta(seconds=1)
+        runtime.observe(
+            _snapshot(pending_at),
+            _quick_restart_thermal(pending_at),
+            _orchestration(pending_at, "restart-pending-authority"),
+        )
+
+        assert restore_calls == []
+        assert runtime.quick_restart_recovery_armed is True
+        assert runtime.circulation_ownership.owner is PoolCirculationOwner.NONE
+        assert hass.tasks == []
+        assert driver.processed == []
+
+        authority.base_authority_reason = PhysicalAuthorityReason.ALLOWED
+        ready_at = NOW + timedelta(seconds=2)
+        runtime.observe(
+            _snapshot(ready_at),
+            _quick_restart_thermal(ready_at),
+            _orchestration(ready_at, "restart-authority-ready"),
+        )
+
+        assert restore_calls == ["restore"]
+        assert runtime.quick_restart_recovery_armed is False
+        assert runtime.circulation_ownership.owner is PoolCirculationOwner.THERMAL
+        assert (
+            runtime.circulation_ownership.thermal_lease_id
+            == "restored-thermal-lease"
+        )
+        assert driver.processed == []
+        await asyncio.wait_for(
+            coordinator.pump_session_refresh_event.wait(),
+            timeout=1,
+        )
+        assert coordinator.pump_session_refresh_count >= 1
+        assert authority.epochs == [
+            "restart-pending-authority",
+            "restart-authority-ready",
+        ]
+        assert coordinator.listener_updates >= 2
+
+        lease.status = ThermalRuntimeOwnershipStatus.PREEMPTED
+        task = runtime._owned_pump_session_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(scenario())
+
+def test_quick_restart_success_restores_circulation_and_is_command_free() -> None:
+    async def scenario() -> None:
+        from poolos.pool_circulation_ownership import PoolCirculationOwner
+        from poolos.thermal_runtime_ownership import (
+            ThermalRuntimeOwnershipDisposition,
+            ThermalRuntimeOwnershipStatus,
+        )
+
+        module = _load_module()
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        runtime, hass, authority, coordinator, driver = _runtime(module)
+
+        checkpoint = SimpleNamespace()
+        runtime.arm_quick_restart_recovery(checkpoint)
+        runtime.set_enabled(True)
+
+        lease = SimpleNamespace(
+            lease_id="restored-thermal-lease",
+            status=ThermalRuntimeOwnershipStatus.OWNED,
+        )
+        decision = SimpleNamespace(
             disposition=ThermalRuntimeOwnershipDisposition.ESTABLISHED
         )
 
-    runtime.orchestrator = SimpleNamespace(
-        restore_quick_restart=restore_quick_restart,
-        ownership=SimpleNamespace(
-            state=SimpleNamespace(lease=lease),
-        ),
-    )
+        restore_calls: list[str] = []
 
-    authority.base_authority_reason = (
-        PhysicalAuthorityReason.CONTROLLER_MODE_UNRESOLVED
-    )
-    pending_at = NOW + timedelta(seconds=1)
-    runtime.observe(
-        _snapshot(pending_at),
-        _quick_restart_thermal(pending_at),
-        _orchestration(pending_at, "restart-pending-authority"),
-    )
+        def restore_quick_restart(
+            supplied_checkpoint,
+            **_: object,
+        ):
+            assert supplied_checkpoint is checkpoint
+            restore_calls.append("restore")
+            return decision
 
-    assert restore_calls == []
-    assert runtime.quick_restart_recovery_armed is True
-    assert runtime.circulation_ownership.owner is PoolCirculationOwner.NONE
-    assert hass.tasks == []
-    assert driver.processed == []
+        runtime.orchestrator = SimpleNamespace(
+            restore_quick_restart=restore_quick_restart,
+            ownership=SimpleNamespace(
+                state=SimpleNamespace(lease=lease),
+            ),
+        )
 
-    authority.base_authority_reason = PhysicalAuthorityReason.ALLOWED
-    ready_at = NOW + timedelta(seconds=2)
-    runtime.observe(
-        _snapshot(ready_at),
-        _quick_restart_thermal(ready_at),
-        _orchestration(ready_at, "restart-authority-ready"),
-    )
+        at = NOW + timedelta(seconds=1)
+        runtime.observe(
+            _snapshot(at),
+            _quick_restart_thermal(at),
+            _orchestration(at, "restart-epoch-1"),
+        )
 
-    assert restore_calls == ["restore"]
-    assert runtime.quick_restart_recovery_armed is False
-    assert runtime.circulation_ownership.owner is PoolCirculationOwner.THERMAL
-    assert (
-        runtime.circulation_ownership.thermal_lease_id
-        == "restored-thermal-lease"
-    )
-    assert hass.tasks == []
-    assert driver.processed == []
-    assert authority.epochs == [
-        "restart-pending-authority",
-        "restart-authority-ready",
-    ]
-    assert coordinator.listener_updates >= 2
+        assert restore_calls == ["restore"]
+        assert runtime.quick_restart_recovery_armed is False
 
+        assert runtime.circulation_ownership.owner is PoolCirculationOwner.THERMAL
+        assert (
+            runtime.circulation_ownership.thermal_lease_id
+            == "restored-thermal-lease"
+        )
 
-def test_quick_restart_success_restores_circulation_and_is_command_free() -> None:
-    from poolos.pool_circulation_ownership import PoolCirculationOwner
-    from poolos.thermal_runtime_ownership import (
-        ThermalRuntimeOwnershipDisposition,
-    )
+        # Recovery remains command-free: the only scheduled task is the
+        # read-only owned-evidence refresh loop, never an execution epoch.
+        assert driver.processed == []
+        await asyncio.wait_for(
+            coordinator.pump_session_refresh_event.wait(),
+            timeout=1,
+        )
+        assert coordinator.pump_session_refresh_count >= 1
+        assert runtime._owned_pump_session_reobservation_task is not None
+        assert all(
+            task.get_name() != "PoolOS automatic thermal execution epoch"
+            for task in hass.tasks
+        )
 
-    module = _load_module()
-    runtime, hass, authority, coordinator, driver = _runtime(module)
+        # We still begin the physical-authority epoch and publish diagnostics.
+        assert authority.epochs == ["restart-epoch-1"]
+        assert coordinator.listener_updates >= 1
 
-    checkpoint = SimpleNamespace()
-    runtime.arm_quick_restart_recovery(checkpoint)
-    runtime.set_enabled(True)
+        lease.status = ThermalRuntimeOwnershipStatus.PREEMPTED
+        task = runtime._owned_pump_session_reobservation_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
 
-    lease = SimpleNamespace(lease_id="restored-thermal-lease")
-    decision = SimpleNamespace(
-        disposition=ThermalRuntimeOwnershipDisposition.ESTABLISHED
-    )
-
-    restore_calls: list[str] = []
-
-    def restore_quick_restart(
-        supplied_checkpoint,
-        **_: object,
-    ):
-        assert supplied_checkpoint is checkpoint
-        restore_calls.append("restore")
-        return decision
-
-    runtime.orchestrator = SimpleNamespace(
-        restore_quick_restart=restore_quick_restart,
-        ownership=SimpleNamespace(
-            state=SimpleNamespace(lease=lease),
-        ),
-    )
-
-    at = NOW + timedelta(seconds=1)
-    runtime.observe(
-        _snapshot(at),
-        _quick_restart_thermal(at),
-        _orchestration(at, "restart-epoch-1"),
-    )
-
-    assert restore_calls == ["restore"]
-    assert runtime.quick_restart_recovery_armed is False
-
-    assert runtime.circulation_ownership.owner is PoolCirculationOwner.THERMAL
-    assert (
-        runtime.circulation_ownership.thermal_lease_id
-        == "restored-thermal-lease"
-    )
-
-    # The restoration epoch must never issue or schedule equipment work.
-    assert hass.tasks == []
-    assert driver.processed == []
-
-    # We still begin the physical-authority epoch and publish diagnostics.
-    assert authority.epochs == ["restart-epoch-1"]
-    assert coordinator.listener_updates >= 1
+    asyncio.run(scenario())
 
 
 def test_quick_restart_denial_is_consumed_once_and_never_retries_equality() -> None:
