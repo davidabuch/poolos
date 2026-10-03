@@ -98,6 +98,7 @@ class ThermalDesiredState:
                     "opportunistic_target_cap_reached",
                     "opportunistic_roof_low_hold",
                     "opportunistic_start_waiting_for_idle_hydraulics",
+                    "opportunistic_residual_circulation_hold",
                     "six_pm_preserve",
                     "external_spa_session_operating_purpose",
                     "external_spa_inherited_gas_neutralization",
