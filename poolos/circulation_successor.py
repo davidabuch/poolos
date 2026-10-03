@@ -284,7 +284,14 @@ class CirculationSuccessorArbitrator:
     ) -> CirculationSuccessorAssessment:
         facts = _facts(entitlement, evidence, source_cleanup, filtration, outage)
         at = evidence.evaluated_at
-        if entitlement is not None and entitlement.body is not ThermalBody.POOL:
+        if (
+            entitlement is not None
+            and entitlement.body is ThermalBody.HOT_TUB
+            and entitlement.body_activation is None
+        ):
+            # A homeowner/adopted Spa BODY remains fail-closed.  Only a Spa BODY
+            # positively activated by PoolOS may enter the exact residual
+            # shutdown path that can later yield to a current Pool successor.
             return _blocked(at, "circulation_hot_tub_not_commissioned", facts)
         if entitlement is None:
             return _result(
