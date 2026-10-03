@@ -55,6 +55,53 @@ def _load_module() -> ModuleType:
     return module
 
 
+def test_hot_tub_delivery_factory_falls_back_to_canonical_operating_purpose() -> None:
+    """Final dispatch must not reject a valid Spa RPM when step metadata is absent."""
+
+    from poolos.integration import SetPumpSpeed
+
+    module = _load_module()
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            desired=SimpleNamespace(
+                evidence={"active_operating_purpose": "ordinary_circulation"}
+            )
+        )
+    )
+    operation = SetPumpSpeed(
+        equipment_id="p0101",
+        rpm=2600,
+        metadata={},
+    )
+
+    assert (
+        module._bound_pump_operating_purpose(session, operation)
+        == "ordinary_circulation"
+    )
+
+
+def test_operation_operating_purpose_remains_stronger_than_desired_fallback() -> None:
+    """Exact step metadata still wins over the canonical fallback."""
+
+    from poolos.integration import SetPumpSpeed
+
+    module = _load_module()
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            desired=SimpleNamespace(
+                evidence={"active_operating_purpose": "ordinary_circulation"}
+            )
+        )
+    )
+    operation = SetPumpSpeed(
+        equipment_id="p0101",
+        rpm=3000,
+        metadata={"operating_purpose": "gas_heating"},
+    )
+
+    assert module._bound_pump_operating_purpose(session, operation) == "gas_heating"
+
+
 @dataclass
 class FakeDriver:
     requested_enabled: bool = False

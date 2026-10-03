@@ -74,6 +74,39 @@ LOGGER = logging.getLogger(__name__)
 _OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 15.0
 
 
+def _bound_pump_operating_purpose(
+    session: ThermalLiveExecutionSession,
+    operation: SetPumpSpeed | SetPumpFlow,
+) -> str | None:
+    """Bind the final gateway to the canonical current pump purpose.
+
+    Operation metadata is the preferred exact transport from planning. The
+    desired-state evidence is an equivalent canonical source and is used only
+    as a fallback when optional operation metadata is absent. Purpose is never
+    inferred from RPM.
+    """
+
+    purpose_value = operation.metadata.get("operating_purpose")
+    if isinstance(purpose_value, str) and purpose_value:
+        return purpose_value
+    if operation.metadata.get("priming_step") == "true":
+        return "priming"
+    desired_evidence = getattr(session.assessment.desired, "evidence", {})
+    desired_purpose = (
+        desired_evidence.get("active_operating_purpose")
+        if hasattr(desired_evidence, "get")
+        else None
+    )
+    if isinstance(desired_purpose, str) and desired_purpose in {
+        "temperature_acquisition",
+        "ordinary_circulation",
+        "solar_heating",
+        "gas_heating",
+        "priming",
+    }:
+        return desired_purpose
+    return None
+
 
 @dataclass(frozen=True, slots=True)
 class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
@@ -105,11 +138,10 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 current_sequence - 1
             ].operation
             if isinstance(current_operation, (SetPumpSpeed, SetPumpFlow)):
-                purpose_value = current_operation.metadata.get("operating_purpose")
-                if isinstance(purpose_value, str) and purpose_value:
-                    operating_purpose = purpose_value
-                elif current_operation.metadata.get("priming_step") == "true":
-                    operating_purpose = "priming"
+                operating_purpose = _bound_pump_operating_purpose(
+                    session,
+                    current_operation,
+                )
         currentness = session.originating_currentness
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
             sequence = session.coordination.current_step_sequence
