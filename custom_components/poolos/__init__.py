@@ -113,6 +113,8 @@ from poolos.pool_automatic_control_suppression import (  # noqa: E402
     retire_transient_pool_suppression_for_new_session,
     SpaAutomaticControlSuppression,
     SpaAutomaticControlSuppressionSource,
+    SpaBodySessionBoundaryTracker,
+    retire_transient_spa_suppression_for_new_session,
     pool_suppression_is_current,
     spa_suppression_is_current,
 )
@@ -299,6 +301,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     pool_automatic_control = PoolAutomaticControlSuppression()
     pool_body_session_boundary = PoolBodySessionBoundaryTracker()
     spa_automatic_control = SpaAutomaticControlSuppression()
+    spa_body_session_boundary = SpaBodySessionBoundaryTracker()
     def initial_spa_session_kind():
         return None
 
@@ -677,6 +680,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             pool_automatic_control,
             pool_body_session_boundary,
             pool_active=pool_active if isinstance(pool_active, bool) else None,
+            observed_at=native.generated_at,
+        )
+        spa_active = next(
+            (
+                item.value
+                for item in native.observations
+                if item.observation_id == "spa.active"
+            ),
+            None,
+        )
+        retire_transient_spa_suppression_for_new_session(
+            spa_automatic_control,
+            spa_body_session_boundary,
+            spa_active=spa_active if isinstance(spa_active, bool) else None,
             observed_at=native.generated_at,
         )
 
