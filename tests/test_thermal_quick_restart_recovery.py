@@ -228,6 +228,7 @@ def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
         manager.evaluate(
             evidence(
                 at=accepted_at + timedelta(seconds=1),
+                evaluation_id=currentness.evaluation_id,
                 plan_id=assessment.plan_id,
                 requested_mode="Solar Preferred",
                 execution_currentness=currentness,
