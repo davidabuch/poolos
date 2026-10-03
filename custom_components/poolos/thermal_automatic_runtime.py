@@ -91,8 +91,11 @@ def _bound_pump_operating_purpose(
         return purpose_value
     if operation.metadata.get("priming_step") == "true":
         return "priming"
-    desired_purpose = session.assessment.desired.evidence.get(
-        "active_operating_purpose"
+    desired_evidence = getattr(session.assessment.desired, "evidence", {})
+    desired_purpose = (
+        desired_evidence.get("active_operating_purpose")
+        if hasattr(desired_evidence, "get")
+        else None
     )
     if isinstance(desired_purpose, str) and desired_purpose in {
         "temperature_acquisition",
