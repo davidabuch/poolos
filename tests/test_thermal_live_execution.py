@@ -3582,12 +3582,97 @@ def test_old_generation_consequence_cannot_verify_new_compatible_execution(
         source_id="native-intellicenter",
     )
 
-    assert still_waiting.status is ThermalLiveExecutionStatus.FAILED
-    assert (
-        still_waiting.failure_reason
-        == "authoritative_verification_evidence_unusable"
-    )
+    if concept == "pump":
+        assert still_waiting.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+        assert still_waiting.failure_reason is None
+        assert still_waiting.current_attempt is not None
+        assert waiting.current_attempt is not None
+        assert (
+            still_waiting.current_attempt.receipt.command_id
+            == waiting.current_attempt.receipt.command_id
+        )
+    else:
+        assert still_waiting.status is ThermalLiveExecutionStatus.FAILED
+        assert (
+            still_waiting.failure_reason
+            == "authoritative_verification_evidence_unusable"
+        )
     assert still_waiting.coordination.current_step_sequence == 1
+
+
+def test_accepted_pool_pump_step_waits_for_post_receipt_rpm_then_verifies() -> None:
+    """The live 2600->2900 Solar transition must not fault on pre-receipt RPM."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.SOLAR,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    accepted_at = NOW + timedelta(seconds=10)
+
+    @dataclass
+    class TimedDelivery(FakeThermalDelivery):
+        async def deliver(
+            self,
+            operation: PoolOperation,
+            *,
+            correlation_id: str,
+        ) -> CommandReceipt:
+            self.calls.append((operation, correlation_id))
+            return CommandReceipt(
+                status=CommandStatus.ACKNOWLEDGED,
+                command_id="receipt-pool-2900",
+                issued_at=accepted_at,
+                acknowledged_at=accepted_at,
+                verification_required=True,
+            )
+
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan, at=accepted_at),
+            delivery=TimedDelivery(),
+        )
+    )
+
+    old = store(
+        "pump.rpm",
+        2600,
+        at=NOW + timedelta(seconds=1),
+        hydraulics_at=accepted_at + timedelta(seconds=1),
+    )
+    pending = engine.verify_current_step(
+        waiting,
+        old,
+        current_context=waiting.originating_context,
+        policy=policy(),
+        evaluated_at=accepted_at + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+
+    assert pending.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+    assert pending.failure_reason is None
+
+    fresh = store(
+        "pump.rpm",
+        2900,
+        at=accepted_at + timedelta(seconds=2),
+    )
+    completed = engine.verify_current_step(
+        pending,
+        fresh,
+        current_context=pending.originating_context,
+        policy=policy(),
+        evaluated_at=accepted_at + timedelta(seconds=2),
+        source_id="native-intellicenter",
+    )
+
+    assert completed.status is ThermalLiveExecutionStatus.COMPLETED
+    assert completed.failure_reason is None
 
 
 def test_current_convergence_does_not_skip_delivered_step_verification() -> None:
