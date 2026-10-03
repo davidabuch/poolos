@@ -1935,12 +1935,18 @@ class ThermalLiveExecutionEngine:
             attempt.step.metadata.get("spa_opportunistic_source_precondition") == "true"
             or attempt.step.metadata.get("spa_opportunistic_body_activation") == "true"
         )
-        if chronology_only_pending and opportunistic_spa_start_step:
-            # The dormant Spa startup path deliberately requires a fresh
-            # post-command native frame.  The first evaluator epoch can race
-            # the native refresh and still expose the pre-command value.  For
-            # these two exact startup steps only, keep authority fail-closed
-            # and wait within the existing bounded verification deadline.
+        pump_settling_step = isinstance(
+            attempt.step.operation,
+            (SetPumpSpeed, SetPumpFlow),
+        )
+        if chronology_only_pending and (
+            opportunistic_spa_start_step or pump_settling_step
+        ):
+            # Pre-command chronology is absence of post-command proof, not a
+            # contradictory consequence.  Spa startup topology and accepted
+            # pump targets therefore remain fail-closed but pending inside the
+            # original fixed verification deadline while bounded native
+            # reobservation seeks genuinely post-receipt evidence.
             if verification.status is VerificationStatus.TIMED_OUT:
                 return self._terminal(
                     updated,
