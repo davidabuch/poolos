@@ -332,6 +332,7 @@ class PoolOSThermalAutomaticRuntime:
     _shared_hydraulic_reobservation_epoch_identity: str | None = field(
         default=None, init=False, repr=False
     )
+    _authority_epoch_generation: int = field(default=0, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
@@ -530,6 +531,17 @@ class PoolOSThermalAutomaticRuntime:
         self.driver.restrictive_authority_changed(changed_at=datetime.now(UTC))
         self.coordinator.async_update_listeners()
 
+    def note_reset_authority_reopened(self) -> None:
+        """Advance evaluation identity after Reset closes without relabeling evidence.
+
+        Reset closure changes command authority while the immutable safe-baseline
+        evidence can remain byte-for-byte identical.  A new authority generation
+        therefore belongs in automatic execution's evaluation epoch identity,
+        rather than manufacturing a new native observation identity.
+        """
+
+        self._authority_epoch_generation += 1
+
     def observe(
         self,
         snapshot: ObservationSnapshot,
@@ -579,8 +591,14 @@ class PoolOSThermalAutomaticRuntime:
                 "gas_heating",
             }
         )
+        execution_epoch_identity = orchestration.snapshot_identity
+        if self._authority_epoch_generation:
+            execution_epoch_identity = (
+                f"{orchestration.snapshot_identity}:authority:"
+                f"{self._authority_epoch_generation}"
+            )
         frame = ThermalAutomaticExecutionFrame(
-            epoch_identity=orchestration.snapshot_identity,
+            epoch_identity=execution_epoch_identity,
             observed_at=snapshot.generated_at,
             observations=tuple(snapshot.observations),
             thermal=thermal,
