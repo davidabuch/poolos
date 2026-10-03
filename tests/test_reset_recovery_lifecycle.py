@@ -239,7 +239,9 @@ def test_reset_refresh_timeout_accepts_fresh_safe_native_truth(monkeypatch):
                 async_set_body_active=AsyncMock(),
             ),
             thermal_automatic_runtime=SimpleNamespace(
-                driver=Mock(), circulation_ownership=Mock()
+                driver=Mock(),
+                circulation_ownership=Mock(),
+                note_reset_authority_reopened=Mock(),
             ),
             thermal_runtime_orchestrator=Mock(),
             pool_automatic_control=Mock(),
@@ -366,7 +368,11 @@ def test_reset_owned_solar_reduces_then_acquires_fresh_solar_without_restart(mon
             manual_intellicenter=SimpleNamespace(
                 async_set_body_heat_source=AsyncMock(), async_set_body_active=AsyncMock()
             ),
-            thermal_automatic_runtime=SimpleNamespace(driver=driver, circulation_ownership=driver.circulation_ownership),
+            thermal_automatic_runtime=SimpleNamespace(
+                driver=driver,
+                circulation_ownership=driver.circulation_ownership,
+                note_reset_authority_reopened=Mock(),
+            ),
             thermal_runtime_orchestrator=orchestrator,
             pool_automatic_control=Mock(), spa_automatic_control=Mock(),
         )
