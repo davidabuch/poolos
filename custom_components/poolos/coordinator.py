@@ -203,9 +203,21 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         return await transport._async_refresh_owned_pump_session_evidence()
 
     async def async_refresh_native_owned_pump_session_evidence(self) -> bool:
-        """Refresh unchanged evidence required by an owned pump session."""
+        """Refresh unchanged evidence required by an owned thermal session.
 
-        return await self._async_refresh_native_runtime_evidence()
+        Stable runtime ownership depends on BODY/PUMP/source chronology plus a
+        complete current shared-hydraulic safety inventory.  Use the same
+        bounded read-only full-topology batch as safety admission so unchanged
+        Waterfall/Jets/Slide state cannot age out merely because IntelliCenter
+        emitted no callback.
+        """
+
+        transport = self.independent_intellicenter_transport
+        if transport is None or self._unloading:
+            return False
+        return await transport._async_refresh_owned_pump_session_evidence(
+            cleanup_topology=True
+        )
 
     async def async_refresh_native_filtration_topology_evidence(self) -> bool:
         """Refresh BODY/PMPCIRC/pump evidence for filtration verification."""
