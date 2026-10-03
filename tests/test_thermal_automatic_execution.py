@@ -4660,7 +4660,7 @@ def test_user_spa_predispatch_supersession_preserves_adoption_and_newest_epoch()
     assert first.state is ThermalAutomaticDriverState.SUPERSEDED
     assert first.blocker == "automatic_thermal_dispatch_context_superseded"
     assert first.command_delivery_performed is False
-    assert driver.diagnostics()["automatic_thermal_reenable_required"] is False
+    assert driver._reenable_required is False
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
