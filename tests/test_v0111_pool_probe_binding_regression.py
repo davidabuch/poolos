@@ -102,6 +102,43 @@ def _production_factory_module():
     return module
 
 
+def _production_delivery_module():
+    """Load the real HA delivery module without importing the integration package."""
+
+    import importlib.util
+    from pathlib import Path
+    import sys
+    from types import ModuleType
+
+    root = Path(__file__).resolve().parents[1]
+    module_path = root / "custom_components" / "poolos" / "thermal_live_delivery.py"
+    package_name = "poolos_v0111_real_delivery_regression"
+
+    package = ModuleType(package_name)
+    package.__path__ = [str(module_path.parent)]
+    package.__package__ = package_name
+    sys.modules[package_name] = package
+
+    manual = ModuleType(f"{package_name}.manual_intellicenter")
+
+    class ManualIntelliCenterCommandError(RuntimeError):
+        pass
+
+    manual.ManualIntelliCenterCommandError = ManualIntelliCenterCommandError
+    manual.ManualIntelliCenterControl = object
+    sys.modules[manual.__name__] = manual
+
+    spec = importlib.util.spec_from_file_location(
+        f"{package_name}.thermal_live_delivery",
+        module_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _authority_ready_for_probe() -> PoolOSPhysicalCommandAuthority:
     authority = PoolOSPhysicalCommandAuthority()
     authority.resolve_maintenance(False)
@@ -202,12 +239,10 @@ def _external_spa_session(operation):
 def test_real_ha_factory_context_passes_real_spa_pump_validator() -> None:
     """The exact factory context for ordinary Spa circulation must admit 2600 RPM."""
 
-    from custom_components.poolos.thermal_live_delivery import (
-        ManualIntelliCenterThermalLiveDelivery,
-    )
     from poolos.physical_command_authority import PhysicalRequestSource
 
     module = _production_factory_module()
+    delivery_module = _production_delivery_module()
     authority = PoolOSPhysicalCommandAuthority()
     authority.resolve_maintenance(False)
     authority.set_controller_mode("auto")
@@ -249,7 +284,7 @@ def test_real_ha_factory_context_passes_real_spa_pump_validator() -> None:
     )
     context = delivery_stub.kwargs["automatic_thermal_context"]
 
-    real_delivery = ManualIntelliCenterThermalLiveDelivery(
+    real_delivery = delivery_module.ManualIntelliCenterThermalLiveDelivery(
         manual=object(),
         request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
         automatic_thermal_context=context,
