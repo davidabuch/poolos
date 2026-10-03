@@ -22,9 +22,9 @@ def test_all_component_python_modules_parse() -> None:
 
 def test_manifest_advances_observation_bridge_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "1.0.11"
+    assert manifest["version"] == "1.0.12"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@v1.0.11",
+        "poolos@git+https://github.com/davidabuch/poolos.git@v1.0.12",
         "pyintellicenter==0.1.20",
     ]
     assert manifest["single_config_entry"] is True
