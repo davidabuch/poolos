@@ -11,7 +11,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnershipManager,
     ThermalRuntimeOwnershipStatus,
 )
-from poolos.thermal_live_execution import ThermalLiveExecutionContext
+from poolos.thermal_live_execution import ThermalLiveExecutionContext, ThermalLiveExecutionOwnership
 
 from test_thermal_runtime_ownership import (
     NOW,
@@ -101,64 +101,141 @@ def _fresh_matching_evidence(
 def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
     """Return a fully verified PoolOS-started Hot Tub Solar lease."""
 
-    manager = ThermalRuntimeOwnershipManager()
-    current = ThermalExecutionCurrentness.from_assessment(
-        thermal_assessment(
-            at=NOW,
-            body=ThermalBody.HOT_TUB,
-            requested_mode="Solar Preferred",
-            source=PhysicalHeatMode.SOLAR,
-            rpm=2900,
-            current_source=PhysicalHeatMode.OFF,
-            current_rpm=2600,
-            current_body_active=False,
-        ),
+    accepted_base = NOW - timedelta(seconds=10)
+    assessment = thermal_assessment(
+        at=accepted_base,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="Solar Preferred",
+        source=PhysicalHeatMode.SOLAR,
+        rpm=2900,
+        current_source=PhysicalHeatMode.OFF,
+        current_rpm=0,
+        current_body_active=False,
+    )
+    currentness = ThermalExecutionCurrentness.from_assessment(
+        assessment,
         evaluation_id="hot-tub-evaluation",
     )
-    ownership = execution_ownership(
-        body=ThermalBody.HOT_TUB,
-        activation=True,
-        pump_rpm=2900,
-        source=PhysicalHeatMode.SOLAR,
-        evaluation_id=current.evaluation_id,
-        plan_id=current.plan_id,
+    context = ThermalLiveExecutionContext(
+        currentness.evaluation_id,
+        assessment.plan_id,
+        currentness,
+    )
+    manager = ThermalRuntimeOwnershipManager()
+    ownership = ThermalLiveExecutionOwnership(
+        evaluation_id=currentness.evaluation_id,
+        thermal_plan_id=assessment.plan_id,
         execution_plan_id="hot-tub-execution-plan",
+        target_body=ThermalBody.HOT_TUB,
     )
-    decision = manager.establish(
-        ownership,
-        established_at=NOW,
-        requested_mode="Solar Preferred",
-        current_context=ThermalLiveExecutionContext(
-            current.evaluation_id,
-            current.plan_id,
-            current,
-        ),
-        execution_progress=ThermalExecutionProgress(),
-    )
-    assert decision.disposition is ThermalRuntimeOwnershipDisposition.ESTABLISHED
 
-    at = NOW + timedelta(seconds=10)
-    retained = manager.evaluate(
-        evidence(
-            body=ThermalBody.HOT_TUB,
-            at=at,
-            evaluation_id=current.evaluation_id,
-            plan_id=current.plan_id,
-            requested_mode="Solar Preferred",
-            pool_active=False,
-            spa_active=True,
-            pump_rpm=2900,
-            configured_pump_rpm=2900,
-            heat_source=PhysicalHeatMode.SOLAR,
-            execution_currentness=current,
-            pool_observed_at=at,
-            spa_observed_at=at,
-            pump_observed_at=at,
-            configured_pump_observed_at=at,
-            source_observed_at=at,
-        )
+    values = (
+        (
+            0,
+            {
+                "body": ThermalBody.HOT_TUB,
+                "pool_active": False,
+                "spa_active": True,
+                "spa_observed_at": accepted_base + timedelta(seconds=1),
+                "pool_observed_at": accepted_base + timedelta(seconds=1),
+            },
+        ),
+        (
+            1,
+            {
+                "body": ThermalBody.HOT_TUB,
+                "pool_active": False,
+                "spa_active": True,
+                "pump_rpm": 3000,
+                "configured_pump_rpm": 3000,
+                "pump_observed_at": accepted_base + timedelta(seconds=3),
+                "configured_pump_observed_at": accepted_base + timedelta(seconds=3),
+                "spa_observed_at": accepted_base + timedelta(seconds=3),
+                "pool_observed_at": accepted_base + timedelta(seconds=3),
+            },
+        ),
+        (
+            2,
+            {
+                "body": ThermalBody.HOT_TUB,
+                "pool_active": False,
+                "spa_active": True,
+                "pump_rpm": 2900,
+                "configured_pump_rpm": 2900,
+                "pump_observed_at": accepted_base + timedelta(seconds=5),
+                "configured_pump_observed_at": accepted_base + timedelta(seconds=5),
+                "spa_observed_at": accepted_base + timedelta(seconds=5),
+                "pool_observed_at": accepted_base + timedelta(seconds=5),
+            },
+        ),
+        (
+            3,
+            {
+                "body": ThermalBody.HOT_TUB,
+                "pool_active": False,
+                "spa_active": True,
+                "heat_source": PhysicalHeatMode.SOLAR,
+                "source_observed_at": accepted_base + timedelta(seconds=7),
+                "spa_observed_at": accepted_base + timedelta(seconds=7),
+                "pool_observed_at": accepted_base + timedelta(seconds=7),
+            },
+        ),
     )
-    assert retained.disposition is ThermalRuntimeOwnershipDisposition.RETAINED
+
+    verified_prefix = ()
+    for offset, (index, evidence_values) in enumerate(values):
+        operation = assessment.operations[index]
+        accepted_at = accepted_base + timedelta(seconds=offset * 2)
+        if index == 0:
+            ownership = replace(
+                ownership,
+                body_activation_operation_id=operation.operation_id,
+                body_activation_receipt_id="hot-tub-body-receipt",
+                body_activation_correlation_id="hot-tub-body-correlation",
+                body_activation_accepted_at=accepted_at,
+            )
+        elif index in {1, 2}:
+            ownership = replace(
+                ownership,
+                pump_operation_id=operation.operation_id,
+                pump_receipt_id=f"hot-tub-pump-receipt-{index}",
+                pump_correlation_id=f"hot-tub-pump-correlation-{index}",
+                commanded_pump_rpm=3000 if index == 1 else 2900,
+                pump_accepted_at=accepted_at,
+            )
+        else:
+            ownership = replace(
+                ownership,
+                heat_source_operation_id=operation.operation_id,
+                heat_source_receipt_id="hot-tub-source-receipt",
+                heat_source_correlation_id="hot-tub-source-correlation",
+                commanded_heat_source=PhysicalHeatMode.SOLAR,
+                heat_source_accepted_at=accepted_at,
+            )
+
+        decision = manager.promote_session_provenance(
+            ownership,
+            promoted_at=accepted_at,
+            requested_mode="Solar Preferred",
+            originating_context=context,
+            execution_progress=ThermalExecutionProgress(
+                verified_prefix=verified_prefix,
+                accepted_current=currentness.residual_plan.operations[index],
+                accepted_operation_id=operation.operation_id,
+            ),
+        )
+        assert decision.current_state.status is ThermalRuntimeOwnershipStatus.OWNED
+        manager.evaluate(
+            evidence(
+                at=accepted_at + timedelta(seconds=1),
+                plan_id=assessment.plan_id,
+                requested_mode="Solar Preferred",
+                execution_currentness=currentness,
+                **evidence_values,
+            )
+        )
+        verified_prefix = currentness.residual_plan.operations[: index + 1]
+
     lease = manager.state.lease
     assert lease is not None
     assert set(lease.verified_concepts) == {
