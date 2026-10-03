@@ -8,7 +8,7 @@ The production Home Assistant installation is HACS-managed and physically commis
 scoped live control. The previous observation-only / global operating-mode commissioning model
 is historical and must not be used as current runtime truth.
 
-Current production integration line: `1.0.8`; release candidate: `1.0.9`.
+Current production integration line: `1.0.8`; release candidate: `1.0.10`.
 
 PoolOS 1.0 is released. PR #389 introduced the coherent observation/accepted-command
 chronology repair shipped in v1.0.3: truthful per-concept observation timestamps,
@@ -83,7 +83,7 @@ verified within the bounded recovery window`. PR #405 adds a dedicated bounded r
 Reset-baseline reobservation through the existing native PMPCIRC/PUMP/SENSE/BODY path
 before each verification publication. The strict safe-baseline predicate is unchanged;
 no freshness relaxation, fabricated timestamp, polling loop, ownership-from-state, or
-equipment command was added. v1.0.9 packages this already-safe Reset liveness repair.
+equipment command was added. v1.0.10 packages this already-safe Reset liveness repair.
 
 See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for the
 chronology model. PR #388 was closed as superseded by PR #389.
