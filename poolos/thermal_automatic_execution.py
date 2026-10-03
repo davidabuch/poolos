@@ -1563,6 +1563,25 @@ class ThermalAutomaticExecutionDriver:
             )
         if delivered.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
             reason = delivered.failure_reason or "automatic_thermal_delivery_failed"
+            if (
+                delivered.status is ThermalLiveExecutionStatus.SUPERSEDED
+                and reason == "physical_authority:automatic_thermal_context_stale"
+            ):
+                # A newer authoritative frame invalidated this exact dispatch
+                # before transport.  Preserve any command-free BODY adoption;
+                # only the obsolete execution attempt is retired.  The runtime
+                # will immediately schedule the newest frame.
+                self.active_session = None
+                return self._publish(
+                    state=ThermalAutomaticDriverState.SUPERSEDED,
+                    evaluated_at=frame.observed_at,
+                    blocker="automatic_thermal_dispatch_context_superseded",
+                    frame=frame,
+                    body=body,
+                    preflight=None,
+                    failure=None,
+                    command_delivery_performed=False,
+                )
             return self._terminate_for_frame(frame, reason)
         return self._publish(
             state=ThermalAutomaticDriverState.AWAITING_REOBSERVATION,
