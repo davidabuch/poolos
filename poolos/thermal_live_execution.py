@@ -1939,14 +1939,21 @@ class ThermalLiveExecutionEngine:
             attempt.step.operation,
             (SetPumpSpeed, SetPumpFlow),
         )
-        if chronology_only_pending and (
-            opportunistic_spa_start_step or pump_settling_step
-        ):
-            # Pre-command chronology is absence of post-command proof, not a
-            # contradictory consequence.  Spa startup topology and accepted
-            # pump targets therefore remain fail-closed but pending inside the
-            # original fixed verification deadline while bounded native
-            # reobservation seeks genuinely post-receipt evidence.
+        bounded_reobservation_pending = (
+            chronology_only_pending
+            and opportunistic_spa_start_step
+        ) or (
+            pump_settling_step
+            and bool(unusable_evidence)
+        )
+        if bounded_reobservation_pending:
+            # For an already accepted pump step, temporarily missing/stale/
+            # unusable native RPM evidence is absence of proof while the
+            # hardware may still be converging, not proof of contradiction.
+            # Preserve receipt-bound provenance and remain fail-closed inside
+            # the original immutable verification deadline. Fresh hydraulic
+            # contradictions are handled above, and a wrong RPM must still
+            # converge before the deadline.
             if verification.status is VerificationStatus.TIMED_OUT:
                 return self._terminal(
                     updated,
