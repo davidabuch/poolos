@@ -183,6 +183,35 @@ def probe_context(*, operation_id: str = "probe-step") -> AutomaticThermalDispat
     )
 
 
+def test_hot_tub_priming_context_admits_exact_priming_baseline() -> None:
+    """A Spa cold-start prime is a first-class 3000-RPM operating purpose."""
+
+    manual = FakeManualControl()
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="spa-prime-epoch",
+        session_identity="spa-prime-session",
+        body="hot_tub",
+        pump_circuit_id="p0101",
+        operating_purpose="priming",
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0101", rpm=3000),
+            correlation_id="spa-prime-step",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.calls == [("pump", "p0101", 3000)]
+
+
 def test_adapter_reuses_manual_gateway_for_commissioned_thermal_operations() -> None:
     manual = FakeManualControl()
     delivery = adapter(manual)
