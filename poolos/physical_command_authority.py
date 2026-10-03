@@ -2344,6 +2344,7 @@ def _automatic_thermal_request_matches_context(
         if context.body == "hot_tub":
             expected_hot_tub_rpm = session_rpm if session_rpm is not None else {
                 "temperature_acquisition": baselines.temperature_probe_rpm,
+                "priming": baselines.priming_rpm,
                 "ordinary_circulation": baselines.filtration_rpm,
                 "solar_heating": baselines.solar_heating_rpm,
                 "gas_heating": baselines.gas_heating_rpm,
