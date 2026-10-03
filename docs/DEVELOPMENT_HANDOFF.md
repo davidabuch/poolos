@@ -89,6 +89,72 @@ See [ADR-111](adr/ADR-111-observation-and-command-consequence-chronology.md) for
 chronology model. PR #388 was closed as superseded by PR #389.
 
 
+## Chronology recovery audit closure — October 3, 2026
+
+After the v1.0.3 chronology substrate change, physical commissioning was paused and the
+pre-change physical behavior was treated as a mandatory recovery matrix rather than
+continuing one hotfix/deployment at a time.
+
+The repository-wide liveness audit used this adversarial condition for every commissioned
+lifecycle:
+
+> Hardware remains unchanged and IntelliCenter emits no unsolicited callback.
+
+The audit distinguishes observation freshness, immutable evidence identity, and
+authority/evaluation generation. A genuine native read may advance observation chronology
+without changing evidence value or inventing operator intent; Reset/restart may advance
+authority generation without changing physical state.
+
+The audit confirmed existing bounded native liveness mechanisms for:
+
+- shared-hydraulic Waterfall/Jets/Slide safety topology;
+- every accepted automatic thermal verification step;
+- stable OWNED thermal pump/body sessions;
+- Spa startup topology;
+- thermal source/body cleanup and coastdown verification;
+- Reset safe-baseline verification, including already-OFF/0 hardware;
+- Reset closure authority/evaluation generation;
+- PMPCIRC identity independent of unrelated snapshot publications;
+- quick-restart thermal recovery from a positively verified checkpoint.
+
+Two remaining chronology regressions were found in automatic filtration:
+
+1. A verified stable filtration session had no native keepalive. Its BODY/PMPCIRC/pump
+   evidence could age beyond the 120-second steady-state window and oscillate
+   OWNED -> SUSPENDED -> OWNED while unchanged hardware continued normally. PR #407
+   adds a 15-second read-only native reobservation loop only while a verified filtration
+   lease owns circulation. The existing fail-closed suspension remains unchanged if
+   fresh truth cannot be obtained.
+2. Accepted filtration BODY_ON, pump-setpoint, and BODY_OFF steps could wait for an
+   unsolicited callback even after a physically successful command. PR #408 adds one
+   receipt-bound read-only native refresh per accepted filtration attempt. Verification
+   still requires authoritative evidence strictly after command acceptance and retains
+   the original fixed deadline.
+
+No freshness threshold was lengthened, no cached value is republished as fresh truth,
+no matching physical state creates ownership, and no audit repair adds an equipment
+command.
+
+The recovery software matrix now covers the previously commissioned behaviors that were
+at risk from chronology/liveness changes: Pool Solar cold start/probe, stable Solar hold,
+target-down shutdown, target-up/new-opportunity reacquisition, filtration start/hold/
+completion/shutdown, Reset from active and already-safe hardware, verified quick restart,
+Spa startup/steady ownership/cleanup, thermal-to-filtration circulation handoff, and
+shared-hydraulic safety under unchanged native state.
+
+The broader ownership scenario traceability file still intentionally identifies future
+or partially implemented product semantics such as general prospective thermal adoption,
+durable ICP/OCP session-override persistence, generalized autonomous recovery after
+exhausted command failure, and generalized operator-assisted convergence. Those are not
+claimed complete by this chronology recovery audit and must not be silently implemented
+as part of the recovery deployment. They require separate architecture/commissioning
+work.
+
+**Pre-deployment gate:** PRs #407 and #408 must be merged, all required CI must be green,
+and the exact merged main SHA must pass post-merge CI before a recovery release is cut.
+Physical commissioning after deployment must run the whole recovery matrix rather than
+only the last observed defect.
+
 ## Production control model
 
 PoolOS is the default autonomous controller for its commissioned domains and yields only to
