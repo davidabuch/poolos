@@ -80,6 +80,35 @@ def test_hot_tub_delivery_factory_falls_back_to_canonical_operating_purpose() ->
     )
 
 
+def test_priming_step_metadata_overrides_desired_operating_purpose() -> None:
+    """Cold-start priming binds the 3000-RPM semantic purpose, not steady circulation."""
+
+    from poolos.integration import SetPumpSpeed
+
+    module = _load_module()
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            desired=SimpleNamespace(
+                evidence={"active_operating_purpose": "ordinary_circulation"}
+            )
+        )
+    )
+    operation = SetPumpSpeed(
+        equipment_id="p0101",
+        rpm=3000,
+        metadata={"reason_code": "cold_start_pump_priming"},
+    )
+
+    assert (
+        module._bound_pump_operating_purpose(
+            session,
+            operation,
+            step_metadata={"priming_step": "true"},
+        )
+        == "priming"
+    )
+
+
 def test_operation_operating_purpose_remains_stronger_than_desired_fallback() -> None:
     """Exact step metadata still wins over the canonical fallback."""
 
