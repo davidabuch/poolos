@@ -1558,9 +1558,9 @@ def test_predispatch_stale_thermal_context_is_superseded_not_failed() -> None:
 
     assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
     assert result.failure_reason == "physical_authority:automatic_thermal_context_stale"
-    assert result.current_attempt is not None
-    assert result.current_attempt.receipt is not None
-    assert not result.current_attempt.receipt.accepted
+    # Nothing crossed the transport boundary, so there is no retained
+    # command attempt/provenance for the superseded frame.
+    assert result.current_attempt is None
     assert not result.ownership.owns_body_activation
     assert not result.ownership.owns_pump_setpoint
     assert not result.ownership.owns_heat_source
