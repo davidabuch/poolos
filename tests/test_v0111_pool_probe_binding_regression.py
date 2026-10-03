@@ -199,6 +199,64 @@ def _external_spa_session(operation):
     )
 
 
+def test_real_ha_factory_context_passes_real_spa_pump_validator() -> None:
+    """The exact factory context for ordinary Spa circulation must admit 2600 RPM."""
+
+    from custom_components.poolos.thermal_live_delivery import (
+        ManualIntelliCenterThermalLiveDelivery,
+    )
+    from poolos.physical_command_authority import PhysicalRequestSource
+
+    module = _production_factory_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-validator-epoch")
+
+    policy = module.ThermalLiveExecutionPolicy(
+        pump_session_id="spa-session-1",
+        pump_session_body="hot_tub",
+        pump_session_purpose="ordinary_circulation",
+        pump_session_pump_circuit_id="p0101",
+        pump_session_effective_rpm=2600,
+    )
+    authority.synchronize_pump_speed_session(
+        session_id="spa-session-1",
+        body="hot_tub",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0101",
+        effective_rpm=2600,
+    )
+    operation = SetPumpSpeed(
+        operation_id="spa-normalize-validator",
+        equipment_id="p0101",
+        rpm=2600,
+        metadata={"operating_purpose": "ordinary_circulation"},
+    )
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+        live_policy=policy,
+    )
+    delivery_stub = factory.for_session(
+        _external_spa_session(operation),
+        epoch_identity="spa-validator-epoch",
+    )
+    context = delivery_stub.kwargs["automatic_thermal_context"]
+
+    real_delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=object(),
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+    real_delivery._validate_pump(operation)
+
+
 def test_real_ha_factory_uses_frozen_frame_pump_session_for_spa_delivery() -> None:
     """A later pump-session publication cannot rewrite an older frame's command context."""
 
