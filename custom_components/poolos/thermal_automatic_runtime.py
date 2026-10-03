@@ -113,7 +113,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
     manual: ManualIntelliCenterControl
     authority: PoolOSPhysicalCommandAuthority
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
-    pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
+    live_policy: ThermalLiveExecutionPolicy | None = None
 
     def for_session(
         self,
@@ -183,41 +183,18 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         pump_session_id = None
         effective_pump_rpm = None
         effective_pump_target = None
-        if self.pump_speed_session is not None and operating_purpose is not None:
-            target_runtime = self.pump_speed_session.target_session
-            target_state = (
-                None if target_runtime is None else target_runtime.snapshot
-            )
-            if (
-                target_state is not None
-                and target_state.active
-                and target_state.body is not None
-                and target_state.body.value == session.assessment.desired.body.value
-                and target_state.purpose is not None
-                and target_state.purpose.value == operating_purpose
-                and target_state.pump_circuit_id == pump_circuit_id
-                and target_state.effective_target is not None
-                and target_state.effective_target.unit is PumpTargetUnit.GPM
-                and operating_purpose in {
-                    "temperature_acquisition",
-                    "solar_heating",
-                    "gas_heating",
-                }
-            ):
-                pump_session_id = target_state.session_id
-                effective_pump_target = target_state.effective_target
-            else:
-                pump_state = self.pump_speed_session.session.snapshot
-                if (
-                    pump_state.active
-                    and pump_state.body is not None
-                    and pump_state.body.value == session.assessment.desired.body.value
-                    and pump_state.purpose is not None
-                    and pump_state.purpose.value == operating_purpose
-                    and pump_state.pump_circuit_id == pump_circuit_id
-                ):
-                    pump_session_id = pump_state.session_id
-                    effective_pump_rpm = pump_state.effective_rpm
+        policy = self.live_policy
+        if (
+            policy is not None
+            and operating_purpose is not None
+            and policy.pump_session_id is not None
+            and policy.pump_session_body == session.assessment.desired.body.value
+            and policy.pump_session_purpose == operating_purpose
+            and policy.pump_session_pump_circuit_id == pump_circuit_id
+        ):
+            pump_session_id = policy.pump_session_id
+            effective_pump_rpm = policy.pump_session_effective_rpm
+            effective_pump_target = policy.pump_session_effective_target
         context = self.authority.bind_automatic_thermal_dispatch(
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
@@ -1209,7 +1186,7 @@ class PoolOSThermalAutomaticRuntime:
             self.manual,
             self.authority,
             self.baselines,
-            self.pump_speed_session,
+            frame.live_policy,
         )
         self._task = self.hass.async_create_task(
             self.driver.process_epoch(frame, delivery_factory=factory),

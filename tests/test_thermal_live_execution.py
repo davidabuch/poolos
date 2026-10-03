@@ -1531,6 +1531,42 @@ def test_predispatch_authority_denial_preserves_exact_failure_reason() -> None:
     assert len(delivery.calls) == 1
 
 
+def test_predispatch_stale_thermal_context_is_superseded_not_failed() -> None:
+    """A newer authority epoch retires only the obsolete pre-transport attempt."""
+
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=policy(), evidence=evidence(plan))
+    delivery = FakeThermalDelivery(
+        statuses=[CommandStatus.REJECTED],
+        authority_reasons=["automatic_thermal_context_stale"],
+    )
+
+    result = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=policy(),
+            evidence=evidence(plan),
+            delivery=delivery,
+        )
+    )
+
+    assert result.status is ThermalLiveExecutionStatus.SUPERSEDED
+    assert result.failure_reason == "physical_authority:automatic_thermal_context_stale"
+    # Nothing crossed the transport boundary, so there is no retained
+    # command attempt/provenance for the superseded frame.
+    assert result.current_attempt is None
+    assert not result.ownership.owns_body_activation
+    assert not result.ownership.owns_pump_setpoint
+    assert not result.ownership.owns_heat_source
+    assert len(delivery.calls) == 1
+
+
 def test_rpm_settles_pending_then_verifies_within_inclusive_tolerance() -> None:
     plan = thermal_plan(PhysicalHeatMode.OFF, 2600, PhysicalHeatMode.SOLAR, 2900)
     engine = ThermalLiveExecutionEngine()

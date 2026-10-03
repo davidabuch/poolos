@@ -175,3 +175,77 @@ def test_real_ha_factory_binds_all_three_canonical_pool_probe_operations() -> No
         assert context.purpose.value == "pool_temperature_probe"
         assert context.probe_authority is not None
         assert context.probe_authority.operation_id == operation.operation_id
+
+
+
+def _external_spa_session(operation):
+    """Minimal external-user Spa session consumed by the production factory."""
+
+    return SimpleNamespace(
+        assessment=SimpleNamespace(
+            operations=(operation,),
+            desired=SimpleNamespace(body=SimpleNamespace(value="hot_tub")),
+        ),
+        execution_plan=SimpleNamespace(
+            plan_id="external-spa-plan",
+            steps=(SimpleNamespace(operation=operation),),
+        ),
+        coordination=SimpleNamespace(current_step_sequence=1),
+        originating_currentness=SimpleNamespace(
+            purpose=SimpleNamespace(
+                kind=ThermalExecutionPurposeKind.THERMAL_CONTROL
+            )
+        ),
+    )
+
+
+def test_real_ha_factory_uses_frozen_frame_pump_session_for_spa_delivery() -> None:
+    """A later pump-session publication cannot rewrite an older frame's command context."""
+
+    module = _production_factory_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-epoch")
+
+    policy = module.ThermalLiveExecutionPolicy(
+        pump_session_id="spa-session-1",
+        pump_session_body="hot_tub",
+        pump_session_purpose="ordinary_circulation",
+        pump_session_pump_circuit_id="p0101",
+        pump_session_effective_rpm=2600,
+    )
+    authority.synchronize_pump_speed_session(
+        session_id="spa-session-1",
+        body="hot_tub",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0101",
+        effective_rpm=2600,
+    )
+    operation = SetPumpSpeed(
+        operation_id="spa-normalize",
+        equipment_id="p0101",
+        rpm=2600,
+        metadata={"operating_purpose": "ordinary_circulation"},
+    )
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+        live_policy=policy,
+    )
+
+    delivery = factory.for_session(
+        _external_spa_session(operation),
+        epoch_identity="spa-epoch",
+    )
+    context = delivery.kwargs["automatic_thermal_context"]
+
+    assert context.pump_session_id == "spa-session-1"
+    assert context.effective_pump_rpm == 2600
+    assert context.operating_purpose == "ordinary_circulation"
+    assert context.pump_circuit_id == "p0101"
