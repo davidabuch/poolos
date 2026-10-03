@@ -207,6 +207,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return await self._async_refresh_native_runtime_evidence()
 
+    async def async_refresh_native_filtration_topology_evidence(self) -> bool:
+        """Refresh BODY/PMPCIRC/pump evidence for filtration verification."""
+
+        return await self._async_refresh_native_runtime_evidence()
+
     async def async_refresh_native_cleanup_topology_evidence(self) -> bool:
         """Read post-boundary topology AND source selection before cleanup."""
 
