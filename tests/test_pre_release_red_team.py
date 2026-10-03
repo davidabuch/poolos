@@ -119,6 +119,14 @@ def test_rejected_thermal_handoff_does_not_reserve_future_filtration_cleanup():
         if seconds == 3:
             assert driver._reenable_required, result.blocker
             assert circulation.owner is thermal.PoolCirculationOwner.FILTRATION
+            rejected = driver.diagnostics()["last_rejected_delivery"]
+            assert rejected is not None
+            assert rejected["receipt_status"] == thermal.CommandStatus.REJECTED.value
+            assert rejected["operation_type"]
+            assert rejected["operation_id"]
+            assert rejected["target"]
+            assert isinstance(rejected["receipt_message"], str)
+            assert isinstance(rejected["receipt_details"], dict)
             continue
         assert result.blocker == "automatic_thermal_reenable_required"
         assert not circulation.thermal_reserved_for(frame.epoch_identity)

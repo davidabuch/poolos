@@ -343,6 +343,9 @@ class ThermalAutomaticExecutionDriver:
     _last_accepted_correlation_id: str | None = field(
         default=None, init=False, repr=False
     )
+    _last_rejected_delivery: dict[str, object] | None = field(
+        default=None, init=False, repr=False
+    )
     _probe_acquisition: PoolTemperatureProbeExecutionEvidence | None = field(
         default=None, init=False, repr=False
     )
@@ -1482,6 +1485,45 @@ class ThermalAutomaticExecutionDriver:
             )
         finally:
             self._delivery_in_flight = False
+        rejected_attempt = delivered.current_attempt
+        if (
+            rejected_attempt is None
+            and delivered.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+            and delivered.attempts
+        ):
+            rejected_attempt = delivered.attempts[-1]
+        if (
+            delivered.status is not ThermalLiveExecutionStatus.AWAITING_VERIFICATION
+            and rejected_attempt is not None
+            and rejected_attempt.receipt is not None
+            and not rejected_attempt.receipt.accepted
+        ):
+            operation = rejected_attempt.step.operation
+            requested_value: object | None
+            if isinstance(operation, SetPumpSpeed):
+                requested_value = operation.rpm
+            elif isinstance(operation, SetHeatMode):
+                requested_value = operation.mode.value
+            elif isinstance(operation, SetBodyActive):
+                requested_value = operation.active
+            else:
+                requested_value = None
+            self._last_rejected_delivery = {
+                "operation_type": type(operation).__name__,
+                "operation_id": operation.operation_id,
+                "target": operation.equipment_id,
+                "requested_value": requested_value,
+                "receipt_status": rejected_attempt.receipt.status.value,
+                "receipt_message": _bounded(rejected_attempt.receipt.message),
+                "receipt_details": {
+                    str(key): value
+                    for key, value in rejected_attempt.receipt.details.items()
+                    if isinstance(value, (str, int, float, bool)) or value is None
+                },
+            }
+        elif delivered.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION:
+            self._last_rejected_delivery = None
+
         self.active_session = delivered
         command_performed = delivered.status is ThermalLiveExecutionStatus.AWAITING_VERIFICATION
         if command_performed:
@@ -2831,6 +2873,11 @@ class ThermalAutomaticExecutionDriver:
                 "accepted_delivery_count": assessment.accepted_delivery_count,
                 "last_accepted_correlation_id": (
                     assessment.last_accepted_correlation_id
+                ),
+                "last_rejected_delivery": (
+                    None
+                    if self._last_rejected_delivery is None
+                    else dict(self._last_rejected_delivery)
                 ),
                 "command_delivery_performed": assessment.command_delivery_performed,
                 "automatic_retry_enabled": False,
