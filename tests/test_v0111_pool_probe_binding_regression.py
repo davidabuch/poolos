@@ -102,6 +102,43 @@ def _production_factory_module():
     return module
 
 
+def _production_delivery_module():
+    """Load the real HA delivery module without importing the integration package."""
+
+    import importlib.util
+    from pathlib import Path
+    import sys
+    from types import ModuleType
+
+    root = Path(__file__).resolve().parents[1]
+    module_path = root / "custom_components" / "poolos" / "thermal_live_delivery.py"
+    package_name = "poolos_v0111_real_delivery_regression"
+
+    package = ModuleType(package_name)
+    package.__path__ = [str(module_path.parent)]
+    package.__package__ = package_name
+    sys.modules[package_name] = package
+
+    manual = ModuleType(f"{package_name}.manual_intellicenter")
+
+    class ManualIntelliCenterCommandError(RuntimeError):
+        pass
+
+    manual.ManualIntelliCenterCommandError = ManualIntelliCenterCommandError
+    manual.ManualIntelliCenterControl = object
+    sys.modules[manual.__name__] = manual
+
+    spec = importlib.util.spec_from_file_location(
+        f"{package_name}.thermal_live_delivery",
+        module_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _authority_ready_for_probe() -> PoolOSPhysicalCommandAuthority:
     authority = PoolOSPhysicalCommandAuthority()
     authority.resolve_maintenance(False)
@@ -197,6 +234,140 @@ def _external_spa_session(operation):
             )
         ),
     )
+
+
+def test_real_ha_factory_uses_desired_evidence_when_spa_step_metadata_is_absent() -> None:
+    """Live Spa composition may carry purpose only in canonical desired evidence."""
+
+    from poolos.physical_command_authority import PhysicalRequestSource
+
+    module = _production_factory_module()
+    delivery_module = _production_delivery_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-fallback-validator-epoch")
+
+    operation = SetPumpSpeed(
+        operation_id="spa-normalize-fallback-validator",
+        equipment_id="p0101",
+        rpm=2600,
+        metadata={},
+    )
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            operations=(operation,),
+            desired=SimpleNamespace(
+                body=SimpleNamespace(value="hot_tub"),
+                evidence={"active_operating_purpose": "ordinary_circulation"},
+            ),
+        ),
+        execution_plan=SimpleNamespace(
+            plan_id="external-spa-fallback-plan",
+            steps=(SimpleNamespace(operation=operation),),
+        ),
+        coordination=SimpleNamespace(current_step_sequence=1),
+        originating_currentness=SimpleNamespace(
+            purpose=SimpleNamespace(
+                kind=ThermalExecutionPurposeKind.THERMAL_CONTROL
+            )
+        ),
+    )
+    policy = module.ThermalLiveExecutionPolicy(
+        pump_session_id="spa-session-fallback",
+        pump_session_body="hot_tub",
+        pump_session_purpose="ordinary_circulation",
+        pump_session_pump_circuit_id="p0101",
+        pump_session_effective_rpm=2600,
+    )
+    authority.synchronize_pump_speed_session(
+        session_id="spa-session-fallback",
+        body="hot_tub",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0101",
+        effective_rpm=2600,
+    )
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+        live_policy=policy,
+    )
+    delivery_stub = factory.for_session(
+        session,
+        epoch_identity="spa-fallback-validator-epoch",
+    )
+    context = delivery_stub.kwargs["automatic_thermal_context"]
+
+    assert context.operating_purpose == "ordinary_circulation"
+    assert context.effective_pump_rpm == 2600
+
+    real_delivery = delivery_module.ManualIntelliCenterThermalLiveDelivery(
+        manual=object(),
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+    real_delivery._validate_pump(operation)
+
+
+def test_real_ha_factory_context_passes_real_spa_pump_validator() -> None:
+    """The exact factory context for ordinary Spa circulation must admit 2600 RPM."""
+
+    from poolos.physical_command_authority import PhysicalRequestSource
+
+    module = _production_factory_module()
+    delivery_module = _production_delivery_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-validator-epoch")
+
+    policy = module.ThermalLiveExecutionPolicy(
+        pump_session_id="spa-session-1",
+        pump_session_body="hot_tub",
+        pump_session_purpose="ordinary_circulation",
+        pump_session_pump_circuit_id="p0101",
+        pump_session_effective_rpm=2600,
+    )
+    authority.synchronize_pump_speed_session(
+        session_id="spa-session-1",
+        body="hot_tub",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0101",
+        effective_rpm=2600,
+    )
+    operation = SetPumpSpeed(
+        operation_id="spa-normalize-validator",
+        equipment_id="p0101",
+        rpm=2600,
+        metadata={"operating_purpose": "ordinary_circulation"},
+    )
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+        live_policy=policy,
+    )
+    delivery_stub = factory.for_session(
+        _external_spa_session(operation),
+        epoch_identity="spa-validator-epoch",
+    )
+    context = delivery_stub.kwargs["automatic_thermal_context"]
+
+    real_delivery = delivery_module.ManualIntelliCenterThermalLiveDelivery(
+        manual=object(),
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+    real_delivery._validate_pump(operation)
 
 
 def test_real_ha_factory_uses_frozen_frame_pump_session_for_spa_delivery() -> None:
