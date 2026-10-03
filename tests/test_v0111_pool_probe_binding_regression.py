@@ -236,6 +236,73 @@ def _external_spa_session(operation):
     )
 
 
+def test_real_ha_factory_binds_spa_cold_start_priming_before_steady_purpose() -> None:
+    """Spa cold-start prime must bind priming even when steady purpose is ordinary."""
+
+    from poolos.physical_command_authority import PhysicalRequestSource
+
+    module = _production_factory_module()
+    delivery_module = _production_delivery_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-prime-validator-epoch")
+
+    operation = SetPumpSpeed(
+        operation_id="spa-prime-validator",
+        equipment_id="p0101",
+        rpm=3000,
+        metadata={"reason_code": "cold_start_pump_priming"},
+    )
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            operations=(operation,),
+            desired=SimpleNamespace(
+                body=SimpleNamespace(value="hot_tub"),
+                evidence={"active_operating_purpose": "ordinary_circulation"},
+            ),
+        ),
+        execution_plan=SimpleNamespace(
+            plan_id="external-spa-prime-plan",
+            steps=(
+                SimpleNamespace(
+                    operation=operation,
+                    metadata={"priming_step": "true"},
+                ),
+            ),
+        ),
+        coordination=SimpleNamespace(current_step_sequence=1),
+        originating_currentness=SimpleNamespace(
+            purpose=SimpleNamespace(
+                kind=ThermalExecutionPurposeKind.THERMAL_CONTROL
+            )
+        ),
+    )
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+    )
+    delivery_stub = factory.for_session(
+        session,
+        epoch_identity="spa-prime-validator-epoch",
+    )
+    context = delivery_stub.kwargs["automatic_thermal_context"]
+
+    assert context.operating_purpose == "priming"
+
+    real_delivery = delivery_module.ManualIntelliCenterThermalLiveDelivery(
+        manual=object(),
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+    real_delivery._validate_pump(operation)
+
+
 def test_real_ha_factory_uses_desired_evidence_when_spa_step_metadata_is_absent() -> None:
     """Live Spa composition may carry purpose only in canonical desired evidence."""
 
