@@ -963,8 +963,23 @@ def test_current_on_grid_evidence_is_reported_and_permits_exclusivity() -> None:
     assert result.critical_evidence_current
 
 
-def test_hot_tub_remains_fail_closed() -> None:
-    result = _evaluate(entitlement=_entitlement(body=ThermalBody.HOT_TUB))
+def test_poolos_owned_hot_tub_can_enter_exact_successor_evaluation() -> None:
+    result = _evaluate(
+        entitlement=_entitlement(body=ThermalBody.HOT_TUB),
+        evidence=_evidence(pool_active=True, spa_active=False),
+    )
+
+    assert result.disposition is CirculationArbitrationDisposition.EXCLUSIVE_THERMAL
+    assert result.circulation_origin is CirculationOrigin.POOLOS_THERMAL
+    assert result.body_deactivation_eligible
+    assert result.reason_code == "circulation_exclusive_thermal_future_deactivation_eligible"
+
+
+def test_adopted_hot_tub_remains_fail_closed() -> None:
+    result = _evaluate(
+        entitlement=_entitlement(body=ThermalBody.HOT_TUB, adopted=True),
+        evidence=_evidence(pool_active=False, spa_active=True),
+    )
 
     assert result.disposition is CirculationArbitrationDisposition.BLOCKED
     assert result.reason_code == "circulation_hot_tub_not_commissioned"
