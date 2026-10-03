@@ -4668,7 +4668,9 @@ def test_user_spa_predispatch_supersession_preserves_adoption_and_newest_epoch()
     assert lease.body_adoption is not None
     assert lease.body_activation is None
     assert stale.calls and isinstance(stale.calls[0], SetPumpSpeed)
-    assert stale.calls[0].rpm == 2600
+    # A physically stopped Spa starts with the commissioned priming step;
+    # 2600 ordinary circulation is the later semantic steady-state target.
+    assert stale.calls[0].rpm == 3000
 
     current = _frame(
         orchestrator,
@@ -4693,7 +4695,9 @@ def test_user_spa_predispatch_supersession_preserves_adoption_and_newest_epoch()
 
     assert resumed.command_delivery_performed
     assert isinstance(delivery.calls[-1], SetPumpSpeed)
-    assert delivery.calls[-1].rpm == 2600
+    # Because the superseded command never crossed transport, the newest
+    # frame is entitled to retry the same bounded priming step.
+    assert delivery.calls[-1].rpm == 3000
     lease = orchestrator.ownership.state.lease
     assert lease is not None
     assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
