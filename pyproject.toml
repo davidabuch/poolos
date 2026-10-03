@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poolos"
-version = "1.0.7"
+version = "1.0.8"
 description = "A vendor-independent operating system for intelligent pool and spa control."
 readme = "README.md"
 requires-python = ">=3.13"
