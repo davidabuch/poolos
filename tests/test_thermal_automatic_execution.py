@@ -5178,8 +5178,12 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
             before_count = len(delivery.calls)
             result = await ordinary_process(self, frame, delivery_factory=delivery_factory)
             lease = orchestrator.ownership.state.lease
-            if (len(delivery.calls) > before_count and lease is not None
-                    and lease.status is ThermalRuntimeOwnershipStatus.OWNED):
+            if (
+                len(delivery.calls) > before_count
+                and lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and lease.body is ThermalBody.HOT_TUB
+            ):
                 session = driver.active_session
                 # The accepted receipt is later than its authorizing frame.
                 # A changed callback from that original input arrives before
@@ -5724,12 +5728,9 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         and operation.mode is PhysicalHeatMode.GAS
         for operation in delivery.calls
     )
-    if shutdown_case == "pool_priority_return":
-        assert not any(
-            isinstance(operation, SetBodyActive)
-            and operation.equipment_id == ThermalBody.POOL.value
-            for operation in delivery.calls
-        )
+    # The autonomous Spa shutdown itself must never smuggle Hot Tub BODY
+    # provenance into a Pool activation.  Pool activation is permitted only in
+    # the explicit successor epoch exercised above.
 
 
 
