@@ -875,7 +875,10 @@ def test_quick_restart_waits_for_startup_authority_before_adjudication() -> None
     runtime.arm_quick_restart_recovery(checkpoint)
     runtime.set_enabled(True)
 
-    lease = SimpleNamespace(lease_id="restored-thermal-lease")
+    lease = SimpleNamespace(
+        lease_id="restored-thermal-lease",
+        status=module.ThermalRuntimeOwnershipStatus.OWNED,
+    )
     restore_calls: list[str] = []
 
     def restore_quick_restart(
@@ -935,7 +938,7 @@ def test_quick_restart_waits_for_startup_authority_before_adjudication() -> None
     assert coordinator.listener_updates >= 2
 
 
-def test_quick_restart_success_restores_circulation_and_resumes_read_only_reobservation() -> None:
+def test_quick_restart_success_restores_circulation_and_is_command_free() -> None:
     async def scenario() -> None:
         from poolos.pool_circulation_ownership import PoolCirculationOwner
         from poolos.thermal_runtime_ownership import (
