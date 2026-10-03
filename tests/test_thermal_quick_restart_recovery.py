@@ -139,9 +139,9 @@ def _stable_verified_hot_tub_solar_manager() -> ThermalRuntimeOwnershipManager:
 
     accepted_base = NOW + timedelta(milliseconds=100)
     for role, operation, accepted_at in (
-        ("body_activation", SetBodyActive("hot_tub", True), accepted_base),
-        ("pump_setpoint", SetPumpSpeed("p0198", 2900), accepted_base + timedelta(milliseconds=100)),
-        ("heat_source", SetHeatMode("hot_tub", PhysicalHeatMode.SOLAR), accepted_base + timedelta(milliseconds=200)),
+        ("body_activation", SetBodyActive(equipment_id="hot_tub", active=True), accepted_base),
+        ("pump_setpoint", SetPumpSpeed(equipment_id="p0198", rpm=2900), accepted_base + timedelta(milliseconds=100)),
+        ("heat_source", SetHeatMode(equipment_id="hot_tub", mode=PhysicalHeatMode.SOLAR), accepted_base + timedelta(milliseconds=200)),
     ):
         manager.accept_delivery(
             ownership,
