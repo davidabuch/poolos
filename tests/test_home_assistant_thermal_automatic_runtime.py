@@ -318,6 +318,25 @@ def test_reset_recovery_blocks_intermediate_thermal_driver_until_fresh_post_rese
     asyncio.run(scenario())
 
 
+def test_reset_close_advances_orchestration_evaluation_generation() -> None:
+    module = _load_module()
+    runtime, _, _, _, _ = _runtime(module)
+
+    assert runtime.orchestration_evaluation_identity is None
+
+    runtime.note_reset_authority_reopened()
+    assert (
+        runtime.orchestration_evaluation_identity
+        == "thermal-authority-generation:1"
+    )
+
+    runtime.note_reset_authority_reopened()
+    assert (
+        runtime.orchestration_evaluation_identity
+        == "thermal-authority-generation:2"
+    )
+
+
 def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
     async def scenario() -> None:
         module = _load_module()

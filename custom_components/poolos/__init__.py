@@ -724,6 +724,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             thermal=assessment,
             external_changes=external_change_runtime.latest_batch,
             evidence_identity=snapshot.evidence_identity,
+            evaluation_identity=(
+                thermal_automatic_runtime.orchestration_evaluation_identity
+            ),
         )
         native = snapshot.native_snapshot
         transport = None if native is None else native.transport_snapshot
