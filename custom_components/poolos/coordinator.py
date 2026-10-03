@@ -222,6 +222,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return await self._async_refresh_native_runtime_evidence()
 
+    async def async_refresh_native_reset_baseline_evidence(self) -> bool:
+        """Re-read BODY/source/PUMP evidence needed to verify Reset safe baseline."""
+
+        return await self._async_refresh_native_runtime_evidence()
+
     async def async_refresh_native_thermal_safety_topology_evidence(self) -> bool:
         """Re-read BODY plus shared-hydraulic safety topology without commands."""
 
