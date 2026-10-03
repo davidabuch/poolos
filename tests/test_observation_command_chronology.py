@@ -381,6 +381,32 @@ def test_same_captured_evidence_can_evaluate_new_policy_without_snapshot_conflic
     assert orchestrator.ownership.state.lease is None
 
 
+def test_same_captured_evidence_can_revaluate_after_authority_generation_change():
+    orchestrator = o.ThermalRuntimeOrchestrator()
+    observations = o._observations(o.NOW)
+    thermal = o._thermal(o.NOW)
+
+    first = orchestrator.refresh(
+        generated_at=o.NOW,
+        observations=observations,
+        thermal=thermal,
+        evidence_identity="captured-1",
+        evaluation_identity="authority-generation:0",
+    )
+    second = orchestrator.refresh(
+        generated_at=o.NOW,
+        observations=observations,
+        thermal=thermal,
+        evidence_identity="captured-1",
+        evaluation_identity="authority-generation:1",
+    )
+
+    assert second.blocking_reason != "thermal_orchestration_snapshot_conflict"
+    assert second.snapshot_identity != first.snapshot_identity
+    assert second.pool_evaluation_id == first.pool_evaluation_id
+    assert orchestrator.ownership.state.lease is None
+
+
 def test_same_claimed_evidence_identity_cannot_change_its_facts():
     orchestrator = o.ThermalRuntimeOrchestrator()
     orchestrator.refresh(
