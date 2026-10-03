@@ -318,6 +318,42 @@ def test_reset_recovery_blocks_intermediate_thermal_driver_until_fresh_post_rese
     asyncio.run(scenario())
 
 
+def test_reset_close_creates_new_execution_epoch_without_relabeling_native_evidence() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+
+        authority.reset_recovery_active = True
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "same-safe-evidence"),
+        )
+        assert driver.processed == []
+        assert hass.tasks == []
+
+        authority.reset_recovery_active = False
+        runtime.note_reset_authority_reopened()
+        later = NOW + timedelta(seconds=1)
+        runtime.observe(
+            _snapshot(later),
+            None,
+            _orchestration(later, "same-safe-evidence"),
+        )
+
+        assert authority.epochs == [
+            "same-safe-evidence",
+            "same-safe-evidence:authority:1",
+        ]
+        assert len(hass.tasks) == 1
+        driver.release.set()
+        await hass.tasks[0]
+        assert driver.processed == ["same-safe-evidence:authority:1"]
+
+    asyncio.run(scenario())
+
+
 def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
     async def scenario() -> None:
         module = _load_module()
