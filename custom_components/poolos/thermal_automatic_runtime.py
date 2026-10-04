@@ -963,14 +963,20 @@ class PoolOSThermalAutomaticRuntime:
         if self._unloaded or not self.driver.requested_enabled:
             return
         provenance_id = self._cleanup_topology_reobservation_identity()
+        task = self._cleanup_topology_reobservation_task
         if provenance_id is None:
             self._cleanup_topology_reobservation_provenance_id = None
+            if task is not None and not task.done():
+                task.cancel()
             return
-        if self._cleanup_topology_reobservation_provenance_id == provenance_id:
+        if (
+            self._cleanup_topology_reobservation_provenance_id == provenance_id
+            and task is not None
+            and not task.done()
+        ):
             return
-        task = self._cleanup_topology_reobservation_task
         if task is not None and not task.done():
-            return
+            task.cancel()
         self._cleanup_topology_reobservation_provenance_id = provenance_id
         self._cleanup_topology_reobservation_task = self.hass.async_create_task(
             self._refresh_cleanup_topology_until_complete(provenance_id),
