@@ -6,7 +6,7 @@ from datetime import timedelta
 
 DOMAIN = "poolos"
 NAME = "PoolOS"
-INTEGRATION_VERSION = "1.0.23"
+INTEGRATION_VERSION = "1.0.24"
 CONFIG_ENTRY_VERSION = 2
 CONFIG_ENTRY_MINOR_VERSION = 2
 
