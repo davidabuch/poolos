@@ -520,12 +520,12 @@ def test_complete_cleanup_batch_redates_all_returned_native_fields(monkeypatch):
             ):
                 break
 
-        before = transport.read_snapshot()
-        pool_before = before.pool_active_observed_at
-        spa_before = before.spa_active_observed_at
-        pump_before = before.pump_rpm_observed_at
-        source_before = before.pool_heat_source_observed_at
-        inventory_before = before.inventory_observed_at
+        pool_before = transport._attribute_observed_at[("B1101", "STATUS")]
+        spa_before = transport._attribute_observed_at[("B1202", "STATUS")]
+        pump_before = transport._attribute_observed_at[("PMP01", "RPM")]
+        source_before = transport._attribute_observed_at[("B1101", "HEATER")]
+        inventory_before = transport._inventory_observed_at
+        assert inventory_before is not None
 
         async def read(cmd, extra=None):
             assert cmd == "GetParamList"
@@ -560,12 +560,12 @@ def test_complete_cleanup_batch_redates_all_returned_native_fields(monkeypatch):
                 cleanup_topology=True
             )
             assert result is True
-            after = transport.read_snapshot()
-            assert after.pool_active_observed_at > pool_before
-            assert after.spa_active_observed_at > spa_before
-            assert after.pump_rpm_observed_at > pump_before
-            assert after.pool_heat_source_observed_at > source_before
-            assert after.inventory_observed_at > inventory_before
+            assert transport._attribute_observed_at[("B1101", "STATUS")] > pool_before
+            assert transport._attribute_observed_at[("B1202", "STATUS")] > spa_before
+            assert transport._attribute_observed_at[("PMP01", "RPM")] > pump_before
+            assert transport._attribute_observed_at[("B1101", "HEATER")] > source_before
+            assert transport._inventory_observed_at is not None
+            assert transport._inventory_observed_at > inventory_before
         finally:
             await transport.async_stop()
 
