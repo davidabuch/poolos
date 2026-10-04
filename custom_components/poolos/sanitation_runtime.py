@@ -33,6 +33,7 @@ from poolos.sanitation import (
 )
 from poolos.thermal_runtime_orchestration import ThermalRuntimeOrchestrationAssessment
 
+from .background_tasks import PoolOSBackgroundTasks
 from .coordinator import PoolOSCoordinator
 from .manual_intellicenter import ManualIntelliCenterControl
 from .observation import ObservationSnapshot
@@ -71,6 +72,9 @@ class PoolOSSanitationRuntime:
         ExternalChangeBatch,
     ] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _background_tasks: PoolOSBackgroundTasks = field(
+        default_factory=PoolOSBackgroundTasks, init=False, repr=False
+    )
     _last_persisted_remaining: float | None = field(
         default=None, init=False, repr=False
     )
@@ -177,12 +181,13 @@ class PoolOSSanitationRuntime:
         """Convert ordinary manual BODY Off into sanitation cancellation intent."""
 
         session = self.controller.session
-        if session is None or not session.active or session.body is not body:
+        if self._unloaded or session is None or not session.active or session.body is not body:
             return False
         self.assessment = self.controller.request_cancel(
             reason="manual_body_off",
         )
-        self.hass.async_create_task(
+        self._background_tasks.create(
+            self.hass,
             self._persist(force=True),
             "Persist manual PoolOS sanitation cancellation",
         )
@@ -333,7 +338,8 @@ class PoolOSSanitationRuntime:
             if self.authority_boundary_changed is not None:
                 self.authority_boundary_changed(snapshot.generated_at, False)
             self._last_delivery_error = None
-            self.hass.async_create_task(
+            self._background_tasks.create(
+                self.hass,
                 self._persist(force=True),
                 "Persist completed PoolOS sanitation session",
             )
@@ -341,7 +347,8 @@ class PoolOSSanitationRuntime:
             self.coordinator.async_update_listeners()
             return
 
-        self.hass.async_create_task(
+        self._background_tasks.create(
+            self.hass,
             self._persist(force=False),
             "Persist PoolOS sanitation progress",
         )
@@ -422,7 +429,8 @@ class PoolOSSanitationRuntime:
                     str(reason) if reason else receipt.message
                 )
         if not self._unloaded:
-            self.hass.async_create_task(
+            self._background_tasks.create(
+                self.hass,
                 self.coordinator.async_request_refresh(),
                 "Refresh PoolOS after sanitation delivery",
             )
@@ -461,16 +469,22 @@ class PoolOSSanitationRuntime:
         self._last_persisted_remaining = session.remaining_seconds
         self._last_persisted_lifecycle = session.lifecycle.value
 
-    async def async_unload(self) -> None:
+    def prepare_unload(self) -> None:
         """Persist remaining work and make late sanitation work inert."""
 
         if self._unloaded:
             return
         self._unloaded = True
-        await self._persist(force=True)
+        self._background_tasks.prepare_stop()
         session = self.controller.session
         if session is not None:
             self.authority.end_sanitation_session(session_id=session.session_id)
+
+    async def async_unload(self) -> None:
+        """Drain command-free work after the synchronous scheduling fence."""
+
+        self.prepare_unload()
+        await self._background_tasks.async_stop()
         task = self._task
         if task is not None and not task.done():
             try:
@@ -479,6 +493,8 @@ class PoolOSSanitationRuntime:
                 pass
         self._task = None
         self._pending = None
+
+        await self._persist(force=True)
 
     def diagnostics(self) -> dict[str, object]:
         session = self.controller.session

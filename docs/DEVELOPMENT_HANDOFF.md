@@ -281,3 +281,17 @@ This task stops at reviewed PR/green validation. No merge, release, deployment o
 equipment action is authorized by this candidate note. Real native reply timing,
 completeness and the complete physical target-down/target-up cycle still require
 operator commissioning after eventual review/release.
+
+## HA STOP lifecycle repair (v1.0.23 follow-up)
+
+The v1.0.23 commissioning passed manual Pool/Spa attribution, currentness and
+restart fail-closed checks, but exposed a thermal reobservation loop surviving
+HA final writes. The integration STOP listener previously quiesced only the
+coordinator. STOP and config-entry unload now share command-free entry teardown:
+synchronously fence all producers, cancel/await owned background work, settle
+already-dispatched results and disconnect transports. Only an already-valid
+quick-restart checkpoint is frozen for final writes, with unchanged provenance
+and age. Arbitration and ownership policy are unchanged.
+
+See [HA_STOP_TASK_QUIESCENCE_AUDIT.md](HA_STOP_TASK_QUIESCENCE_AUDIT.md) for the
+red regression, task inventory, ordering and remaining physical validation.

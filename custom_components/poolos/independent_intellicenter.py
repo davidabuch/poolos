@@ -59,6 +59,8 @@ from pyintellicenter import (
 from pyintellicenter.attributes import ALL_ATTRIBUTES_BY_TYPE
 from pyintellicenter.exceptions import ICConnectionError, ICTimeoutError
 
+from poolos.integration.connection_lifecycle import async_quiesce_connection_handler
+
 from poolos.evidence_chronology import evidence_precedes_authority
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
@@ -635,7 +637,7 @@ class IndependentIntelliCenterReadOnlyTransport:
             self._state = IndependentIntelliCenterTransportState.UNAVAILABLE
             return
         self._running = False
-        self._handler.stop()
+        await async_quiesce_connection_handler(self._handler)
 
         reconciliation_tasks = tuple(self._connection_reconciliation_tasks)
         for task in reconciliation_tasks:

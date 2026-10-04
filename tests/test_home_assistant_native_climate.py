@@ -82,7 +82,9 @@ def test_runtime_owns_single_manual_gateway() -> None:
     assert "manual_intellicenter: ManualIntelliCenterControl | None" in source
     assert "manual_intellicenter = (" in source
     assert "await manual_intellicenter.async_start()" in source
-    assert "await entry.runtime_data.manual_intellicenter.async_stop()" in source
+    stop_contract = (COMPONENT / "lifecycle.py").read_text(encoding="utf-8")
+    assert "stops.append(data.manual_intellicenter.async_stop())" in stop_contract
+    assert "await asyncio.gather(*stops, return_exceptions=True)" in stop_contract
 
 
 def test_climate_does_not_construct_writable_controller() -> None:

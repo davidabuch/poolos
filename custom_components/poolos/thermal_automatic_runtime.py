@@ -65,6 +65,7 @@ from poolos.thermal_runtime_ownership import (
     ThermalRuntimeOwnershipStatus,
 )
 
+from .background_tasks import PoolOSBackgroundTasks
 from .coordinator import PoolOSCoordinator
 from .manual_intellicenter import ManualIntelliCenterControl
 from .observation import ObservationSnapshot
@@ -349,7 +350,11 @@ class PoolOSThermalAutomaticRuntime:
         default=None, init=False, repr=False
     )
     _authority_epoch_generation: int = field(default=0, init=False, repr=False)
+    _shutdown_checkpoint: dict[str, object] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _background_tasks: PoolOSBackgroundTasks = field(
+        default_factory=PoolOSBackgroundTasks, init=False, repr=False
+    )
     _desired_enabled: bool = field(default=False, init=False, repr=False)
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
         default=None, init=False, repr=False
@@ -538,12 +543,21 @@ class PoolOSThermalAutomaticRuntime:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
         return None
 
+    def preserve_shutdown_checkpoint(self) -> None:
+        """Freeze reviewed restart evidence before command-free unload invalidation."""
+
+        if not self._unloaded:
+            self._shutdown_checkpoint = self.quick_restart_restore_payload()
+
     @property
     def quick_restart_recovery_armed(self) -> bool:
         return self._restart_checkpoint is not None
 
     def quick_restart_restore_payload(self) -> dict[str, object] | None:
         """Return the latest safely persisted stable thermal checkpoint."""
+
+        if self._unloaded:
+            return self._shutdown_checkpoint
 
         lease = self.orchestrator.ownership.state.lease
         if lease is None:
@@ -797,7 +811,8 @@ class PoolOSThermalAutomaticRuntime:
                 # No commands or ownership are permitted during preparation;
                 # checkpoint age remains fixed and read failure discards it.
                 if preparation is None:
-                    self._restart_evidence_preparation_task = self.hass.async_create_task(
+                    self._restart_evidence_preparation_task = self._background_tasks.create(
+                        self.hass,
                         self._prepare_restart_evidence(checkpoint),
                         "PoolOS restart native evidence preparation",
                     )
@@ -846,7 +861,8 @@ class PoolOSThermalAutomaticRuntime:
             # never delivery authority after failed restoration. Recompose with
             # ordinary origin before considering any automatic candidate.
             self.coordinator.async_update_listeners()
-            self.hass.async_create_task(
+            self._background_tasks.create(
+                self.hass,
                 self.coordinator.async_request_refresh(),
                 "PoolOS restart origin reevaluation",
             )
@@ -877,28 +893,24 @@ class PoolOSThermalAutomaticRuntime:
         )
         self.coordinator.async_update_listeners()
 
-    async def async_unload(self) -> None:
+    def prepare_unload(self) -> None:
         """Make late work inert, then retain any already-accepted receipt."""
 
         if self._unloaded:
             return
         self._unloaded = True
+        self._background_tasks.prepare_stop()
         self.authority.ownership_permission_reader = None
         self.authority.operator_request_listener = None
         now = datetime.now(UTC)
         self.authority.unload_automatic_thermal_driver()
         self.driver.unload(unloaded_at=now)
-        task = self._task
-        if task is not None and not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                LOGGER.exception(
-                    "PoolOS automatic thermal task failed during command-free unload"
-                )
-        self._task = None
+
+    async def async_unload(self) -> None:
+        """Drain command-free work after the synchronous scheduling fence."""
+
+        self.prepare_unload()
+        await self._background_tasks.async_stop()
         probe_task = self._owned_pump_session_reobservation_task
         if probe_task is not None and not probe_task.done():
             probe_task.cancel()
@@ -932,6 +944,17 @@ class PoolOSThermalAutomaticRuntime:
             await asyncio.gather(restart_task, return_exceptions=True)
         self._restart_evidence_preparation_task = None
         self._restart_checkpoint = None
+        task = self._task
+        if task is not None and not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                LOGGER.exception(
+                    "PoolOS automatic thermal task failed during command-free unload"
+                )
+        self._task = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -992,7 +1015,8 @@ class PoolOSThermalAutomaticRuntime:
         task = self._owned_pump_session_reobservation_task
         if task is not None and not task.done():
             return
-        self._owned_pump_session_reobservation_task = self.hass.async_create_task(
+        self._owned_pump_session_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._owned_pump_session_reobservation_loop(),
             "PoolOS owned pump-session native reobservation",
         )
@@ -1060,7 +1084,8 @@ class PoolOSThermalAutomaticRuntime:
         if task is not None and not task.done():
             task.cancel()
         self._cleanup_topology_reobservation_provenance_id = provenance_id
-        self._cleanup_topology_reobservation_task = self.hass.async_create_task(
+        self._cleanup_topology_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._refresh_cleanup_topology_until_complete(provenance_id),
             "PoolOS cleanup topology native reobservation",
         )
@@ -1128,7 +1153,8 @@ class PoolOSThermalAutomaticRuntime:
         if task is not None and not task.done():
             return True
         self._shared_hydraulic_reobservation_epoch_identity = token
-        self._shared_hydraulic_reobservation_task = self.hass.async_create_task(
+        self._shared_hydraulic_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._refresh_shared_hydraulic_topology_once(token),
             "PoolOS shared hydraulic safety native reobservation",
         )
@@ -1184,7 +1210,8 @@ class PoolOSThermalAutomaticRuntime:
         if task is not None and not task.done():
             return True
         self._verification_topology_reobservation_token = token
-        self._verification_topology_reobservation_task = self.hass.async_create_task(
+        self._verification_topology_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._refresh_verification_topology_once(token),
             "PoolOS thermal verification native reobservation",
         )
@@ -1243,7 +1270,8 @@ class PoolOSThermalAutomaticRuntime:
         if task is not None and not task.done():
             return True
         self._spa_startup_topology_reobservation_token = token
-        self._spa_startup_topology_reobservation_task = self.hass.async_create_task(
+        self._spa_startup_topology_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._refresh_spa_startup_topology_once(token),
             "PoolOS Spa startup native topology reobservation",
         )

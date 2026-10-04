@@ -29,6 +29,8 @@ from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
 
+from poolos.integration.connection_lifecycle import async_quiesce_connection_handler
+
 from poolos.capabilities import Capability
 from poolos.pump_capability import (
     CommissionedPumpCapability,
@@ -237,6 +239,7 @@ class ManualIntelliCenterControl:
 
         self._state = ManualIntelliCenterState.INITIALIZING
         self._running = False
+        self._stopping = False
         self._command_lock = asyncio.Lock()
         self._last_error_code: str | None = None
         self._reconnect_count = 0
@@ -251,12 +254,12 @@ class ManualIntelliCenterControl:
     def available(self) -> bool:
         """Return whether manual command delivery is available."""
 
-        return self._state is ManualIntelliCenterState.AVAILABLE
+        return not self._stopping and self._state is ManualIntelliCenterState.AVAILABLE
 
     async def async_start(self) -> None:
         """Start the independent manual command connection."""
 
-        if self._running:
+        if self._stopping or self._running:
             return
 
         self._running = True
@@ -268,15 +271,21 @@ class ManualIntelliCenterControl:
             self._last_error_code = type(exc).__name__.upper()
             self._state = ManualIntelliCenterState.RECONNECTING
 
+    def prepare_stop(self) -> None:
+        """Deny new delivery before command-free transport teardown."""
+
+        self._stopping = True
+
     async def async_stop(self) -> None:
         """Stop reconnect handling and disconnect the manual controller."""
 
+        self.prepare_stop()
         if not self._running:
             self._state = ManualIntelliCenterState.UNAVAILABLE
             return
 
         self._running = False
-        self._handler.stop()
+        await async_quiesce_connection_handler(self._handler)
 
         with contextlib.suppress(Exception):
             await self._controller.stop()
@@ -300,6 +309,9 @@ class ManualIntelliCenterControl:
         self._require_body(body_objnam)
         if not isinstance(active, bool):
             raise ValueError("body active state must be boolean")
+
+        if self._stopping:
+            raise ManualIntelliCenterCommandNotDispatchedError("PoolOS is stopping")
 
         prefix = "pool" if body_objnam == "B1101" else "spa"
         pool_off_requested = getattr(self, "_pool_manual_off_requested", None)
@@ -1071,6 +1083,8 @@ class ManualIntelliCenterControl:
     ) -> None:
         """Reserve, recheck inside the command lock, and dispatch once."""
 
+        if self._stopping:
+            raise ManualIntelliCenterCommandNotDispatchedError("PoolOS is stopping")
         self._command_authority.note_operator_request(request, at=datetime.now(UTC))
         await self._require_available()
         now = datetime.now(UTC)
@@ -1097,6 +1111,7 @@ class ManualIntelliCenterControl:
                 # This is the final PoolOS check immediately before invoking
                 # pyintellicenter's physical dispatch coroutine.  A request
                 # queued behind the lock cannot reuse an earlier permission.
+                await self._require_available()
                 self._command_authority.require_allowed(request)
                 self._command_authority.supersede_dispatched_expectations(request)
                 for expectation_id in expectation_ids:

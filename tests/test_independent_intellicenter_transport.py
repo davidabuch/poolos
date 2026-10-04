@@ -1155,6 +1155,7 @@ def test_production_path_has_no_ha_control_or_direct_socket_write() -> None:
     source = MODULE_PATH.read_text(encoding="utf-8").lower()
     coordinator = (MODULE_PATH.parent / "coordinator.py").read_text(encoding="utf-8")
     lifecycle = (MODULE_PATH.parent / "__init__.py").read_text(encoding="utf-8")
+    stop_contract = (MODULE_PATH.parent / "lifecycle.py").read_text(encoding="utf-8")
 
     for prohibited in (
         "hass.services",
@@ -1180,7 +1181,7 @@ def test_production_path_has_no_ha_control_or_direct_socket_write() -> None:
     assert "self.async_start_independent_intellicenter()" in coordinator
     assert "async_activate_poolos_post_start" in lifecycle
     assert "coordinator.async_activate_post_start()" in lifecycle
-    assert "async_stop_independent_intellicenter" in lifecycle
+    assert "async_stop_independent_intellicenter" in stop_contract
 
 
 def test_body_state_change_refreshes_stale_spa_target_read_only(

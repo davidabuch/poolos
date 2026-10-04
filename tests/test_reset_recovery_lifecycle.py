@@ -23,6 +23,10 @@ def _button_module(monkeypatch):
 
     class Entity:
         def __init__(self, coordinator):
+            from test_home_assistant_stop_lifecycle import _background_owner
+            coordinator.background_tasks = _background_owner()
+            coordinator._unloading = False
+            self.hass = SimpleNamespace(async_create_task=lambda coro, name: asyncio.create_task(coro, name=name))
             self.coordinator = coordinator
 
         @classmethod
