@@ -1423,6 +1423,21 @@ def test_body_update_during_pending_refresh_forces_one_rerun(
     asyncio.run(exercise())
 
 
+def _complete_arbitration_reply_queue(transport) -> None:
+    """Legacy pump fixtures now return the full read contract, not partial BODY."""
+
+    replies = transport._controller.command_response_queues["GetParamList"]
+    for reply in replies:
+        for entry in reply["objectList"]:
+            cached = transport._model[entry["objnam"]].properties
+            entry["params"] = {**{k: v for k, v in cached.items() if v is not None}, **entry["params"]}
+    for kind in ("CIRCUIT", "SYSTEM"):
+        replies.append({"objectList": [
+            {"objnam": obj.objnam, "params": {k: v for k, v in obj.properties.items() if v is not None}}
+            for obj in transport._model.get_by_type(kind)
+        ]})
+
+
 def test_owned_pump_session_refresh_uses_read_only_getparamlist_and_republishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1485,10 +1500,11 @@ def test_owned_pump_session_refresh_uses_read_only_getparamlist_and_republishes(
             },
         ]
 
+        _complete_arbitration_reply_queue(transport)
         refreshed = await transport._async_refresh_owned_pump_session_evidence()
 
         assert refreshed is True
-        assert transport._controller.sent_operations == ["GetParamList"] * 4
+        assert transport._controller.sent_operations == ["GetParamList"] * 6
         assert all(
             request is not None
             and request["objectList"][0]["objnam"] == "ALL"
@@ -1582,6 +1598,7 @@ def test_owned_pump_session_reread_advances_unchanged_mapped_rpm_clock(
             },
         ]
 
+        _complete_arbitration_reply_queue(transport)
         await asyncio.sleep(0.001)
         assert await transport._async_refresh_owned_pump_session_evidence()
 

@@ -94,3 +94,25 @@ all 90 ownership scenarios. Restart reconstructs no ownership from these capture
 
 PR #388 must remain unmerged until the complete repair is reviewed. Its isolated
 pre-establishment conflict guard is covered here but is not the complete repair.
+
+## v1.0.22 follow-up: one arbitration read contract
+
+The audit in `docs/NATIVE_ARBITRATION_EVIDENCE_AUDIT.md` reproduces lifecycle
+callers disagreeing about the native read set and reply completeness. All native
+verification, owned-session, shared-safety, cleanup and Reset callers now use one
+generation-bound PMPCIRC/PUMP/SENSE/BODY/CIRCUIT/SYSTEM batch. Expected identities
+and fields are frozen before awaits; partial, duplicate or superseded reads
+publish nothing. Returned unchanged fields and validated inventory share the
+conservative request-start boundary. Lifecycle owners retain existing cadences;
+the transport serializes the complete read contract, not command authority.
+
+Reviewed fully verified quick-restart checkpoints remain a separate provenance
+contract. An armed PoolOS Spa checkpoint may preview historical origin only for
+command-free assessment; fresh Spa temperature preparation precedes the single
+authority attempt. Failure discards the preview and recomposes normal input.
+Restoration also requires current configured RPM and usable shared topology.
+The exact purpose fingerprint and requested policy still bind restoration;
+cross-vocabulary comparisons cannot invalidate an otherwise exact purpose.
+Successful restoration retains the already-verified BODY origin for eventual
+cleanup. Native state equality never creates that origin or permits a read to
+restore an arbitrary Pool/Spa session.

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -13,6 +14,38 @@ from poolos.thermal_source_policy import HeatSourcePermissions, ThermalHeatSourc
 
 LOCAL = ZoneInfo("America/Los_Angeles")
 NOW = datetime(2026, 8, 26, 14, 0, tzinfo=LOCAL)
+
+
+def test_fresh_tracker_preserves_positively_attributed_active_solar_purpose() -> None:
+    evidence = replace(
+        observation(active=True, roof=140, active_heat_source=ThermalHeatSource.SOLAR),
+        session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        opportunistic_start_ready=False,
+    )
+    result = SpaThermalPolicyTracker().evaluate(evidence)
+    assert result.state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
+    assert result.heat_source is ThermalHeatSource.SOLAR
+    assert result.recommended_pump_rpm == 2900
+    assert not result.command_delivery_enabled
+
+
+@pytest.mark.parametrize("blocker", ["no_origin", "pool_priority", "target_reached", "permission", "inactive_source"])
+def test_policy_continuation_requires_origin_and_current_eligibility(blocker) -> None:
+    evidence = replace(
+        observation(active=True, roof=140, active_heat_source=ThermalHeatSource.SOLAR),
+        session_kind=SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        opportunistic_start_ready=False,
+    )
+    changes = {
+        "no_origin": {"session_kind": None},
+        "pool_priority": {"higher_priority_conflict": True},
+        "target_reached": {"spa_temperature_f": 100},
+        "permission": {"permissions": HeatSourcePermissions(solar_allowed=False)},
+        "inactive_source": {"active_heat_source": ThermalHeatSource.NONE},
+    }
+    result = SpaThermalPolicyTracker().evaluate(replace(evidence, **changes[blocker]))
+    assert result.state is not SpaPolicyState.OPPORTUNISTIC_ACTIVE
+    assert not result.command_delivery_enabled
 
 
 def observation(*, at: datetime = NOW, active: bool = False, source: SpaUserSource | None = None, spa: float = 90, target: float = 100, roof: float = 125, mode: SpaHeatingMode = SpaHeatingMode.SOLAR_PREFERRED, allowed: bool = True, pool_satisfied: bool = True, debt: timedelta = timedelta(0), conflict: bool = False, permissions: HeatSourcePermissions = HeatSourcePermissions(), active_heat_source: ThermalHeatSource | None = None, start_ready: bool = True) -> SpaPolicyInput:

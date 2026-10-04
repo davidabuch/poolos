@@ -11,9 +11,9 @@ import pytest
 from test_independent_intellicenter_transport import (
     _load_module as load_transport,
     FakeModelController,
-    _objects,
 )
 from test_native_coordinator_refresh_coalescing import _load_coordinator_module
+from test_native_arbitration_evidence_contract import arbitration_objects
 from poolos.intellicenter_readonly import NativeIntelliCenterReadAdapter
 
 from test_thermal_automatic_execution import (
@@ -98,7 +98,7 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
                 return clock_at[0]
 
         monkeypatch.setattr(native_module, "datetime", Clock)
-        objects = dict(_objects())
+        objects = arbitration_objects()
         objects["B1101"].update(STATUS="ON", HTMODE="0", HEATER="00000")
         objects["B1102"] = dict(objects["B1101"], SNAME="Spa", STATUS="OFF")
         objects["P0001"].update(RPM=1500)
@@ -527,7 +527,7 @@ def test_cleanup_native_read_publishes_only_complete_current_replies(monkeypatch
 
     async def scenario():
         native_module = load_transport(monkeypatch)
-        objects = dict(_objects())
+        objects = arbitration_objects()
         objects["B1101"].update(HEATER="00000", HTMODE="0")
         FakeModelController.initial_objects = tuple(objects.items())
         transport = native_module.IndependentIntelliCenterReadOnlyTransport(host="192.0.2.10")

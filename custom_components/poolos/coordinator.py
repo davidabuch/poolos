@@ -200,7 +200,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         transport = self.independent_intellicenter_transport
         if transport is None or self._unloading:
             return False
-        return await transport._async_refresh_owned_pump_session_evidence()
+        return await transport._async_refresh_arbitration_evidence()
 
     async def async_refresh_native_owned_pump_session_evidence(self) -> bool:
         """Refresh unchanged evidence required by an owned thermal session.
@@ -212,12 +212,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         emitted no callback.
         """
 
-        transport = self.independent_intellicenter_transport
-        if transport is None or self._unloading:
-            return False
-        return await transport._async_refresh_owned_pump_session_evidence(
-            cleanup_topology=True
-        )
+        return await self._async_refresh_native_runtime_evidence()
 
     async def async_refresh_native_filtration_topology_evidence(self) -> bool:
         """Refresh BODY/PMPCIRC/pump evidence for filtration verification."""
@@ -227,12 +222,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     async def async_refresh_native_cleanup_topology_evidence(self) -> bool:
         """Read post-boundary topology AND source selection before cleanup."""
 
-        transport = self.independent_intellicenter_transport
-        if transport is None or self._unloading:
-            return False
-        return await transport._async_refresh_owned_pump_session_evidence(
-            cleanup_topology=True
-        )
+        return await self._async_refresh_native_runtime_evidence()
 
     async def async_refresh_native_thermal_topology_evidence(self) -> bool:
         """Refresh BODY topology through the existing bounded read-only native path."""
@@ -247,12 +237,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     async def async_refresh_native_thermal_safety_topology_evidence(self) -> bool:
         """Re-read BODY plus shared-hydraulic safety topology without commands."""
 
-        transport = self.independent_intellicenter_transport
-        if transport is None or self._unloading:
-            return False
-        return await transport._async_refresh_owned_pump_session_evidence(
-            cleanup_topology=True
-        )
+        return await self._async_refresh_native_runtime_evidence()
 
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run the periodic reconciliation/backstop observation refresh."""
