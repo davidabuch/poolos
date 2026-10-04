@@ -20,7 +20,8 @@ from test_thermal_automatic_execution import NOW, FakeDelivery, FakeDeliveryFact
 
 
 @pytest.mark.parametrize("restart_spa", [False, True])
-def test_native_pool_target_down_idle_target_up_and_spa_restart_return(monkeypatch, restart_spa):
+@pytest.mark.parametrize("interleaved", [False, True])
+def test_native_pool_target_down_idle_target_up_and_spa_restart_return(monkeypatch, restart_spa, interleaved):
     async def scenario():
         module = _load_module(monkeypatch)
         clock = [NOW]
@@ -46,6 +47,12 @@ def test_native_pool_target_down_idle_target_up_and_spa_restart_return(monkeypat
         async def read(cmd, extra=None):
             assert cmd == "GetParamList"
             kind = extra["condition"].split(" = ")[1]
+            if interleaved and kind == "PUMP":
+                # The real transport publishes these callbacks while a complete
+                # read is in flight. Sibling unchanged BODY/circuit clocks must
+                # still advance through the complete read, not this callback.
+                transport._controller._apply_updates([{"objnam": "P0001",
+                    "params": {"RPM": transport._model["P0001"]["RPM"]}}])
             keys = extra["objectList"][0]["keys"]
             return {"objectList": [{"objnam": obj.objnam, "params": {key: obj[key] for key in keys if obj[key] is not None}}
                                    for obj in transport._model.get_by_type(kind)]}

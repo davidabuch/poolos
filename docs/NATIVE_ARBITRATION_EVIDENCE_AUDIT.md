@@ -1,5 +1,11 @@
 # Native arbitration evidence: v1.0.22 forensic audit and candidate
 
+Historical record: the later v1.0.24 recovery audit in
+[SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md](SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md)
+supersedes blanket rejection of intervening publications with discovery/topology
+and field-conflict fencing. The six-type completeness and conservative chronology
+contract documented here remains in force.
+
 Baseline: `ffd8617fa77c484d3f944c97c494dba94269a7f1` (v1.0.22).
 Branch: `fix/native-arbitration-evidence-contract`.
 No Home Assistant connection, physical command, deployment, release or merge is

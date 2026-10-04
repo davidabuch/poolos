@@ -1443,7 +1443,10 @@ def test_owned_pump_session_refresh_uses_read_only_getparamlist_and_republishes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_module(monkeypatch)
-    FakeModelController.initial_objects = _objects()
+    objects = dict(_objects())
+    objects["PC001"].update(CIRCUIT="C0006", SELECT="RPM", PARENT="P0001")
+    objects["S0001"].update(SUBTYP="POOL")
+    FakeModelController.initial_objects = tuple(objects.items())
 
     async def exercise() -> None:
         transport = module.IndependentIntelliCenterReadOnlyTransport(
@@ -1531,7 +1534,9 @@ def test_owned_pump_session_reread_advances_unchanged_mapped_rpm_clock(
     """A genuine unchanged native RPM reply must become post-boundary evidence."""
 
     module = _load_module(monkeypatch)
-    FakeModelController.initial_objects = _objects()
+    objects = dict(_objects())
+    objects["PC001"].update(CIRCUIT="C0006", SELECT="RPM", PARENT="P0001")
+    FakeModelController.initial_objects = tuple(objects.items())
 
     async def exercise() -> None:
         transport = module.IndependentIntelliCenterReadOnlyTransport(

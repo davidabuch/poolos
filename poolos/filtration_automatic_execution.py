@@ -428,6 +428,27 @@ class FiltrationAutomaticExecutionDriver:
                 frame=frame,
                 command=False,
             )
+        if self.attempt is not None and _transient_evidence_loss(blocker):
+            # Missing current proof is not evidence of operator takeover.
+            # Retain the accepted attempt and its original absolute deadline;
+            # no verification or new command is allowed by this frame.
+            if frame.observed_at >= self.attempt.deadline:
+                return self._fail(
+                    frame,
+                    "automatic_filtration_verification_timed_out",
+                    failed_domain=(
+                        OwnershipDomain.PUMP
+                        if self.attempt.step is FiltrationExecutionStep.PUMP_SETPOINT
+                        else OwnershipDomain.BODY
+                    ),
+                )
+            return self._publish(
+                FiltrationAutomaticDriverState.AWAITING_REOBSERVATION,
+                at=frame.observed_at,
+                blocker=blocker,
+                frame=frame,
+                command=False,
+            )
         if suspended:
             assert lease is not None
             if blocker is not None:

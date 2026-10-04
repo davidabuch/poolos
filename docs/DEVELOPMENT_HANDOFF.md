@@ -295,3 +295,25 @@ and age. Arbitration and ownership policy are unchanged.
 
 See [HA_STOP_TASK_QUIESCENCE_AUDIT.md](HA_STOP_TASK_QUIESCENCE_AUDIT.md) for the
 red regression, task inventory, ordering and remaining physical validation.
+
+## Systemic arbitration currentness recovery (v1.0.24 follow-up)
+
+Baseline `dc67ad4b8fdf769287a5b83e7b4bfda965ad5953`. Compatible native callbacks
+could invalidate every complete arbitration read, leaving unchanged BODY/source/
+shared-circuit clocks stale while RPM telemetry and observation health remained
+good. The shared read now fences discovery/topology identity and contradictory
+critical fields, preserves newer measurements, and dates only genuinely returned
+fields at conservative read start. An immutable read record adds diagnostics;
+it grants no ownership, intent, command or cleanup authority.
+
+Pending filtration acquisition retains its accepted attempt during transient
+evidence loss and retries the same shared read until its original deadline.
+Timeout remains a control fault; operator and topology gates remain authoritative.
+PR #442 shutdown quiescence and the operator's disabled Thermal gate are unchanged.
+
+See [SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md](SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md)
+for history, red regressions, all 36 lifecycle boundaries, physical evidence
+limits and commissioning sequence. The maintainable A–BJ prediction matrix is
+`docs/ownership/systemic_currentness_prediction_matrix.json`; it does not claim
+all 90 ownership scenarios or physical commissioning. No live operation,
+deployment, release or merge occurs in this recovery task.
