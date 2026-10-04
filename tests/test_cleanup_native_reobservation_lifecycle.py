@@ -503,6 +503,75 @@ def test_residual_reobservation_is_bounded_and_cannot_create_authority(outcome):
 
     asyncio.run(scenario())
 
+def test_complete_cleanup_batch_redates_all_returned_native_fields(monkeypatch):
+    """A complete unchanged cleanup batch must advance every returned field/object."""
+
+    async def scenario():
+        native_module = load_transport(monkeypatch)
+        objects = dict(_objects())
+        FakeModelController.initial_objects = tuple(objects.items())
+        transport = native_module.IndependentIntelliCenterReadOnlyTransport(host="192.0.2.10")
+        await transport.async_start()
+        for _ in range(30):
+            await asyncio.sleep(0)
+            if (
+                not transport._connection_reconciliation_tasks
+                and not transport._body_metadata_refresh_tasks
+            ):
+                break
+
+        before = transport.read_snapshot()
+        pool_before = before.pool_active_observed_at
+        spa_before = before.spa_active_observed_at
+        pump_before = before.pump_rpm_observed_at
+        source_before = before.pool_heat_source_observed_at
+        inventory_before = before.inventory_observed_at
+
+        async def read(cmd, extra=None):
+            assert cmd == "GetParamList"
+            kind = extra["condition"].split(" = ")[1]
+            keys = extra["objectList"][0]["keys"]
+            return {
+                "objectList": [
+                    {
+                        "objnam": obj.objnam,
+                        "params": {key: obj[key] for key in keys if obj[key] is not None},
+                    }
+                    for obj in transport._model.get_by_type(kind)
+                ]
+            }
+
+        transport._controller.send_cmd = read
+
+        def unchanged_updates(_controller, entries):
+            for entry in entries:
+                obj = transport._model[entry["objnam"]]
+                obj.properties.update(entry["params"])
+            return {}
+
+        monkeypatch.setattr(
+            type(transport._controller).__mro__[1],
+            "_apply_updates",
+            unchanged_updates,
+        )
+
+        try:
+            result = await transport._async_refresh_owned_pump_session_evidence(
+                cleanup_topology=True
+            )
+            assert result is True
+            after = transport.read_snapshot()
+            assert after.pool_active_observed_at > pool_before
+            assert after.spa_active_observed_at > spa_before
+            assert after.pump_rpm_observed_at > pump_before
+            assert after.pool_heat_source_observed_at > source_before
+            assert after.inventory_observed_at > inventory_before
+        finally:
+            await transport.async_stop()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "response_case",
     [
