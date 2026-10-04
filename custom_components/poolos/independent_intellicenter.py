@@ -334,7 +334,20 @@ class _ReadOnlyModelController(ICModelController):
                 "OBJTYP = SENSE",
                 (SOURCE_ATTR, SUBTYP_ATTR),
             ),
-            ("OBJTYP = BODY", tuple(dict.fromkeys((*_BODY_MONITOR_ATTRIBUTES, SUBTYP_ATTR)))),
+            (
+                "OBJTYP = BODY",
+                tuple(
+                    dict.fromkeys(
+                        (
+                            *_BODY_MONITOR_ATTRIBUTES,
+                            STATUS_ATTR,
+                            HEATER_ATTR,
+                            HTMODE_ATTR,
+                            SUBTYP_ATTR,
+                        )
+                    )
+                ),
+            ),
         )
         read_started_at = datetime.now(UTC)
         if cleanup_topology:
@@ -391,6 +404,22 @@ class _ReadOnlyModelController(ICModelController):
                 cleanup_updates.extend(object_list)
         if generation_is_current():
             # Publish only once, from the transport after the complete batch.
+            # A validated cleanup batch is genuine native observation even when
+            # every value is unchanged. Record every returned field/object at
+            # the batch boundary before applying model updates so arbitration
+            # cannot see one changed BODY as fresh while unchanged Spa, pump,
+            # source, or shared-hydraulic evidence remains stale.
+            if cleanup_topology:
+                observed_fields = {
+                    str(entry["objnam"]): dict(entry["params"])
+                    for entry in cleanup_updates
+                    if isinstance(entry, dict)
+                    and isinstance(entry.get("objnam"), str)
+                    and isinstance(entry.get("params"), dict)
+                }
+                observer = self._evidence_observer
+                if observer is not None:
+                    observer(observed_fields, read_started_at)
             # This synchronous section cannot hide an unrelated notification.
             callback = self._updated_callback
             self._updated_callback = None

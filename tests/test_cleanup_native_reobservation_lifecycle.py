@@ -185,10 +185,16 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             assert mapped["pool.active"].value is True
             assert mapped["spa.active"].value is False
             assert mapped["pool.raw_heater_id"].value == "00000"
+            assert mapped["pump.rpm"].value == 1500
             retained = orchestrator.ownership.residual_termination
             assert all(
                 mapped[c].observed_at > retained.retained_at
-                for c in ("pool.active", "spa.active", "pool.raw_heater_id")
+                for c in (
+                    "pool.active",
+                    "spa.active",
+                    "pool.raw_heater_id",
+                    "pump.rpm",
+                )
             )
             refreshed_frame = _frame(
                 orchestrator,
@@ -502,6 +508,7 @@ def test_residual_reobservation_is_bounded_and_cannot_create_authority(outcome):
         assert driver.processed == []
 
     asyncio.run(scenario())
+
 
 @pytest.mark.parametrize(
     "response_case",
