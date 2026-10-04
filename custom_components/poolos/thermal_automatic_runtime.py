@@ -963,36 +963,61 @@ class PoolOSThermalAutomaticRuntime:
         if self._unloaded or not self.driver.requested_enabled:
             return
         provenance_id = self._cleanup_topology_reobservation_identity()
+        task = self._cleanup_topology_reobservation_task
         if provenance_id is None:
             self._cleanup_topology_reobservation_provenance_id = None
+            if task is not None and not task.done():
+                task.cancel()
             return
-        if self._cleanup_topology_reobservation_provenance_id == provenance_id:
+        if (
+            self._cleanup_topology_reobservation_provenance_id == provenance_id
+            and task is not None
+            and not task.done()
+        ):
             return
-        task = self._cleanup_topology_reobservation_task
         if task is not None and not task.done():
-            return
+            task.cancel()
         self._cleanup_topology_reobservation_provenance_id = provenance_id
         self._cleanup_topology_reobservation_task = self.hass.async_create_task(
-            self._refresh_cleanup_topology_once(provenance_id),
+            self._refresh_cleanup_topology_until_complete(provenance_id),
             "PoolOS cleanup topology native reobservation",
         )
 
-    async def _refresh_cleanup_topology_once(self, provenance_id: str) -> None:
-        """Refresh topology once after cleanup establishes a new chronology boundary."""
+    async def _refresh_cleanup_topology_until_complete(
+        self,
+        provenance_id: str,
+    ) -> None:
+        """Keep cleanup topology evidence current until its boundary changes.
+
+        Cleanup may legitimately span longer than the native-evidence freshness
+        window.  A one-shot reread can therefore expire before residual
+        termination captures provenance or before the final BODY-off command is
+        authorized.  Continue bounded read-only rereads at the same cadence as
+        owned-session reobservation, and stop immediately when cleanup
+        completes or advances to a new chronology boundary.
+        """
 
         try:
-            if self._unloaded:
-                return
-            if self._cleanup_topology_reobservation_identity() != provenance_id:
-                return
-            refresh = getattr(
-                self.coordinator,
-                "async_refresh_native_cleanup_topology_evidence",
-                None,
-            )
-            if refresh is None:
-                return
-            await refresh()
+            while True:
+                if self._unloaded:
+                    return
+                if self._cleanup_topology_reobservation_identity() != provenance_id:
+                    return
+                refresh = getattr(
+                    self.coordinator,
+                    "async_refresh_native_cleanup_topology_evidence",
+                    None,
+                )
+                if refresh is None:
+                    return
+                await refresh()
+                if self._unloaded:
+                    return
+                if self._cleanup_topology_reobservation_identity() != provenance_id:
+                    return
+                await asyncio.sleep(
+                    _OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS
+                )
         except asyncio.CancelledError:
             raise
         except Exception:

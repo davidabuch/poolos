@@ -444,46 +444,49 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
     asyncio.run(scenario())
 
 
-def test_cleanup_provenance_triggers_one_post_boundary_native_refresh() -> None:
+def test_cleanup_provenance_keeps_native_topology_current_until_boundary_changes() -> None:
     async def scenario() -> None:
         module = _load_module()
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
         runtime, _, _, coordinator, driver = _runtime(module)
         driver.requested_enabled = True
         driver.cleanup_provenance = SimpleNamespace(provenance_id="cleanup-1")
 
         runtime._sync_cleanup_topology_reobservation()
-        await asyncio.wait_for(
-            coordinator.cleanup_topology_refresh_event.wait(),
-            timeout=1,
-        )
-        task = runtime._cleanup_topology_reobservation_task
-        if task is not None:
-            await asyncio.wait_for(task, timeout=1)
+        for _ in range(1000):
+            await asyncio.sleep(0)
+            if coordinator.cleanup_topology_refresh_count >= 2:
+                break
 
-        assert coordinator.cleanup_topology_refresh_count == 1
+        first_task = runtime._cleanup_topology_reobservation_task
+        assert first_task is not None
+        assert coordinator.cleanup_topology_refresh_count >= 2
         assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-1"
+        assert not first_task.done()
 
-        coordinator.cleanup_topology_refresh_event.clear()
-        runtime._sync_cleanup_topology_reobservation()
-        await asyncio.sleep(0)
-        assert coordinator.cleanup_topology_refresh_count == 1
-        assert not coordinator.cleanup_topology_refresh_event.is_set()
-
+        # Advancing to a new chronology boundary terminates the old loop.
         driver.cleanup_provenance = SimpleNamespace(provenance_id="cleanup-2")
-        runtime._sync_cleanup_topology_reobservation()
-        await asyncio.wait_for(
-            coordinator.cleanup_topology_refresh_event.wait(),
-            timeout=1,
-        )
-        task = runtime._cleanup_topology_reobservation_task
-        if task is not None:
-            await asyncio.wait_for(task, timeout=1)
+        await asyncio.wait_for(first_task, timeout=1)
 
-        assert coordinator.cleanup_topology_refresh_count == 2
+        refreshes_before_second = coordinator.cleanup_topology_refresh_count
+        runtime._sync_cleanup_topology_reobservation()
+        for _ in range(1000):
+            await asyncio.sleep(0)
+            if coordinator.cleanup_topology_refresh_count >= refreshes_before_second + 2:
+                break
+
+        second_task = runtime._cleanup_topology_reobservation_task
+        assert second_task is not None
+        assert second_task is not first_task
+        assert coordinator.cleanup_topology_refresh_count >= refreshes_before_second + 2
         assert runtime._cleanup_topology_reobservation_provenance_id == "cleanup-2"
 
-    asyncio.run(scenario())
+        # Completing cleanup terminates the active loop rather than leaving a
+        # background task behind at test/runtime shutdown.
+        driver.cleanup_provenance = None
+        await asyncio.wait_for(second_task, timeout=1)
 
+    asyncio.run(scenario())
 
 def test_stale_shared_hydraulic_admission_requests_one_genuine_native_reobservation() -> None:
     async def scenario() -> None:

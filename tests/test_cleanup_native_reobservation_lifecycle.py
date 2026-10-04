@@ -163,8 +163,10 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             await coordinator.async_refresh_native_cleanup_topology_evidence()
         runtime._sync_cleanup_topology_reobservation()
         task = runtime._cleanup_topology_reobservation_task
-        if task is not None:
-            await task
+        for _ in range(1000):
+            await asyncio.sleep(0)
+            if requests:
+                break
         try:
             assert requests, "Residual waiting must request native evidence before cleanup capture"
             assert publications
@@ -205,12 +207,21 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             )
             await driver.process_epoch(refreshed_frame, delivery_factory=factory)
             assert driver.cleanup_provenance is not None
-            # Capture is a second strict boundary, not permission to reuse the
-            # earlier residual refresh. Reobserve unchanged topology again.
+            # Capture is a second strict boundary. Sync immediately cancels
+            # the residual loop and starts a fresh loop for cleanup provenance.
             captured = driver.cleanup_provenance
             clock_at[0] = NOW + timedelta(seconds=127)
+            requests_before_cleanup = len(requests)
             runtime._sync_cleanup_topology_reobservation()
-            await runtime._cleanup_topology_reobservation_task
+            cleanup_task = runtime._cleanup_topology_reobservation_task
+            if task is not None:
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            for _ in range(1000):
+                await asyncio.sleep(0)
+                if len(requests) > requests_before_cleanup:
+                    break
+            assert len(requests) > requests_before_cleanup
             native = NativeIntelliCenterReadAdapter().capture(
                 transport, generated_at=NOW + timedelta(seconds=128)
             )
@@ -243,6 +254,10 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
                 if rpm:
                     assert driver.cleanup_provenance is not None
             assert driver.cleanup_provenance is None, result
+            runtime._sync_cleanup_topology_reobservation()
+            if cleanup_task is not None:
+                with pytest.raises(asyncio.CancelledError):
+                    await cleanup_task
             assert not driver._reenable_required
             # Continue the SAME evaluator/driver after Pool completion. Native
             # Spa activation starts configured circulation before any RPM step.
@@ -419,11 +434,13 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
 
 @pytest.mark.parametrize("outcome", ["false", "exception", "invalidated", "replacement"])
 def test_residual_reobservation_is_bounded_and_cannot_create_authority(outcome):
-    """A read request is generation-bound observation work, never provenance."""
+    """Periodic read work is generation-bound observation, never provenance."""
     from types import SimpleNamespace
 
     async def scenario():
-        runtime, _, _, coordinator, driver = _runtime(_load_module())
+        module = _load_module()
+        module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
+        runtime, _, _, coordinator, driver = _runtime(module)
         driver.requested_enabled = True
         residual = SimpleNamespace(entitlement_id="residual-generation-1")
         ownership = SimpleNamespace(residual_termination=residual)
@@ -439,25 +456,52 @@ def test_residual_reobservation_is_bounded_and_cannot_create_authority(outcome):
         coordinator.async_refresh_native_cleanup_topology_evidence = refresh
         runtime._sync_cleanup_topology_reobservation()
         old_task = runtime._cleanup_topology_reobservation_task
+        assert old_task is not None
+
         if outcome == "invalidated":
             ownership.residual_termination = None
+            await asyncio.wait_for(old_task, timeout=1)
+            assert calls == []
         elif outcome == "replacement":
-            ownership.residual_termination = SimpleNamespace(entitlement_id="residual-generation-2")
-        await old_task
-        assert calls == ([] if outcome in {"invalidated", "replacement"} else ["read"])
-        assert driver.cleanup_provenance is None
-        assert driver.processed == []
-        for _ in range(4):
+            ownership.residual_termination = SimpleNamespace(
+                entitlement_id="residual-generation-2"
+            )
+            await asyncio.wait_for(old_task, timeout=1)
+            assert calls == []
+
             runtime._sync_cleanup_topology_reobservation()
-            task = runtime._cleanup_topology_reobservation_task
-            if task is not None:
-                await task
-        assert calls == ([] if outcome == "invalidated" else ["read"])
+            replacement_task = runtime._cleanup_topology_reobservation_task
+            assert replacement_task is not None
+            for _ in range(1000):
+                await asyncio.sleep(0)
+                if len(calls) >= 2:
+                    break
+            assert len(calls) >= 2
+            ownership.residual_termination = None
+            runtime._sync_cleanup_topology_reobservation()
+            with pytest.raises(asyncio.CancelledError):
+                await replacement_task
+        elif outcome == "exception":
+            await asyncio.wait_for(old_task, timeout=1)
+            assert calls == ["read"]
+            ownership.residual_termination = None
+            runtime._sync_cleanup_topology_reobservation()
+        else:
+            for _ in range(1000):
+                await asyncio.sleep(0)
+                if len(calls) >= 2:
+                    break
+            assert len(calls) >= 2
+            assert not old_task.done()
+            ownership.residual_termination = None
+            runtime._sync_cleanup_topology_reobservation()
+            with pytest.raises(asyncio.CancelledError):
+                await old_task
+
         assert driver.cleanup_provenance is None
         assert driver.processed == []
 
     asyncio.run(scenario())
-
 
 @pytest.mark.parametrize(
     "response_case",
