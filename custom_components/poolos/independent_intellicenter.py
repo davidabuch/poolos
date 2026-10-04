@@ -334,7 +334,20 @@ class _ReadOnlyModelController(ICModelController):
                 "OBJTYP = SENSE",
                 (SOURCE_ATTR, SUBTYP_ATTR),
             ),
-            ("OBJTYP = BODY", tuple(dict.fromkeys((*_BODY_MONITOR_ATTRIBUTES, SUBTYP_ATTR)))),
+            (
+                "OBJTYP = BODY",
+                tuple(
+                    dict.fromkeys(
+                        (
+                            *_BODY_MONITOR_ATTRIBUTES,
+                            STATUS_ATTR,
+                            HEATER_ATTR,
+                            HTMODE_ATTR,
+                            SUBTYP_ATTR,
+                        )
+                    )
+                ),
+            ),
         )
         read_started_at = datetime.now(UTC)
         if cleanup_topology:
