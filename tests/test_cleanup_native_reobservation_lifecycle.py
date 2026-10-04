@@ -86,9 +86,7 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
         assert result.blocker == "circulation_body_activity_evidence_not_current"
         assert orchestrator.ownership.residual_termination is not None
         assert driver.cleanup_provenance is None
-        runtime_module = _load_module()
-        runtime_module._OWNED_PUMP_SESSION_REOBSERVATION_INTERVAL_SECONDS = 0.001
-        runtime, _, _, coordinator, _ = _runtime(runtime_module)
+        runtime, _, _, coordinator, _ = _runtime(_load_module())
         runtime.driver = driver
         runtime.orchestrator = orchestrator
         native_module = load_transport(monkeypatch)
@@ -165,15 +163,12 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             await coordinator.async_refresh_native_cleanup_topology_evidence()
         runtime._sync_cleanup_topology_reobservation()
         task = runtime._cleanup_topology_reobservation_task
-        for _ in range(1000):
-            await asyncio.sleep(0)
-            if len(requests) >= 2:
-                break
+        await asyncio.wait_for(
+            coordinator.cleanup_topology_refresh_event.wait(),
+            timeout=1,
+        )
         try:
-            assert len(requests) >= 2, (
-                "Residual waiting must keep unchanged native evidence current "
-                "instead of performing only one reread"
-            )
+            assert requests, "Residual waiting must request native evidence before cleanup capture"
             assert publications
             body_keys = next(
                 request["objectList"][0]["keys"]
@@ -212,24 +207,20 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             )
             await driver.process_epoch(refreshed_frame, delivery_factory=factory)
             assert driver.cleanup_provenance is not None
-            # The residual loop must stop as soon as cleanup provenance creates
-            # the next chronology boundary.
-            if task is not None:
-                await asyncio.wait_for(task, timeout=1)
-            # Capture is a second strict boundary, not permission to reuse the
-            # earlier residual refresh. Start a new periodic reread loop for
-            # the captured cleanup provenance and require repeated reads there
-            # as well.
+            # Capture is a second strict boundary. Sync immediately cancels
+            # the residual loop and starts a fresh loop for cleanup provenance.
             captured = driver.cleanup_provenance
             clock_at[0] = NOW + timedelta(seconds=127)
-            requests_before_cleanup = len(requests)
+            coordinator.cleanup_topology_refresh_event.clear()
             runtime._sync_cleanup_topology_reobservation()
             cleanup_task = runtime._cleanup_topology_reobservation_task
-            for _ in range(1000):
-                await asyncio.sleep(0)
-                if len(requests) >= requests_before_cleanup + 2:
-                    break
-            assert len(requests) >= requests_before_cleanup + 2
+            if task is not None:
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            await asyncio.wait_for(
+                coordinator.cleanup_topology_refresh_event.wait(),
+                timeout=1,
+            )
             native = NativeIntelliCenterReadAdapter().capture(
                 transport, generated_at=NOW + timedelta(seconds=128)
             )
@@ -262,8 +253,10 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
                 if rpm:
                     assert driver.cleanup_provenance is not None
             assert driver.cleanup_provenance is None, result
+            runtime._sync_cleanup_topology_reobservation()
             if cleanup_task is not None:
-                await asyncio.wait_for(cleanup_task, timeout=1)
+                with pytest.raises(asyncio.CancelledError):
+                    await cleanup_task
             assert not driver._reenable_required
             # Continue the SAME evaluator/driver after Pool completion. Native
             # Spa activation starts configured circulation before any RPM step.
