@@ -81,7 +81,9 @@ def test_unload_stops_new_event_observations_and_waits_for_active_work() -> None
     assert "self._unloading = True" in coordinator
     assert "self.async_stop_event_observation()" in coordinator
     assert "if self._unloading:\n            return" in coordinator
-    assert init_source.index("await entry.runtime_data.coordinator.async_prepare_unload()") < init_source.index(
+    stop_contract = (COMPONENT / "lifecycle.py").read_text(encoding="utf-8")
+    assert "await data.coordinator.async_prepare_unload()" in stop_contract
+    assert init_source.index("await entry.runtime_data.lifecycle.async_stop(entry.runtime_data)") < init_source.index(
         "async_unload_platforms"
     )
 
@@ -177,9 +179,9 @@ def test_unload_prevents_deferred_post_start_work_from_starting() -> None:
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
 
     unload = coordinator.split(
-        "async def async_prepare_unload", 1
+        "def prepare_unload", 1
     )[1].split(
-        "async def async_handle_homeassistant_stop", 1
+        "async def async_prepare_unload", 1
     )[0]
 
     activation = coordinator.split(
@@ -214,12 +216,14 @@ def test_home_assistant_stop_quiesces_poolos_before_final_shutdown() -> None:
 
     assert "EVENT_HOMEASSISTANT_STOP" in init_source
     assert "hass.bus.async_listen_once(" in init_source
-    assert "coordinator.async_handle_homeassistant_stop" in init_source
-    assert "async def async_handle_homeassistant_stop" in coordinator
-    stop_body = coordinator.split(
-        "async def async_handle_homeassistant_stop", 1
-    )[1].split("async def _async_mapped_state_changed", 1)[0]
-    assert "await self.async_prepare_unload()" in stop_body
+    assert "partial(_async_handle_homeassistant_stop, entry=entry)" in init_source
+    assert "async def _async_handle_homeassistant_stop" in init_source
+    assert "homeassistant_stop=True" in init_source
+    stop_contract = (COMPONENT / "lifecycle.py").read_text(encoding="utf-8")
+    assert "data.coordinator.prepare_unload()" in stop_contract
+    assert "runtime.prepare_unload()" in stop_contract
+    assert "await data.coordinator.async_prepare_unload()" in stop_contract
+    assert "self._unloading = True" in coordinator
 
 
 def test_commissioning_append_is_flushed_to_disk_before_return() -> None:

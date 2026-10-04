@@ -405,7 +405,7 @@ class PoolOSGridOutageSafetyRuntime:
         if not self._unloaded and pending is not None:
             self._process_frame(*pending)
 
-    async def async_unload(self) -> None:
+    def prepare_unload(self) -> None:
         """Invalidate all authority and await any command already inside dispatch."""
 
         if self._unloaded:
@@ -421,6 +421,11 @@ class PoolOSGridOutageSafetyRuntime:
         self._pool_shutdown_entitlement_epoch = None
         self._pool_shutdown_entitled = False
         self._filtration_satisfied_commissioning_override = False
+
+    async def async_unload(self) -> None:
+        """Drain command-free work after the synchronous scheduling fence."""
+
+        self.prepare_unload()
         task = self._task
         if task is not None and not task.done():
             try:

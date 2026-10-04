@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
+from functools import partial
 from pathlib import Path
 import sys
 
@@ -27,6 +28,8 @@ def _enable_local_vendored_core() -> None:
 
 
 _enable_local_vendored_core()
+
+from .lifecycle import PoolOSIntegrationLifecycle  # noqa: E402
 
 from .const import (  # noqa: E402
     CONF_PREFERRED_FILTRATION_CATCHUP_START,
@@ -130,6 +133,9 @@ from poolos.spa_thermal_policy import (  # noqa: E402
 class PoolOSRuntimeData:
     """Runtime data owned by one PoolOS config entry."""
 
+    lifecycle: PoolOSIntegrationLifecycle = field(
+        default_factory=PoolOSIntegrationLifecycle, init=False
+    )
     coordinator: PoolOSCoordinator
     loaded_at: str
     manual_intellicenter: ManualIntelliCenterControl | None
@@ -284,12 +290,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     coordinator.set_filtration_runtime_refresh(filtration_runtime.refresh)
     await coordinator.async_config_entry_first_refresh()
     entry.async_on_unload(coordinator.async_stop_event_observation)
-    entry.async_on_unload(
-        hass.bus.async_listen_once(
-            EVENT_HOMEASSISTANT_STOP,
-            coordinator.async_handle_homeassistant_stop,
-        )
-    )
     manual_host = str(configured.get("intellicenter_host", "")).strip()
     physical_command_authority = pump_composition.physical_authority
     pump_speed_session = PoolOSPumpSpeedSessionRuntime(
@@ -624,6 +624,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         pump_operating_baselines=pump_baselines,
         pump_speed_session=pump_speed_session,
     )
+    entry.async_on_unload(
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP,
+            partial(_async_handle_homeassistant_stop, entry=entry),
+        )
+    )
     coordinator.set_thermal_runtime_refresh(thermal_runtime.refresh)
     def synchronize_pump_session(
         native: NativeIntelliCenterObservationSnapshot,
@@ -852,18 +858,11 @@ async def _async_options_updated(hass: HomeAssistant, entry: PoolOSConfigEntry) 
 async def async_unload_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
     """Unload the read-only PoolOS config entry."""
 
-    entry.runtime_data.thermal_runtime.set_orchestration_observer(None)
-    entry.runtime_data.thermal_runtime.set_orchestration_failure_observer(None)
-    await entry.runtime_data.grid_outage_safety_runtime.async_unload()
-    await entry.runtime_data.sanitation_runtime.async_unload()
-    await entry.runtime_data.thermal_automatic_runtime.async_unload()
-    await entry.runtime_data.filtration_automatic_runtime.async_unload()
-    entry.runtime_data.thermal_runtime_orchestrator.unload(
-        unloaded_at=datetime.now(UTC)
-    )
-    await entry.runtime_data.coordinator.async_prepare_unload()
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if entry.runtime_data.manual_intellicenter is not None:
-        await entry.runtime_data.manual_intellicenter.async_stop()
-    await entry.runtime_data.coordinator.async_stop_independent_intellicenter()
-    return unloaded
+    await entry.runtime_data.lifecycle.async_stop(entry.runtime_data)
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def _async_handle_homeassistant_stop(_event: object, *, entry: PoolOSConfigEntry) -> None:
+    """Await command-free integration quiescence before HA final writes."""
+
+    await entry.runtime_data.lifecycle.async_stop(entry.runtime_data, homeassistant_stop=True)

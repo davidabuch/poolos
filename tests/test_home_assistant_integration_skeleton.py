@@ -17,6 +17,8 @@ def _read_json(path: Path) -> dict[str, object]:
 def test_required_integration_files_exist() -> None:
     expected = {
         "__init__.py",
+        "background_tasks.py",
+        "lifecycle.py",
         "authoritative.py",
         "binary_sensor.py",
         "brand/icon.png",
@@ -105,7 +107,9 @@ def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
     assert source.count("compose_pump_baseline_runtime(configured)") == 1
     assert "thermal_runtime.set_orchestration_observer(" in source
     assert "thermal_runtime.set_orchestration_failure_observer(" in source
-    assert "thermal_runtime_orchestrator.unload(" in source
+    stop_contract = (COMPONENT / "lifecycle.py").read_text(encoding="utf-8")
+    assert "thermal_runtime_orchestrator.unload(" in stop_contract
+    assert "await entry.runtime_data.lifecycle.async_stop(entry.runtime_data)" in source
 
 
 def test_observation_coordinator_performs_no_physical_delivery_itself() -> None:

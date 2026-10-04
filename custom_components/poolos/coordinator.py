@@ -57,6 +57,7 @@ from poolos.observation_parity import (
 )
 
 from .authoritative import build_authoritative_snapshot
+from .background_tasks import PoolOSBackgroundTasks
 from .const import (
     CONF_INTELLICENTER_HOST,
     CONF_INTELLICENTER_TRANSPORT,
@@ -161,6 +162,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._observation_lock = asyncio.Lock()
         self._remove_state_listener: Callable[[], None] | None = None
         self._unloading = False
+        self.background_tasks = PoolOSBackgroundTasks()
         self._event_refresh_count = 0
         self._reconciliation_refresh_count = 0
         self._last_observation_trigger = "not_started"
@@ -257,7 +259,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         """Start the independent shadow connection without blocking HA setup."""
 
         transport = self.independent_intellicenter_transport
-        if transport is None or self._independent_intellicenter_start_task is not None:
+        if (
+            self._unloading
+            or transport is None
+            or self._independent_intellicenter_start_task is not None
+        ):
             return
         transport._set_snapshot_update_callback(
             self._async_schedule_native_intellicenter_refresh
@@ -513,15 +519,24 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._remove_state_listener()
         self._remove_state_listener = None
 
-    async def async_prepare_unload(self) -> None:
-        """Stop new observations and wait for any active observation to finish."""
+    def prepare_unload(self) -> None:
+        """Fence observation, analysis and auxiliary scheduling without yielding."""
 
         self._unloading = True
+        self.background_tasks.prepare_stop()
         self._post_start_active = False
         self._native_intellicenter_refresh_dirty = False
+        self._analysis_dirty = False
+        self._native_snapshot_observer = None
         self._filtration_runtime_refresh = None
         self._thermal_runtime_refresh = None
         self.async_stop_event_observation()
+
+    async def async_prepare_unload(self) -> None:
+        """Drain observations after the integration has fenced all producers."""
+
+        self.prepare_unload()
+        await self.background_tasks.async_stop()
         async with self._observation_lock:
             pass
 
@@ -529,11 +544,6 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         if analysis_task is not None and not analysis_task.done():
             with contextlib.suppress(asyncio.CancelledError):
                 await analysis_task
-
-    async def async_handle_homeassistant_stop(self, _event: Event) -> None:
-        """Quiesce PoolOS before Home Assistant reaches final-write shutdown."""
-
-        await self.async_prepare_unload()
 
     async def _async_mapped_state_changed(self, _event: Event) -> None:
         """Capture a mapped HA state/attribute change without waiting for polling."""

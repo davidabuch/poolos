@@ -48,6 +48,7 @@ from poolos.thermal_runtime_orchestration import (
     ThermalRuntimeOrchestrationAssessment,
 )
 
+from .background_tasks import PoolOSBackgroundTasks
 from .coordinator import PoolOSCoordinator
 from .filtration_live_delivery import ManualIntelliCenterFiltrationDelivery
 from .filtration_runtime import PoolOSFiltrationRuntime
@@ -169,6 +170,9 @@ class PoolOSFiltrationAutomaticRuntime:
         default=None, init=False, repr=False
     )
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _background_tasks: PoolOSBackgroundTasks = field(
+        default_factory=PoolOSBackgroundTasks, init=False, repr=False
+    )
     _desired_enabled: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -356,11 +360,19 @@ class PoolOSFiltrationAutomaticRuntime:
         )
         self.coordinator.async_update_listeners()
 
-    async def async_unload(self) -> None:
+    def prepare_unload(self) -> None:
         if self._unloaded:
             return
         self._unloaded = True
+        self._background_tasks.prepare_stop()
         self.authority.unload_automatic_filtration_driver()
+        self.driver.unload(unloaded_at=datetime.now(UTC))
+
+    async def async_unload(self) -> None:
+        """Drain command-free work after the synchronous scheduling fence."""
+
+        self.prepare_unload()
+        await self._background_tasks.async_stop()
         reobservation_task = self._owned_filtration_reobservation_task
         if reobservation_task is not None and not reobservation_task.done():
             reobservation_task.cancel()
@@ -372,7 +384,6 @@ class PoolOSFiltrationAutomaticRuntime:
             await asyncio.gather(verification_task, return_exceptions=True)
         self._verification_topology_reobservation_task = None
         self._verification_topology_reobservation_token = None
-        self.driver.unload(unloaded_at=datetime.now(UTC))
         task = self._task
         if task is not None and not task.done():
             try:
@@ -409,7 +420,8 @@ class PoolOSFiltrationAutomaticRuntime:
         task = self._owned_filtration_reobservation_task
         if task is not None and not task.done():
             return
-        self._owned_filtration_reobservation_task = self.hass.async_create_task(
+        self._owned_filtration_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._owned_filtration_reobservation_loop(),
             "PoolOS owned filtration native reobservation",
         )
@@ -456,7 +468,8 @@ class PoolOSFiltrationAutomaticRuntime:
         if task is not None and not task.done():
             return True
         self._verification_topology_reobservation_token = token
-        self._verification_topology_reobservation_task = self.hass.async_create_task(
+        self._verification_topology_reobservation_task = self._background_tasks.create(
+            self.hass,
             self._refresh_verification_topology_once(token),
             "PoolOS filtration verification native reobservation",
         )

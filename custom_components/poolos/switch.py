@@ -1027,12 +1027,16 @@ class PoolOSNativeIntelliCenterSwitch(
                     self._safety_interlock_blocked_reason = decision.reason.value
                 else:
                     self._safety_interlock_blocked_reason = None
-                    self.hass.async_create_task(
+                    self.coordinator.background_tasks.create(
+                        self.hass,
                         self._async_enforce_parent_interlock(),
                         (
                             "PoolOS safety interlock "
                             f"{self._description.key} parent loss"
                         ),
+                        # Final manual gateway fences queued work at STOP; an
+                        # already-dispatched safety command settles its receipt.
+                        cancel_on_stop=False,
                     )
 
         super()._handle_coordinator_update()

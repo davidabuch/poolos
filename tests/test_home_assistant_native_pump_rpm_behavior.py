@@ -186,6 +186,7 @@ def _gateway(
 
     gateway._model = _Model(objects)
     gateway._controller = recorder
+    gateway._stopping = False
     gateway._state = ManualIntelliCenterState.AVAILABLE
     gateway._command_lock = asyncio.Lock()
     gateway._last_error_code = None

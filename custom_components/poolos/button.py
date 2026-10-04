@@ -136,6 +136,8 @@ class PoolOSResetControlButton(
     def _observe_reset_completion(self) -> None:
         """Continue verification after service cancellation/timeout, never delivery."""
 
+        if self.coordinator._unloading:
+            return
         authority = self._runtime.physical_command_authority
         if (
             self._reset_running
@@ -152,9 +154,10 @@ class PoolOSResetControlButton(
             # normal runtime listeners before this button listener runs, so it
             # cannot be relied on as the required post-Reset epoch. Always
             # schedule one fresh coordinator evaluation after authority closes.
-            asyncio.get_running_loop().create_task(
+            self.coordinator.background_tasks.create(
+                self.hass,
                 self._async_request_post_reset_refresh(),
-                name="PoolOS post-reset authoritative refresh",
+                "PoolOS post-reset authoritative refresh",
             )
 
     @property

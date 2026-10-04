@@ -658,6 +658,8 @@ class _Snapshot:
 
 class _Coordinator:
     def __init__(self, values: dict[str, object]) -> None:
+        from test_home_assistant_stop_lifecycle import _background_owner
+        self.background_tasks = _background_owner()
         self.native_intellicenter_snapshot = _Snapshot(values)
 
     def async_update_listeners(self) -> None:
@@ -1143,7 +1145,7 @@ def test_maintenance_blocks_parent_interlock_without_retry_churn_then_reevaluate
         jets.hass = SimpleNamespace(
             async_create_task=lambda coroutine, name: tasks.append(
                 asyncio.create_task(coroutine, name=name)
-            )
+            ) or tasks[-1]
         )
 
         for _ in range(5):
