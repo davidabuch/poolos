@@ -163,10 +163,10 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             await coordinator.async_refresh_native_cleanup_topology_evidence()
         runtime._sync_cleanup_topology_reobservation()
         task = runtime._cleanup_topology_reobservation_task
-        await asyncio.wait_for(
-            coordinator.cleanup_topology_refresh_event.wait(),
-            timeout=1,
-        )
+        for _ in range(1000):
+            await asyncio.sleep(0)
+            if requests:
+                break
         try:
             assert requests, "Residual waiting must request native evidence before cleanup capture"
             assert publications
@@ -211,16 +211,17 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             # the residual loop and starts a fresh loop for cleanup provenance.
             captured = driver.cleanup_provenance
             clock_at[0] = NOW + timedelta(seconds=127)
-            coordinator.cleanup_topology_refresh_event.clear()
+            requests_before_cleanup = len(requests)
             runtime._sync_cleanup_topology_reobservation()
             cleanup_task = runtime._cleanup_topology_reobservation_task
             if task is not None:
                 with pytest.raises(asyncio.CancelledError):
                     await task
-            await asyncio.wait_for(
-                coordinator.cleanup_topology_refresh_event.wait(),
-                timeout=1,
-            )
+            for _ in range(1000):
+                await asyncio.sleep(0)
+                if len(requests) > requests_before_cleanup:
+                    break
+            assert len(requests) > requests_before_cleanup
             native = NativeIntelliCenterReadAdapter().capture(
                 transport, generated_at=NOW + timedelta(seconds=128)
             )
