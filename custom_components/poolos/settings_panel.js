@@ -1,4 +1,5 @@
 const DOMAIN = "poolos";
+const POOL_OS_DASHBOARD_PATH = "/pool-os";
 
 const LABELS = {
   filtration_scheduling_mode: "Filtration strategy",
@@ -620,6 +621,7 @@ class PoolOSSettingsPanel extends HTMLElement {
           display: flex;
           gap: 12px;
           align-items: center;
+          flex-wrap: wrap;
           background: linear-gradient(
             to bottom,
             transparent,
@@ -670,6 +672,7 @@ class PoolOSSettingsPanel extends HTMLElement {
         <div class="actions">
           <button id="save" ${!this._dirty() || this._saving ? "disabled" : ""}>Save</button>
           <button id="reload" class="secondary" ${this._saving ? "disabled" : ""}>Reload</button>
+          <button id="dashboard" class="secondary">Back to PoolOS Dashboard</button>
           <span class="message">${this._message}</span>
         </div>
       </div>
@@ -677,8 +680,10 @@ class PoolOSSettingsPanel extends HTMLElement {
 
     const save = this.shadowRoot.getElementById("save");
     const reload = this.shadowRoot.getElementById("reload");
+    const dashboard = this.shadowRoot.getElementById("dashboard");
     if (save) save.addEventListener("click", () => this._save());
     if (reload) reload.addEventListener("click", () => this._load());
+    if (dashboard) dashboard.addEventListener("click", () => window.location.assign(POOL_OS_DASHBOARD_PATH));
     this._syncForm();
   }
 
