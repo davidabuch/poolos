@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 
 from poolos.observations import ObservationQuality, ObservationSourceKind
@@ -20,6 +21,7 @@ from .coordinator import PoolOSCoordinator
 
 
 _RESET_REFRESH_TIMEOUT_SECONDS = 5.0
+LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(

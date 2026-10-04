@@ -234,6 +234,8 @@ class FakeHass:
             "PoolOS Spa startup native topology reobservation",
             "PoolOS thermal verification native reobservation",
             "PoolOS shared hydraulic safety native reobservation",
+            "PoolOS restart origin reevaluation",
+            "PoolOS restart native evidence preparation",
         }
         task = asyncio.create_task(coroutine)
         self.tasks.append(task)
@@ -264,8 +266,13 @@ def _runtime(module: ModuleType):
         coordinator.thermal_safety_topology_refresh_event.set()
         return True
 
+    async def request_refresh() -> None:
+        coordinator.requested_refreshes += 1
+
     coordinator = SimpleNamespace(
         listener_updates=0,
+        requested_refreshes=0,
+        async_request_refresh=request_refresh,
         pump_session_refresh_count=0,
         pump_session_refresh_event=asyncio.Event(),
         cleanup_topology_refresh_count=0,
@@ -857,12 +864,57 @@ def _quick_restart_thermal(at: datetime):
     hot_tub = SimpleNamespace(
         evidence_blockers=("not_candidate",),
         execution_currentness=currentness,
+        spa_temperature=None,
     )
     return SimpleNamespace(
         generated_at=at,
         pool=pool,
         hot_tub=hot_tub,
     )
+
+
+def test_failed_restart_preparation_discards_preview_without_command_authority() -> None:
+    async def scenario():
+        module = _load_module()
+        runtime, _, _, coordinator, driver = _runtime(module)
+        checkpoint = SimpleNamespace()
+        runtime.arm_quick_restart_recovery(checkpoint)
+
+        async def failed_read():
+            return False
+
+        coordinator.async_refresh_native_thermal_topology_evidence = failed_read
+        await runtime._prepare_restart_evidence(checkpoint)
+        assert not runtime.quick_restart_recovery_armed
+        assert coordinator.requested_refreshes == 1
+        assert driver.processed == []
+
+    asyncio.run(scenario())
+
+
+def test_old_restart_preparation_cannot_discard_replacement_checkpoint() -> None:
+    async def scenario():
+        module = _load_module()
+        runtime, _, _, coordinator, driver = _runtime(module)
+        predecessor, successor = SimpleNamespace(), SimpleNamespace()
+        gate = asyncio.Event()
+
+        async def failed_read():
+            await gate.wait()
+            return False
+
+        coordinator.async_refresh_native_thermal_topology_evidence = failed_read
+        runtime.arm_quick_restart_recovery(predecessor)
+        old_read = asyncio.create_task(runtime._prepare_restart_evidence(predecessor))
+        await asyncio.sleep(0)
+        runtime.arm_quick_restart_recovery(successor)
+        gate.set()
+        await old_read
+        assert runtime._restart_checkpoint is successor
+        assert coordinator.requested_refreshes == 0
+        assert driver.processed == []
+
+    asyncio.run(scenario())
 
 
 def test_quick_restart_waits_for_startup_authority_before_adjudication() -> None:
@@ -1069,8 +1121,8 @@ def test_quick_restart_denial_is_consumed_once_and_never_retries_equality() -> N
             ),
         )
 
-        # Let normal fail-closed startup processing complete immediately after
-        # the denied recovery attempt.
+        # Denial discards the origin preview and requests new composition;
+        # that same checkpoint-derived frame cannot authorize execution.
         driver.release.set()
 
         first_at = NOW + timedelta(seconds=1)
@@ -1085,6 +1137,7 @@ def test_quick_restart_denial_is_consumed_once_and_never_retries_equality() -> N
 
         assert len(hass.tasks) == 1
         await hass.tasks[0]
+        assert driver.processed == []
 
         # A later identical-looking physical epoch is ordinary runtime input.
         # The consumed restart checkpoint can never be retried from equality.

@@ -569,7 +569,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         thermal_automatic_runtime.driver.probe_execution_evidence
     )
     thermal_runtime.set_spa_session_kind_provider(
-        thermal_automatic_runtime.driver.spa_session_kind
+        thermal_automatic_runtime.spa_session_kind_for_assessment
     )
     def probe_continuity(
         snapshot: ObservationSnapshot,

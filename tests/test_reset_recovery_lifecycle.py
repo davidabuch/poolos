@@ -69,6 +69,14 @@ def _snapshot(*, active, rpm):
     )
 
 
+def test_post_reset_failed_observation_refresh_is_logged_without_second_failure(monkeypatch, caplog):
+    module = _button_module(monkeypatch)
+    button = object.__new__(module.PoolOSResetControlButton)
+    button.coordinator = SimpleNamespace(async_request_refresh=AsyncMock(side_effect=OSError("read failed")))
+    asyncio.run(button._async_request_post_reset_refresh())
+    assert "post-reset authoritative refresh failed" in caplog.text
+
+
 def test_reset_listener_completion_schedules_fresh_post_close_epoch(monkeypatch):
     """Listener fallback must publish a fresh epoch after Reset authority closes."""
 

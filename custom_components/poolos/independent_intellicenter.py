@@ -112,6 +112,25 @@ _SENSE_MONITOR_ATTRIBUTES = (
     SOURCE_ATTR,
 )
 
+# Read contract, not a subscription or an authority grant. Every lifecycle
+# requests the same physical arbitration facts; only the caller owns cadence.
+_ARBITRATION_READ_REQUESTS = (
+    ("PMPCIRC", ("CIRCUIT", "SELECT", PARENT_ATTR, "SPEED")),
+    (PUMP_TYPE, (RPM_ATTR, STATUS_ATTR, GPM_ATTR, PWR_ATTR, MIN_ATTR, MAX_ATTR,
+                 _MINF_ATTR, _MAXF_ATTR)),
+    (SENSE_TYPE, (SOURCE_ATTR, SUBTYP_ATTR)),
+    (BODY_TYPE, tuple(dict.fromkeys((*_BODY_MONITOR_ATTRIBUTES, SUBTYP_ATTR)))),
+    (CIRCUIT_TYPE, (STATUS_ATTR, SNAME_ATTR, SUBTYP_ATTR, "USE")),
+    (SYSTEM_TYPE, (SERVICE_ATTR, VER_ATTR)),
+)
+_ARBITRATION_REQUIRED_FIELDS = {
+    "PMPCIRC": frozenset({"CIRCUIT", "SELECT", PARENT_ATTR, "SPEED"}),
+    PUMP_TYPE: frozenset({STATUS_ATTR, RPM_ATTR}),
+    BODY_TYPE: frozenset({STATUS_ATTR, HEATER_ATTR, HTMODE_ATTR}),
+    CIRCUIT_TYPE: frozenset({STATUS_ATTR}),
+    SYSTEM_TYPE: frozenset({SERVICE_ATTR}),
+}
+
 ALLOWED_READ_ONLY_PROTOCOL_OPERATIONS = frozenset(
     {"GetParamList", "RequestParamList"}
 )
@@ -305,11 +324,11 @@ class _ReadOnlyModelController(ICModelController):
         self._read_only_guard.require_allowed("SETPARAMLIST")
         raise AssertionError("unreachable")
 
-    async def refresh_owned_pump_session_evidence(
+    async def refresh_arbitration_evidence(
         self,
         *,
         generation_is_current: Callable[[], bool],
-        cleanup_topology: bool = False,
+        observed_at: datetime,
     ) -> None:
         """Actively re-read native evidence required by an owned pump session.
 
@@ -320,49 +339,24 @@ class _ReadOnlyModelController(ICModelController):
         emits no NotifyList.
         """
 
-        requests = (
-            (
-                "OBJTYP = PMPCIRC",
-                ("CIRCUIT", "SELECT", PARENT_ATTR, "SPEED"),
-            ),
-            (
-                "OBJTYP = PUMP",
-                ((RPM_ATTR, STATUS_ATTR, GPM_ATTR, PWR_ATTR, MIN_ATTR, MAX_ATTR)
-                 if cleanup_topology else (RPM_ATTR, STATUS_ATTR)),
-            ),
-            (
-                "OBJTYP = SENSE",
-                (SOURCE_ATTR, SUBTYP_ATTR),
-            ),
-            (
-                "OBJTYP = BODY",
-                tuple(
-                    dict.fromkeys(
-                        (
-                            *_BODY_MONITOR_ATTRIBUTES,
-                            STATUS_ATTR,
-                            HEATER_ATTR,
-                            HTMODE_ATTR,
-                            SUBTYP_ATTR,
-                        )
-                    )
-                ),
-            ),
-        )
-        read_started_at = datetime.now(UTC)
-        if cleanup_topology:
-            requests += (
-                ("OBJTYP = CIRCUIT", (STATUS_ATTR, SNAME_ATTR, SUBTYP_ATTR, "USE")),
-                ("OBJTYP = SYSTEM", (SERVICE_ATTR, VER_ATTR)),
-            )
-        cleanup_updates: list[dict[str, Any]] = []
-        for condition, keys in requests:
+        # Freeze expected identities and fields before any await. Presence in a
+        # later mutable model is not proof the originating read was complete.
+        expected = {
+            kind: {
+                obj.objnam: ({key for key in keys if obj[key] is not None}
+                             | _ARBITRATION_REQUIRED_FIELDS.get(kind, frozenset()))
+                for obj in self.model.get_by_type(kind)
+            }
+            for kind, keys in _ARBITRATION_READ_REQUESTS
+        }
+        updates: list[dict[str, Any]] = []
+        for kind, keys in _ARBITRATION_READ_REQUESTS:
             if not generation_is_current():
                 return
             response = await self.send_cmd(
                 "GetParamList",
                 {
-                    "condition": condition,
+                    "condition": f"OBJTYP = {kind}",
                     "objectList": [
                         {
                             "objnam": "ALL",
@@ -374,57 +368,28 @@ class _ReadOnlyModelController(ICModelController):
             if not generation_is_current():
                 return
             object_list = response.get("objectList")
-            if cleanup_topology:
-                # Do not publish cached source/topology as newly observed when
-                # any required reply is missing. Apply one complete read batch;
-                # unchanged replies need no pyintellicenter change callback.
-                object_type = condition.removeprefix("OBJTYP = ")
-                expected = tuple(self.model.get_by_type(object_type))
-                if not isinstance(object_list, list):
-                    raise NativeIntelliCenterReadError("CLEANUP_NATIVE_READ_INCOMPLETE")
-                received = {
-                    entry.get("objnam"): entry.get("params")
-                    for entry in object_list if isinstance(entry, dict)
-                }
-                if set(received) != {obj.objnam for obj in expected}:
-                    raise NativeIntelliCenterReadError("CLEANUP_NATIVE_IDENTITY_CHANGED")
-                for obj in expected:
-                    params = received.get(obj.objnam)
-                    required = {key for key in keys if obj[key] is not None}
-                    if object_type == BODY_TYPE:
-                        required.update((STATUS_ATTR, HEATER_ATTR, HTMODE_ATTR))
-                    if object_type == PUMP_TYPE:
-                        required.update((STATUS_ATTR, RPM_ATTR))
-                    if not isinstance(params, dict) or any(
-                        key not in params or params[key] is None for key in required
-                    ):
-                        raise NativeIntelliCenterReadError("CLEANUP_NATIVE_READ_INCOMPLETE")
-                cleanup_updates.extend(object_list)
-            elif isinstance(object_list, list):
-                cleanup_updates.extend(object_list)
+            if not isinstance(object_list, list) or any(
+                not isinstance(entry, dict) or not isinstance(entry.get("objnam"), str)
+                for entry in object_list
+            ):
+                raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_READ_INCOMPLETE")
+            received = {entry["objnam"]: entry.get("params") for entry in object_list}
+            if len(received) != len(object_list) or set(received) != set(expected[kind]):
+                raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_IDENTITY_CHANGED")
+            for native_id, required in expected[kind].items():
+                params = received[native_id]
+                if not isinstance(params, dict) or any(
+                    key not in params or params[key] is None for key in required
+                ):
+                    raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_READ_INCOMPLETE")
+            updates.extend(object_list)
         if generation_is_current():
             # Publish only once, from the transport after the complete batch.
-            # A validated cleanup batch is genuine native observation even when
-            # every value is unchanged. Record every returned field/object at
-            # the batch boundary before applying model updates so arbitration
-            # cannot see one changed BODY as fresh while unchanged Spa, pump,
-            # source, or shared-hydraulic evidence remains stale.
-            if cleanup_topology:
-                observed_fields = {
-                    str(entry["objnam"]): dict(entry["params"])
-                    for entry in cleanup_updates
-                    if isinstance(entry, dict)
-                    and isinstance(entry.get("objnam"), str)
-                    and isinstance(entry.get("params"), dict)
-                }
-                observer = self._evidence_observer
-                if observer is not None:
-                    observer(observed_fields, read_started_at)
             # This synchronous section cannot hide an unrelated notification.
             callback = self._updated_callback
             self._updated_callback = None
             try:
-                self._apply_updates(cleanup_updates, observed_at=read_started_at)
+                self._apply_updates(updates, observed_at=observed_at)
             finally:
                 self._updated_callback = callback
 
@@ -610,6 +575,7 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._inventory_completeness = NativeInventoryCompleteness.UNKNOWN
         self._inventory_observed_at: datetime | None = None
         self._running = False
+        self._arbitration_read_lock = asyncio.Lock()
         self._body_metadata_refresh_pending: set[str] = set()
         self._body_metadata_refresh_dirty: set[str] = set()
         self._body_metadata_refresh_applying: set[str] = set()
@@ -696,7 +662,19 @@ class IndependentIntelliCenterReadOnlyTransport:
     async def _async_refresh_owned_pump_session_evidence(
         self, *, cleanup_topology: bool = False
     ) -> bool:
-        """Refresh unchanged owned pump-session evidence without commands."""
+        """Compatibility entry point; all callers use the arbitration contract."""
+
+        del cleanup_topology
+        return await self._async_refresh_arbitration_evidence()
+
+    async def _async_refresh_arbitration_evidence(self) -> bool:
+        """Serialize complete read batches, never cached evidence or authority."""
+
+        async with self._arbitration_read_lock:
+            return await self._async_read_arbitration_evidence()
+
+    async def _async_read_arbitration_evidence(self) -> bool:
+        """Publish exactly one validated generation-bound native read capture."""
 
         if not self.connected:
             return False
@@ -708,22 +686,23 @@ class IndependentIntelliCenterReadOnlyTransport:
             return self._refresh_generation_is_current(generation) and self._latest_snapshot is originating_snapshot
 
         try:
-            arguments = {"cleanup_topology": True} if cleanup_topology else {}
-            await self._controller.refresh_owned_pump_session_evidence(
+            await self._controller.refresh_arbitration_evidence(
                 generation_is_current=read_is_current,
-                **arguments,
+                observed_at=read_started_at,
             )
         except (ICConnectionError, ICTimeoutError, NativeIntelliCenterReadError) as exc:
-            self._last_error_code = type(exc).__name__.upper()
+            self._last_error_code = (
+                exc.reason_code if isinstance(exc, NativeIntelliCenterReadError)
+                else type(exc).__name__.upper()
+            )
             return False
         if not read_is_current():
             return False
         # A cleanup batch uses the conservative start-of-read boundary. A
         # command or new entitlement created while queries are in flight cannot
         # be verified by an earlier reply merely because the batch finished later.
-        observed_at = read_started_at if cleanup_topology else datetime.now(UTC)
-        if cleanup_topology:
-            self._inventory_observed_at = read_started_at
+        observed_at = read_started_at
+        self._inventory_observed_at = read_started_at
         self._last_native_update = observed_at
         self._last_error_code = None
         self._latest_snapshot = self._copy_snapshot(

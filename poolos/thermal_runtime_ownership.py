@@ -1174,11 +1174,13 @@ class ThermalRuntimeOwnershipManager:
             return deny("currentness_unavailable")
 
         purpose = currentness.purpose
+        # The exact purpose fingerprint already includes its canonical mode.
+        # The checkpoint below stores the HA requested-mode vocabulary instead
+        # (e.g. "Solar Preferred" versus "solar_preferred"). Comparing those
+        # two representations rejects an otherwise identical proven purpose.
         if (
             purpose.purpose_id != checkpoint.purpose_id
             or purpose.body is not checkpoint.body
-            or purpose.requested_mode.casefold()
-            != checkpoint.requested_mode.casefold()
             or purpose.kind is not ThermalExecutionPurposeKind.THERMAL_CONTROL
             or purpose.selected_source is not PhysicalHeatMode.SOLAR
             or purpose.required_pump_rpm
@@ -1197,6 +1199,21 @@ class ThermalRuntimeOwnershipManager:
 
         if checkpoint.body not in {ThermalBody.POOL, ThermalBody.HOT_TUB}:
             return deny("unsupported_body")
+
+        if any(
+            observed_at is None or not checkpoint.captured_at < observed_at <= at
+            for observed_at in (
+                evidence.pool_activity_observed_at, evidence.spa_activity_observed_at,
+                evidence.pump_observed_at, evidence.configured_pump_speed_observed_at,
+                evidence.heat_source_observed_at,
+            )
+        ):
+            return deny("evidence_not_current")
+        if _shared_hydraulic_failure_reason(evidence) is not None or any(
+            item.observed_at is None or not checkpoint.captured_at < item.observed_at <= at
+            for item in evidence.shared_hydraulic_circuits
+        ):
+            return deny("shared_hydraulic_topology_unusable")
 
         expected_pool_active = checkpoint.body is ThermalBody.POOL
         expected_spa_active = checkpoint.body is ThermalBody.HOT_TUB
@@ -1242,6 +1259,13 @@ class ThermalRuntimeOwnershipManager:
             is not checkpoint.heat_source.intended_value
         ):
             return deny("heat_source_mismatch")
+
+        if (
+            not evidence.configured_pump_speed_observation_fresh
+            or not evidence.configured_pump_speed_observation_usable
+            or evidence.configured_pump_speed_rpm != expected_rpm
+        ):
+            return deny("configured_pump_state_mismatch")
 
         # Preserve the exact accepted command provenance and body-session
         # generation.  Only the transient planner/evaluation identity advances

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import timedelta
+import pytest
 
 from poolos.integration import PhysicalHeatMode, ThermalBody
 from poolos.thermal_execution_currentness import ThermalExecutionCurrentness, ThermalExecutionProgress
@@ -610,3 +611,32 @@ def test_restart_checkpoint_restore_state_rejects_wrong_schema() -> None:
         pass
     else:
         raise AssertionError("invalid restore schema was accepted")
+
+
+@pytest.mark.parametrize("invalid", ["configured_stale", "configured_old", "configured_mismatch", "shared_incomplete", "shared_stale", "shared_active", "shared_old", "body_future", "pump_future"])
+def test_restart_requires_current_configured_pump_and_shared_topology(invalid) -> None:
+    from poolos.thermal_runtime_ownership import SharedHydraulicCircuitEvidence, SharedHydraulicSafetyClass
+
+    before = _stable_verified_solar_manager()
+    checkpoint = before.export_restart_checkpoint(captured_at=NOW + timedelta(seconds=11))
+    current = _fresh_matching_evidence(before, at=NOW + timedelta(seconds=40))
+    changes = {
+        "configured_stale": {"configured_pump_speed_observation_fresh": False},
+        "configured_old": {"configured_pump_speed_observed_at": checkpoint.captured_at},
+        "configured_mismatch": {"configured_pump_speed_rpm": 3200},
+        "shared_incomplete": {"shared_hydraulic_inventory_complete": False},
+        "body_future": {"pool_activity_observed_at": current.evaluated_at + timedelta(seconds=1)},
+        "pump_future": {"pump_observed_at": current.evaluated_at + timedelta(seconds=1)},
+    }
+    if invalid.startswith("shared_") and invalid != "shared_incomplete":
+        circuit = SharedHydraulicCircuitEvidence(
+            concept="jets.active", active=invalid == "shared_active",
+            fresh=invalid != "shared_stale", usable=True,
+            observed_at=checkpoint.captured_at if invalid == "shared_old" else current.evaluated_at,
+            safety_class=SharedHydraulicSafetyClass.CONFLICTING,
+        )
+        changes[invalid] = {"shared_hydraulic_circuits": (circuit,)}
+    restarted = ThermalRuntimeOwnershipManager()
+    decision = restarted.restore_restart_checkpoint(checkpoint, evidence=replace(current, **changes[invalid]), max_age=timedelta(minutes=5))
+    assert decision.disposition is ThermalRuntimeOwnershipDisposition.DENIED
+    assert restarted.state.status is ThermalRuntimeOwnershipStatus.UNOWNED

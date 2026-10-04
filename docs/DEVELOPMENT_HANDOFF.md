@@ -255,3 +255,29 @@ behavior is final commissioning truth.
 Do not equate "minor remaining edge cases" with permission to weaken fail-closed behavior.
 Unknown capability, stale evidence, unexplained state, failed verification, or ambiguous
 provenance must remain bounded according to the applicable domain contract.
+
+## v1.0.22 native arbitration evidence candidate (2026-10-03)
+
+Baseline `ffd8617fa77c484d3f944c97c494dba94269a7f1`; candidate branch
+`fix/native-arbitration-evidence-contract`. See
+`docs/NATIVE_ARBITRATION_EVIDENCE_AUDIT.md` for the historical audit, complete
+concept/source/currentness matrix, lifecycle read scheduling, red regressions,
+restart findings, and physical acceptance sequence.
+
+The candidate consolidates existing lifecycle rereads into one complete,
+serialized, request-start-dated native arbitration contract. It preserves strict
+receipt/entitlement chronology, domain provenance and fail-closed partial reads.
+Fresh-policy Spa restart restoration is command-free and limited to the existing
+reviewed fully verified checkpoint scope; invalid restoration discards its origin
+preview. Configured RPM and shared topology now gate restoration explicitly.
+
+Software modeling covers Pool Solar target-down/source-Off/body-Off/pump-zero,
+deferred idle, target-up/new Pool acquisition, and a fully fresh Spa restart with
+independent Pool priority return. The ten-minute target-satisfaction debounce is
+unchanged. Full unchanged cleanup batches already passed on v1.0.22; do not claim
+an undocumented live failure or physical confirmation from these tests.
+
+This task stops at reviewed PR/green validation. No merge, release, deployment or
+equipment action is authorized by this candidate note. Real native reply timing,
+completeness and the complete physical target-down/target-up cycle still require
+operator commissioning after eventual review/release.

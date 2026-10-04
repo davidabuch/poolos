@@ -31,7 +31,7 @@ jobs:
         run: python -m compileall poolos intellicenter
 
       - name: Run Ruff
-        run: python -m ruff check poolos intellicenter tests
+        run: python -m ruff check poolos intellicenter custom_components/poolos tests
 
       - name: Run MyPy
         run: python -m mypy poolos

@@ -487,6 +487,7 @@ def _frame(
     pump_session_effective_rpm: int | None = None,
     pump_session_override_state: PumpSpeedOverrideState = PumpSpeedOverrideState.NONE,
     spa_thermal_operator_owned: bool | None = None,
+    spa_session_kind_override: SpaSessionKind | None = None,
     command_ledger: StructuredCommandLedger | None = None,
     real_probe_continuity: bool = False,
     pool_opportunity_id: str | None = None,
@@ -609,7 +610,7 @@ def _frame(
                 )
                 is FiltrationDisposition.RUN_NOW
             ),
-            spa_session_kind=(None if driver is None else driver.spa_session_kind()),
+            spa_session_kind=(spa_session_kind_override or (None if driver is None else driver.spa_session_kind())),
             spa_thermal_operator_owned=(
                 (False if driver is None else driver.spa_thermal_operator_owned())
                 if spa_thermal_operator_owned is None

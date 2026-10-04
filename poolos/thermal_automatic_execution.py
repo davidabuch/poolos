@@ -476,6 +476,25 @@ class ThermalAutomaticExecutionDriver:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
         return None
 
+    def note_restored_body_session_origin(self) -> None:
+        """Retain verified restored Spa origin through its residual cleanup.
+
+        A new process did not witness OFF -> ON. Only the existing reviewed
+        checkpoint restoration, with exact accepted and verified BODY proof,
+        can supply that origin; telemetry equality cannot call it into existence.
+        """
+
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.reason_code == "runtime_ownership_restored:quick_restart"
+            and lease.body is ThermalBody.HOT_TUB
+            and lease.body_activation is not None
+            and ThermalRuntimeOwnedConcept.BODY_ACTIVATION in lease.verified_concepts
+        ):
+            self._poolos_opportunistic_spa_session_active = True
+
     def spa_thermal_operator_owned(self) -> bool:
         """Return whether fresh operator evidence currently owns Spa THERMAL."""
 

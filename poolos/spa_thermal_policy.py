@@ -249,6 +249,21 @@ class SpaThermalPolicyTracker:
             )
 
         if (
+            self._state is SpaPolicyState.IDLE
+            and observation.spa_active
+            and observation.session_kind is SpaSessionKind.POOLOS_OPPORTUNISTIC
+            and observation.active_heat_source_usable
+            and observation.active_heat_source is ThermalHeatSource.SOLAR
+        ):
+            # Continue a positively attributed, physically active purpose when
+            # the policy tracker is new (including reviewed quick restart).
+            # This is command-free policy, never ownership restoration. Native
+            # equality without the independently supplied PoolOS origin cannot
+            # enter here. The normal priority, cap and hysteresis checks still
+            # apply; inactive/new starts still require idle qualification.
+            self._state = SpaPolicyState.OPPORTUNISTIC_ACTIVE
+
+        if (
             self._state is SpaPolicyState.OPPORTUNISTIC_ACTIVE
             and not observation.spa_active
             and not observation.opportunistic_start_ready

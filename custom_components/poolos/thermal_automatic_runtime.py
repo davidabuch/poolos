@@ -32,6 +32,8 @@ from poolos.pool_circulation_ownership import PoolCirculationOwner, PoolCirculat
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pump_operating_target import PumpTargetUnit
 from poolos.pump_speed_session import PumpSpeedSessionPurpose
+from poolos.spa_thermal_policy import SpaSessionKind
+from poolos.spa_temperature_policy import SpaTemperatureDisposition
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
@@ -352,6 +354,9 @@ class PoolOSThermalAutomaticRuntime:
     _restart_checkpoint: ThermalQuickRestartCheckpoint | None = field(
         default=None, init=False, repr=False
     )
+    _restart_evidence_preparation_task: asyncio.Task[object] | None = field(
+        default=None, init=False, repr=False
+    )
     _restart_recovery_max_age: timedelta = field(
         default=timedelta(minutes=5), init=False, repr=False
     )
@@ -495,6 +500,43 @@ class PoolOSThermalAutomaticRuntime:
         """Arm one command-free recovery attempt for a persisted lease."""
 
         self._restart_checkpoint = checkpoint
+        task = self._restart_evidence_preparation_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._restart_evidence_preparation_task = None
+
+    async def _prepare_restart_evidence(self, checkpoint: ThermalQuickRestartCheckpoint) -> None:
+        """One complete read after the fresh tracker first observes circulation."""
+
+        try:
+            refreshed = await self.coordinator.async_refresh_native_thermal_topology_evidence()
+        except Exception:
+            LOGGER.exception("PoolOS restart evidence preparation failed closed")
+            refreshed = False
+        if self._unloaded or self._restart_checkpoint is not checkpoint:
+            return
+        if not refreshed:
+            self._restart_checkpoint = None
+            await self.coordinator.async_request_refresh()
+
+    def spa_session_kind_for_assessment(self) -> SpaSessionKind | None:
+        """Use verified historical origin only for command-free restart assessment.
+
+        This is not restored authority. Observe fences execution until the exact
+        checkpoint is adjudicated; denial discards this preview and reevaluates.
+        """
+
+        kind = self.driver.spa_session_kind()
+        if kind is not None:
+            return kind
+        checkpoint = self._restart_checkpoint
+        if (
+            isinstance(checkpoint, ThermalQuickRestartCheckpoint)
+            and checkpoint.body is ThermalBody.HOT_TUB
+            and checkpoint.body_activation is not None
+        ):
+            return SpaSessionKind.POOLOS_OPPORTUNISTIC
+        return None
 
     @property
     def quick_restart_recovery_armed(self) -> bool:
@@ -740,6 +782,27 @@ class PoolOSThermalAutomaticRuntime:
                 # authoritative recovery epoch.
                 self.coordinator.async_update_listeners()
                 return
+            spa_temperature = thermal.hot_tub.spa_temperature
+            preparation = self._restart_evidence_preparation_task
+            if (
+                spa_temperature is not None
+                and checkpoint.body is ThermalBody.HOT_TUB
+                and spa_temperature.disposition is SpaTemperatureDisposition.EVIDENCE_UNUSABLE
+                and timedelta(0) <= snapshot.generated_at - checkpoint.captured_at <= self._restart_recovery_max_age
+                and (preparation is None or not preparation.done())
+            ):
+                # The first frame only establishes the new temperature
+                # tracker's circulation boundary. Obtain one genuinely later
+                # native sample before the one-shot authority adjudication.
+                # No commands or ownership are permitted during preparation;
+                # checkpoint age remains fixed and read failure discards it.
+                if preparation is None:
+                    self._restart_evidence_preparation_task = self.hass.async_create_task(
+                        self._prepare_restart_evidence(checkpoint),
+                        "PoolOS restart native evidence preparation",
+                    )
+                self.coordinator.async_update_listeners()
+                return
             observations = {
                 item.observation_id: item
                 for item in snapshot.observations
@@ -773,8 +836,21 @@ class PoolOSThermalAutomaticRuntime:
                 # BODY/PUMP/source/shared-hydraulic facts age out after startup
                 # and the freshly restored lease preempts itself.
                 self.coordinator.async_update_listeners()
+                note_origin = getattr(self.driver, "note_restored_body_session_origin", None)
+                if note_origin is not None:
+                    note_origin()
                 self._sync_owned_pump_session_reobservation()
                 return
+
+            # The assessment may have used a checkpoint origin preview. It is
+            # never delivery authority after failed restoration. Recompose with
+            # ordinary origin before considering any automatic candidate.
+            self.coordinator.async_update_listeners()
+            self.hass.async_create_task(
+                self.coordinator.async_request_refresh(),
+                "PoolOS restart origin reevaluation",
+            )
+            return
 
         reserve = getattr(self.driver, "reserve_circulation_candidate", None)
         if reserve is not None:
@@ -850,6 +926,12 @@ class PoolOSThermalAutomaticRuntime:
             await asyncio.gather(shared_hydraulic_task, return_exceptions=True)
         self._shared_hydraulic_reobservation_task = None
         self._shared_hydraulic_reobservation_epoch_identity = None
+        restart_task = self._restart_evidence_preparation_task
+        if restart_task is not None and not restart_task.done():
+            restart_task.cancel()
+            await asyncio.gather(restart_task, return_exceptions=True)
+        self._restart_evidence_preparation_task = None
+        self._restart_checkpoint = None
 
     def diagnostics(self) -> dict[str, object]:
         return {
