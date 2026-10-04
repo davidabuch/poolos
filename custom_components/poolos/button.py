@@ -7,6 +7,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from poolos.observations import ObservationQuality, ObservationSourceKind
+from poolos.pool_automatic_control_suppression import (
+    PoolAutomaticControlSuppressionSource,
+    SpaAutomaticControlSuppressionSource,
+)
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -205,8 +209,16 @@ class PoolOSResetControlButton(
                 # Reset clears session-scoped operator restraints but preserves
                 # durable policy/accounting. It must not leave future autonomy
                 # suppressed after reaching the safe baseline.
-                runtime.pool_automatic_control.resume(resumed_at=reset_at)
-                runtime.spa_automatic_control.resume(resumed_at=reset_at)
+                if runtime.pool_automatic_control.state.source not in {
+                    PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+                    PoolAutomaticControlSuppressionSource.RESTORED,
+                }:
+                    runtime.pool_automatic_control.resume(resumed_at=reset_at)
+                if runtime.spa_automatic_control.state.source not in {
+                    SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+                    SpaAutomaticControlSuppressionSource.RESTORED,
+                }:
+                    runtime.spa_automatic_control.resume(resumed_at=reset_at)
                 self._reset_sessions_invalidated = True
 
                 native = self.coordinator.native_intellicenter_snapshot

@@ -404,7 +404,14 @@ class PoolOSFiltrationAutomaticRuntime:
         if self._unloaded or not self.driver.requested_enabled:
             return False
         lease = self.ownership.filtration_lease
-        if lease is None or not lease.verified:
+        if lease is None:
+            return False
+        if self.driver.verification_topology_reobservation_token() is not None:
+            # Accepted acquisition also needs a retry path when its first read
+            # fails. The driver owns the fixed receipt deadline and disposes
+            # the token on verification, failure, preemption or unload.
+            return True
+        if not lease.verified:
             return False
         return self.ownership.owner in {
             PoolCirculationOwner.FILTRATION,

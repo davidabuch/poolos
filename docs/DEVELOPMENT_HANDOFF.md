@@ -295,3 +295,42 @@ and age. Arbitration and ownership policy are unchanged.
 
 See [HA_STOP_TASK_QUIESCENCE_AUDIT.md](HA_STOP_TASK_QUIESCENCE_AUDIT.md) for the
 red regression, task inventory, ordering and remaining physical validation.
+
+## Systemic arbitration currentness recovery (v1.0.24 follow-up)
+
+Baseline `dc67ad4b8fdf769287a5b83e7b4bfda965ad5953`. Compatible native callbacks
+could invalidate every complete arbitration read, leaving unchanged BODY/source/
+shared-circuit clocks stale while RPM telemetry and observation health remained
+good. The shared read now fences discovery/topology identity and contradictory
+critical fields, preserves newer measurements, and dates only genuinely returned
+fields at conservative read start. An immutable read record adds diagnostics;
+it grants no ownership, intent, command or cleanup authority.
+
+Pending filtration acquisition retains its accepted attempt during transient
+evidence loss and retries the same shared read until its original deadline.
+Timeout remains a control fault; operator and topology gates remain authoritative.
+PR #442 shutdown quiescence and the operator's disabled Thermal gate are unchanged.
+
+See [SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md](SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md)
+for history, red regressions, all 36 lifecycle boundaries, physical evidence
+limits and commissioning sequence. The maintainable A–BJ prediction matrix is
+`docs/ownership/systemic_currentness_prediction_matrix.json`; it does not claim
+all 90 ownership scenarios or physical commissioning. No live operation,
+deployment, release or merge occurs in this recovery task.
+
+### PR #444 independent-review blockers
+
+The internal Reset-gate test was insufficient: actual HA switch restore can await
+old ON, then overwrite a newer explicit OFF after Reset. Shared persistent-switch
+bootstrap now fences explicit services/re-add, carries operator intent on config
+reload, and retains RestoreEntity durability and fresh startup rules. Reset never
+enables a desired gate. The native accounting path also lacked a reread owner for
+manual circulation; existing reconciliation uses the same complete contract.
+Exact critical-field freshness replaces coarse native source staleness, avoiding
+temperature/STATUS source-ID contamination without accepting stale route proof.
+Scheduling deferral/credit priority, debt policy and ownership remain separate.
+
+The audit above records red regressions, sibling findings and live evidence limits.
+Prediction coverage extends to A–CJ (88 cases). Physical OFF/Reset/delayed callback
+and manual Solar credit commissioning remain required; no HA/equipment action is
+part of this work.

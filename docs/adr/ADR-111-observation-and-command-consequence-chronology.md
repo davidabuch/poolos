@@ -116,3 +116,26 @@ cross-vocabulary comparisons cannot invalidate an otherwise exact purpose.
 Successful restoration retains the already-verified BODY origin for eventual
 cleanup. Native state equality never creates that origin or permits a read to
 restore an arbitrary Pool/Spa session.
+
+## v1.0.24 follow-up: compatible publication is not read invalidation
+
+The systemic audit in `docs/SYSTEMIC_ARBITRATION_CURRENTNESS_AUDIT.md` proves
+that rejecting every intervening native publication can indefinitely starve a
+complete read. Unchanged RPM and temperature callbacks replace the snapshot
+pointer while unchanged BODY/source/shared-circuit evidence receives no refresh.
+The pointer-identity fence is superseded by frozen discovery/topology identity
+and field-level conflict validation before any batch field is applied.
+
+An intervening contradictory arbitration-critical fact still rejects the batch.
+A compatible callback does not. A newer measurement/policy field is preserved
+with its actual receipt clock; its older reply is omitted. Valid returned sibling
+facts use the conservative read-start boundary. Completeness, strict chronology,
+freshness, generation, ownership and final command gates are unchanged.
+
+The immutable `NativeArbitrationEvidence` record describes that read and its
+completion/failure, not command authority. Accepted filtration acquisition also
+retains its original verification deadline during transient evidence loss, with
+a lifecycle-owned read retry until verification or that same fixed deadline.
+Missing proof cannot become operator takeover or silently remove a verified
+BODY domain. Timeout remains a control fault. This does not extend deadlines or
+permit verification from unusable evidence.

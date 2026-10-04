@@ -626,7 +626,7 @@ def test_ha_entities_expose_exact_safe_configuration_contracts() -> None:
 
     assert "PoolOSThermalLiveExecutionSwitch" in switch
     assert "commissioned_desired_state_persists_across_restart" in switch
-    assert "RestoreEntity" in switch.split(
+    assert "_PersistentIntentSwitch" in switch.split(
         "class PoolOSThermalLiveExecutionSwitch", 1
     )[1].split("class ", 1)[0]
     assert '"Disabled": ThermalLiveCommissioningScope.DISABLED' in select
@@ -636,7 +636,12 @@ def test_ha_entities_expose_exact_safe_configuration_contracts() -> None:
     automatic = switch.split(
         "class PoolOSThermalAutomaticExecutionSwitch", 1
     )[1].split("class ", 1)[0]
-    assert "RestoreEntity" in automatic
+    assert "_PersistentIntentSwitch" in automatic
+    bootstrap = switch.split("class _PersistentIntentSwitch", 1)[1].split("\nclass ", 1)[0]
+    assert "RestoreEntity, SwitchEntity" in bootstrap
+    assert "await super().async_added_to_hass()" in bootstrap
+    assert "async_get_last_state()" in bootstrap
+    assert "if not accepted:" in automatic
     assert "fresh_authoritative_epoch_required" in automatic
     assert "physical_session_ownership_restored" in automatic
 

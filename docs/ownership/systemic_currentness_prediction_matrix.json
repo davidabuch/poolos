@@ -1,0 +1,853 @@
+{
+  "baseline": "dc67ad4b8fdf769287a5b83e7b4bfda965ad5953",
+  "scope": "A-CJ recovery matrix (88 cases); not a claim of all 90 ownership scenarios or physical commissioning",
+  "cases": [
+    {
+      "id": "A",
+      "accepted_case": "Everything OFF\nroof becomes eligible\ntrusted Pool water unavailable\n\u2192 PoolOS Pool ON\n\u2192 probe 1500\n\u2192 complete post-command arbitration reread\n\u2192 trusted Pool temperature\n\u2192 continue correctly.",
+      "mechanism": "Truthful native water/body/pump capture; accepted BODY and 1500 verification; real probe stabilization; typed Solar successor retains BODY origin.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks",
+        "tests/test_thermal_automatic_execution.py::test_cold_start_probe_hands_off_to_fresh_thermal_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "B",
+      "accepted_case": "Same, but shared water starts with previous Spa temperature and drops:\n102 \u2192 99 \u2192 96 \u2192 91 \u2192 88.\n\nExpected:\n- no false target-satisfied decision from residual Spa water;\n- no ownership loss;\n- probe remains internal PoolOS preparation;\n- trusted water accepted only when stabilization rules allow.",
+      "mechanism": "Truthful native water/body/pump capture; accepted BODY and 1500 verification; real probe stabilization; typed Solar successor retains BODY origin.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks",
+        "tests/test_thermal_automatic_execution.py::test_cold_start_probe_hands_off_to_fresh_thermal_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "C",
+      "accepted_case": "BODY ON consequence arrives before pump consequence.",
+      "mechanism": "Per-concept strictly post-receipt consequence admission; default motor circulation is not command or operator provenance; fixed pending attempt.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks",
+        "tests/test_thermal_automatic_execution.py::test_cold_start_probe_hands_off_to_fresh_thermal_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "D",
+      "accepted_case": "Pump consequence arrives before BODY reread publication.",
+      "mechanism": "Per-concept strictly post-receipt consequence admission; default motor circulation is not command or operator provenance; fixed pending attempt.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks",
+        "tests/test_thermal_automatic_execution.py::test_cold_start_probe_hands_off_to_fresh_thermal_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "E",
+      "accepted_case": "Unchanged Waterfall/Jets/Slide OFF facts are reread after command.\n\nExpected:\nthey are current, not stale merely because values did not change.",
+      "mechanism": "Complete six-type returned-field validation; unchanged shared-circuit OFF facts advance only at conservative read start; inventory identity remains bound.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_complete_read_survives_compatible_interleaved_native_publication",
+        "tests/test_native_arbitration_evidence_contract.py::test_every_lifecycle_requires_one_complete_unchanged_arbitration_batch"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "F",
+      "accepted_case": "One complete arbitration read is delayed but succeeds within legitimate recovery.",
+      "mechanism": "Lifecycle-owned read retries retain accepted attempt and fixed deadline; no command on unusable proof; later complete usable evidence can verify.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_read_completion_cannot_renew_start_or_admit_intervening_command",
+        "tests/test_thermal_live_execution.py::test_pool_pump_step_survives_stale_body_gap_and_verifies_on_fresh_reobservation"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "G",
+      "accepted_case": "First read fails; second read succeeds.",
+      "mechanism": "Lifecycle-owned read retries retain accepted attempt and fixed deadline; no command on unusable proof; later complete usable evidence can verify.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pending_filtration_has_read_retry_owner_before_full_verification",
+        "tests/test_systemic_arbitration_currentness.py::test_pending_filtration_temporarily_missing_circuit_retains_fixed_attempt"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "H",
+      "accepted_case": "Wrong generation response arrives late.",
+      "mechanism": "Frozen discovery/topology/object/required-field identity; partial, duplicate or superseded batches publish no successful arbitration evidence.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_contradictory_or_invalidated_read_cannot_refresh_sibling_evidence"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "I",
+      "accepted_case": "Old identity/topology response arrives late.",
+      "mechanism": "Frozen discovery/topology/object/required-field identity; partial, duplicate or superseded batches publish no successful arbitration evidence.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_contradictory_or_invalidated_read_cannot_refresh_sibling_evidence"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "J",
+      "accepted_case": "Partial response missing required circuit.",
+      "mechanism": "Frozen discovery/topology/object/required-field identity; partial, duplicate or superseded batches publish no successful arbitration evidence.",
+      "regressions": [
+        "tests/test_native_arbitration_evidence_contract.py::test_every_lifecycle_requires_one_complete_unchanged_arbitration_batch"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "K",
+      "accepted_case": "Duplicate identity response.\n\nExpected:\nfail closed where necessary, but preserve legitimate ownership/recovery when no operator takeover occurred.",
+      "mechanism": "Frozen discovery/topology/object/required-field identity; partial, duplicate or superseded batches publish no successful arbitration evidence.",
+      "regressions": [
+        "tests/test_native_arbitration_evidence_contract.py::test_every_lifecycle_requires_one_complete_unchanged_arbitration_batch"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "L",
+      "accepted_case": "Probe succeeds; collector differential warrants Solar.\n\u2192 Solar selected\n\u2192 Solar physically activates\n\u2192 pump reaches 2900\n\u2192 OWNED / CONVERGED.",
+      "mechanism": "Trusted water and eligible source; selected-source receipt verification is distinct from Solar physical engagement and operating RPM; fixed engagement timeout.",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return",
+        "tests/test_thermal_automatic_execution.py::test_cold_start_probe_hands_off_to_fresh_thermal_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "M",
+      "accepted_case": "Solar selected but not yet physically active.\n\nExpected:\ndo NOT force Solar RPM prematurely.",
+      "mechanism": "Trusted water and eligible source; selected-source receipt verification is distinct from Solar physical engagement and operating RPM; fixed engagement timeout.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_quiescent_solar_cold_start_verifies_h0002_before_engagement",
+        "tests/test_thermal_automatic_execution.py::test_unengaged_solar_cold_start_is_bounded_and_not_immediately_retried"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "N",
+      "accepted_case": "Solar activation is delayed/bursty.",
+      "mechanism": "Trusted water and eligible source; selected-source receipt verification is distinct from Solar physical engagement and operating RPM; fixed engagement timeout.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_quiescent_solar_cold_start_verifies_h0002_before_engagement",
+        "tests/test_thermal_automatic_execution.py::test_unengaged_solar_cold_start_is_bounded_and_not_immediately_retried"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "O",
+      "accepted_case": "Solar never physically activates.\n\nExpected:\nbounded failure/recovery with correct reason; no false manual ownership.",
+      "mechanism": "Trusted water and eligible source; selected-source receipt verification is distinct from Solar physical engagement and operating RPM; fixed engagement timeout.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_quiescent_solar_cold_start_verifies_h0002_before_engagement",
+        "tests/test_thermal_automatic_execution.py::test_unengaged_solar_cold_start_is_bounded_and_not_immediately_retried"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "P",
+      "accepted_case": "Pool reaches target; no filtration successor.\nExpected:\nSolar OFF\n\u2192 source cleanup verified\n\u2192 Pool OFF\n\u2192 pump 0\n\u2192 UNOWNED/INACTIVE.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "Q",
+      "accepted_case": "Solar lost; filtration immediately required.\nExpected:\nSolar OFF\n\u2192 Pool remains ON\n\u2192 pump 2600\n\u2192 ownership preserved.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "R",
+      "accepted_case": "Solar lost; filtration TOU-deferred.\nExpected:\nSolar OFF\n\u2192 Pool OFF\n\u2192 pump 0\n\u2192 debt preserved for later TOU.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_preempted_session_successor_completes_solar_and_defers_filtration",
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "S",
+      "accepted_case": "Brief cloud:\nSolar temporarily unavailable, then returns.\nExpected:\ncorrect continuation/recovery without unnecessary long-lived broken ownership.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_owned_solar_session_survives_native_solar_active_drop"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "T",
+      "accepted_case": "Pool Solar stable\n\u2192 target lowered below actual\n\u2192 shutdown completes.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "U",
+      "accepted_case": "After clean idle\n\u2192 target raised above actual\n\u2192 fresh reacquisition\n\u2192 probe if required\n\u2192 Solar again.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "V",
+      "accepted_case": "Rapid down/up race.\n\nExpected:\nno old-generation shutdown command can corrupt the new generation.",
+      "mechanism": "Thermal purpose/currentness, existing demand debounce and source cleanup; residual/cleanup boundaries; RUN_NOW-only successor arbitration; independent post-idle acquisition.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_cleanup_attempt_cannot_cross_provenance_generation",
+        "tests/test_thermal_runtime_ownership.py::test_probe_replacement_handoff_rejects_stale_generation"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "W",
+      "accepted_case": "TOU debt exists\n\u2192 scheduled start\n\u2192 Pool ON\n\u2192 2600\n\u2192 credit accrues\n\u2192 debt reaches 0\n\u2192 no successor\n\u2192 Pool OFF\n\u2192 pump 0.\n\nThis reproduces the actual failure from last night.",
+      "mechanism": "Canonical TOU debt policy; accepted filtration BODY/pump attempts; verified suspension retains completion responsibility; shared topology and pump-zero shutdown proof.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_filtration_completion_during_native_callbacks_reaches_verified_off",
+        "tests/test_systemic_arbitration_currentness.py::test_pending_filtration_temporarily_missing_circuit_retains_fixed_attempt",
+        "tests/test_filtration_policy.py::test_overnight_catchup_window_runs_outstanding_filtration"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "X",
+      "accepted_case": "Same sequence with Waterfall/Jets/Slide all physically OFF but unchanged.\n\nExpected:\ncomplete reread makes them current; no\n`automatic_filtration_shared_hydraulic_unusable:waterfall.active`.",
+      "mechanism": "Canonical TOU debt policy; accepted filtration BODY/pump attempts; verified suspension retains completion responsibility; shared topology and pump-zero shutdown proof.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_filtration_completion_during_native_callbacks_reaches_verified_off",
+        "tests/test_systemic_arbitration_currentness.py::test_pending_filtration_temporarily_missing_circuit_retains_fixed_attempt",
+        "tests/test_filtration_policy.py::test_overnight_catchup_window_runs_outstanding_filtration"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "Y",
+      "accepted_case": "Waterfall genuinely active.\n\nExpected:\ncorrect fail-closed arbitration.",
+      "mechanism": "Canonical TOU debt policy; accepted filtration BODY/pump attempts; verified suspension retains completion responsibility; shared topology and pump-zero shutdown proof.",
+      "regressions": [
+        "tests/test_filtration_automatic_execution.py::test_suspended_filtration_identity_or_topology_conflict_remains_preemptive",
+        "tests/test_systemic_arbitration_currentness.py::test_contradictory_or_invalidated_read_cannot_refresh_sibling_evidence"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "Z",
+      "accepted_case": "TOU reaches zero while one evidence batch is delayed.\n\nExpected:\nactive recovery, then correct shutdown; no orphaned pump.",
+      "mechanism": "Canonical TOU debt policy; accepted filtration BODY/pump attempts; verified suspension retains completion responsibility; shared topology and pump-zero shutdown proof.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_filtration_completion_during_native_callbacks_reaches_verified_off",
+        "tests/test_systemic_arbitration_currentness.py::test_pending_filtration_temporarily_missing_circuit_retains_fixed_attempt",
+        "tests/test_filtration_policy.py::test_overnight_catchup_window_runs_outstanding_filtration"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AA",
+      "accepted_case": "TOU completion plus simultaneous new Solar opportunity.\n\nExpected:\nsemantic successor chosen correctly, no unnecessary OFF/ON.",
+      "mechanism": "Exclusive typed circulation handoff and independent pump purpose; retained compatible BODY origin; obsolete attempts cannot act on successor; scoped operator intent still wins.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adoption",
+        "tests/test_pool_circulation_ownership.py::test_filtration_to_thermal_handoff_is_explicit_and_preserves_only_body_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AB",
+      "accepted_case": "TOU completion plus operator manual pump override.\n\nExpected:\nBODY completion semantics still correct under contract.",
+      "mechanism": "Exclusive typed circulation handoff and independent pump purpose; retained compatible BODY origin; obsolete attempts cannot act on successor; scoped operator intent still wins.",
+      "regressions": [
+        "tests/test_filtration_automatic_execution.py::test_verified_session_rpm_override_relinquishes_only_pump_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AC",
+      "accepted_case": "Filtration 2600 \u2192 Solar activates \u2192 2900.",
+      "mechanism": "Exclusive typed circulation handoff and independent pump purpose; retained compatible BODY origin; obsolete attempts cannot act on successor; scoped operator intent still wins.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adoption",
+        "tests/test_pool_circulation_ownership.py::test_filtration_to_thermal_handoff_is_explicit_and_preserves_only_body_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AD",
+      "accepted_case": "Solar 2900 \u2192 Solar ends \u2192 filtration 2600.",
+      "mechanism": "Exclusive typed circulation handoff and independent pump purpose; retained compatible BODY origin; obsolete attempts cannot act on successor; scoped operator intent still wins.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AE",
+      "accepted_case": "Purpose transition changes Pump-ownership boundary but preserves BODY provenance.",
+      "mechanism": "Exclusive typed circulation handoff and independent pump purpose; retained compatible BODY origin; obsolete attempts cannot act on successor; scoped operator intent still wins.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adoption",
+        "tests/test_pool_circulation_ownership.py::test_filtration_to_thermal_handoff_is_explicit_and_preserves_only_body_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AF",
+      "accepted_case": "Old purpose timeout fires after new purpose already exists.\n\nExpected:\nold callback fenced; cannot terminate successor.",
+      "mechanism": "Exclusive typed circulation handoff and independent pump purpose; retained compatible BODY origin; obsolete attempts cannot act on successor; scoped operator intent still wins.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_cleanup_attempt_cannot_cross_provenance_generation",
+        "tests/test_thermal_runtime_ownership.py::test_probe_replacement_handoff_rejects_stale_generation"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AG",
+      "accepted_case": "User manually starts Pool.\n\nExpected:\nBODY remains external/manual origin.",
+      "mechanism": "Positive BODY intent and semantic opportunity cancellation; independent prospective adoption or later TOU opportunity; equality/plan churn cannot acquire origin.",
+      "regressions": [
+        "tests/test_filtration_automatic_execution.py::test_preexisting_matching_pool_is_not_body_adopted_but_pump_is_governed"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AH",
+      "accepted_case": "While user Pool session is running, a genuinely new PoolOS Solar opportunity occurs.\n\nExpected:\nprospective adoption/reacquisition according to contract, not fabricated historical provenance.",
+      "mechanism": "Positive BODY intent and semantic opportunity cancellation; independent prospective adoption or later TOU opportunity; equality/plan churn cannot acquire origin.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body",
+        "tests/test_thermal_automatic_execution.py::test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AI",
+      "accepted_case": "User manually turns Pool OFF during PoolOS session.\n\nExpected:\nsame opportunity suppressed appropriately.",
+      "mechanism": "Positive BODY intent and semantic opportunity cancellation; independent prospective adoption or later TOU opportunity; equality/plan churn cannot acquire origin.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_manual_pool_off_suppression_preempts_inflight_cold_start_without_retry"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AJ",
+      "accepted_case": "Later independent TOU boundary occurs.\n\nExpected:\nPoolOS may reacquire; prior OFF does not permanently exile autonomy.",
+      "mechanism": "Positive BODY intent and semantic opportunity cancellation; independent prospective adoption or later TOU opportunity; equality/plan churn cannot acquire origin.",
+      "regressions": [
+        "tests/test_ownership_opportunity_cancellation.py::test_manual_pool_on_off_then_later_tou_filtration_retires_transient_restraint"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AK",
+      "accepted_case": "User starts Spa.\n\nExpected:\nexternal BODY activation; Pump/Thermal may be prospectively governed as defined.",
+      "mechanism": "External Spa origin excludes PoolOS BODY checkpoint; fresh assessment and separately permissible pump/source scope; restart does not turn user Spa into PoolOS activation.",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_user_hot_tub_session_governs_dynamic_spa_pump_with_body_adoption"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AL",
+      "accepted_case": "User Spa + HA restart.\n\nExpected:\nexternal origin remains external.",
+      "mechanism": "External Spa origin excludes PoolOS BODY checkpoint; fresh assessment and separately permissible pump/source scope; restart does not turn user Spa into PoolOS activation.",
+      "regressions": [
+        "tests/test_home_assistant_stop_lifecycle.py::test_stop_preserves_exact_verified_checkpoint_but_never_creates_one_from_external_spa",
+        "tests/test_thermal_automatic_execution.py::test_restart_does_not_reconstruct_opportunistic_spa_ownership_from_state"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AM",
+      "accepted_case": "PoolOS-created opportunistic Spa + HA restart.\n\nExpected:\nPoolOS origin restored only with valid checkpoint/provenance.",
+      "mechanism": "Reviewed fully verified PoolOS Spa checkpoint with fresh exact-purpose evidence; provenance-bound source/body cleanup; independent Pool generation on priority return; no Gas fallback.",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return",
+        "tests/test_thermal_quick_restart_recovery.py::test_matching_fresh_hot_tub_restart_restores_same_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AN",
+      "accepted_case": "Spa ends while Pool demand exists.\n\nExpected:\nclean Spa termination \u2192 Pool reacquisition.",
+      "mechanism": "Reviewed fully verified PoolOS Spa checkpoint with fresh exact-purpose evidence; provenance-bound source/body cleanup; independent Pool generation on priority return; no Gas fallback.",
+      "regressions": [
+        "tests/test_cleanup_native_reobservation_lifecycle.py::test_probe_residual_wait_requests_post_entitlement_native_evidence"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AO",
+      "accepted_case": "Spa ends while no Pool need exists.\n\nExpected:\ncomplete shutdown.",
+      "mechanism": "Reviewed fully verified PoolOS Spa checkpoint with fresh exact-purpose evidence; provenance-bound source/body cleanup; independent Pool generation on priority return; no Gas fallback.",
+      "regressions": [
+        "tests/test_cleanup_native_reobservation_lifecycle.py::test_probe_residual_wait_requests_post_entitlement_native_evidence"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AP",
+      "accepted_case": "Hot Spa plumbing temperature followed immediately by Pool probe.\n\nThis MUST reproduce the physical commissioning chronology we just observed.",
+      "mechanism": "Truthful native water/body/pump capture; accepted BODY and 1500 verification; real probe stabilization; typed Solar successor retains BODY origin.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks",
+        "tests/test_thermal_automatic_execution.py::test_cold_start_probe_hands_off_to_fresh_thermal_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AQ",
+      "accepted_case": "Reset during idle.",
+      "mechanism": "Reset authority epoch invalidates stale work without changing durable policy/debt or fabricating restraint; explicitly disabled Thermal gate remains disabled.",
+      "regressions": [
+        "tests/test_reset_recovery_lifecycle.py::test_reset_already_safe_baseline_requires_genuine_post_boundary_native_read",
+        "tests/test_reset_recovery_lifecycle.py::test_reset_owned_solar_reduces_then_acquires_fresh_solar_without_restart"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AR",
+      "accepted_case": "Reset after stale evidence failure.",
+      "mechanism": "Reset authority epoch invalidates stale work without changing durable policy/debt or fabricating restraint; explicitly disabled Thermal gate remains disabled.",
+      "regressions": [
+        "tests/test_reset_recovery_lifecycle.py::test_reset_already_safe_baseline_requires_genuine_post_boundary_native_read",
+        "tests/test_reset_recovery_lifecycle.py::test_reset_owned_solar_reduces_then_acquires_fresh_solar_without_restart"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AS",
+      "accepted_case": "Reset while legitimate debt remains.\n\nExpected:\nfresh authority epoch;\ndurable filtration debt retained;\nno fabricated restraints;\nno late old-generation command accepted.",
+      "mechanism": "Reset authority epoch invalidates stale work without changing durable policy/debt or fabricating restraint; explicitly disabled Thermal gate remains disabled.",
+      "regressions": [
+        "tests/test_reset_recovery_lifecycle.py::test_reset_already_safe_baseline_requires_genuine_post_boundary_native_read",
+        "tests/test_reset_recovery_lifecycle.py::test_reset_owned_solar_reduces_then_acquires_fresh_solar_without_restart"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AT",
+      "accepted_case": "Reset must NOT silently re-enable a runtime switch the operator deliberately disabled for quarantine unless that behavior is explicitly part of the commissioned desired-state contract and clearly observable.\n\nReview current semantics carefully.",
+      "mechanism": "Reset authority epoch invalidates stale work without changing durable policy/debt or fabricating restraint; explicitly disabled Thermal gate remains disabled.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_reset_authority_reopen_preserves_quarantined_thermal_gate",
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Internal authority boundary plus actual HA switch/button/restore regressions; physical callback context remains unproven."
+    },
+    {
+      "id": "AU",
+      "accepted_case": "Restart during PoolOS-owned Solar.",
+      "mechanism": "Exact checkpoint/adoption scope and fresh post-restart evidence; unverified/pending work is not restorable by equality; STOP cancellation settles only actual accepted results.",
+      "regressions": [
+        "tests/test_thermal_quick_restart_recovery.py::test_matching_fresh_restart_restores_same_provenance_without_new_delivery"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AV",
+      "accepted_case": "Restart during PoolOS-created opportunistic Spa.",
+      "mechanism": "Reviewed fully verified PoolOS Spa checkpoint with fresh exact-purpose evidence; provenance-bound source/body cleanup; independent Pool generation on priority return; no Gas fallback.",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return",
+        "tests/test_thermal_quick_restart_recovery.py::test_matching_fresh_hot_tub_restart_restores_same_provenance"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AW",
+      "accepted_case": "Restart during external Spa.",
+      "mechanism": "External Spa origin excludes PoolOS BODY checkpoint; fresh assessment and separately permissible pump/source scope; restart does not turn user Spa into PoolOS activation.",
+      "regressions": [
+        "tests/test_home_assistant_stop_lifecycle.py::test_stop_preserves_exact_verified_checkpoint_but_never_creates_one_from_external_spa",
+        "tests/test_thermal_automatic_execution.py::test_restart_does_not_reconstruct_opportunistic_spa_ownership_from_state"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AX",
+      "accepted_case": "Restart during TOU filtration.",
+      "mechanism": "Exact checkpoint/adoption scope and fresh post-restart evidence; unverified/pending work is not restorable by equality; STOP cancellation settles only actual accepted results.",
+      "regressions": [
+        "tests/test_filtration_automatic_execution.py::test_restart_with_matching_hardware_reconstructs_no_ownership",
+        "tests/test_pool_circulation_ownership.py::test_restart_unload_reconstructs_nothing"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AY",
+      "accepted_case": "Restart while complete arbitration reread is in flight.",
+      "mechanism": "Exact checkpoint/adoption scope and fresh post-restart evidence; unverified/pending work is not restorable by equality; STOP cancellation settles only actual accepted results.",
+      "regressions": [
+        "tests/test_home_assistant_stop_lifecycle.py::test_all_thermal_reobservation_owners_are_cancelled_and_awaited_after_fence",
+        "tests/test_systemic_arbitration_currentness.py::test_cancelled_native_read_has_no_completed_generation"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "AZ",
+      "accepted_case": "Restart immediately after an accepted BODY or pump command but before consequence verification.\n\nEnsure PR #442 task quiescence remains clean.",
+      "mechanism": "Exact checkpoint/adoption scope and fresh post-restart evidence; unverified/pending work is not restorable by equality; STOP cancellation settles only actual accepted results.",
+      "regressions": [
+        "tests/test_thermal_quick_restart_recovery.py::test_partial_or_unverified_session_cannot_create_restart_checkpoint",
+        "tests/test_home_assistant_stop_lifecycle.py::test_already_dispatched_command_settles_truthful_result_without_shutdown_cleanup"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BA",
+      "accepted_case": "Same values, new successful complete reread.",
+      "mechanism": "Complete six-type returned-field validation; unchanged shared-circuit OFF facts advance only at conservative read start; inventory identity remains bound.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_complete_read_survives_compatible_interleaved_native_publication",
+        "tests/test_native_arbitration_evidence_contract.py::test_every_lifecycle_requires_one_complete_unchanged_arbitration_batch"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BB",
+      "accepted_case": "Events delivered out of order.",
+      "mechanism": "Per-field observation chronology and immutable capture; compatible publications do not abort reads; contradictory critical facts reject batch; newer measurements keep their actual clocks.",
+      "regressions": [
+        "tests/test_observation_command_chronology.py::test_delayed_metadata_reply_cannot_overwrite_newer_native_body",
+        "tests/test_observation_command_chronology.py::test_old_manager_evidence_cannot_preempt_later_confirmed_lease"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BC",
+      "accepted_case": "One concept bursts multiple updates.",
+      "mechanism": "Per-field observation chronology and immutable capture; compatible publications do not abort reads; contradictory critical facts reject batch; newer measurements keep their actual clocks.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_newer_measurement_during_read_does_not_starve_topology_or_get_overwritten",
+        "tests/test_systemic_arbitration_currentness.py::test_complete_read_survives_compatible_interleaved_native_publication"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BD",
+      "accepted_case": "Native read started before command but completes after command.\n\nExpected:\nmust NOT count as post-command evidence if chronology contract says read-start is conservative boundary.",
+      "mechanism": "Read-start, not completion/publication, is consequence boundary; a read begun before/equal acceptance cannot verify the later command.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_read_completion_cannot_renew_start_or_admit_intervening_command",
+        "tests/test_thermal_live_execution.py::test_pool_pump_step_survives_stale_body_gap_and_verifies_on_fresh_reobservation"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BE",
+      "accepted_case": "Native read starts after command and returns unchanged OFF circuits.\n\nExpected:\nvalid fresh evidence.",
+      "mechanism": "Complete six-type returned-field validation; unchanged shared-circuit OFF facts advance only at conservative read start; inventory identity remains bound.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_complete_read_survives_compatible_interleaved_native_publication",
+        "tests/test_native_arbitration_evidence_contract.py::test_every_lifecycle_requires_one_complete_unchanged_arbitration_batch"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BF",
+      "accepted_case": "Two lifecycle callers request reread simultaneously.",
+      "mechanism": "Single serializer with lifecycle-specific cancellation tokens; canceled reads release lock without successful publication; discovery/topology change invalidates entire originating batch.",
+      "regressions": [
+        "tests/test_native_arbitration_evidence_contract.py::test_overlapping_lifecycle_reads_are_serialized_and_cancellation_releases_contract"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BG",
+      "accepted_case": "One caller is cancelled while another awaits serialized arbitration read.",
+      "mechanism": "Single serializer with lifecycle-specific cancellation tokens; canceled reads release lock without successful publication; discovery/topology change invalidates entire originating batch.",
+      "regressions": [
+        "tests/test_native_arbitration_evidence_contract.py::test_overlapping_lifecycle_reads_are_serialized_and_cancellation_releases_contract"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BH",
+      "accepted_case": "Reset/new generation occurs while read lock is held.",
+      "mechanism": "Single serializer with lifecycle-specific cancellation tokens; canceled reads release lock without successful publication; discovery/topology change invalidates entire originating batch.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_read_completion_cannot_renew_start_or_admit_intervening_command",
+        "tests/test_residual_cleanup_transfer.py::test_new_accepted_generation_invalidates_retained_capture_token"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BI",
+      "accepted_case": "Transport disconnect/reconnect between batch queries.",
+      "mechanism": "Single serializer with lifecycle-specific cancellation tokens; canceled reads release lock without successful publication; discovery/topology change invalidates entire originating batch.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_contradictory_or_invalidated_read_cannot_refresh_sibling_evidence"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BJ",
+      "accepted_case": "HA coordinator refresh interleaves with explicit arbitration reread.\n\nThese tests should be deliberately hostile to timing assumptions.\n\n======================================================================",
+      "mechanism": "Per-field observation chronology and immutable capture; compatible publications do not abort reads; contradictory critical facts reject batch; newer measurements keep their actual clocks.",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_newer_measurement_during_read_does_not_starve_topology_or_get_overwritten",
+        "tests/test_systemic_arbitration_currentness.py::test_complete_read_survives_compatible_interleaved_native_publication"
+      ],
+      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BK",
+      "accepted_case": "Automatic Thermal ON; actual switch OFF then actual Reset button press must remain OFF.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BL",
+      "accepted_case": "Explicit Thermal OFF then Reset and authoritative refresh/listener must remain OFF.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BM",
+      "accepted_case": "Delayed pre-OFF entity/restore callback after Reset cannot re-enable Thermal.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BN",
+      "accepted_case": "Stale pre-OFF RestoreEntity ON result and entity re-add cannot overwrite newer explicit OFF.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BO",
+      "accepted_case": "Explicit OFF \u2192 Reset \u2192 coordinator refresh \u2192 state write, without restart: OFF throughout.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BP",
+      "accepted_case": "Explicit OFF \u2192 HA restart: durable OFF restored without session authority.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_restart_restores_latest_explicit_gate_state_without_session"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BQ",
+      "accepted_case": "Explicit ON \u2192 HA restart: desired ON restored only through existing fresh-authoritative startup gates.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_restart_restores_latest_explicit_gate_state_without_session",
+        "tests/test_home_assistant_thermal_automatic_runtime.py::test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_frame",
+        "tests/test_persistent_gate_and_external_credit.py::test_restored_on_uses_actual_runtime_fresh_epoch_gate_without_delivery"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BR",
+      "accepted_case": "Reset with desired ON and no operator OFF preserves desired ON.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_reset_preserves_explicit_on_and_never_calls_enable"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BS",
+      "accepted_case": "Reset completion does not directly call set_enabled(True).",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_reset_preserves_explicit_on_and_never_calls_enable"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BT",
+      "accepted_case": "Newest explicit intent outranks stale bootstrap state; Reset is not intent; restart and config reload preserve last durable choice.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_config_reload_operator_intent_handover_beats_opposite_restore",
+        "tests/test_persistent_gate_and_external_credit.py::test_real_reset_preserves_explicit_body_autonomy_off",
+        "tests/test_persistent_gate_and_external_credit.py::test_real_reset_still_clears_transient_body_session_cancellation",
+        "tests/test_persistent_gate_and_external_credit.py::test_reload_explicit_on_does_not_admit_cached_pre_off_checkpoint"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BU",
+      "accepted_case": "Manual Pool at 2600 earns qualifying credit without BODY shutdown ownership.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BV",
+      "accepted_case": "Manual Pool with Solar physically active at 2600 continues credit and retains external provenance.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BW",
+      "accepted_case": "Manual Pool/Solar for one hour advances credit according to actual RPM policy.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BX",
+      "accepted_case": "Partial external Solar runtime decreases debt only by qualifying credited time.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BY",
+      "accepted_case": "External circulation satisfying the obligation suppresses an unnecessary later TOU start.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BZ",
+      "accepted_case": "External circulation ends with debt remaining; debt persists and later TOU can acquire a fresh generation.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CA",
+      "accepted_case": "Nonqualifying external Pool RPM earns no credit.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CB",
+      "accepted_case": "Spa route or incompatible simultaneous Pool/Spa activity cannot earn Pool filtration credit.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CC",
+      "accepted_case": "Manual Solar2600 without owned PUMP is not a PoolOS convergence fault.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CD",
+      "accepted_case": "Independent legitimate filtration opportunity may prospectively govern/adopt only its reviewed scope; manual origin remains distinct.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_filtration_automatic_execution.py::test_external_pool_body_can_receive_pump_only_filtration_governance"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CE",
+      "accepted_case": "Independent Solar opportunity on an external Pool uses prospective adoption, not a fabricated historical activation.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_thermal_automatic_execution.py::test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CF",
+      "accepted_case": "Prospective adoption creates new prospective provenance and does not rewrite manual historical origin.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_thermal_automatic_execution.py::test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body",
+        "tests/test_thermal_automatic_execution.py::test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CG",
+      "accepted_case": "Manual circulation continues earning across coordinator refreshes.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CH",
+      "accepted_case": "Recorded external circulation earns across restart only for history-supported continuity; no unseen gap credit.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_credit_restart_duplicate_and_delayed_intervals_never_double_count",
+        "tests/test_home_assistant_filtration_runtime.py::test_runtime_restore_live_overlap_matches_continuous_provable_timeline"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CI",
+      "accepted_case": "Credit is monotonic and duplicate/older interval callbacks cannot double count.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_credit_restart_duplicate_and_delayed_intervals_never_double_count"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CJ",
+      "accepted_case": "Higher-priority thermal scheduling does not suppress qualifying physical circulation accounting.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_home_assistant_filtration_runtime.py::test_pool_solar_circulation_is_crediting_not_deferred"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    }
+  ]
+}

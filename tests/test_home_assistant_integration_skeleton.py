@@ -152,8 +152,13 @@ def test_grid_outage_safety_switch_persists_explicit_operator_enablement() -> No
     )
     block = source[start:end]
 
-    assert "RestoreEntity, SwitchEntity" in block
-    assert "async_get_last_state()" in block
+    assert "PoolOSGridOutagePhysicalSafetySwitch(_PersistentIntentSwitch)" in block
+    bootstrap = source.split("class _PersistentIntentSwitch", 1)[1].split("\nclass ", 1)[0]
+    assert "RestoreEntity, SwitchEntity" in bootstrap
+    assert "await super().async_added_to_hass()" in bootstrap
+    assert "async_get_last_state()" in bootstrap
+    assert "await self._async_restore_candidate()" in block
+    assert "if not accepted:" in block
     assert 'previous.state == "on"' in block
     assert "set_enabled(True)" in block
     assert "set_enabled(False)" in block

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 import asyncio
 import contextlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from enum import Enum
 import json
@@ -62,6 +63,7 @@ from pyintellicenter.exceptions import ICConnectionError, ICTimeoutError
 from poolos.integration.connection_lifecycle import async_quiesce_connection_handler
 
 from poolos.evidence_chronology import evidence_precedes_authority
+from poolos.native_arbitration_evidence import NativeArbitrationEvidence
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
     NativeBodyState,
@@ -129,6 +131,17 @@ _ARBITRATION_REQUIRED_FIELDS = {
     "PMPCIRC": frozenset({"CIRCUIT", "SELECT", PARENT_ATTR, "SPEED"}),
     PUMP_TYPE: frozenset({STATUS_ATTR, RPM_ATTR}),
     BODY_TYPE: frozenset({STATUS_ATTR, HEATER_ATTR, HTMODE_ATTR}),
+    CIRCUIT_TYPE: frozenset({STATUS_ATTR}),
+    SYSTEM_TYPE: frozenset({SERVICE_ATTR}),
+}
+_ARBITRATION_IDENTITY_FIELDS = frozenset({
+    "CIRCUIT", "SELECT", PARENT_ATTR, SUBTYP_ATTR, SNAME_ATTR, "USE",
+})
+_ARBITRATION_CONFLICT_FIELDS = {
+    BODY_TYPE: frozenset({STATUS_ATTR, HEATER_ATTR, HTMODE_ATTR}),
+    PUMP_TYPE: frozenset({STATUS_ATTR, RPM_ATTR, GPM_ATTR, MIN_ATTR, MAX_ATTR,
+                          _MINF_ATTR, _MAXF_ATTR}),
+    "PMPCIRC": _ARBITRATION_REQUIRED_FIELDS["PMPCIRC"],
     CIRCUIT_TYPE: frozenset({STATUS_ATTR}),
     SYSTEM_TYPE: frozenset({SERVICE_ATTR}),
 }
@@ -331,6 +344,7 @@ class _ReadOnlyModelController(ICModelController):
         *,
         generation_is_current: Callable[[], bool],
         observed_at: datetime,
+        read_prepared: Callable[[dict[str, dict[str, set[str]]]], None] | None = None,
     ) -> None:
         """Actively re-read native evidence required by an owned pump session.
 
@@ -352,6 +366,11 @@ class _ReadOnlyModelController(ICModelController):
             for kind, keys in _ARBITRATION_READ_REQUESTS
         }
         updates: list[dict[str, Any]] = []
+        original = {obj.objnam: {**dict(obj.properties), SUBTYP_ATTR: obj.subtype}
+                    for kind, _keys in _ARBITRATION_READ_REQUESTS
+                    for obj in self.model.get_by_type(kind)}
+        if read_prepared is not None:
+            read_prepared(expected)
         for kind, keys in _ARBITRATION_READ_REQUESTS:
             if not generation_is_current():
                 return
@@ -384,8 +403,28 @@ class _ReadOnlyModelController(ICModelController):
                     key not in params or params[key] is None for key in required
                 ):
                     raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_READ_INCOMPLETE")
-            updates.extend(object_list)
+            updates.extend({**entry, "params": dict(entry["params"])} for entry in object_list)
         if generation_is_current():
+            # Validate every returned field before applying any. A compatible
+            # notification is not a reason to starve sibling evidence. A newer
+            # contradictory fact must never be overwritten by this earlier read.
+            for entry in updates:
+                obj = self.model[entry["objnam"]]
+                for name, value in tuple(entry["params"].items()):
+                    origin = original[entry["objnam"]].get(name)
+                    if name in _ARBITRATION_IDENTITY_FIELDS and origin is not None and value != origin:
+                        raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_IDENTITY_CHANGED")
+                    current = obj.subtype if name == SUBTYP_ATTR else obj[name]
+                    newer = (self._evidence_admission is not None and
+                             not self._evidence_admission(entry["objnam"], name, observed_at))
+                    changed = current != original[entry["objnam"]].get(name)
+                    if (newer or changed) and current != value:
+                        if name in _ARBITRATION_CONFLICT_FIELDS.get(obj.objtype, frozenset()):
+                            raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_INTERVENING_CONTRADICTION")
+                        # Measurement/policy callbacks do not invalidate safe
+                        # topology. Keep their actually received newer value
+                        # and timestamp; never apply or redate the older reply.
+                        entry["params"].pop(name)
             # Publish only once, from the transport after the complete batch.
             # This synchronous section cannot hide an unrelated notification.
             callback = self._updated_callback
@@ -578,6 +617,10 @@ class IndependentIntelliCenterReadOnlyTransport:
         self._inventory_observed_at: datetime | None = None
         self._running = False
         self._arbitration_read_lock = asyncio.Lock()
+        self._arbitration_read_id = 0
+        self._arbitration_evidence: NativeArbitrationEvidence | None = None
+        self._last_successful_arbitration_evidence: NativeArbitrationEvidence | None = None
+        self._last_failed_arbitration_evidence: NativeArbitrationEvidence | None = None
         self._body_metadata_refresh_pending: set[str] = set()
         self._body_metadata_refresh_dirty: set[str] = set()
         self._body_metadata_refresh_applying: set[str] = set()
@@ -682,24 +725,42 @@ class IndependentIntelliCenterReadOnlyTransport:
             return False
         generation = self._discovery_generation
         read_started_at = datetime.now(UTC)
-        originating_snapshot = self._latest_snapshot
+        identity = self._arbitration_topology_identity()
+        self._arbitration_read_id += 1
+        self._arbitration_evidence = NativeArbitrationEvidence(
+            self._arbitration_read_id, generation, read_started_at, None, (), identity,
+        )
 
         def read_is_current() -> bool:
-            return self._refresh_generation_is_current(generation) and self._latest_snapshot is originating_snapshot
+            return (self._refresh_generation_is_current(generation)
+                    and self._arbitration_topology_identity() == identity)
+
+        def prepared(expected: dict[str, dict[str, set[str]]]) -> None:
+            assert self._arbitration_evidence is not None
+            self._arbitration_evidence = replace(self._arbitration_evidence,
+                required_fields=tuple(sorted((native_id, tuple(sorted(fields)))
+                    for objects in expected.values() for native_id, fields in objects.items())))
 
         try:
             await self._controller.refresh_arbitration_evidence(
                 generation_is_current=read_is_current,
                 observed_at=read_started_at,
+                read_prepared=prepared,
             )
+        except asyncio.CancelledError:
+            self._finish_arbitration_read("ARBITRATION_NATIVE_READ_CANCELLED")
+            raise
         except (ICConnectionError, ICTimeoutError, NativeIntelliCenterReadError) as exc:
             self._last_error_code = (
                 exc.reason_code if isinstance(exc, NativeIntelliCenterReadError)
                 else type(exc).__name__.upper()
             )
+            self._finish_arbitration_read(self._last_error_code)
             return False
         if not read_is_current():
+            self._finish_arbitration_read("ARBITRATION_NATIVE_GENERATION_OR_TOPOLOGY_CHANGED")
             return False
+        self._finish_arbitration_read(None)
         # A cleanup batch uses the conservative start-of-read boundary. A
         # command or new entitlement created while queries are in flight cannot
         # be verified by an earlier reply merely because the batch finished later.
@@ -713,6 +774,23 @@ class IndependentIntelliCenterReadOnlyTransport:
         )
         self._notify_snapshot_updated()
         return True
+
+    def _arbitration_topology_identity(self) -> tuple[tuple[str, str, str, str], ...]:
+        return tuple(sorted((str(obj.objnam), str(obj.objtype),
+                             str(obj.subtype), json.dumps(
+                                 {key: (obj.subtype if key == SUBTYP_ATTR else obj[key])
+                                  for key in sorted(_ARBITRATION_IDENTITY_FIELDS)},
+                                 sort_keys=True, default=str)) for obj in self._model))
+
+    def _finish_arbitration_read(self, failure: str | None) -> None:
+        assert self._arbitration_evidence is not None
+        self._arbitration_evidence = replace(self._arbitration_evidence,
+            completed_at=datetime.now(UTC), failure_reason=failure)
+        self._last_error_code = failure
+        if failure is None:
+            self._last_successful_arbitration_evidence = self._arbitration_evidence
+        else:
+            self._last_failed_arbitration_evidence = self._arbitration_evidence
 
     def read_snapshot(self) -> NativeIntelliCenterTransportSnapshot:
         """Return the latest immutable snapshot through the existing read contract."""
@@ -752,6 +830,14 @@ class IndependentIntelliCenterReadOnlyTransport:
         return MappingProxyType(
             {
                 "state": self._state.value,
+                "arbitration_evidence": (None if self._arbitration_evidence is None
+                                         else self._arbitration_evidence.diagnostics()),
+                "last_successful_arbitration_read": (
+                    None if self._last_successful_arbitration_evidence is None
+                    else self._last_successful_arbitration_evidence.diagnostics()),
+                "last_failed_arbitration_read": (
+                    None if self._last_failed_arbitration_evidence is None
+                    else self._last_failed_arbitration_evidence.diagnostics()),
                 "selected_transport": self._transport_name,
                 "connected": self.connected,
                 "controller_name": getattr(system_info, "prop_name", None),
@@ -1077,6 +1163,7 @@ class IndependentIntelliCenterReadOnlyTransport:
             ),
             inventory_completeness=self._inventory_completeness,
             inventory_observed_at=self._inventory_observed_at,
+            arbitration_evidence=self._arbitration_evidence,
             discovery_generation=self._discovery_generation,
             bodies=tuple(
                 item

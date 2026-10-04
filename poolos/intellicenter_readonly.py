@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Protocol
 
 from .pump_operating_target import PumpOperatingTarget, PumpTargetUnit
+from .native_arbitration_evidence import NativeArbitrationEvidence
 from .observations import (
     ObservationQuality,
     ObservationSourceKind,
@@ -266,6 +267,7 @@ class NativeIntelliCenterTransportSnapshot:
     raw_inventory: tuple[NativeRawObject, ...] = ()
     inventory_observed_at: datetime | None = None
     discovery_generation: int = 0
+    arbitration_evidence: NativeArbitrationEvidence | None = None
 
     def __post_init__(self) -> None:
         if not self.source_id.strip():

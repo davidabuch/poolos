@@ -136,6 +136,8 @@ class PoolOSRuntimeData:
     lifecycle: PoolOSIntegrationLifecycle = field(
         default_factory=PoolOSIntegrationLifecycle, init=False
     )
+    persistent_gate_intents: dict[str, bool] = field(default_factory=dict, init=False)
+    restored_gate_intents: set[str] = field(default_factory=set, init=False)
     coordinator: PoolOSCoordinator
     loaded_at: str
     manual_intellicenter: ManualIntelliCenterControl | None
@@ -605,6 +607,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         )
 
     thermal_runtime.set_probe_continuity_provider(probe_continuity)
+    prior_operator_intents = dict(getattr(
+        getattr(entry, "runtime_data", None), "persistent_gate_intents", {}
+    ))
     entry.runtime_data = PoolOSRuntimeData(
         coordinator=coordinator,
         loaded_at=datetime.now(UTC).isoformat(),
@@ -624,6 +629,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         pump_operating_baselines=pump_baselines,
         pump_speed_session=pump_speed_session,
     )
+    entry.runtime_data.persistent_gate_intents.update(prior_operator_intents)
     entry.async_on_unload(
         hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STOP,
