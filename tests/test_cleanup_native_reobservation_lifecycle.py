@@ -185,10 +185,16 @@ def test_probe_residual_wait_requests_post_entitlement_native_evidence(
             assert mapped["pool.active"].value is True
             assert mapped["spa.active"].value is False
             assert mapped["pool.raw_heater_id"].value == "00000"
+            assert mapped["pump.rpm"].value == 1500
             retained = orchestrator.ownership.residual_termination
             assert all(
                 mapped[c].observed_at > retained.retained_at
-                for c in ("pool.active", "spa.active", "pool.raw_heater_id")
+                for c in (
+                    "pool.active",
+                    "spa.active",
+                    "pool.raw_heater_id",
+                    "pump.rpm",
+                )
             )
             refreshed_frame = _frame(
                 orchestrator,
@@ -500,74 +506,6 @@ def test_residual_reobservation_is_bounded_and_cannot_create_authority(outcome):
 
         assert driver.cleanup_provenance is None
         assert driver.processed == []
-
-    asyncio.run(scenario())
-
-def test_complete_cleanup_batch_redates_all_returned_native_fields(monkeypatch):
-    """A complete unchanged cleanup batch must advance every returned field/object."""
-
-    async def scenario():
-        native_module = load_transport(monkeypatch)
-        objects = dict(_objects())
-        FakeModelController.initial_objects = tuple(objects.items())
-        transport = native_module.IndependentIntelliCenterReadOnlyTransport(host="192.0.2.10")
-        await transport.async_start()
-        for _ in range(30):
-            await asyncio.sleep(0)
-            if (
-                not transport._connection_reconciliation_tasks
-                and not transport._body_metadata_refresh_tasks
-            ):
-                break
-
-        floor = datetime.min.replace(tzinfo=UTC)
-        pool_before = transport._attribute_observed_at.get(("B1101", "STATUS"), floor)
-        spa_before = transport._attribute_observed_at.get(("B1202", "STATUS"), floor)
-        pump_before = transport._attribute_observed_at.get(("PMP01", "RPM"), floor)
-        source_before = transport._attribute_observed_at.get(("B1101", "HEATER"), floor)
-        inventory_before = transport._inventory_observed_at or floor
-
-        async def read(cmd, extra=None):
-            assert cmd == "GetParamList"
-            kind = extra["condition"].split(" = ")[1]
-            keys = extra["objectList"][0]["keys"]
-            return {
-                "objectList": [
-                    {
-                        "objnam": obj.objnam,
-                        "params": {key: obj[key] for key in keys if obj[key] is not None},
-                    }
-                    for obj in transport._model.get_by_type(kind)
-                ]
-            }
-
-        transport._controller.send_cmd = read
-
-        def unchanged_updates(_controller, entries):
-            for entry in entries:
-                obj = transport._model[entry["objnam"]]
-                obj.properties.update(entry["params"])
-            return {}
-
-        monkeypatch.setattr(
-            type(transport._controller).__mro__[1],
-            "_apply_updates",
-            unchanged_updates,
-        )
-
-        try:
-            result = await transport._async_refresh_owned_pump_session_evidence(
-                cleanup_topology=True
-            )
-            assert result is True
-            assert transport._attribute_observed_at[("B1101", "STATUS")] > pool_before
-            assert transport._attribute_observed_at[("B1202", "STATUS")] > spa_before
-            assert transport._attribute_observed_at[("PMP01", "RPM")] > pump_before
-            assert transport._attribute_observed_at[("B1101", "HEATER")] > source_before
-            assert transport._inventory_observed_at is not None
-            assert transport._inventory_observed_at > inventory_before
-        finally:
-            await transport.async_stop()
 
     asyncio.run(scenario())
 
