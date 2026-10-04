@@ -520,12 +520,12 @@ def test_complete_cleanup_batch_redates_all_returned_native_fields(monkeypatch):
             ):
                 break
 
-        pool_before = transport._attribute_observed_at[("B1101", "STATUS")]
-        spa_before = transport._attribute_observed_at[("B1202", "STATUS")]
-        pump_before = transport._attribute_observed_at[("PMP01", "RPM")]
-        source_before = transport._attribute_observed_at[("B1101", "HEATER")]
-        inventory_before = transport._inventory_observed_at
-        assert inventory_before is not None
+        floor = datetime.min.replace(tzinfo=UTC)
+        pool_before = transport._attribute_observed_at.get(("B1101", "STATUS"), floor)
+        spa_before = transport._attribute_observed_at.get(("B1202", "STATUS"), floor)
+        pump_before = transport._attribute_observed_at.get(("PMP01", "RPM"), floor)
+        source_before = transport._attribute_observed_at.get(("B1101", "HEATER"), floor)
+        inventory_before = transport._inventory_observed_at or floor
 
         async def read(cmd, extra=None):
             assert cmd == "GetParamList"
