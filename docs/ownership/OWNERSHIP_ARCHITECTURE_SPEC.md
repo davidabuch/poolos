@@ -373,3 +373,26 @@ Each scenario requires deterministic assertions for authority, provenance,
 command ledger, recovery and physical endpoint as applicable. Test positive intent
 and identical telemetry without it separately. Existing green tests and a populated
 matrix are not contract compliance or physical commissioning.
+
+## Persistent gate intent and observational accounting
+
+RestoreEntity state is bootstrap input, not a later operator command. Within an
+entry lifetime, the newest explicit ON/OFF service wins over pending restore or
+re-add callbacks. Config reload carries explicit intent into a fresh runtime;
+HA process restart uses the last durably published HA state. RestoreEntity remains
+the persistence owner. Restoring desired ON does not restore execution permission
+or ownership: existing fresh-authoritative and checkpoint gates still apply.
+Reset changes authority/session generations and reviewed restraints, never the
+desired Automatic Thermal/Filtration/Live or Safety gate. An explicitly disabled
+quarantine remains disabled until an explicit ON request.
+
+Filtration accounting is independent of BODY/PUMP/THERMAL ownership and thermal
+scheduling priority. Present, GOOD, fresh Pool/Spa route facts and qualifying
+actual RPM can earn credit during external/manual Solar. Native facts are checked
+per field against the shared native steady freshness contract; an unrelated stale
+temperature sharing a BODY source ID cannot poison current BODY activity. The
+existing reconciliation cadence supplies complete native rereads for physically
+circulating external sessions even without an automatic command owner. Reads and
+credit grant no adoption, shutdown authority or historical receipt. Higher-priority
+deferral still governs scheduling when qualifying circulation is absent. Durable
+history reconstruction remains monotonic and does not credit unobserved gaps.

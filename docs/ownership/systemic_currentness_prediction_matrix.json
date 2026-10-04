@@ -1,6 +1,6 @@
 {
   "baseline": "dc67ad4b8fdf769287a5b83e7b4bfda965ad5953",
-  "scope": "A-BJ recovery matrix; not a claim of all 90 ownership scenarios or physical commissioning",
+  "scope": "A-CJ recovery matrix (88 cases); not a claim of all 90 ownership scenarios or physical commissioning",
   "cases": [
     {
       "id": "A",
@@ -443,9 +443,10 @@
       "accepted_case": "Reset must NOT silently re-enable a runtime switch the operator deliberately disabled for quarantine unless that behavior is explicitly part of the commissioned desired-state contract and clearly observable.\n\nReview current semantics carefully.",
       "mechanism": "Reset authority epoch invalidates stale work without changing durable policy/debt or fabricating restraint; explicitly disabled Thermal gate remains disabled.",
       "regressions": [
-        "tests/test_systemic_arbitration_currentness.py::test_reset_authority_reopen_preserves_quarantined_thermal_gate"
+        "tests/test_systemic_arbitration_currentness.py::test_reset_authority_reopen_preserves_quarantined_thermal_gate",
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
       ],
-      "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+      "coverage": "Internal authority boundary plus actual HA switch/button/restore regressions; physical callback context remains unproven."
     },
     {
       "id": "AU",
@@ -602,6 +603,251 @@
         "tests/test_systemic_arbitration_currentness.py::test_complete_read_survives_compatible_interleaved_native_publication"
       ],
       "coverage": "deterministic mechanisms and lifecycle assertions; physical timing remains unproven"
+    },
+    {
+      "id": "BK",
+      "accepted_case": "Automatic Thermal ON; actual switch OFF then actual Reset button press must remain OFF.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BL",
+      "accepted_case": "Explicit Thermal OFF then Reset and authoritative refresh/listener must remain OFF.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BM",
+      "accepted_case": "Delayed pre-OFF entity/restore callback after Reset cannot re-enable Thermal.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BN",
+      "accepted_case": "Stale pre-OFF RestoreEntity ON result and entity re-add cannot overwrite newer explicit OFF.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BO",
+      "accepted_case": "Explicit OFF \u2192 Reset \u2192 coordinator refresh \u2192 state write, without restart: OFF throughout.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BP",
+      "accepted_case": "Explicit OFF \u2192 HA restart: durable OFF restored without session authority.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_restart_restores_latest_explicit_gate_state_without_session"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BQ",
+      "accepted_case": "Explicit ON \u2192 HA restart: desired ON restored only through existing fresh-authoritative startup gates.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_restart_restores_latest_explicit_gate_state_without_session",
+        "tests/test_home_assistant_thermal_automatic_runtime.py::test_disabled_runtime_never_schedules_and_enable_does_not_replay_cached_frame",
+        "tests/test_persistent_gate_and_external_credit.py::test_restored_on_uses_actual_runtime_fresh_epoch_gate_without_delivery"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BR",
+      "accepted_case": "Reset with desired ON and no operator OFF preserves desired ON.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_reset_preserves_explicit_on_and_never_calls_enable"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BS",
+      "accepted_case": "Reset completion does not directly call set_enabled(True).",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_reset_preserves_explicit_on_and_never_calls_enable"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BT",
+      "accepted_case": "Newest explicit intent outranks stale bootstrap state; Reset is not intent; restart and config reload preserve last durable choice.",
+      "mechanism": "Explicit service intent and once-per-runtime bootstrap admission; operator-only entry intent handover on reload; RestoreEntity durability and unchanged fresh-authoritative enable gates; Reset changes authority only.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_config_reload_operator_intent_handover_beats_opposite_restore",
+        "tests/test_persistent_gate_and_external_credit.py::test_real_reset_preserves_explicit_body_autonomy_off",
+        "tests/test_persistent_gate_and_external_credit.py::test_real_reset_still_clears_transient_body_session_cancellation",
+        "tests/test_persistent_gate_and_external_credit.py::test_reload_explicit_on_does_not_admit_cached_pre_off_checkpoint"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BU",
+      "accepted_case": "Manual Pool at 2600 earns qualifying credit without BODY shutdown ownership.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BV",
+      "accepted_case": "Manual Pool with Solar physically active at 2600 continues credit and retains external provenance.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BW",
+      "accepted_case": "Manual Pool/Solar for one hour advances credit according to actual RPM policy.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BX",
+      "accepted_case": "Partial external Solar runtime decreases debt only by qualifying credited time.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BY",
+      "accepted_case": "External circulation satisfying the obligation suppresses an unnecessary later TOU start.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "BZ",
+      "accepted_case": "External circulation ends with debt remaining; debt persists and later TOU can acquire a fresh generation.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CA",
+      "accepted_case": "Nonqualifying external Pool RPM earns no credit.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CB",
+      "accepted_case": "Spa route or incompatible simultaneous Pool/Spa activity cannot earn Pool filtration credit.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CC",
+      "accepted_case": "Manual Solar2600 without owned PUMP is not a PoolOS convergence fault.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CD",
+      "accepted_case": "Independent legitimate filtration opportunity may prospectively govern/adopt only its reviewed scope; manual origin remains distinct.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_filtration_automatic_execution.py::test_external_pool_body_can_receive_pump_only_filtration_governance"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CE",
+      "accepted_case": "Independent Solar opportunity on an external Pool uses prospective adoption, not a fabricated historical activation.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_thermal_automatic_execution.py::test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CF",
+      "accepted_case": "Prospective adoption creates new prospective provenance and does not rewrite manual historical origin.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_thermal_automatic_execution.py::test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_body",
+        "tests/test_thermal_automatic_execution.py::test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CG",
+      "accepted_case": "Manual circulation continues earning across coordinator refreshes.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CH",
+      "accepted_case": "Recorded external circulation earns across restart only for history-supported continuity; no unseen gap credit.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_credit_restart_duplicate_and_delayed_intervals_never_double_count",
+        "tests/test_home_assistant_filtration_runtime.py::test_runtime_restore_live_overlap_matches_continuous_provable_timeline"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CI",
+      "accepted_case": "Credit is monotonic and duplicate/older interval callbacks cannot double count.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_credit_restart_duplicate_and_delayed_intervals_never_double_count"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
+    },
+    {
+      "id": "CJ",
+      "accepted_case": "Higher-priority thermal scheduling does not suppress qualifying physical circulation accounting.",
+      "mechanism": "Owner-independent canonical ledger; exact critical field quality/native freshness; shared complete read on existing reconciliation cadence for external circulation; oldest-first monotonic accounting; existing prospective adoption separate from credit.",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_circulation_credit_is_physical_route_and_rpm_not_owner",
+        "tests/test_home_assistant_filtration_runtime.py::test_pool_solar_circulation_is_crediting_not_deferred"
+      ],
+      "coverage": "Executable HA entity/button/native boundary and ledger regressions; exact live caller/packet sequence and physical commissioning remain unproven."
     }
   ]
 }

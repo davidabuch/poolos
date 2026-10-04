@@ -294,6 +294,10 @@ def _filtration_ordering_harness() -> tuple[ModuleType, Any]:
 
     class Harness(module.PoolOSCoordinator):
         def __init__(self) -> None:
+            # This ledger-ordering harness supplies observations directly and
+            # has no independent native transport to reread. The real-native
+            # external-session regression covers the reconciliation read path.
+            self.native_intellicenter_snapshot = None
             self._unloading = False
             self._observation_lock = asyncio.Lock()
             self._native_intellicenter_refresh_dirty = False

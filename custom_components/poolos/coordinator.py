@@ -246,6 +246,23 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         if self._unloading and self.data is not None:
             return self.data
+        # Physical accounting is independent of automatic command ownership.
+        # A manual Pool/Solar session can have no runtime-owned reread loop;
+        # the existing reconciliation cadence must still obtain genuine current
+        # BODY/pump/route facts. This uses the same serialized six-type contract
+        # and supplies observation evidence only, never adoption or commands.
+        native = self.native_intellicenter_snapshot
+        values = {} if native is None else {
+            item.observation_id: item.value for item in native.observations
+        }
+        rpm = values.get("pump.rpm")
+        circulation_present = (
+            values.get("pool.active") is True
+            or values.get("spa.active") is True
+            or (isinstance(rpm, (int, float)) and not isinstance(rpm, bool) and rpm > 0)
+        )
+        if not self._unloading and circulation_present:
+            await self._async_refresh_native_runtime_evidence()
         async with self._observation_lock:
             if self._unloading and self.data is not None:
                 return self.data

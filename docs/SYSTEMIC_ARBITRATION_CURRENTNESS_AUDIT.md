@@ -270,3 +270,72 @@ concept. Correlate those with raw packet chronology; do not assume a Pentair SLA
 At any failed checkpoint, stop commissioning, preserve read/receipt/generation
 evidence, and use the reviewed operator fallback. No live patch, Reset merely to
 erase evidence, freshness extension, or speculative equipment command follows.
+
+## Independent-review follow-up: persistent intent and external credit
+
+The original internal Reset-gate test missed the HA service/RestoreEntity awaits.
+The new HA-facing regression reproduces this reachable sequence: switch
+`async_added_to_hass()` awaits old ON; actual `async_turn_off()` and Reset button
+`async_press()` complete; old restore calls `thermal_automatic_runtime.set_enabled(True)`.
+Reset itself never calls enable; the only other ON caller is the explicit ON
+service. Recorder state timestamps cannot prove which caller ran live or exclude
+an automation/reload. No HA was accessed to invent that missing context.
+
+One persistent-switch bootstrap mechanism covers Automatic Thermal/Filtration,
+Thermal Live, Grid Safety, Maintenance and Pool/Spa autonomous-control switches.
+RestoreEntity registration/persistence remains. Explicit services record intent
+before gate mutation. Pending restore/re-add cannot overwrite that resolved
+choice. Bootstrap is admitted once per runtime. Config reload carries only
+explicit operator choices, without cached physical checkpoint attributes even
+when the old state bit agrees. A red OFF→ON/reload regression proves that a
+pre-OFF checkpoint cannot be rearmed. Process
+restart still restores durable HA state and desired ON passes existing fresh
+execution gates. Reset does not clear gate intent: it changes authority/session
+state and existing session restraints, not durable policy. This map holds no
+physical state, receipts or ownership. Sibling races were reproduced red for
+filtration/live/grid; paired ON/OFF controls also cover Maintenance and Pool/Spa.
+
+An additional pair of actual Reset regressions was red: Reset directly resumed
+Pool/Spa autonomous-control switches despite persistent operator OFF. The button
+now retains OPERATOR_RESTRAINT/RESTORED policy gates while clearing the existing
+transient manual/native BODY-session sources. Paired controls prove those transient
+cancellations still clear. Reset reduction, debt and safe-baseline proof are unchanged.
+
+Accounting already prioritizes CREDITING when physical routing qualifies, even
+during higher-priority Solar, and requires no command ownership. Do not remove
+`DEFERRED_HIGHER_PRIORITY` to repair missing proof. The native-boundary regression
+instead reproduces frozen credit: manual Pool/Solar2600 and motor callbacks
+continue, unchanged BODY/source facts age, and with execution disabled no owned
+loop rereads them. Existing coordinator reconciliation now requests the same
+complete read while circulation is present. No new timer, command loop or
+ownership boundary is added. Failed reads leave old facts old.
+
+Two adversarial qualification tests were also red: native STATUS/temperature may
+share a BODY source ID, so stale temperature poisoned separately current STATUS;
+and GOOD critical facts had no independent timestamp check when aggregate health
+omitted their stale source. Live and replay now check exact field quality/time
+against canonical native steady freshness120s. Unrelated sibling staleness cannot
+poison native proof; stale/future/missing critical fields still reject credit.
+Legacy non-native source-health markers remain required. Diagnostics expose
+unusable credit concepts separately from the RPM factor.
+
+This demonstrates a sufficient software cause for full RPM factor/no credit.
+The exact live rejected concept needs same-time values/quality/clocks/stale
+sources. HEALTHY is not filtration-specific proof. The tests do not reconstruct
+the recorded packet stream or establish physical commissioning.
+
+Tests cover actual OFF/Reset/post-close refresh/state publication, arbitrarily
+delayed old restore/re-add, durable ON/OFF restart, actual setup intent-handover
+statements on reload, Reset preserving ON without enable, a native manual-Solar
+hour, partial debt, full satisfaction preventing an actual later TOU BODY command,
+and remaining debt permitting fresh TOU acquisition. Route/RPM negatives, exact
+field freshness, shared-source isolation and history/duplicate/older controls are
+command-free. Existing prospective adoption tests preserve historical manual
+origin; credit creates no receipt or shutdown authority. Unseen restart gaps are
+not credited. Source/purpose labels cannot double-count a ledger interval.
+
+Prediction coverage is now A–CJ (88 cases). Original native generation/topology
+fencing, fixed deadlines and PR #442 STOP remain intact. Physical checkpoints add
+Thermal OFF → Reset → delayed refresh/reload → still OFF, and external
+Pool/Solar2600 → advancing credit → satisfied/no later TOU or debt/fresh TOU.
+No live switch, fallback, target or equipment was altered.

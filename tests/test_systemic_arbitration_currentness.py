@@ -503,7 +503,8 @@ def test_prediction_matrix_accounts_for_every_requested_case_and_real_tests():
     ids = [case["id"] for case in matrix["cases"]]
     assert ids == ([chr(n) for n in range(ord("A"), ord("Z") + 1)]
                    + ["A" + chr(n) for n in range(ord("A"), ord("Z") + 1)]
-                   + ["B" + chr(n) for n in range(ord("A"), ord("J") + 1)])
+                   + ["B" + chr(n) for n in range(ord("A"), ord("Z") + 1)]
+                   + ["C" + chr(n) for n in range(ord("A"), ord("J") + 1)])
     for case in matrix["cases"]:
         assert case["accepted_case"] and case["mechanism"] and case["coverage"]
         for ref in case["regressions"]:

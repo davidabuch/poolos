@@ -15,6 +15,7 @@ from poolos.filtration_policy import (
     FiltrationSchedulingMode,
 )
 from poolos.observations import ObservationQuality, RecordedObservationEvent
+from poolos.native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
 
@@ -36,6 +37,7 @@ class PoolOSFiltrationRuntime:
     tracker: FiltrationAccountingTracker = field(init=False)
     assessment: FiltrationAccountingSnapshot | None = None
     restore_error: str | None = None
+    credit_evidence_blockers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.tracker = FiltrationAccountingTracker(
@@ -84,6 +86,11 @@ class PoolOSFiltrationRuntime:
         """Apply one immutable authoritative snapshot without any command path."""
 
         observation = _observation_from_snapshot(snapshot)
+        by_id = {item.observation_id: item for item in snapshot.observations}
+        self.credit_evidence_blockers = tuple(
+            concept for concept in ("pool.active", "spa.active", "pump.rpm")
+            if not _usable(by_id.get(concept), set(snapshot.stale_entities), snapshot.generated_at)
+        )
         values = {item.observation_id: item.value for item in snapshot.observations}
         self.assessment = self.tracker.observe(
             observation,
@@ -109,6 +116,7 @@ class PoolOSFiltrationRuntime:
         return {
             **dict(self.assessment.diagnostics()),
             "persistence_source": "authoritative_observation_history",
+            "filtration_credit_evidence_blockers": self.credit_evidence_blockers,
         }
 
 
@@ -149,9 +157,9 @@ def _filtration_observation(
 ) -> FiltrationObservation:
     circulation_concepts = ("pool.active", "spa.active", "pump.rpm")
     circulation_usable = all(
-        _usable(by_id.get(concept), stale_sources) for concept in circulation_concepts
+        _usable(by_id.get(concept), stale_sources, observed_at) for concept in circulation_concepts
     )
-    temperature_usable = _usable(by_id.get("pool.temperature"), stale_sources)
+    temperature_usable = _usable(by_id.get("pool.temperature"), stale_sources, observed_at)
     return FiltrationObservation(
         observed_at=observed_at,
         pool_active=_boolean(_value(by_id.get("pool.active"))),
@@ -169,17 +177,36 @@ def _value(item: Any) -> Any:
     return getattr(item, "value", None)
 
 
-def _usable(item: Any, stale_sources: set[str]) -> bool:
+def _usable(item: Any, stale_sources: set[str], evaluated_at: datetime) -> bool:
     if item is None:
         return False
     if isinstance(item, Mapping):
         quality = item.get("quality")
         source_id = item.get("source_id")
+        observed_at = item.get("observed_at")
     else:
         quality = getattr(item, "quality", None)
         source_id = getattr(item, "source_id", None)
+        observed_at = getattr(item, "observed_at", None)
+    if isinstance(observed_at, str):
+        try:
+            observed_at = datetime.fromisoformat(observed_at)
+        except ValueError:
+            return False
+    if (
+        not isinstance(observed_at, datetime) or observed_at.utcoffset() is None
+        or not timedelta(0) <= evaluated_at - observed_at <= NATIVE_STEADY_STATE_FRESHNESS.max_age
+    ):
+        return False
     quality_value = getattr(quality, "value", quality)
-    return quality_value == ObservationQuality.GOOD.value and source_id not in stale_sources
+    # Native STATUS and temperature may share one BODY source ID. A stale
+    # temperature cannot invalidate a separately current STATUS; the exact
+    # field timestamp/quality above is authoritative. Legacy source-health
+    # markers remain required for non-native observations and history.
+    native = isinstance(source_id, str) and source_id.startswith("intellicenter_native:")
+    return quality_value == ObservationQuality.GOOD.value and (
+        native or source_id not in stale_sources
+    )
 
 
 def _boolean(value: Any) -> bool | None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 from homeassistant.components.switch import SwitchEntity
@@ -255,7 +256,62 @@ class PoolOSNativeIntelliCenterSolarSwitch(
         }
 
 
-class PoolOSThermalLiveExecutionSwitch(RestoreEntity, SwitchEntity):
+class _PersistentIntentSwitch(RestoreEntity, SwitchEntity):
+    """Restore once per entry lifetime; explicit services supersede old awaits.
+
+    RestoreEntity remains the durable owner across restart/reload. This entry's
+    intent map only fences bootstrap/re-add callbacks within the current lifetime;
+    it stores no equipment state, command provenance or ownership.
+    """
+
+    def _intent_map(self) -> dict[str, bool]:
+        intents = getattr(self._runtime, "persistent_gate_intents", None)
+        if intents is None:
+            # Lightweight callers may not construct PoolOSRuntimeData.
+            intents = {}
+            self._runtime.persistent_gate_intents = intents
+        return intents
+
+    def _note_operator_intent(self, enabled: bool) -> None:
+        self._intent_map()[self._attr_unique_id] = enabled
+        self._resolved_intents().add(self._attr_unique_id)
+
+    def _resolved_intents(self) -> set[str]:
+        resolved = getattr(self._runtime, "restored_gate_intents", None)
+        if resolved is None:
+            resolved = set()
+            self._runtime.restored_gate_intents = resolved
+        return resolved
+
+    async def _async_restore_candidate(self) -> tuple[bool, Any]:
+        intents = self._intent_map()
+        # Always register RestoreEntity's durable lifecycle, even if an operator
+        # service won before this entity finished being added.
+        await super().async_added_to_hass()
+        resolved = self._resolved_intents()
+        if (
+            self._attr_unique_id in resolved
+            or getattr(getattr(self._runtime, "coordinator", None), "_unloading", False)
+        ):
+            return False, None
+        previous = await self.async_get_last_state()
+        # A service/re-add may run during either await. It wins even if its
+        # value equals the restored value; bootstrap cannot rearm checkpoints.
+        if self._attr_unique_id in resolved:
+            return False, None
+        if getattr(getattr(self._runtime, "coordinator", None), "_unloading", False):
+            return False, None
+        resolved.add(self._attr_unique_id)
+        if self._attr_unique_id in intents:
+            # Config-entry reload carries explicit services into the new runtime.
+            # Explicit intent supplies policy only, never a cached physical
+            # checkpoint, even when the restored state bit happens to agree.
+            desired = "on" if intents[self._attr_unique_id] else "off"
+            previous = SimpleNamespace(state=desired, attributes={})
+        return True, previous
+
+
+class PoolOSThermalLiveExecutionSwitch(_PersistentIntentSwitch):
     """Persist commissioned desired readiness; never restore a live session."""
 
     _attr_has_entity_name = True
@@ -271,13 +327,15 @@ class PoolOSThermalLiveExecutionSwitch(RestoreEntity, SwitchEntity):
         return self._runtime.thermal_runtime.effective_live_enabled
 
     async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
+        accepted, previous = await self._async_restore_candidate()
+        if not accepted:
+            return
         if previous is not None and previous.state == "on":
             self._runtime.thermal_runtime.set_effective_live_enabled(True)
             self._runtime.thermal_automatic_runtime.authority_configuration_changed()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._note_operator_intent(True)
         del kwargs
         self._runtime.thermal_runtime.set_effective_live_enabled(True)
         automatic = getattr(self._runtime, "thermal_automatic_runtime", None)
@@ -285,6 +343,7 @@ class PoolOSThermalLiveExecutionSwitch(RestoreEntity, SwitchEntity):
             automatic.authority_configuration_changed()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.thermal_runtime.set_effective_live_enabled(False)
         automatic = getattr(self._runtime, "thermal_automatic_runtime", None)
@@ -310,7 +369,7 @@ class PoolOSThermalLiveExecutionSwitch(RestoreEntity, SwitchEntity):
         }
 
 
-class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
+class PoolOSThermalAutomaticExecutionSwitch(_PersistentIntentSwitch):
     """Persist desired automation while runtime ownership always starts empty."""
 
     _attr_has_entity_name = True
@@ -326,8 +385,7 @@ class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
         return self._runtime.thermal_automatic_runtime.enabled
 
     async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-
+        accepted, previous = await self._async_restore_candidate()
         # Keep RestoreEntity attributes synchronized with each coordinator
         # publication so the persisted checkpoint reflects the latest
         # authoritative stable lease before a routine HA restart.
@@ -337,7 +395,8 @@ class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
             )
         )
 
-        previous = await self.async_get_last_state()
+        if not accepted:
+            return
         if previous is not None and previous.state == "on":
             payload = previous.attributes.get(
                 "quick_restart_checkpoint"
@@ -362,11 +421,13 @@ class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
             self._runtime.thermal_automatic_runtime.set_enabled(True)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._note_operator_intent(True)
         del kwargs
         self._runtime.thermal_automatic_runtime.set_enabled(True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.thermal_automatic_runtime.set_enabled(False)
         self.async_write_ha_state()
@@ -392,7 +453,7 @@ class PoolOSThermalAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
         }
 
 
-class PoolOSFiltrationAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
+class PoolOSFiltrationAutomaticExecutionSwitch(_PersistentIntentSwitch):
     """Persist desired filtration automation without restoring ownership."""
 
     _attr_has_entity_name = True
@@ -408,18 +469,21 @@ class PoolOSFiltrationAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
         return self._runtime.filtration_automatic_runtime.enabled
 
     async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
+        accepted, previous = await self._async_restore_candidate()
+        if not accepted:
+            return
         if previous is not None and previous.state == "on":
             self._runtime.filtration_automatic_runtime.arm_restart_recovery_adoption()
             self._runtime.filtration_automatic_runtime.set_enabled(True)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._note_operator_intent(True)
         del kwargs
         self._runtime.filtration_automatic_runtime.set_enabled(True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.filtration_automatic_runtime.set_enabled(False)
         self.async_write_ha_state()
@@ -436,7 +500,7 @@ class PoolOSFiltrationAutomaticExecutionSwitch(RestoreEntity, SwitchEntity):
         }
 
 
-class PoolOSGridOutagePhysicalSafetySwitch(RestoreEntity, SwitchEntity):
+class PoolOSGridOutagePhysicalSafetySwitch(_PersistentIntentSwitch):
     """Persist explicit operator enablement for confirmed-outage reductions."""
 
     _attr_has_entity_name = True
@@ -454,8 +518,9 @@ class PoolOSGridOutagePhysicalSafetySwitch(RestoreEntity, SwitchEntity):
     async def async_added_to_hass(self) -> None:
         """Restore only explicit gate intent; never restore outage authority."""
 
-        await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
+        accepted, previous = await self._async_restore_candidate()
+        if not accepted:
+            return
         if previous is not None and previous.state == "on":
             # set_enabled() still requires a fresh authoritative frame after
             # enable, so restart persistence cannot replay stale outage work.
@@ -463,11 +528,13 @@ class PoolOSGridOutagePhysicalSafetySwitch(RestoreEntity, SwitchEntity):
             self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._note_operator_intent(True)
         del kwargs
         self._runtime.grid_outage_safety_runtime.set_enabled(True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.grid_outage_safety_runtime.set_enabled(False)
         self.async_write_ha_state()
@@ -526,7 +593,7 @@ class PoolOSGridOutageFiltrationSatisfiedSimulationSwitch(SwitchEntity):
         }
 
 
-class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
+class PoolOSMaintenanceModeSwitch(_PersistentIntentSwitch):
     """Persistent global deny for every PoolOS physical mutation."""
 
     _attr_name = "PoolOS Maintenance Mode"
@@ -539,8 +606,9 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
     async def async_added_to_hass(self) -> None:
         """Resolve persisted state; authority remains denied until this completes."""
 
-        await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
+        accepted, previous = await self._async_restore_candidate()
+        if not accepted:
+            return
         enabled = previous is not None and previous.state == "on"
         self._runtime.physical_command_authority.resolve_maintenance(enabled)
         pump_session = getattr(self._runtime, "pump_speed_session", None)
@@ -561,6 +629,7 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
         return self._runtime.physical_command_authority.maintenance_mode is not False
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._note_operator_intent(True)
         del kwargs
         self._runtime.physical_command_authority.resolve_maintenance(True)
         pump_session = getattr(self._runtime, "pump_speed_session", None)
@@ -572,6 +641,7 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.physical_command_authority.resolve_maintenance(False)
         pump_session = getattr(self._runtime, "pump_speed_session", None)
@@ -607,7 +677,7 @@ class PoolOSMaintenanceModeSwitch(RestoreEntity, SwitchEntity):
         }
 
 
-class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
+class PoolOSPoolAutonomousControlSwitch(_PersistentIntentSwitch):
     """Persistent human-Off restraint; changing it never commands equipment."""
 
     _attr_name = "PoolOS Autonomous Pool Control"
@@ -620,8 +690,9 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
     async def async_added_to_hass(self) -> None:
         """Restore persistent enablement separately from transient session cancellation."""
 
-        await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
+        accepted, previous = await self._async_restore_candidate()
+        if not accepted:
+            return
         if (
             previous is not None
             and not self._runtime.pool_automatic_control.state.suppressed
@@ -703,6 +774,8 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Explicitly resume future automation without issuing a command."""
 
+        self._note_operator_intent(True)
+
         del kwargs
         self._runtime.pool_automatic_control.resume(resumed_at=datetime.now(UTC))
         self.async_write_ha_state()
@@ -710,6 +783,7 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Proactively restrain future automatic Pool mutations."""
 
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.pool_automatic_control.suppress(
             source=PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
@@ -733,7 +807,7 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
         }
 
 
-class PoolOSSpaAutonomousControlSwitch(RestoreEntity, SwitchEntity):
+class PoolOSSpaAutonomousControlSwitch(_PersistentIntentSwitch):
     """Persistent human-Off restraint scoped only to automatic Spa work."""
 
     _attr_name = "PoolOS Autonomous Hot Tub Control"
@@ -744,8 +818,9 @@ class PoolOSSpaAutonomousControlSwitch(RestoreEntity, SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_autonomous_hot_tub_control"
 
     async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        previous = await self.async_get_last_state()
+        accepted, previous = await self._async_restore_candidate()
+        if not accepted:
+            return
         if (
             previous is not None
             and previous.state == "off"
@@ -796,11 +871,13 @@ class PoolOSSpaAutonomousControlSwitch(RestoreEntity, SwitchEntity):
         return not self._runtime.spa_automatic_control.state.suppressed
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self._note_operator_intent(True)
         del kwargs
         self._runtime.spa_automatic_control.resume(resumed_at=datetime.now(UTC))
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        self._note_operator_intent(False)
         del kwargs
         self._runtime.spa_automatic_control.suppress(
             source=SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
