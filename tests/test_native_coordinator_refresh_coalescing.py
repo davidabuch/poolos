@@ -298,6 +298,7 @@ def _filtration_ordering_harness() -> tuple[ModuleType, Any]:
             # has no independent native transport to reread. The real-native
             # external-session regression covers the reconciliation read path.
             self.native_intellicenter_snapshot = None
+            self.independent_intellicenter_transport = None
             self._unloading = False
             self._observation_lock = asyncio.Lock()
             self._native_intellicenter_refresh_dirty = False
@@ -965,7 +966,8 @@ def test_blocked_durable_persistence_does_not_starve_reconciliation() -> None:
                 self.background_tasks = module.PoolOSBackgroundTasks()
                 self.observe_calls = 0
 
-            def _native_circulation_present(self) -> bool:
+            async def _async_refresh_native_runtime_evidence(self) -> bool:
+                # This durable-I/O isolation harness has no native transport.
                 return False
 
             async def _async_observe(

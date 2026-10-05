@@ -2,7 +2,6 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from functools import partial
 from types import SimpleNamespace
 
 import pytest
@@ -59,8 +58,11 @@ def test_native_pool_target_down_idle_target_up_and_spa_restart_return(monkeypat
 
         transport._controller.send_cmd = read
         coordinator_type = _load_coordinator_module().PoolOSCoordinator
-        coordinator = SimpleNamespace(independent_intellicenter_transport=transport, _unloading=False)
-        coordinator._async_refresh_native_runtime_evidence = partial(coordinator_type._async_refresh_native_runtime_evidence, coordinator)
+        from test_observation_control_liveness_history import coordinator_harness
+        coordinator = coordinator_harness(
+            monkeypatch, transport,
+            NativeIntelliCenterReadAdapter().capture(transport, generated_at=clock[0]), clock,
+        )
         orchestrator = ThermalRuntimeOrchestrator()
         driver = ThermalAutomaticExecutionDriver(orchestrator)
         evaluator = ThermalRuntimeEvaluator()
@@ -75,8 +77,9 @@ def test_native_pool_target_down_idle_target_up_and_spa_restart_return(monkeypat
             clock[0] += timedelta(seconds=15)
             # No NotifyList or invented observation timestamps: unchanged and
             # changed physical values must cross the real batch/adapter boundary.
-            assert await coordinator_type.async_refresh_native_thermal_topology_evidence(coordinator)
-            native = NativeIntelliCenterReadAdapter().capture(transport, generated_at=clock[0])
+            # Exercise the production reconciliation admission at idle too;
+            # an unconditional test-side capture used to mask that missing read.
+            native = await coordinator._async_update_data()
             mapped = {o.observation_id: o for o in native.observations}
             frame = _frame(
                 orchestrator, clock[0],

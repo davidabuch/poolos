@@ -334,3 +334,20 @@ The audit above records red regressions, sibling findings and live evidence limi
 Prediction coverage extends to A–CJ (88 cases). Physical OFF/Reset/delayed callback
 and manual Solar credit commissioning remain required; no HA/equipment action is
 part of this work.
+
+## Historical observation/control-liveness recovery
+
+Current-main v1.0.28 forensic audit is recorded in
+[OBSERVATION_CONTROL_LIVENESS_FORENSIC_RECOVERY.md](OBSERVATION_CONTROL_LIVENESS_FORENSIC_RECOVERY.md).
+PR #339 explicitly records v0.11.87 successful outage commissioning; v0.11.88 is
+its safety-hardened reference, not a proven flawless final-good release. The
+.95–.98 wakeup changes and .104 OBSERVE metadata retirement are distinguished
+from #389's per-field clocks/coherent input replacement.
+
+The new red native/coordinator regressions show the remaining idle liveness gap:
+reconciliation skipped native reads at OFF/0, so topology aged and later new Pool
+acquisition blocked. Existing reconciliation now reads the shared arbitration
+contract while idle too; failures renew nothing. No timer, ownership/adoption,
+Safety rule or command path is added. The strengthened native lifecycle test
+uses this production entrypoint instead of unconditional test-side read capture.
+The30-class historical matrix retains explicit software/physical evidence limits.

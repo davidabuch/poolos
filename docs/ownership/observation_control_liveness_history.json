@@ -1,0 +1,462 @@
+{
+  "baseline": "6329d0bfcbcf733d1bf01f336510de998aeb7480",
+  "historical_reference": "99d5585caaf837ec81a5b6cb5951895cc5d7dedc",
+  "scope": "30 requested historical behavior classes; not 90-scenario conformance or historical physical proof",
+  "releases": [
+    {
+      "release": "v0.11.84",
+      "commit": "54f0a0540df14dac0032318dd3a52b9aa5f5998f",
+      "commits": [
+        "54f0a05 Release PoolOS v0.11.84 (#332)",
+        "7a529dd Complete owned Pool circulation after outage filtration is satisfied (#331)"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 29 ++++++++++++++++++++++++++++-\n 1 file changed, 28 insertions(+), 1 deletion(-)"
+    },
+    {
+      "release": "v0.11.85",
+      "commit": "ecb04159f1f99e45b285fe5b450c17863f08fb8d",
+      "commits": [
+        "ecb0415 Release PoolOS v0.11.85 (#334)",
+        "4be1231 Capture Pool shutdown entitlement before outage preemption (#333)"
+      ],
+      "observation_paths_diff": ""
+    },
+    {
+      "release": "v0.11.86",
+      "commit": "e4f65d6452840212afb249b94d9503adef6c644c",
+      "commits": [
+        "e4f65d6 Release PoolOS v0.11.86 (#336)",
+        "23853b4 Capture outage Pool termination provenance at observation edge (#335)"
+      ],
+      "observation_paths_diff": ""
+    },
+    {
+      "release": "v0.11.87",
+      "commit": "16997a07dda7d05329870eaf3d1a965d66145315",
+      "commits": [
+        "16997a0 Merge pull request #338 from davidabuch/release/v0.11.87",
+        "7aafe57 Use residual Pool BODY termination proof for outage shutdown (#337)"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 13 ++++++-------\n 1 file changed, 6 insertions(+), 7 deletions(-)"
+    },
+    {
+      "release": "v0.11.88",
+      "commit": "99d5585caaf837ec81a5b6cb5951895cc5d7dedc",
+      "commits": [
+        "99d5585 Release PoolOS v0.11.88 (#340)",
+        "430fd0a Persist grid outage safety and enforce global outage pump ceiling (#339)"
+      ],
+      "observation_paths_diff": ""
+    },
+    {
+      "release": "v0.11.89",
+      "commit": "a6a50716c338f64664383399c65c24ce4eacc193",
+      "commits": [
+        "a6a5071 Merge pull request #342 from davidabuch/release/v0.11.89",
+        "a1e9c41 Merge pull request #341 from davidabuch/feat/filtration-scheduling-profiles"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 33 +++++++++++++++++++++++++++++++++\n 1 file changed, 33 insertions(+)"
+    },
+    {
+      "release": "v0.11.90",
+      "commit": "303c3311f26ec44dae675886e60c83f897aa00cf",
+      "commits": [
+        "303c331 Merge pull request #344 from davidabuch/release/v0.11.90",
+        "13eaf1f Merge pull request #343 from davidabuch/fix/conditional-filtration-time-options"
+      ],
+      "observation_paths_diff": ""
+    },
+    {
+      "release": "v0.11.91",
+      "commit": "45709fb27b3073fb699c4c0dd26c6a4c5af6b0f3",
+      "commits": [
+        "45709fb Merge pull request #346 from davidabuch/release/v0.11.91",
+        "9a68f79 Merge pull request #345 from davidabuch/fix/restore-filtration-time-controls"
+      ],
+      "observation_paths_diff": ""
+    },
+    {
+      "release": "v0.11.92",
+      "commit": "d75a5eb14c68fb660ee647975d44fd61ebab9de7",
+      "commits": [
+        "d75a5eb Merge pull request #348 from davidabuch/release/v0.11.92",
+        "77ea888 Merge pull request #347 from davidabuch/feat/settings-panel"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 3 +++\n 1 file changed, 3 insertions(+)"
+    },
+    {
+      "release": "v0.11.93",
+      "commit": "30399d3a78ebb01d7e61f639795e55b770bb82c9",
+      "commits": [
+        "30399d3 Merge pull request #350 from davidabuch/release/v0.11.93",
+        "81b253f Merge pull request #349 from davidabuch/fix/manual-pool-off-session-scope"
+      ],
+      "observation_paths_diff": "poolos/pool_automatic_control_suppression.py | 15 +++++++++++++++\n 1 file changed, 15 insertions(+)"
+    },
+    {
+      "release": "v0.11.94",
+      "commit": "84c7afdc4b148c3ca97f7188ae5a03e53fe41225",
+      "commits": [
+        "84c7afd Merge pull request #352 from davidabuch/release/v0.11.94",
+        "9dfac1d Merge pull request #351 from davidabuch/fix/autonomy-switch-and-ordinary-pump-baseline"
+      ],
+      "observation_paths_diff": "poolos/pool_automatic_control_suppression.py | 5 ++++-\n 1 file changed, 4 insertions(+), 1 deletion(-)"
+    },
+    {
+      "release": "v0.11.95",
+      "commit": "17474724c2c0537ff766df27a7a53f2a2d9844f2",
+      "commits": [
+        "1747472 Merge pull request #354 from davidabuch/release/v0.11.95",
+        "fa728e7 Merge pull request #353 from davidabuch/fix/native-circulation-reevaluation"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py               | 24 ++++++++++++++\n .../poolos/filtration_automatic_runtime.py         | 38 ++++++++++++++++++++--\n 2 files changed, 59 insertions(+), 3 deletions(-)"
+    },
+    {
+      "release": "v0.11.96",
+      "commit": "90d3e19f3e53bad70ac210913cfce7db8a5d0f65",
+      "commits": [
+        "90d3e19 Merge pull request #356 from davidabuch/release/v0.11.96",
+        "16c1d17 Merge pull request #355 from davidabuch/fix/manual-pool-on-new-session-boundary"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 22 ++++++++++++++++++++++\n 1 file changed, 22 insertions(+)"
+    },
+    {
+      "release": "v0.11.97",
+      "commit": "7cad1babef5bfae7f0a96f5a3093566116f37ad0",
+      "commits": [
+        "7cad1ba Merge pull request #358 from davidabuch/release/v0.11.97",
+        "a5ea8ff Merge pull request #357 from davidabuch/fix/native-body-session-boundary"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py         | 40 ++++++++++++---------------\n poolos/pool_automatic_control_suppression.py | 41 ++++++++++++++++++++++++++++\n 2 files changed, 59 insertions(+), 22 deletions(-)"
+    },
+    {
+      "release": "v0.11.98",
+      "commit": "a791c94db17d31bd52747e2e8570b95576a8e11d",
+      "commits": [
+        "a791c94 Merge pull request #360 from davidabuch/release/v0.11.98",
+        "d01e5eb Merge pull request #359 from davidabuch/fix/native-circulation-first-class-execution"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py               | 30 +++------\n .../poolos/filtration_automatic_runtime.py         | 26 +++-----\n poolos/native_circulation_change.py                | 78 ++++++++++++++++++++++\n 3 files changed, 94 insertions(+), 40 deletions(-)"
+    },
+    {
+      "release": "v0.11.99",
+      "commit": "c20e36ea29d8d7adf2365c48456f5899f72953d0",
+      "commits": [
+        "c20e36e Merge pull request #362 from davidabuch/release/v0.11.99",
+        "8048e36 Merge pull request #361 from davidabuch/fix/thermal-chronology-and-diagnostic-cost"
+      ],
+      "observation_paths_diff": ""
+    },
+    {
+      "release": "v0.11.100",
+      "commit": "eb5ea92d6f9abb9b10757eca1e89ac13b0b3eed1",
+      "commits": [
+        "eb5ea92 Merge pull request #371 from davidabuch/release/v0.11.100",
+        "d4415a0 Merge pull request #370 from davidabuch/feature/pump-gpm-settings-exposure",
+        "dba4524 Merge pull request #369 from davidabuch/feature/pump-gpm-thermal-execution",
+        "c11a274 Merge pull request #368 from davidabuch/feature/pump-gpm-automatic-execution",
+        "5bd1000 Merge pull request #367 from davidabuch/feature/pump-target-ha-composition",
+        "abc03fa Merge pull request #366 from davidabuch/feature/pump-target-session-authority",
+        "4e8e1ef Merge pull request #365 from davidabuch/feature/pump-gpm-physical-gateway",
+        "e5212a3 Merge pull request #364 from davidabuch/feature/pump-gpm-execution",
+        "99d2ad1 Merge pull request #363 from davidabuch/feature/pump-target-rpm-gpm"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py               |   1 +\n .../poolos/filtration_automatic_runtime.py         |  73 ++++++---\n .../poolos/independent_intellicenter.py            |   4 +\n poolos/intellicenter_readonly.py                   | 179 +++++++++++++++------\n 4 files changed, 192 insertions(+), 65 deletions(-)"
+    },
+    {
+      "release": "v0.11.101",
+      "commit": "c4482e9f1d1b7ee99aec8eb1ab08f32262992dc5",
+      "commits": [
+        "c4482e9 Merge pull request #373 from davidabuch/release/v0.11.101",
+        "8751de8 Merge pull request #372 from davidabuch/feature/probe-sanitation-gpm"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 1 +\n 1 file changed, 1 insertion(+)"
+    },
+    {
+      "release": "v0.11.102",
+      "commit": "e823c37f827de4cdc60597ac901ffc1766cd815f",
+      "commits": [
+        "e823c37 Merge pull request #375 from davidabuch/release/v0.11.102",
+        "b70cdc2 Merge pull request #374 from davidabuch/feat/vendor-neutral-pump-capabilities"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 3 +++\n 1 file changed, 3 insertions(+)"
+    },
+    {
+      "release": "v0.11.103",
+      "commit": "d2dc27d97655b6f57a5c3ea1c4e88ad213a97b06",
+      "commits": [
+        "d2dc27d Merge pull request #377 from davidabuch/release/v0.11.103",
+        "3f806fe Merge pull request #376 from davidabuch/feat/commissioned-pump-capabilities"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 77 +++++++++++++++++++++++++++++++++++-\n 1 file changed, 76 insertions(+), 1 deletion(-)"
+    },
+    {
+      "release": "v0.11.104",
+      "commit": "576b0f57db88cf2f6b014b7ed9d145264814eb15",
+      "commits": [
+        "576b0f5 Merge pull request #379 from davidabuch/release/v0.11.104",
+        "e965f7a Merge pull request #378 from davidabuch/chore/v1-runtime-truth-cleanup"
+      ],
+      "observation_paths_diff": "custom_components/poolos/__init__.py | 3 ---\n 1 file changed, 3 deletions(-)"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": 1,
+      "scenario": "Pool OFF to morning Solar acquisition",
+      "regressions": [
+        "tests/test_observation_control_liveness_history.py::test_quiet_idle_then_new_pool_opportunity_acquires_from_fresh_observations",
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 2,
+      "scenario": "1500 RPM temperature probe",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 3,
+      "scenario": "Hot Spa-water flush before trusted Pool temperature",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 4,
+      "scenario": "Probe to active Solar 2900",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_pool_probe_retains_accepted_body_and_pump_during_native_callbacks",
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 5,
+      "scenario": "Solar target satisfied to source Off / Pool Off / pump zero",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 6,
+      "scenario": "Brief Solar disengagement retains lifecycle",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_owned_solar_session_survives_native_solar_active_drop"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 7,
+      "scenario": "Evening Solar loss / successor / deferred debt",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_preempted_session_successor_completes_solar_and_defers_filtration",
+        "tests/test_thermal_automatic_execution.py::test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 8,
+      "scenario": "Target down idle target up",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 9,
+      "scenario": "Filtration Solar filtration transfers",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_verified_filtration_owner_hands_pool_body_to_thermal_without_state_adoption",
+        "tests/test_thermal_automatic_execution.py::test_verified_source_off_then_normalizes_filtration_once_and_later_stops_body"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 10,
+      "scenario": "TOU filtration start",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_solar_credit_then_later_tou_uses_exact_remaining_debt",
+        "tests/test_filtration_automatic_execution.py::test_off_to_filtration_owned_to_off_is_closed_loop_and_provenance_based"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 11,
+      "scenario": "Zero debt verified cleanup",
+      "regressions": [
+        "tests/test_systemic_arbitration_currentness.py::test_filtration_completion_during_native_callbacks_reaches_verified_off"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 12,
+      "scenario": "External Pool physical credit",
+      "regressions": [
+        "tests/test_persistent_gate_and_external_credit.py::test_external_pool_solar_periodic_native_read_keeps_accounting_current"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 13,
+      "scenario": "External Spa session",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_user_hot_tub_session_governs_dynamic_spa_pump_with_body_adoption",
+        "tests/test_thermal_automatic_execution.py::test_restart_does_not_reconstruct_opportunistic_spa_ownership_from_state"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 14,
+      "scenario": "Gas Spa 3000",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_external_hot_tub_already_gas_active_reconciles_directly_to_3000"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 15,
+      "scenario": "Opportunistic Spa",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 16,
+      "scenario": "Pool priority after Spa",
+      "regressions": [
+        "tests/test_native_arbitration_lifecycle.py::test_native_pool_target_down_idle_target_up_and_spa_restart_return"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 17,
+      "scenario": "Operator Pool OFF",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_manual_pool_off_consumes_origin_and_later_external_on_is_never_adopted",
+        "tests/test_filtration_automatic_execution.py::test_new_manual_pool_session_does_not_clear_persistent_operator_restraint"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 18,
+      "scenario": "Operator Spa OFF",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_external_spa_off_preempts_accepted_pump_work_without_retry"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 19,
+      "scenario": "Reset authority and quarantine",
+      "regressions": [
+        "tests/test_reset_recovery_lifecycle.py::test_reset_owned_solar_reduces_then_acquires_fresh_solar_without_restart",
+        "tests/test_persistent_gate_and_external_credit.py::test_operator_off_survives_real_reset_and_post_reset_publication"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 20,
+      "scenario": "Restart idle / new current opportunity",
+      "regressions": [
+        "tests/test_observation_command_chronology.py::test_restart_matching_state_remains_unowned",
+        "tests/test_observation_control_liveness_history.py::test_quiet_idle_then_new_pool_opportunity_acquires_from_fresh_observations"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 21,
+      "scenario": "Restart Pool Solar",
+      "regressions": [
+        "tests/test_home_assistant_thermal_automatic_runtime.py::test_quick_restart_success_restores_circulation_and_is_command_free"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 22,
+      "scenario": "Restart external Spa",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_restart_does_not_reconstruct_opportunistic_spa_ownership_from_state",
+        "tests/test_thermal_runtime_orchestrator.py::test_restart_matching_native_state_never_manufactures_ownership"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 23,
+      "scenario": "Confirmed grid outage",
+      "regressions": [
+        "tests/test_grid_outage_physical_safety.py::test_positive_operator_intent_during_outage_does_not_preempt_safety",
+        "tests/test_grid_outage_physical_safety.py::test_satisfied_filtration_shuts_down_only_poolos_owned_pool"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 24,
+      "scenario": "Grid return fresh authority",
+      "regressions": [
+        "tests/test_grid_outage_physical_safety.py::test_authoritative_grid_return_ends_without_restoration_or_replay"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 25,
+      "scenario": "Delayed reordered telemetry",
+      "regressions": [
+        "tests/test_observation_command_chronology.py::test_old_same_timestamp_frame_cannot_end_newer_accepted_lease",
+        "tests/test_observation_command_chronology.py::test_filtration_preacceptance_observation_cannot_verify_body_on"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 26,
+      "scenario": "Unchanged native facts / quiet idle",
+      "regressions": [
+        "tests/test_observation_control_liveness_history.py::test_idle_reconciliation_restores_historical_evidence_liveness_truthfully",
+        "tests/test_observation_control_liveness_history.py::test_historical_motor_keepalive_clock_was_not_body_observation"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 27,
+      "scenario": "Callback bursts and durable I/O",
+      "regressions": [
+        "tests/test_native_coordinator_refresh_coalescing.py::test_poolos_owned_reconciliation_cadence_survives_event_flood",
+        "tests/test_native_coordinator_refresh_coalescing.py::test_blocked_durable_persistence_does_not_starve_reconciliation"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 28,
+      "scenario": "Priming startup RPM",
+      "regressions": [
+        "tests/test_thermal_automatic_execution.py::test_priming_hold_uses_later_epochs_and_never_chains_delivery",
+        "tests/test_thermal_automatic_execution.py::test_opportunistic_spa_idle_start_preserves_poolos_body_provenance"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 29,
+      "scenario": "Shared hydraulic OFF currentness",
+      "regressions": [
+        "tests/test_observation_control_liveness_history.py::test_idle_reconciliation_restores_historical_evidence_liveness_truthfully",
+        "tests/test_native_arbitration_evidence_contract.py::test_every_lifecycle_requires_one_complete_unchanged_arbitration_batch"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    },
+    {
+      "id": 30,
+      "scenario": "Genuine Waterfall Jets Slide activity",
+      "regressions": [
+        "tests/test_thermal_runtime_orchestrator.py::test_unusable_shared_hydraulic_evidence_fails_closed",
+        "tests/test_observation_command_chronology.py::test_current_topology_loss_still_preempts_owned_manager"
+      ],
+      "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
+    }
+  ]
+}
