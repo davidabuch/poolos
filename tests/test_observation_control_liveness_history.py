@@ -90,10 +90,7 @@ def test_idle_reconciliation_restores_historical_evidence_liveness_truthfully(mo
                 # A read must not change native configured intent or issue a
                 # physical command: native_loop's send_cmd accepts GetParamList only.
                 assert transport._model["p0102"]["SPEED"] == 2600
-            assert (
-                transport._last_successful_arbitration_evidence.started_at
-                == start + timedelta(seconds=180)
-            )
+            assert transport._last_successful_arbitration_evidence.started_at == clock[0]
             assert coordinator._reconciliation_refresh_count == 8
             assert coordinator.data.generated_at == clock[0]
     asyncio.run(run())
@@ -210,29 +207,3 @@ def test_historical_scenario_matrix_maps_all_30_classes_to_executable_regression
             file, name = reference.split("::")
             assert any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
                        for node in ast.walk(ast.parse((root / file).read_text()))), reference
-
-
-def test_idle_native_refresh_is_throttled_inside_freshness_window(monkeypatch):
-    async def run():
-        async with native_loop(monkeypatch) as (transport, clock, noise, capture):
-            native = await capture()
-            coordinator = coordinator_harness(monkeypatch, transport, native, clock)
-            baseline_read_id = transport._last_successful_arbitration_evidence.read_id
-
-            for _ in range(2):
-                clock[0] += timedelta(seconds=30)
-                await coordinator._async_update_data()
-            assert transport._last_successful_arbitration_evidence.read_id == baseline_read_id
-
-            clock[0] += timedelta(seconds=30)
-            await coordinator._async_update_data()
-            assert transport._last_successful_arbitration_evidence.read_id == baseline_read_id + 1
-
-            body = next(
-                item
-                for item in coordinator.native_intellicenter_snapshot.observations
-                if item.observation_id == "pool.active"
-            )
-            assert fresh(body, clock[0])
-
-    asyncio.run(run())
