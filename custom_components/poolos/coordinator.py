@@ -263,7 +263,23 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # restart and the next independent opportunity need the same current
             # topology/source facts as active circulation. The shared read is
             # bounded, generation-fenced and command-free; failure renews nothing.
-            await self._async_refresh_native_runtime_evidence()
+            refreshed = await self._async_refresh_native_runtime_evidence()
+            transport = getattr(
+                self, "independent_intellicenter_transport", None
+            )
+            if (
+                not refreshed
+                and self.data is not None
+                and transport is not None
+                and not transport.connected
+            ):
+                # A disconnected transport has supplied no new authoritative
+                # evidence. Re-publishing the identical unavailable snapshot on
+                # every backstop cadence needlessly wakes every PoolOS entity and
+                # can monopolize Home Assistant's main loop. Keep the last
+                # published snapshot until a real native publication or mapped
+                # external event supplies new evidence.
+                return self.data
         async with self._observation_lock:
             if self._unloading and self.data is not None:
                 return self.data
@@ -308,8 +324,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 self._native_reconciliation_last_attempt_at = attempted_at
                 try:
                     async with asyncio.timeout(pass_timeout_seconds):
+                        previous_snapshot = self.data
                         snapshot = await self._async_update_data()
-                        if not self._unloading:
+                        if (
+                            not self._unloading
+                            and snapshot is not previous_snapshot
+                        ):
                             self.async_set_updated_data(snapshot)
                 except asyncio.CancelledError:
                     raise

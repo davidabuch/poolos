@@ -93,3 +93,57 @@ def test_backstop_diagnostics_are_not_unconditionally_healthy() -> None:
     assert '"periodic_reconciliation_success_count"' in text
     assert '"periodic_reconciliation_failure_count"' in text
     assert '"periodic_reconciliation_last_failure_reason"' in text
+
+
+def test_backstop_does_not_republish_cached_snapshot_on_disconnected_noop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        module = _load_coordinator_module()
+        monkeypatch.setattr(
+            module,
+            "OBSERVATION_UPDATE_INTERVAL",
+            timedelta(milliseconds=5),
+        )
+
+        class Harness(module.PoolOSCoordinator):
+            def __init__(self) -> None:
+                self.hass = _FakeHass()
+                self._unloading = False
+                self._post_start_active = True
+                self._native_reconciliation_task = None
+                self.calls = 0
+                self.publishes = 0
+                self.data = SimpleNamespace(generated_at=datetime.now(UTC))
+                self.independent_intellicenter_transport = SimpleNamespace(
+                    connected=False
+                )
+
+            async def _async_update_data(self) -> object:
+                self.calls += 1
+                return self.data
+
+            def async_set_updated_data(self, snapshot: object) -> None:
+                self.publishes += 1
+                self.data = snapshot
+
+        coordinator = Harness()
+        coordinator._async_start_native_reconciliation_backstop()
+        try:
+            for _ in range(100):
+                await asyncio.sleep(0.001)
+                if coordinator.calls >= 3:
+                    break
+
+            assert coordinator.calls >= 3
+            assert coordinator.publishes == 0
+            assert coordinator._native_reconciliation_success_count >= 3
+        finally:
+            coordinator._unloading = True
+            coordinator._post_start_active = False
+            task = coordinator._native_reconciliation_task
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
