@@ -340,7 +340,6 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
                 self._native_reconciliation_success_count += 1
                 self._native_reconciliation_last_success_at = datetime.now(UTC)
-                self._native_reconciliation_last_failure_reason = None
         finally:
             if self._native_reconciliation_task is current_task:
                 self._native_reconciliation_task = None
