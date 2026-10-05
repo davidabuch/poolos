@@ -114,7 +114,9 @@ def test_setup_uses_runtime_data_and_idle_first_refresh() -> None:
 
 def test_observation_coordinator_performs_no_physical_delivery_itself() -> None:
     source = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
-    assert "update_interval=OBSERVATION_UPDATE_INTERVAL" in source
+    assert "update_interval=None" in source
+    assert "_async_start_native_reconciliation_backstop" in source
+    assert "OBSERVATION_UPDATE_INTERVAL.total_seconds()" in source
     assert "self.hass.states.get" in source
     assert '"observation_enabled": True' in source
     assert '"command_delivery_enabled": False' in source
