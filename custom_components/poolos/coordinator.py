@@ -316,7 +316,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     return
 
                 attempted_at = datetime.now(UTC)
-                self._native_reconciliation_attempt_count += 1
+                self._native_reconciliation_attempt_count = (
+                    getattr(self, "_native_reconciliation_attempt_count", 0) + 1
+                )
                 self._native_reconciliation_last_attempt_at = attempted_at
                 try:
                     async with asyncio.timeout(pass_timeout_seconds):
@@ -327,7 +329,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     raise
                 except Exception as exc:
                     failed_at = datetime.now(UTC)
-                    self._native_reconciliation_failure_count += 1
+                    self._native_reconciliation_failure_count = (
+                        getattr(self, "_native_reconciliation_failure_count", 0) + 1
+                    )
                     self._native_reconciliation_last_failure_at = failed_at
                     self._native_reconciliation_last_failure_reason = (
                         f"{type(exc).__name__}: {exc}"
@@ -338,7 +342,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     )
                     continue
 
-                self._native_reconciliation_success_count += 1
+                self._native_reconciliation_success_count = (
+                    getattr(self, "_native_reconciliation_success_count", 0) + 1
+                )
                 self._native_reconciliation_last_success_at = datetime.now(UTC)
         finally:
             if self._native_reconciliation_task is current_task:
@@ -347,7 +353,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # integration remains active. Unexpected loop exit is recovered
             # without waiting for a config-entry reload.
             if not self._unloading and self._post_start_active:
-                self._native_reconciliation_restart_count += 1
+                self._native_reconciliation_restart_count = (
+                    getattr(self, "_native_reconciliation_restart_count", 0) + 1
+                )
                 self._async_start_native_reconciliation_backstop()
 
     def async_start_independent_intellicenter(self) -> None:
