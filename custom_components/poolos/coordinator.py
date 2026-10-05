@@ -499,10 +499,16 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     "PoolOS external native-change diagnostics failed; "
                     "authoritative publication continues"
                 )
-        # Runtime observers always receive fresh chronology. HA entities only
-        # need a write when their semantic state changed; evidence-only clock
-        # renewal remains internal and must not fan out across every entity.
-        if _publication_changed(previous_native, mapped):
+        # The first native callback establishes HA entity state. After that,
+        # evidence-only timestamp renewal remains internal and must not fan out
+        # across every entity when semantic state is unchanged.
+        first_publication = not getattr(
+            self,
+            "_native_fast_publication_initialized",
+            False,
+        )
+        self._native_fast_publication_initialized = True
+        if first_publication or _publication_changed(previous_native, mapped):
             self.async_update_listeners()
 
     async def _async_native_intellicenter_snapshot_updated(self) -> None:
@@ -520,10 +526,15 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     if self._unloading:
                         return
                     self._event_refresh_count += 1
-                    await self._async_observe(
+                    snapshot = await self._async_observe(
                         observed_at=datetime.now(UTC),
                         trigger="native_intellicenter_update",
                     )
+                    previous_snapshot = getattr(self, "data", None)
+                    if _publication_changed(previous_snapshot, snapshot):
+                        self.async_set_updated_data(snapshot)
+                    else:
+                        self.data = snapshot
         finally:
             self._native_intellicenter_refresh_task = None
 
@@ -731,10 +742,15 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # A queued event may run after a newer native observation; using
             # its historical time would regress stateful accounting.
             timestamp = datetime.now(UTC)
-            await self._async_observe(
+            snapshot = await self._async_observe(
                 observed_at=timestamp,
                 trigger="state_change_event",
             )
+            previous_snapshot = getattr(self, "data", None)
+            if _publication_changed(previous_snapshot, snapshot):
+                self.async_set_updated_data(snapshot)
+            else:
+                self.data = snapshot
 
     async def _async_observe(
         self,
@@ -793,18 +809,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         if self._thermal_runtime_refresh is not None:
             self._thermal_runtime_refresh(snapshot)
 
-        # Publish event-driven authoritative state immediately after it is
-        # built, before commissioning persistence, inventory export, or
-        # recorder I/O. This keeps Control Center state aligned with the
-        # already-published native IntelliCenter truth.
-        #
-        # Periodic reconciliation is excluded because DataUpdateCoordinator
-        # publishes the returned snapshot itself.
-        if trigger in {
-            "state_change_event",
-            "native_intellicenter_update",
-        }:
-            self.async_set_updated_data(snapshot)
+        # Publication is caller-owned. Event and native refresh callers each
+        # publish at most once after this authoritative snapshot is complete;
+        # periodic reconciliation applies the same semantic coalescing rule.
         self._last_observation_trigger = trigger
         self._update_durable_health_confirmation(snapshot, observed_at=observed_at)
         self.shadow_runtime.evaluate(snapshot)
