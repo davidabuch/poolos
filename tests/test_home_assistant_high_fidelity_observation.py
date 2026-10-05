@@ -91,7 +91,7 @@ def test_event_driven_observation_and_periodic_reconciliation_coexist() -> None:
 
 
 def test_expensive_analysis_is_decoupled_from_observation_critical_path() -> None:
-    """Derived history analysis must not block serialized observation cadence."""
+    """Durable I/O and history analysis must not block observation serialization."""
 
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
 
@@ -99,10 +99,16 @@ def test_expensive_analysis_is_decoupled_from_observation_critical_path() -> Non
         "async def _async_observe(",
         1,
     )[1].split(
+        "async def _async_persist_observation(",
+        1,
+    )[0]
+    persist = coordinator.split(
+        "async def _async_persist_observation(",
+        1,
+    )[1].split(
         "def _refresh_native_intellicenter_parity(",
         1,
     )[0]
-
     worker = coordinator.split(
         "async def _async_analysis_worker(",
         1,
@@ -111,14 +117,21 @@ def test_expensive_analysis_is_decoupled_from_observation_critical_path() -> Non
         1,
     )[0]
 
-    # Primary observation still persists significant evidence.
-    assert "self.observation_recorder.record_snapshot" in observe
+    # Authoritative observation publishes immediately and only schedules
+    # non-authoritative persistence through the shutdown-owned task manager.
+    assert "self.background_tasks.create(" in observe
+    assert "self._async_persist_observation(snapshot, observed_at)" in observe
+    assert "await self._async_record_native_parity_commissioning" not in observe
+    assert "self.observation_recorder.record_snapshot" not in observe
 
-    # Expensive derived analysis is only scheduled from the observation path.
-    assert "self._async_schedule_analysis(snapshot.generated_at)" in observe
-    assert "self._infer_and_retro" not in observe
+    # Durable persistence and recorder I/O are isolated from _observation_lock.
+    assert "await self._async_record_native_parity_commissioning" in persist
+    assert "await self._async_export_native_intellicenter_inventory" in persist
+    assert "self.observation_recorder.record_snapshot" in persist
+    assert "self._async_schedule_analysis(snapshot.generated_at)" in persist
 
     # The separate serialized worker owns derived inference/retrospective work.
+    assert "self._infer_and_retro" not in observe
     assert "self._infer_and_retro" in worker
     assert "async_add_executor_job" in worker
 

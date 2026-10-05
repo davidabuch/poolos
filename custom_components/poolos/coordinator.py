@@ -748,6 +748,28 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "native_intellicenter_update",
         }:
             self.async_set_updated_data(snapshot)
+        self._last_observation_trigger = trigger
+        self._update_durable_health_confirmation(snapshot, observed_at=observed_at)
+        self.shadow_runtime.evaluate(snapshot)
+
+        # Durable persistence is intentionally outside the authoritative
+        # observation serialization boundary. A slow filesystem/executor write
+        # must never hold _observation_lock and starve native/event/backstop
+        # reconciliation. PoolOSBackgroundTasks owns cancellation and draining.
+        self.background_tasks.create(
+            self.hass,
+            self._async_persist_observation(snapshot, observed_at),
+            f"PoolOS observation persistence: {trigger}",
+        )
+        return snapshot
+
+    async def _async_persist_observation(
+        self,
+        snapshot: ObservationSnapshot,
+        observed_at: datetime,
+    ) -> None:
+        """Persist non-authoritative observation artifacts off the main lock."""
+
         try:
             await self._async_record_native_parity_commissioning(observed_at)
         except (OSError, TypeError, ValueError):
@@ -760,9 +782,6 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         except (OSError, TypeError, ValueError):
             self.native_inventory_exporter.last_error = "native inventory export failed"
             LOGGER.exception("PoolOS native IntelliCenter inventory export failed")
-        self._last_observation_trigger = trigger
-        self._update_durable_health_confirmation(snapshot, observed_at=observed_at)
-        self.shadow_runtime.evaluate(snapshot)
 
         health = {
             "healthy": snapshot.healthy,
@@ -784,7 +803,6 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         else:
             if wrote:
                 self._async_schedule_analysis(snapshot.generated_at)
-        return snapshot
 
     def _refresh_native_intellicenter_parity(
         self,

@@ -139,9 +139,10 @@ def test_native_failure_is_isolated_and_startup_is_not_an_alarm() -> None:
     assert "native_source_available=native.available" in coordinator
     assert "await self._async_record_native_parity_commissioning(observed_at)" in coordinator
     assert '"native parity commissioning persistence failed"' in coordinator
-    assert coordinator.index("native parity commissioning persistence failed") < coordinator.index(
-        "self.shadow_runtime.evaluate(snapshot)"
+    assert coordinator.index("self.shadow_runtime.evaluate(snapshot)") < coordinator.index(
+        "native parity commissioning persistence failed"
     )
+    assert "async def _async_persist_observation(" in coordinator
 
 
 def test_ha_diagnostics_are_compact_and_dashboard_exposes_summary_and_detail_entities() -> None:
