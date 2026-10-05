@@ -102,6 +102,47 @@ def test_complete_read_can_bootstrap_missing_identity_metadata(monkeypatch):
     asyncio.run(scenario())
 
 
+
+def test_bootstrap_rejects_intervening_unknown_identity_contradiction(monkeypatch):
+    async def scenario():
+        module = _load_module(monkeypatch)
+        objects = arbitration_objects()
+        objects["C0003"].pop("USE", None)
+        FakeModelController.initial_objects = tuple(objects.items())
+        transport = module.IndependentIntelliCenterReadOnlyTransport(host="192.0.2.10")
+        await transport.async_start()
+        for _ in range(40):
+            await asyncio.sleep(0)
+
+        async def read(cmd, extra=None):
+            assert cmd == "GetParamList"
+            kind = extra["condition"].split(" = ")[1]
+            keys = extra["objectList"][0]["keys"]
+            if kind == "PUMP":
+                transport._controller._apply_updates([
+                    {"objnam": "C0003", "params": {"USE": "CALLBACK_VALUE"}}
+                ])
+            response = []
+            for obj in transport._model.get_by_type(kind):
+                params = {key: obj[key] for key in keys if obj[key] is not None}
+                if kind == "CIRCUIT" and obj.objnam == "C0003":
+                    params["USE"] = "READ_VALUE"
+                response.append({"objnam": obj.objnam, "params": params})
+            return {"objectList": response}
+
+        transport._controller.send_cmd = read
+        try:
+            assert not await transport._async_refresh_arbitration_evidence()
+            assert transport._arbitration_evidence is not None
+            assert transport._arbitration_evidence.failure_reason == (
+                "ARBITRATION_NATIVE_IDENTITY_CHANGED"
+            )
+        finally:
+            await transport.async_stop()
+
+    asyncio.run(scenario())
+
+
 def test_bootstrap_does_not_allow_known_identity_contradiction(monkeypatch):
     async def scenario():
         module = _load_module(monkeypatch)
