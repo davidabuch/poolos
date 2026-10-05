@@ -112,6 +112,8 @@ def test_backstop_does_not_republish_cached_snapshot_on_failed_refresh_noop(
                 self._unloading = False
                 self._post_start_active = True
                 self._native_reconciliation_task = None
+                self._observation_lock = asyncio.Lock()
+                self._reconciliation_refresh_count = 0
                 self.calls = 0
                 self.publishes = 0
                 self.data = SimpleNamespace(generated_at=datetime.now(UTC))
