@@ -267,19 +267,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             transport = getattr(
                 self, "independent_intellicenter_transport", None
             )
-            if (
+            self._last_reconciliation_should_publish = not (
                 not refreshed
                 and self.data is not None
                 and transport is not None
-                and not transport.connected
-            ):
-                # A disconnected transport has supplied no new authoritative
-                # evidence. Re-publishing the identical unavailable snapshot on
-                # every backstop cadence needlessly wakes every PoolOS entity and
-                # can monopolize Home Assistant's main loop. Keep the last
-                # published snapshot until a real native publication or mapped
-                # external event supplies new evidence.
-                return self.data
+                and not getattr(transport, "connected", False)
+            )
         async with self._observation_lock:
             if self._unloading and self.data is not None:
                 return self.data
@@ -324,11 +317,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 self._native_reconciliation_last_attempt_at = attempted_at
                 try:
                     async with asyncio.timeout(pass_timeout_seconds):
-                        previous_snapshot = self.data
                         snapshot = await self._async_update_data()
                         if (
                             not self._unloading
-                            and snapshot is not previous_snapshot
+                            and getattr(
+                                self,
+                                "_last_reconciliation_should_publish",
+                                True,
+                            )
                         ):
                             self.async_set_updated_data(snapshot)
                 except asyncio.CancelledError:
