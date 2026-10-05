@@ -93,7 +93,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             hass,
             logger=LOGGER,
             name=f"{DOMAIN}_{entry.entry_id}",
-            update_interval=OBSERVATION_UPDATE_INTERVAL,
+            # PoolOS owns reconciliation cadence explicitly. Event-driven
+            # async_set_updated_data() publications must not be able to postpone
+            # the native evidence backstop indefinitely.
+            update_interval=None,
         )
         self.config_entry = entry
         self.shadow_runtime = HomeAssistantShadowRuntime.create()
@@ -131,6 +134,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_dirty = False
+        self._native_reconciliation_task: asyncio.Task[None] | None = None
         self._post_start_active = False
         self._analysis_task: asyncio.Task[None] | None = None
         self._analysis_dirty = False
@@ -241,27 +245,30 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return await self._async_refresh_native_runtime_evidence()
 
-    async def _async_update_data(self) -> ObservationSnapshot:
-        """Run the periodic reconciliation/backstop observation refresh."""
+    def _native_circulation_present(self) -> bool:
+        """Return whether native evidence shows a body/pump circulation session."""
 
-        if self._unloading and self.data is not None:
-            return self.data
-        # Physical accounting is independent of automatic command ownership.
-        # A manual Pool/Solar session can have no runtime-owned reread loop;
-        # the existing reconciliation cadence must still obtain genuine current
-        # BODY/pump/route facts. This uses the same serialized six-type contract
-        # and supplies observation evidence only, never adoption or commands.
         native = self.native_intellicenter_snapshot
         values = {} if native is None else {
             item.observation_id: item.value for item in native.observations
         }
         rpm = values.get("pump.rpm")
-        circulation_present = (
+        return (
             values.get("pool.active") is True
             or values.get("spa.active") is True
-            or (isinstance(rpm, (int, float)) and not isinstance(rpm, bool) and rpm > 0)
+            or (
+                isinstance(rpm, (int, float))
+                and not isinstance(rpm, bool)
+                and rpm > 0
+            )
         )
-        if not self._unloading and circulation_present:
+
+    async def _async_update_data(self) -> ObservationSnapshot:
+        """Run one reconciliation/backstop observation refresh."""
+
+        if self._unloading and self.data is not None:
+            return self.data
+        if not self._unloading and self._native_circulation_present():
             await self._async_refresh_native_runtime_evidence()
         async with self._observation_lock:
             if self._unloading and self.data is not None:
@@ -271,6 +278,33 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 observed_at=datetime.now(UTC),
                 trigger="periodic_reconciliation",
             )
+
+    def _async_start_native_reconciliation_backstop(self) -> None:
+        """Start a PoolOS-owned cadence immune to event-publication rescheduling."""
+
+        if self._unloading or not self._post_start_active:
+            return
+        task = self._native_reconciliation_task
+        if task is not None and not task.done():
+            return
+        self._native_reconciliation_task = self.hass.async_create_task(
+            self._async_native_reconciliation_backstop_loop(),
+            "PoolOS native reconciliation backstop",
+        )
+
+    async def _async_native_reconciliation_backstop_loop(self) -> None:
+        """Refresh native evidence on a fixed cadence until lifecycle quiescence."""
+
+        try:
+            while not self._unloading and self._post_start_active:
+                await asyncio.sleep(OBSERVATION_UPDATE_INTERVAL.total_seconds())
+                if self._unloading or not self._post_start_active:
+                    return
+                snapshot = await self._async_update_data()
+                if not self._unloading:
+                    self.async_set_updated_data(snapshot)
+        finally:
+            self._native_reconciliation_task = None
 
     def async_start_independent_intellicenter(self) -> None:
         """Start the independent shadow connection without blocking HA setup."""
@@ -501,6 +535,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._post_start_active = True
         self.async_start_event_observation()
         self.async_start_independent_intellicenter()
+        self._async_start_native_reconciliation_backstop()
 
         if self._native_intellicenter_refresh_dirty:
             self._publish_latest_native_intellicenter_snapshot()
@@ -543,6 +578,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self.background_tasks.prepare_stop()
         self._post_start_active = False
         self._native_intellicenter_refresh_dirty = False
+        reconciliation_task = self._native_reconciliation_task
+        self._native_reconciliation_task = None
+        if reconciliation_task is not None and not reconciliation_task.done():
+            reconciliation_task.cancel()
         self._analysis_dirty = False
         self._native_snapshot_observer = None
         self._filtration_runtime_refresh = None
