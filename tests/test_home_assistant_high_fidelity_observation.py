@@ -85,7 +85,9 @@ def test_event_driven_observation_and_periodic_reconciliation_coexist() -> None:
     assert "self.async_start_event_observation()" in coordinator
     assert "entry.async_on_unload(coordinator.async_stop_event_observation)" in setup
     assert '"event_driven_observation_enabled"' in coordinator
-    assert '"periodic_reconciliation_enabled": True' in coordinator
+    assert '"periodic_reconciliation_configured": True' in coordinator
+    assert '"periodic_reconciliation_task_running"' in coordinator
+    assert '"periodic_reconciliation_enabled": bool(' in coordinator
 
 
 def test_expensive_analysis_is_decoupled_from_observation_critical_path() -> None:

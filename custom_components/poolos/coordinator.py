@@ -135,6 +135,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_dirty = False
         self._native_reconciliation_task: asyncio.Task[None] | None = None
+        self._native_reconciliation_attempt_count = 0
+        self._native_reconciliation_success_count = 0
+        self._native_reconciliation_failure_count = 0
+        self._native_reconciliation_restart_count = 0
+        self._native_reconciliation_last_attempt_at: datetime | None = None
+        self._native_reconciliation_last_success_at: datetime | None = None
+        self._native_reconciliation_last_failure_at: datetime | None = None
+        self._native_reconciliation_last_failure_reason: str | None = None
         self._post_start_active = False
         self._analysis_task: asyncio.Task[None] | None = None
         self._analysis_dirty = False
@@ -293,18 +301,62 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         )
 
     async def _async_native_reconciliation_backstop_loop(self) -> None:
-        """Refresh native evidence on a fixed cadence until lifecycle quiescence."""
+        """Refresh native evidence on a fixed, bounded, self-healing cadence."""
 
+        interval_seconds = OBSERVATION_UPDATE_INTERVAL.total_seconds()
+        # A canonical native batch is expected to complete well inside one
+        # cadence. Give it a full extra cadence before treating the pass as
+        # wedged so one stalled transport/read cannot kill reconciliation.
+        pass_timeout_seconds = max(0.001, interval_seconds * 2)
+        current_task = asyncio.current_task()
         try:
             while not self._unloading and self._post_start_active:
-                await asyncio.sleep(OBSERVATION_UPDATE_INTERVAL.total_seconds())
+                await asyncio.sleep(interval_seconds)
                 if self._unloading or not self._post_start_active:
                     return
-                snapshot = await self._async_update_data()
-                if not self._unloading:
-                    self.async_set_updated_data(snapshot)
+
+                attempted_at = datetime.now(UTC)
+                self._native_reconciliation_attempt_count = (
+                    getattr(self, "_native_reconciliation_attempt_count", 0) + 1
+                )
+                self._native_reconciliation_last_attempt_at = attempted_at
+                try:
+                    async with asyncio.timeout(pass_timeout_seconds):
+                        snapshot = await self._async_update_data()
+                        if not self._unloading:
+                            self.async_set_updated_data(snapshot)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    failed_at = datetime.now(UTC)
+                    self._native_reconciliation_failure_count = (
+                        getattr(self, "_native_reconciliation_failure_count", 0) + 1
+                    )
+                    self._native_reconciliation_last_failure_at = failed_at
+                    self._native_reconciliation_last_failure_reason = (
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    LOGGER.exception(
+                        "PoolOS native reconciliation backstop pass failed; "
+                        "continuing fixed cadence"
+                    )
+                    continue
+
+                self._native_reconciliation_success_count = (
+                    getattr(self, "_native_reconciliation_success_count", 0) + 1
+                )
+                self._native_reconciliation_last_success_at = datetime.now(UTC)
         finally:
-            self._native_reconciliation_task = None
+            if self._native_reconciliation_task is current_task:
+                self._native_reconciliation_task = None
+            # A long-lived backstop must not disappear silently while the
+            # integration remains active. Unexpected loop exit is recovered
+            # without waiting for a config-entry reload.
+            if not self._unloading and self._post_start_active:
+                self._native_reconciliation_restart_count = (
+                    getattr(self, "_native_reconciliation_restart_count", 0) + 1
+                )
+                self._async_start_native_reconciliation_backstop()
 
     def async_start_independent_intellicenter(self) -> None:
         """Start the independent shadow connection without blocking HA setup."""
@@ -1289,7 +1341,39 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             "lifecycle": "loaded",
             "observation_enabled": True,
             "event_driven_observation_enabled": self._remove_state_listener is not None,
-            "periodic_reconciliation_enabled": True,
+            "periodic_reconciliation_configured": True,
+            "periodic_reconciliation_enabled": bool(
+                self._native_reconciliation_task is not None
+                and not self._native_reconciliation_task.done()
+                and self._post_start_active
+                and not self._unloading
+            ),
+            "periodic_reconciliation_task_running": bool(
+                self._native_reconciliation_task is not None
+                and not self._native_reconciliation_task.done()
+            ),
+            "periodic_reconciliation_attempt_count": self._native_reconciliation_attempt_count,
+            "periodic_reconciliation_success_count": self._native_reconciliation_success_count,
+            "periodic_reconciliation_failure_count": self._native_reconciliation_failure_count,
+            "periodic_reconciliation_restart_count": self._native_reconciliation_restart_count,
+            "periodic_reconciliation_last_attempt_at": (
+                None
+                if self._native_reconciliation_last_attempt_at is None
+                else self._native_reconciliation_last_attempt_at.isoformat()
+            ),
+            "periodic_reconciliation_last_success_at": (
+                None
+                if self._native_reconciliation_last_success_at is None
+                else self._native_reconciliation_last_success_at.isoformat()
+            ),
+            "periodic_reconciliation_last_failure_at": (
+                None
+                if self._native_reconciliation_last_failure_at is None
+                else self._native_reconciliation_last_failure_at.isoformat()
+            ),
+            "periodic_reconciliation_last_failure_reason": (
+                self._native_reconciliation_last_failure_reason
+            ),
             "event_refresh_count": self._event_refresh_count,
             "reconciliation_refresh_count": self._reconciliation_refresh_count,
             "last_observation_trigger": self._last_observation_trigger,
