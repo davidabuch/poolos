@@ -948,3 +948,64 @@ def test_poolos_owned_reconciliation_cadence_survives_event_flood():
                 await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_blocked_durable_persistence_does_not_starve_reconciliation() -> None:
+    async def scenario() -> None:
+        module = _load_coordinator_module()
+        blocked = asyncio.Event()
+
+        class Harness(module.PoolOSCoordinator):
+            def __init__(self) -> None:
+                self.hass = _FakeHass()
+                self._unloading = False
+                self.data = None
+                self._observation_lock = asyncio.Lock()
+                self._reconciliation_refresh_count = 0
+                self.background_tasks = module.PoolOSBackgroundTasks()
+                self.observe_calls = 0
+
+            def _native_circulation_present(self) -> bool:
+                return False
+
+            async def _async_observe(
+                self,
+                *,
+                observed_at: datetime,
+                trigger: str,
+            ) -> object:
+                del trigger
+                self.observe_calls += 1
+
+                async def persist_forever() -> None:
+                    await blocked.wait()
+
+                self.background_tasks.create(
+                    self.hass,
+                    persist_forever(),
+                    "blocked observation persistence",
+                )
+                return SimpleNamespace(generated_at=observed_at)
+
+        coordinator = Harness()
+        async with coordinator._observation_lock:
+            await coordinator._async_observe(
+                observed_at=datetime.now(UTC),
+                trigger="native_intellicenter_update",
+            )
+
+        # Persistence is still blocked, but it no longer owns observation_lock.
+        assert coordinator.background_tasks._tasks
+        snapshot = await asyncio.wait_for(
+            coordinator._async_update_data(),
+            timeout=0.05,
+        )
+        assert snapshot is not None
+        assert coordinator._reconciliation_refresh_count == 1
+        assert coordinator.observe_calls == 2
+
+        coordinator.background_tasks.prepare_stop()
+        await coordinator.background_tasks.async_stop()
+        assert not coordinator.background_tasks._tasks
+
+    asyncio.run(scenario())
