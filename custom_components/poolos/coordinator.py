@@ -311,22 +311,12 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # topology/source facts as active circulation. The shared read is
             # bounded, generation-fenced and command-free; failure renews nothing.
             refreshed = await self._async_refresh_native_runtime_evidence()
-            transport = getattr(
-                self, "independent_intellicenter_transport", None
-            )
-            if (
-                not refreshed
-                and self.data is not None
-                and transport is not None
-                and not transport.connected
-            ):
-                # A disconnected transport has supplied no new authoritative
-                # evidence. Re-publishing the identical unavailable snapshot on
-                # every backstop cadence needlessly wakes every PoolOS entity and
-                # can monopolize Home Assistant's main loop. Keep the last
-                # published snapshot until a real native publication or mapped
-                # external event supplies new evidence.
-                return self.data
+            # Preserve periodic accounting/health evaluation even when the
+            # canonical read fails, but remember whether this pass actually
+            # acquired fresh native evidence. The backstop uses this admission
+            # bit to prevent a failed read from fanning stale state out across
+            # every Home Assistant entity.
+            self._last_reconciliation_native_refresh_succeeded = refreshed
         async with self._observation_lock:
             if self._unloading and self.data is not None:
                 return self.data
@@ -375,11 +365,22 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                         snapshot = await self._async_update_data()
                         if self._unloading:
                             continue
-                        if _publication_changed(previous_snapshot, snapshot):
+                        fresh_native_evidence = getattr(
+                            self,
+                            "_last_reconciliation_native_refresh_succeeded",
+                            True,
+                        )
+                        if (
+                            (previous_snapshot is None or fresh_native_evidence)
+                            and _publication_changed(previous_snapshot, snapshot)
+                        ):
                             self.async_set_updated_data(snapshot)
                         else:
-                            # Preserve current evidence chronology for runtime
-                            # consumers without waking every HA entity.
+                            # A failed canonical read must not fan stale state
+                            # out across every HA entity. Preserve internal
+                            # accounting/health chronology without waking
+                            # listeners; native callbacks and mapped external
+                            # events retain their independent publication paths.
                             self.data = snapshot
                 except asyncio.CancelledError:
                     raise
