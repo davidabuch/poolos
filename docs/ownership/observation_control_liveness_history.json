@@ -290,7 +290,11 @@
       "id": 11,
       "scenario": "Zero debt verified cleanup",
       "regressions": [
-        "tests/test_systemic_arbitration_currentness.py::test_filtration_completion_during_native_callbacks_reaches_verified_off"
+        "tests/test_systemic_arbitration_currentness.py::test_filtration_completion_during_native_callbacks_reaches_verified_off",
+        "tests/test_filtration_completion_lifecycle.py::test_real_tou_accounting_off_start_debt_zero_shutdown_idle_and_new_need",
+        "tests/test_filtration_completion_lifecycle.py::test_suspended_body_off_keeps_completion_provenance_until_pump_zero",
+        "tests/test_filtration_completion_lifecycle.py::test_partial_shutdown_then_old_on_callback_cannot_become_pump_only_acquisition",
+        "tests/test_filtration_completion_lifecycle.py::test_completed_shutdown_rejects_delayed_on_facts_without_pump_reacquisition"
       ],
       "evidence": "deterministic mechanism/lifecycle coverage; real timing and physical outcome require commissioning"
     },

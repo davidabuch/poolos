@@ -17,7 +17,7 @@ from typing import Mapping, Protocol
 from .clock import FixedClock
 from .evidence_chronology import EvidenceAdmission, accepted_command_boundary, admit_evidence
 from .external_change import ExternalChangeBatch, POOL_CIRCULATION_TAKEOVER_CONCEPTS
-from .filtration_policy import FiltrationAccountingSnapshot
+from .filtration_policy import FiltrationAccountingSnapshot, FiltrationDisposition
 from .hal import CommandReceipt
 from .integration import (
     PoolOperation,
@@ -205,6 +205,7 @@ class FiltrationAutomaticExecutionDriver:
         repr=False,
     )
     _unloaded: bool = field(default=False, init=False, repr=False)
+    _completed_body_observed_at: datetime | None = field(default=None, init=False, repr=False)
 
     @property
     def last_epoch_identity(self) -> str | None:
@@ -419,7 +420,12 @@ class FiltrationAutomaticExecutionDriver:
             # Consume only on the first fully usable recovery decision frame.
             # Incomplete startup evidence leaves recovery armed.
             self._restart_recovery_adoption_armed = False
-        if lease is not None and lease.verified and _transient_evidence_loss(blocker):
+        if (
+            lease is not None
+            and lease.verified
+            and _transient_evidence_loss(blocker)
+            and (self.attempt is None or frame.observed_at < self.attempt.deadline)
+        ):
             self.ownership.suspend_filtration(session_id=lease.session_id)
             return self._publish(
                 FiltrationAutomaticDriverState.SUSPENDED,
@@ -523,7 +529,41 @@ class FiltrationAutomaticExecutionDriver:
             return self._blocked(frame, blocker)
         by_id = {item.observation_id: item for item in frame.observations}
         pool = _live_state(by_id.get("pool.active"), frame.observed_at)
+        independent_filtration = bool(
+            frame.filtration is not None
+            and frame.filtration.independent_disposition is FiltrationDisposition.RUN_NOW
+            and frame.filtration.total_remaining_runtime > timedelta(0)
+            and not frame.thermal_candidate_ready
+            and not frame.thermal_owned
+            and not frame.pump_session_override_current
+            and _plain_pool_circulation(frame)
+        )
+        if (
+            independent_filtration
+            and lease is not None
+            and lease.verified
+            and lease.body_activation is None
+            and lease.body_adoption is None
+            and self.ownership.domain_permission_blocker(OwnershipDomain.PUMP) is None
+        ):
+            assert frame.pool_pump_circuit_id is not None
+            self.session_id = _session_id(frame)
+            self.ownership.adopt_filtration_body(
+                session_id=self.session_id,
+                pool_pump_circuit_id=frame.pool_pump_circuit_id,
+                adopted_at=frame.observed_at,
+                epoch_identity=frame.epoch_identity,
+                reason_code="independent_current_filtration_purpose",
+                predecessor_lease_id=lease.lease_id,
+            )
+            return await self._deliver_pump(frame, delivery_factory)
         if lease is None:
+            if (
+                pool.value is True
+                and self._completed_body_observed_at is not None
+                and not _later(pool.observed_at, self._completed_body_observed_at)
+            ):
+                return self._blocked(frame, "automatic_filtration_completed_body_evidence_regressed")
             if not self.requested_enabled:
                 return self._blocked(frame, "automatic_filtration_driver_disabled")
             if pool.value is True:
@@ -534,17 +574,20 @@ class FiltrationAutomaticExecutionDriver:
                     )
                 assert frame.pool_pump_circuit_id is not None
                 self.session_id = _session_id(frame)
-                if restart_recovery_adoption:
+                if restart_recovery_adoption or independent_filtration:
                     self.ownership.adopt_filtration_body(
                         session_id=self.session_id,
                         pool_pump_circuit_id=frame.pool_pump_circuit_id,
                         adopted_at=frame.observed_at,
                         epoch_identity=frame.epoch_identity,
-                        reason_code="restart_recovery_current_filtration_purpose",
+                        reason_code=(
+                            "restart_recovery_current_filtration_purpose"
+                            if restart_recovery_adoption
+                            else "independent_current_filtration_purpose"
+                        ),
                     )
-                # An externally activated Pool may still have an independently
-                # justified ordinary-filtration PUMP purpose. Establish only
-                # exact PUMP provenance here; never manufacture BODY ownership.
+                # Plain circulation without an independent debt purpose remains
+                # PUMP-only. Adoption above is prospective, never a BODY receipt.
                 return await self._deliver_pump(frame, delivery_factory)
             self.session_id = _session_id(frame)
             return await self._deliver(
@@ -650,12 +693,13 @@ class FiltrationAutomaticExecutionDriver:
 
         by_id = {item.observation_id: item for item in frame.observations}
         pool = _live_state(by_id.get("pool.active"), frame.observed_at)
+        if self.attempt is not None and self.attempt.step is FiltrationExecutionStep.BODY_OFF:
+            # Recovery must pass through the same receipt-bound OFF/zero verifier
+            # as uninterrupted execution. Pool OFF alone cannot consume completion.
+            return None
         if pool.value is False:
-            if (
-                self.attempt is not None
-                and self.attempt.step is FiltrationExecutionStep.BODY_OFF
-                and not _later(pool.observed_at, self.attempt.delivered_at)
-            ):
+            actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+            if not actual.usable or type(actual.value) not in {int, float} or actual.value != 0:
                 return self._publish(
                     FiltrationAutomaticDriverState.SUSPENDED,
                     at=frame.observed_at,
@@ -787,9 +831,11 @@ class FiltrationAutomaticExecutionDriver:
                     and abs(float(actual.value) - operation.rpm) <= self.pump_rpm_tolerance
                     and _later(actual.observed_at, attempt.delivered_at)
                 )
-        if verified:
+        if verified and frame.observed_at <= attempt.deadline:
             self.attempt = None
             if attempt.step is FiltrationExecutionStep.BODY_OFF:
+                assert pool.observed_at is not None and actual.observed_at is not None
+                self._completed_body_observed_at = max(pool.observed_at, actual.observed_at)
                 assert self.session_id is not None
                 self.ownership.release_filtration(session_id=self.session_id)
                 self.session_id = None
@@ -1535,6 +1581,12 @@ def _ordinary_pool_circulation_requires_baseline(
         or frame.pump_session_effective_rpm is not None
     ):
         return False
+    return _plain_pool_circulation(frame)
+
+
+def _plain_pool_circulation(frame: FiltrationAutomaticExecutionFrame) -> bool:
+    """Fresh, exclusive, source-free Pool routing; never ownership evidence."""
+
     by_id = {item.observation_id: item for item in frame.observations}
     required = {
         "pool.active": True,

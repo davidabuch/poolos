@@ -351,3 +351,22 @@ contract while idle too; failures renew nothing. No timer, ownership/adoption,
 Safety rule or command path is added. The strengthened native lifecycle test
 uses this production entrypoint instead of unconditional test-side read capture.
 The30-class historical matrix retains explicit software/physical evidence limits.
+
+## Filtration debt-zero completion recovery
+
+PR #456 also addresses the independently reproduced debt-zero lifecycle defect;
+see [FILTRATION_COMPLETION_RECOVERY.md](FILTRATION_COMPLETION_RECOVERY.md).
+Interrupted BODY_OFF verification previously released BODY provenance at Pool OFF
+while pump coastdown was nonzero. Reordered pre-OFF ON facts could then acquire
+a zero-debt PUMP-only lease. Recovery now uses the same strict OFF/zero verifier,
+retains the original absolute deadline, rejects late verification, and fences old
+ON facts after verified completion. No freshness interval or observation code is
+changed by this extension.
+
+A fresh independent RUN_NOW/debt purpose may prospectively adopt safe plain Pool
+circulation, including an exact eligible PUMP-only predecessor. It records a new
+generation/adoption time and never invents a BODY activation receipt. Satisfied
+manual circulation retains its existing PUMP-only governance and no BODY shutdown
+authority. The first separately authorized physical release gate is filtration
+from OFF through real debt zero, verified OFF/pump zero, quiet idle, and later new
+need; preserve evidence on failure and do not proceed to Solar/Spa before it passes.
