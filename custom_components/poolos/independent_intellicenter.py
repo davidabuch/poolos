@@ -412,9 +412,16 @@ class _ReadOnlyModelController(ICModelController):
                 obj = self.model[entry["objnam"]]
                 for name, value in tuple(entry["params"].items()):
                     origin = original[entry["objnam"]].get(name)
-                    if name in _ARBITRATION_IDENTITY_FIELDS and origin is not None and value != origin:
-                        raise NativeIntelliCenterReadError("ARBITRATION_NATIVE_IDENTITY_CHANGED")
                     current = obj.subtype if name == SUBTYP_ATTR else obj[name]
+                    if name in _ARBITRATION_IDENTITY_FIELDS:
+                        if origin is not None and value != origin:
+                            raise NativeIntelliCenterReadError(
+                                "ARBITRATION_NATIVE_IDENTITY_CHANGED"
+                            )
+                        if origin is None and current is not None and current != value:
+                            raise NativeIntelliCenterReadError(
+                                "ARBITRATION_NATIVE_IDENTITY_CHANGED"
+                            )
                     newer = (self._evidence_admission is not None and
                              not self._evidence_admission(entry["objnam"], name, observed_at))
                     changed = current != original[entry["objnam"]].get(name)
@@ -762,6 +769,11 @@ class IndependentIntelliCenterReadOnlyTransport:
         if not read_is_current():
             self._finish_arbitration_read("ARBITRATION_NATIVE_GENERATION_OR_TOPOLOGY_CHANGED")
             return False
+        assert self._arbitration_evidence is not None
+        self._arbitration_evidence = replace(
+            self._arbitration_evidence,
+            topology_identity=self._arbitration_topology_identity(),
+        )
         self._finish_arbitration_read(None)
         # A cleanup batch uses the conservative start-of-read boundary. A
         # command or new entitlement created while queries are in flight cannot
