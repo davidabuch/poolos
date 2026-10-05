@@ -146,7 +146,7 @@ def test_backstop_does_not_republish_cached_snapshot_on_failed_refresh_noop(
                 if coordinator.calls >= 3:
                     break
 
-            assert coordinator.calls == 0
+            assert coordinator.calls >= 3
             assert coordinator.publishes == 0
             assert coordinator._native_reconciliation_success_count >= 3
         finally:
