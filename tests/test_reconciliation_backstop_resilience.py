@@ -121,6 +121,7 @@ def test_backstop_does_not_republish_cached_snapshot_on_disconnected_noop(
 
             async def _async_update_data(self) -> object:
                 self.calls += 1
+                self._last_reconciliation_should_publish = False
                 return self.data
 
             def async_set_updated_data(self, snapshot: object) -> None:
