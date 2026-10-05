@@ -32,7 +32,6 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.native_inventory_export import NativeIntelliCenterInventoryExporter
-from poolos.native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from poolos.native_parity_commissioning import (
     NativeParityCommissioningStore,
     NativeParityCommissioningSummary,
@@ -83,6 +82,53 @@ from .independent_intellicenter import (
 from .shadow import HomeAssistantShadowRuntime
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _observation_publication_semantics(snapshot: object | None) -> tuple[object, ...] | None:
+    """Compare state exposed to HA while ignoring evidence-only timestamps."""
+
+    if snapshot is None:
+        return None
+
+    observations = tuple(
+        (
+            item.observation_id,
+            item.value,
+            item.unit,
+            item.truth_level,
+            item.source_kind,
+            item.source_id,
+            item.quality,
+            item.confidence,
+        )
+        for item in sorted(
+            getattr(snapshot, "observations", ()),
+            key=lambda item: item.observation_id,
+        )
+    )
+    status = getattr(snapshot, "status", None)
+    status_value = getattr(status, "value", status)
+    return (
+        status_value,
+        getattr(snapshot, "source_id", None),
+        getattr(snapshot, "failure_reason_code", None),
+        getattr(snapshot, "authoritative_source", None),
+        tuple(getattr(snapshot, "missing_concepts", ())),
+        tuple(getattr(snapshot, "missing_required", ())),
+        tuple(getattr(snapshot, "unavailable_entities", ())),
+        tuple(getattr(snapshot, "stale_entities", ())),
+        observations,
+    )
+
+
+def _publication_changed(previous: object | None, current: object) -> bool:
+    """Return whether HA-visible semantic state changed."""
+
+    return (
+        previous is None
+        or _observation_publication_semantics(previous)
+        != _observation_publication_semantics(current)
+    )
 
 
 class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
@@ -254,66 +300,32 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return await self._async_refresh_native_runtime_evidence()
 
-    def _periodic_native_refresh_due(self, now: datetime) -> bool:
-        """Keep idle evidence fresh without hammering IntelliCenter every 30 seconds."""
-
-        transport = getattr(self, "independent_intellicenter_transport", None)
-        if transport is None or not getattr(transport, "connected", False):
-            return False
-
-        successful = getattr(
-            transport,
-            "_last_successful_arbitration_evidence",
-            None,
-        )
-        failed = getattr(
-            transport,
-            "_last_failed_arbitration_evidence",
-            None,
-        )
-        attempts = [
-            item.started_at
-            for item in (successful, failed)
-            if item is not None
-        ]
-        if attempts:
-            latest_attempt = max(attempts)
-            retry_backoff = NATIVE_STEADY_STATE_FRESHNESS.max_age / 2
-            if now - latest_attempt < retry_backoff:
-                return False
-
-        if successful is None:
-            return True
-
-        refresh_age = NATIVE_STEADY_STATE_FRESHNESS.max_age * 0.75
-        return now - successful.started_at >= refresh_age
-
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run one reconciliation/backstop observation refresh."""
 
         if self._unloading and self.data is not None:
             return self.data
         if not self._unloading:
-            # Observation liveness still applies while quiet/idle, but a full
-            # six-object native arbitration batch every 30 seconds is unnecessary
-            # and can overload a slow IntelliCenter/HA event loop. Refresh only as
-            # existing facts approach their freshness boundary. Lifecycle-owned
-            # verification reads remain unthrottled through their dedicated
-            # entrypoints.
-            now = datetime.now(UTC)
-            if self._periodic_native_refresh_due(now):
-                await self._async_refresh_native_runtime_evidence()
+            # Observation liveness precedes execution ownership. Quiet idle,
+            # restart and the next independent opportunity need the same current
+            # topology/source facts as active circulation. The shared read is
+            # bounded, generation-fenced and command-free; failure renews nothing.
+            refreshed = await self._async_refresh_native_runtime_evidence()
             transport = getattr(
                 self, "independent_intellicenter_transport", None
             )
             if (
-                self.data is not None
+                not refreshed
+                and self.data is not None
                 and transport is not None
-                and not getattr(transport, "connected", False)
+                and not transport.connected
             ):
-                # A disconnected transport supplied no new authoritative
-                # evidence. Keep the last published snapshot until a real native
-                # publication or mapped external event supplies new evidence.
+                # A disconnected transport has supplied no new authoritative
+                # evidence. Re-publishing the identical unavailable snapshot on
+                # every backstop cadence needlessly wakes every PoolOS entity and
+                # can monopolize Home Assistant's main loop. Keep the last
+                # published snapshot until a real native publication or mapped
+                # external event supplies new evidence.
                 return self.data
         async with self._observation_lock:
             if self._unloading and self.data is not None:
@@ -361,11 +373,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     async with asyncio.timeout(pass_timeout_seconds):
                         previous_snapshot = self.data
                         snapshot = await self._async_update_data()
-                        if (
-                            not self._unloading
-                            and snapshot is not previous_snapshot
-                        ):
+                        if self._unloading:
+                            continue
+                        if _publication_changed(previous_snapshot, snapshot):
                             self.async_set_updated_data(snapshot)
+                        else:
+                            # Preserve current evidence chronology for runtime
+                            # consumers without waking every HA entity.
+                            self.data = snapshot
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -469,6 +484,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 "PoolOS fast native IntelliCenter snapshot publication rejected"
             )
             return
+        previous_native = self.native_intellicenter_snapshot
         self.native_intellicenter_snapshot = mapped
         observer = getattr(self, "_native_snapshot_observer", None)
         if observer is not None:
@@ -483,9 +499,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     "PoolOS external native-change diagnostics failed; "
                     "authoritative publication continues"
                 )
-        # The diagnostic boundary above is synchronous and bounded, but its
-        # failure can never suppress the already-mapped authoritative state.
-        self.async_update_listeners()
+        # Runtime observers always receive fresh chronology. HA entities only
+        # need a write when their semantic state changed; evidence-only clock
+        # renewal remains internal and must not fan out across every entity.
+        if _publication_changed(previous_native, mapped):
+            self.async_update_listeners()
 
     async def _async_native_intellicenter_snapshot_updated(self) -> None:
         """Publish the latest native snapshot until no callback remains pending."""
@@ -502,11 +520,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     if self._unloading:
                         return
                     self._event_refresh_count += 1
-                    snapshot = await self._async_observe(
+                    await self._async_observe(
                         observed_at=datetime.now(UTC),
                         trigger="native_intellicenter_update",
                     )
-                    self.async_set_updated_data(snapshot)
         finally:
             self._native_intellicenter_refresh_task = None
 
@@ -714,11 +731,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # A queued event may run after a newer native observation; using
             # its historical time would regress stateful accounting.
             timestamp = datetime.now(UTC)
-            snapshot = await self._async_observe(
+            await self._async_observe(
                 observed_at=timestamp,
                 trigger="state_change_event",
             )
-            self.async_set_updated_data(snapshot)
 
     async def _async_observe(
         self,
