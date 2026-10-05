@@ -1069,7 +1069,7 @@ def test_publication_semantics_ignore_evidence_only_timestamp_churn() -> None:
     assert module._publication_changed(previous, changed_value)
 
 
-def test_event_refresh_callers_do_not_publish_snapshot_twice() -> None:
+def test_event_refresh_publication_has_one_owner_per_path() -> None:
     module = _load_coordinator_module()
     source = open(module.__file__, encoding="utf-8").read()
 
@@ -1078,9 +1078,14 @@ def test_event_refresh_callers_do_not_publish_snapshot_twice() -> None:
     )
     native_end = source.index("def _async_schedule_analysis", native_start)
     native_worker = source[native_start:native_end]
-    assert "self.async_set_updated_data(snapshot)" not in native_worker
+    assert native_worker.count("self.async_set_updated_data(snapshot)") == 1
 
     mapped_start = source.index("async def _async_mapped_state_changed")
     mapped_end = source.index("async def _async_observe", mapped_start)
     mapped_worker = source[mapped_start:mapped_end]
-    assert "self.async_set_updated_data(snapshot)" not in mapped_worker
+    assert mapped_worker.count("self.async_set_updated_data(snapshot)") == 1
+
+    observe_start = source.index("async def _async_observe")
+    observe_end = source.index("async def _async_persist_observation", observe_start)
+    observe = source[observe_start:observe_end]
+    assert "self.async_set_updated_data(snapshot)" not in observe
