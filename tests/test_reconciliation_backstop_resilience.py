@@ -115,6 +115,9 @@ def test_backstop_does_not_republish_cached_snapshot_on_disconnected_noop(
                 self.calls = 0
                 self.publishes = 0
                 self.data = SimpleNamespace(generated_at=datetime.now(UTC))
+                self.independent_intellicenter_transport = SimpleNamespace(
+                    connected=False
+                )
 
             async def _async_update_data(self) -> object:
                 self.calls += 1
