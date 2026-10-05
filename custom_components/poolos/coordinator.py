@@ -32,6 +32,7 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.native_inventory_export import NativeIntelliCenterInventoryExporter
+from poolos.native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 from poolos.native_parity_commissioning import (
     NativeParityCommissioningStore,
     NativeParityCommissioningSummary,
@@ -253,32 +254,66 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return await self._async_refresh_native_runtime_evidence()
 
+    def _periodic_native_refresh_due(self, now: datetime) -> bool:
+        """Keep idle evidence fresh without hammering IntelliCenter every 30 seconds."""
+
+        transport = getattr(self, "independent_intellicenter_transport", None)
+        if transport is None or not getattr(transport, "connected", False):
+            return False
+
+        successful = getattr(
+            transport,
+            "_last_successful_arbitration_evidence",
+            None,
+        )
+        failed = getattr(
+            transport,
+            "_last_failed_arbitration_evidence",
+            None,
+        )
+        attempts = [
+            item.started_at
+            for item in (successful, failed)
+            if item is not None
+        ]
+        if attempts:
+            latest_attempt = max(attempts)
+            retry_backoff = NATIVE_STEADY_STATE_FRESHNESS.max_age / 2
+            if now - latest_attempt < retry_backoff:
+                return False
+
+        if successful is None:
+            return True
+
+        refresh_age = NATIVE_STEADY_STATE_FRESHNESS.max_age * 0.75
+        return now - successful.started_at >= refresh_age
+
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run one reconciliation/backstop observation refresh."""
 
         if self._unloading and self.data is not None:
             return self.data
         if not self._unloading:
-            # Observation liveness precedes execution ownership. Quiet idle,
-            # restart and the next independent opportunity need the same current
-            # topology/source facts as active circulation. The shared read is
-            # bounded, generation-fenced and command-free; failure renews nothing.
-            refreshed = await self._async_refresh_native_runtime_evidence()
+            # Observation liveness still applies while quiet/idle, but a full
+            # six-object native arbitration batch every 30 seconds is unnecessary
+            # and can overload a slow IntelliCenter/HA event loop. Refresh only as
+            # existing facts approach their freshness boundary. Lifecycle-owned
+            # verification reads remain unthrottled through their dedicated
+            # entrypoints.
+            now = datetime.now(UTC)
+            if self._periodic_native_refresh_due(now):
+                await self._async_refresh_native_runtime_evidence()
             transport = getattr(
                 self, "independent_intellicenter_transport", None
             )
             if (
-                not refreshed
-                and self.data is not None
+                self.data is not None
                 and transport is not None
-                and not transport.connected
+                and not getattr(transport, "connected", False)
             ):
-                # A disconnected transport has supplied no new authoritative
-                # evidence. Re-publishing the identical unavailable snapshot on
-                # every backstop cadence needlessly wakes every PoolOS entity and
-                # can monopolize Home Assistant's main loop. Keep the last
-                # published snapshot until a real native publication or mapped
-                # external event supplies new evidence.
+                # A disconnected transport supplied no new authoritative
+                # evidence. Keep the last published snapshot until a real native
+                # publication or mapped external event supplies new evidence.
                 return self.data
         async with self._observation_lock:
             if self._unloading and self.data is not None:
