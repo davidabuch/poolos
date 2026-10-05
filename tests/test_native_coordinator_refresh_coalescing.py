@@ -904,3 +904,47 @@ def test_seeded_internal_refresh_interleavings_preserve_ledger_monotonicity() ->
         assert harness.tracker.current.temporal_regressions_ignored == 0
 
     asyncio.run(exercise())
+
+
+def test_poolos_owned_reconciliation_cadence_survives_event_flood():
+    async def scenario():
+        module = _load_coordinator_module()
+        module.OBSERVATION_UPDATE_INTERVAL = timedelta(milliseconds=5)
+
+        class Harness(module.PoolOSCoordinator):
+            def __init__(self):
+                self.hass = _FakeHass()
+                self._unloading = False
+                self._post_start_active = True
+                self._native_reconciliation_task = None
+                self.calls = 0
+                self.data = None
+
+            async def _async_update_data(self):
+                self.calls += 1
+                return SimpleNamespace(generated_at=datetime.now(UTC))
+
+            def async_set_updated_data(self, snapshot):
+                # Model event-driven publication pressure. The explicit PoolOS
+                # reconciliation task must remain independent of these writes.
+                self.data = snapshot
+
+        coordinator = Harness()
+        coordinator._async_start_native_reconciliation_backstop()
+        try:
+            for _ in range(40):
+                coordinator.async_set_updated_data(
+                    SimpleNamespace(generated_at=datetime.now(UTC))
+                )
+                await asyncio.sleep(0.001)
+            await asyncio.sleep(0.02)
+            assert coordinator.calls >= 3
+        finally:
+            coordinator._unloading = True
+            coordinator._post_start_active = False
+            task = coordinator._native_reconciliation_task
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
