@@ -264,11 +264,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # topology/source facts as active circulation. The shared read is
             # bounded, generation-fenced and command-free; failure renews nothing.
             refreshed = await self._async_refresh_native_runtime_evidence()
-            transport = self.independent_intellicenter_transport
+            transport = getattr(
+                self, "independent_intellicenter_transport", None
+            )
             if (
                 not refreshed
                 and self.data is not None
-                and (transport is None or not transport.connected)
+                and transport is not None
+                and not transport.connected
             ):
                 # A disconnected transport has supplied no new authoritative
                 # evidence. Re-publishing the identical unavailable snapshot on
