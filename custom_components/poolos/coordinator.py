@@ -311,21 +311,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # topology/source facts as active circulation. The shared read is
             # bounded, generation-fenced and command-free; failure renews nothing.
             refreshed = await self._async_refresh_native_runtime_evidence()
-            transport = getattr(
-                self, "independent_intellicenter_transport", None
-            )
-            if (
-                not refreshed
-                and self.data is not None
-                and transport is not None
-                and not transport.connected
-            ):
-                # A disconnected transport has supplied no new authoritative
-                # evidence. Re-publishing the identical unavailable snapshot on
-                # every backstop cadence needlessly wakes every PoolOS entity and
-                # can monopolize Home Assistant's main loop. Keep the last
-                # published snapshot until a real native publication or mapped
-                # external event supplies new evidence.
+            if not refreshed and self.data is not None:
+                # A failed canonical read supplied no new authoritative
+                # evidence, even if the socket still reports connected.
+                # Re-publishing the same snapshot wakes every PoolOS entity and
+                # can monopolize Home Assistant's main loop during transport
+                # timeout storms. Keep the last published snapshot until a
+                # successful native read, native callback, or mapped external
+                # event supplies new evidence.
                 return self.data
         async with self._observation_lock:
             if self._unloading and self.data is not None:
