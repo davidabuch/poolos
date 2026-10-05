@@ -253,30 +253,16 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         return await self._async_refresh_native_runtime_evidence()
 
-    def _native_circulation_present(self) -> bool:
-        """Return whether native evidence shows a body/pump circulation session."""
-
-        native = self.native_intellicenter_snapshot
-        values = {} if native is None else {
-            item.observation_id: item.value for item in native.observations
-        }
-        rpm = values.get("pump.rpm")
-        return (
-            values.get("pool.active") is True
-            or values.get("spa.active") is True
-            or (
-                isinstance(rpm, (int, float))
-                and not isinstance(rpm, bool)
-                and rpm > 0
-            )
-        )
-
     async def _async_update_data(self) -> ObservationSnapshot:
         """Run one reconciliation/backstop observation refresh."""
 
         if self._unloading and self.data is not None:
             return self.data
-        if not self._unloading and self._native_circulation_present():
+        if not self._unloading:
+            # Observation liveness precedes execution ownership. Quiet idle,
+            # restart and the next independent opportunity need the same current
+            # topology/source facts as active circulation. The shared read is
+            # bounded, generation-fenced and command-free; failure renews nothing.
             await self._async_refresh_native_runtime_evidence()
         async with self._observation_lock:
             if self._unloading and self.data is not None:

@@ -305,6 +305,7 @@ class PoolCirculationOwnershipRegistry:
         adopted_at: datetime,
         epoch_identity: str,
         reason_code: str,
+        predecessor_lease_id: str | None = None,
     ) -> FiltrationCirculationLease:
         """Create fresh prospective Body provenance without historical fabrication."""
 
@@ -315,9 +316,24 @@ class PoolCirculationOwnershipRegistry:
             raise ValueError("filtration adoption context must not be empty")
         if not is_pmpcirc_native_id(pool_pump_circuit_id):
             raise ValueError("filtration adoption requires a concrete Pool PMPCIRC")
-        if (
-            self.owner is not PoolCirculationOwner.NONE
-            or self.filtration_lease is not None
+        predecessor = self.filtration_lease
+        prospective_upgrade = bool(
+            predecessor_lease_id is not None
+            and predecessor is not None
+            and predecessor.lease_id == predecessor_lease_id
+            and predecessor.pool_pump_circuit_id == pool_pump_circuit_id
+            and predecessor.session_id != session_id
+            and adopted_at > predecessor.last_confirmed_at
+            and predecessor.verified
+            and predecessor.body_activation is None
+            and predecessor.body_adoption is None
+            and self.owner is PoolCirculationOwner.FILTRATION
+            and self.domain_permission_blocker(OwnershipDomain.PUMP) is None
+        )
+        if not prospective_upgrade and (
+            predecessor_lease_id is not None
+            or self.owner is not PoolCirculationOwner.NONE
+            or predecessor is not None
         ):
             raise ValueError("filtration adoption requires unowned circulation")
 
