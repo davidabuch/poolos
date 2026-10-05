@@ -95,7 +95,7 @@ def test_backstop_diagnostics_are_not_unconditionally_healthy() -> None:
     assert '"periodic_reconciliation_last_failure_reason"' in text
 
 
-def test_backstop_does_not_republish_cached_snapshot_on_disconnected_noop(
+def test_backstop_does_not_republish_cached_snapshot_on_failed_refresh_noop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def scenario() -> None:
@@ -116,12 +116,23 @@ def test_backstop_does_not_republish_cached_snapshot_on_disconnected_noop(
                 self.publishes = 0
                 self.data = SimpleNamespace(generated_at=datetime.now(UTC))
                 self.independent_intellicenter_transport = SimpleNamespace(
-                    connected=False
+                    connected=True
                 )
 
-            async def _async_update_data(self) -> object:
+            async def _async_refresh_native_runtime_evidence(self) -> bool:
+                return False
+
+            async def _async_observe(
+                self,
+                *,
+                observed_at: datetime,
+                trigger: str,
+            ) -> object:
                 self.calls += 1
-                return self.data
+                return SimpleNamespace(generated_at=observed_at)
+
+            async def _async_update_data(self) -> object:
+                return await module.PoolOSCoordinator._async_update_data(self)
 
             def async_set_updated_data(self, snapshot: object) -> None:
                 self.publishes += 1
@@ -135,7 +146,7 @@ def test_backstop_does_not_republish_cached_snapshot_on_disconnected_noop(
                 if coordinator.calls >= 3:
                     break
 
-            assert coordinator.calls >= 3
+            assert coordinator.calls == 0
             assert coordinator.publishes == 0
             assert coordinator._native_reconciliation_success_count >= 3
         finally:
