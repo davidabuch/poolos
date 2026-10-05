@@ -579,7 +579,6 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._post_start_active = False
         self._native_intellicenter_refresh_dirty = False
         reconciliation_task = self._native_reconciliation_task
-        self._native_reconciliation_task = None
         if reconciliation_task is not None and not reconciliation_task.done():
             reconciliation_task.cancel()
         self._analysis_dirty = False
@@ -593,6 +592,13 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         self.prepare_unload()
         await self.background_tasks.async_stop()
+
+        reconciliation_task = self._native_reconciliation_task
+        if reconciliation_task is not None and not reconciliation_task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await reconciliation_task
+        self._native_reconciliation_task = None
+
         async with self._observation_lock:
             pass
 
