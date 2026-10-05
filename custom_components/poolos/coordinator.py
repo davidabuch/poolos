@@ -307,7 +307,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         # A canonical native batch is expected to complete well inside one
         # cadence. Give it a full extra cadence before treating the pass as
         # wedged so one stalled transport/read cannot kill reconciliation.
-        pass_timeout_seconds = max(1.0, interval_seconds * 2)
+        pass_timeout_seconds = max(0.001, interval_seconds * 2)
         current_task = asyncio.current_task()
         try:
             while not self._unloading and self._post_start_active:
