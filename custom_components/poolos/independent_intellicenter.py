@@ -732,8 +732,10 @@ class IndependentIntelliCenterReadOnlyTransport:
         )
 
         def read_is_current() -> bool:
-            return (self._refresh_generation_is_current(generation)
-                    and self._arbitration_topology_identity() == identity)
+            return (
+                self._refresh_generation_is_current(generation)
+                and self._arbitration_topology_is_compatible(identity)
+            )
 
         def prepared(expected: dict[str, dict[str, set[str]]]) -> None:
             assert self._arbitration_evidence is not None
@@ -781,6 +783,46 @@ class IndependentIntelliCenterReadOnlyTransport:
                                  {key: (obj.subtype if key == SUBTYP_ATTR else obj[key])
                                   for key in sorted(_ARBITRATION_IDENTITY_FIELDS)},
                                  sort_keys=True, default=str)) for obj in self._model))
+
+    def _arbitration_topology_is_compatible(
+        self,
+        baseline: tuple[tuple[str, str, str, str], ...],
+    ) -> bool:
+        """Accept read-owned identity hydration but reject real topology drift.
+
+        Initial discovery does not always populate every identity field requested
+        by the canonical arbitration batch. A complete read may replace an unknown
+        value with authoritative metadata from the same discovery generation.
+        That bootstrap is not external topology drift and must not invalidate its
+        own read. Existing non-null identity values remain immutable.
+        """
+
+        current = self._arbitration_topology_identity()
+        if len(current) != len(baseline):
+            return False
+        for before, after in zip(baseline, current, strict=True):
+            before_id, before_type, before_subtype, before_payload = before
+            after_id, after_type, after_subtype, after_payload = after
+            if (
+                before_id != after_id
+                or before_type != after_type
+                or before_subtype != after_subtype
+            ):
+                return False
+            try:
+                before_fields = json.loads(before_payload)
+                after_fields = json.loads(after_payload)
+            except (TypeError, ValueError):
+                return False
+            if set(before_fields) != set(after_fields):
+                return False
+            for key, before_value in before_fields.items():
+                after_value = after_fields[key]
+                if before_value is None:
+                    continue
+                if after_value != before_value:
+                    return False
+        return True
 
     def _finish_arbitration_read(self, failure: str | None) -> None:
         assert self._arbitration_evidence is not None
