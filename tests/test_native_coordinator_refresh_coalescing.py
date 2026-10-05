@@ -1011,3 +1011,81 @@ def test_blocked_durable_persistence_does_not_starve_reconciliation() -> None:
         assert not coordinator.background_tasks._tasks
 
     asyncio.run(scenario())
+
+
+def test_publication_semantics_ignore_evidence_only_timestamp_churn() -> None:
+    module = _load_coordinator_module()
+
+    def observation(value: object, observed_at: datetime) -> SimpleNamespace:
+        return SimpleNamespace(
+            observation_id="pool.active",
+            value=value,
+            unit=None,
+            truth_level="measured",
+            observed_at=observed_at,
+            source_kind="native",
+            source_id="B1101",
+            quality="good",
+            confidence=1.0,
+        )
+
+    first_at = datetime(2026, 10, 5, 16, 0, tzinfo=UTC)
+    second_at = first_at + timedelta(seconds=30)
+    previous = SimpleNamespace(
+        status="AVAILABLE",
+        source_id="poolos.independent_intellicenter",
+        failure_reason_code=None,
+        authoritative_source="native_intellicenter",
+        missing_concepts=(),
+        missing_required=(),
+        unavailable_entities=(),
+        stale_entities=(),
+        observations=(observation(False, first_at),),
+    )
+    timestamp_only = SimpleNamespace(
+        status="AVAILABLE",
+        source_id="poolos.independent_intellicenter",
+        failure_reason_code=None,
+        authoritative_source="native_intellicenter",
+        missing_concepts=(),
+        missing_required=(),
+        unavailable_entities=(),
+        stale_entities=(),
+        observations=(observation(False, second_at),),
+    )
+    changed_value = SimpleNamespace(
+        status="AVAILABLE",
+        source_id="poolos.independent_intellicenter",
+        failure_reason_code=None,
+        authoritative_source="native_intellicenter",
+        missing_concepts=(),
+        missing_required=(),
+        unavailable_entities=(),
+        stale_entities=(),
+        observations=(observation(True, second_at),),
+    )
+
+    assert not module._publication_changed(previous, timestamp_only)
+    assert module._publication_changed(previous, changed_value)
+
+
+def test_event_refresh_publication_has_one_owner_per_path() -> None:
+    module = _load_coordinator_module()
+    source = open(module.__file__, encoding="utf-8").read()
+
+    native_start = source.index(
+        "async def _async_native_intellicenter_snapshot_updated"
+    )
+    native_end = source.index("def _async_schedule_analysis", native_start)
+    native_worker = source[native_start:native_end]
+    assert native_worker.count("self.async_set_updated_data(snapshot)") == 1
+
+    mapped_start = source.index("async def _async_mapped_state_changed")
+    mapped_end = source.index("async def _async_observe", mapped_start)
+    mapped_worker = source[mapped_start:mapped_end]
+    assert mapped_worker.count("self.async_set_updated_data(snapshot)") == 1
+
+    observe_start = source.index("async def _async_observe")
+    observe_end = source.index("async def _async_persist_observation", observe_start)
+    observe = source[observe_start:observe_end]
+    assert "self.async_set_updated_data(snapshot)" not in observe

@@ -84,6 +84,53 @@ from .shadow import HomeAssistantShadowRuntime
 LOGGER = logging.getLogger(__name__)
 
 
+def _observation_publication_semantics(snapshot: object | None) -> tuple[object, ...] | None:
+    """Compare state exposed to HA while ignoring evidence-only timestamps."""
+
+    if snapshot is None:
+        return None
+
+    observations = tuple(
+        (
+            item.observation_id,
+            item.value,
+            item.unit,
+            item.truth_level,
+            item.source_kind,
+            item.source_id,
+            item.quality,
+            item.confidence,
+        )
+        for item in sorted(
+            getattr(snapshot, "observations", ()),
+            key=lambda item: item.observation_id,
+        )
+    )
+    status = getattr(snapshot, "status", None)
+    status_value = getattr(status, "value", status)
+    return (
+        status_value,
+        getattr(snapshot, "source_id", None),
+        getattr(snapshot, "failure_reason_code", None),
+        getattr(snapshot, "authoritative_source", None),
+        tuple(getattr(snapshot, "missing_concepts", ())),
+        tuple(getattr(snapshot, "missing_required", ())),
+        tuple(getattr(snapshot, "unavailable_entities", ())),
+        tuple(getattr(snapshot, "stale_entities", ())),
+        observations,
+    )
+
+
+def _publication_changed(previous: object | None, current: object) -> bool:
+    """Return whether HA-visible semantic state changed."""
+
+    return (
+        previous is None
+        or _observation_publication_semantics(previous)
+        != _observation_publication_semantics(current)
+    )
+
+
 class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     """Read configured Home Assistant entities without invoking services."""
 
@@ -326,11 +373,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     async with asyncio.timeout(pass_timeout_seconds):
                         previous_snapshot = self.data
                         snapshot = await self._async_update_data()
-                        if (
-                            not self._unloading
-                            and snapshot is not previous_snapshot
-                        ):
+                        if self._unloading:
+                            continue
+                        if _publication_changed(previous_snapshot, snapshot):
                             self.async_set_updated_data(snapshot)
+                        else:
+                            # Preserve current evidence chronology for runtime
+                            # consumers without waking every HA entity.
+                            self.data = snapshot
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -434,6 +484,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 "PoolOS fast native IntelliCenter snapshot publication rejected"
             )
             return
+        previous_native = self.native_intellicenter_snapshot
         self.native_intellicenter_snapshot = mapped
         observer = getattr(self, "_native_snapshot_observer", None)
         if observer is not None:
@@ -448,9 +499,17 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     "PoolOS external native-change diagnostics failed; "
                     "authoritative publication continues"
                 )
-        # The diagnostic boundary above is synchronous and bounded, but its
-        # failure can never suppress the already-mapped authoritative state.
-        self.async_update_listeners()
+        # The first native callback establishes HA entity state. After that,
+        # evidence-only timestamp renewal remains internal and must not fan out
+        # across every entity when semantic state is unchanged.
+        first_publication = not getattr(
+            self,
+            "_native_fast_publication_initialized",
+            False,
+        )
+        self._native_fast_publication_initialized = True
+        if first_publication or _publication_changed(previous_native, mapped):
+            self.async_update_listeners()
 
     async def _async_native_intellicenter_snapshot_updated(self) -> None:
         """Publish the latest native snapshot until no callback remains pending."""
@@ -471,7 +530,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                         observed_at=datetime.now(UTC),
                         trigger="native_intellicenter_update",
                     )
-                    self.async_set_updated_data(snapshot)
+                    previous_snapshot = getattr(self, "data", None)
+                    if _publication_changed(previous_snapshot, snapshot):
+                        self.async_set_updated_data(snapshot)
+                    else:
+                        self.data = snapshot
         finally:
             self._native_intellicenter_refresh_task = None
 
@@ -683,7 +746,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                 observed_at=timestamp,
                 trigger="state_change_event",
             )
-            self.async_set_updated_data(snapshot)
+            previous_snapshot = getattr(self, "data", None)
+            if _publication_changed(previous_snapshot, snapshot):
+                self.async_set_updated_data(snapshot)
+            else:
+                self.data = snapshot
 
     async def _async_observe(
         self,
@@ -742,18 +809,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         if self._thermal_runtime_refresh is not None:
             self._thermal_runtime_refresh(snapshot)
 
-        # Publish event-driven authoritative state immediately after it is
-        # built, before commissioning persistence, inventory export, or
-        # recorder I/O. This keeps Control Center state aligned with the
-        # already-published native IntelliCenter truth.
-        #
-        # Periodic reconciliation is excluded because DataUpdateCoordinator
-        # publishes the returned snapshot itself.
-        if trigger in {
-            "state_change_event",
-            "native_intellicenter_update",
-        }:
-            self.async_set_updated_data(snapshot)
+        # Publication is caller-owned. Event and native refresh callers each
+        # publish at most once after this authoritative snapshot is complete;
+        # periodic reconciliation applies the same semantic coalescing rule.
         self._last_observation_trigger = trigger
         self._update_durable_health_confirmation(snapshot, observed_at=observed_at)
         self.shadow_runtime.evaluate(snapshot)
