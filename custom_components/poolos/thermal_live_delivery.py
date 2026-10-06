@@ -8,6 +8,7 @@ two canonical operations admitted by the Phase 2 core boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from datetime import datetime, timezone
 
 from poolos.hal import CommandReceipt, CommandStatus
@@ -33,6 +34,8 @@ from .manual_intellicenter import (
     ManualIntelliCenterControl,
 )
 
+
+LOGGER = logging.getLogger(__name__)
 
 _BODY_ID = {ThermalBody.POOL: "B1101", ThermalBody.HOT_TUB: "B1202"}
 _HEATER_ID = {
@@ -110,6 +113,15 @@ class ManualIntelliCenterThermalLiveDelivery:
             authority_reason = None
             if isinstance(exc.__cause__, PhysicalCommandDeniedError):
                 authority_reason = exc.__cause__.decision.reason.value
+            LOGGER.warning(
+                "PoolOS automatic thermal delivery rejected operation=%s target=%s "
+                "value=%s authority_reason=%s error_type=%s",
+                type(operation).__name__,
+                getattr(operation, "equipment_id", None),
+                getattr(operation, "rpm", getattr(operation, "active", getattr(operation, "mode", None))),
+                authority_reason,
+                type(exc).__name__,
+            )
             return CommandReceipt(
                 status=(
                     CommandStatus.FAILED
