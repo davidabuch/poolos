@@ -9,6 +9,7 @@ from poolos.filtration_policy import (
     FiltrationDebtLedger,
     FiltrationObligation,
     FiltrationPolicy,
+    FiltrationSchedulingMode,
     TemperatureFiltrationPolicy,
 )
 from poolos.operational_intent import OperationalIntentType
