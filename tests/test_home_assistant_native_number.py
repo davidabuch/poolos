@@ -83,3 +83,24 @@ def test_manual_gateway_validates_pmpcirc_identity_mode_and_parent() -> None:
     assert "MAX_ATTR" in source
     assert "pump_rpm_requires_native_limits" in source
     assert "pump_rpm_requires_explicit_rpm_mode" in source
+
+
+def test_exact_ha_rpm_return_bridges_to_thermal_domain_handback() -> None:
+    source = _source()
+
+    assert "def _record_exact_thermal_pump_handback(" in source
+    assert "OwnershipAuthority.OPERATOR" in source
+    assert "request.requested_rpm != pump.target_value" in source
+    assert "POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT" in source
+    assert "SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT" in source
+    assert '"accepted_manual_configured_speed_return"' in source
+    assert "runtime.thermal_runtime_orchestrator.ownership.record_operator_events(" in source
+    assert "_record_exact_thermal_pump_handback(" in source
+
+
+def test_ha_rpm_handback_occurs_only_after_manual_delivery_acceptance() -> None:
+    source = _source()
+
+    accepted = source.index("session_runtime.session.manual_delivery_accepted(")
+    handback_call = source.rindex("_record_exact_thermal_pump_handback(")
+    assert handback_call > accepted
