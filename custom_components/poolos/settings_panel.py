@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,7 @@ async def async_setup_settings_panel(hass: HomeAssistant) -> None:
         return
 
     module_path = Path(__file__).resolve().parent / "settings_panel.js"
+    asset_version = sha256(module_path.read_bytes()).hexdigest()[:12]
     await hass.http.async_register_static_paths(
         [StaticPathConfig(_PANEL_MODULE_URL, str(module_path), False)]
     )
@@ -99,10 +101,19 @@ async def async_setup_settings_panel(hass: HomeAssistant) -> None:
         webcomponent_name=_PANEL_ELEMENT,
         sidebar_title="PoolOS Settings",
         sidebar_icon="mdi:pool",
-        module_url=_PANEL_MODULE_URL + "?v=" + INTEGRATION_VERSION,
+        module_url=(
+            _PANEL_MODULE_URL
+            + "?v="
+            + INTEGRATION_VERSION
+            + "-"
+            + asset_version
+        ),
         require_admin=True,
         config_panel_domain=DOMAIN,
-        config={"version": INTEGRATION_VERSION},
+        config={
+            "version": INTEGRATION_VERSION,
+            "asset_version": asset_version,
+        },
         handle_safe_area=True,
     )
     hass.data[_PANEL_FLAG] = True
