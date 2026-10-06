@@ -108,6 +108,23 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 elif current_operation.metadata.get("priming_step") == "true":
                     operating_purpose = "priming"
         currentness = session.originating_currentness
+        if (
+            operating_purpose is None
+            and currentness.purpose.body is ThermalBody.HOT_TUB
+            and currentness.purpose.selected_source is PhysicalHeatMode.OFF
+            and currentness.purpose.required_pump_rpm == self.baselines.temperature_probe_rpm
+            and any(
+                step.metadata.get("spa_temperature_acquisition_step") == "true"
+                for step in session.execution_plan.steps
+            )
+        ):
+            # The Spa acquisition purpose belongs to the immutable execution
+            # session, not to one transient coordinator pointer. BODY
+            # verification may advance/rebuild the current-step view before the
+            # 1500-RPM step is bound; retain the exact semantic purpose from the
+            # originating session so the delivery and pump-session gateways can
+            # validate that next command without broadening any other RPM.
+            operating_purpose = PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
             sequence = session.coordination.current_step_sequence
             if sequence is None:
