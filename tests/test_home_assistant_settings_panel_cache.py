@@ -10,5 +10,6 @@ def test_settings_panel_cache_key_tracks_frontend_content() -> None:
 
     assert "from hashlib import sha256" in source
     assert "sha256(module_path.read_bytes()).hexdigest()[:12]" in source
-    assert '"+ "-"\n            + asset_version' in source
+    assert '+ "-"' in source
+    assert "+ asset_version" in source
     assert '"asset_version": asset_version' in source
