@@ -154,6 +154,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             Path(hass.config.path("poolos_logs")),
             load_history=False,
         )
+        # Commissioning parity persistence is disabled during normal runtime.
+        # Control behavior does not depend on this history, and avoiding these
+        # writes prevents the prior high-I/O commissioning failure mode.
+        self.native_parity_commissioning_store.persistence_available = False
         self.native_parity_commissioning_summary: NativeParityCommissioningSummary = (
             self.native_parity_commissioning_store.summary()
         )
@@ -184,14 +188,11 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         ] | None = None
 
     async def async_initialize_persistence(self) -> None:
-        """Load disk-backed commissioning state without blocking HA's event loop."""
+        """Initialize bounded commissioning state without loading parity history."""
 
-        def load_and_summarize() -> NativeParityCommissioningSummary:
-            self.native_parity_commissioning_store.load()
-            return self.native_parity_commissioning_store.summary()
-
+        self.native_parity_commissioning_store.initialize_empty()
         self.native_parity_commissioning_summary = (
-            await self.hass.async_add_executor_job(load_and_summarize)
+            self.native_parity_commissioning_store.summary()
         )
 
     async def _async_refresh_native_runtime_evidence(self) -> bool:
@@ -733,8 +734,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     async def _async_export_native_intellicenter_inventory(
         self, exported_at: datetime
     ) -> None:
-        """Write complete raw discovery outside bounded HA state attributes."""
+        """Skip commissioning inventory export when persistence is disabled."""
 
+        if not self.native_parity_commissioning_store.persistence_available:
+            return
         transport = self.independent_intellicenter_transport
         snapshot = None if transport is None else transport.latest_snapshot
         if transport is None or snapshot is None:
@@ -755,8 +758,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     async def _async_record_native_parity_commissioning(
         self, recorded_at: datetime
     ) -> None:
-        """Persist shadow parity without affecting authoritative HA processing."""
+        """Persist shadow parity only when explicit commissioning persistence is enabled."""
 
+        if not self.native_parity_commissioning_store.persistence_available:
+            return
         report = self.native_intellicenter_parity_report
         transport = self.independent_intellicenter_transport
         if report is None or transport is None:
@@ -780,7 +785,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         recorded_at: datetime,
         recommendation: OperatorRecommendation | None,
         recommendation_published_at: datetime | None,
-        export_evidence: bool = True,
+        export_evidence: bool = False,
     ) -> tuple[
         BehavioralInferenceReport,
         DailyOperationalRetrospective,
