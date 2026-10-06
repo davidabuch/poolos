@@ -532,11 +532,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # A queued event may run after a newer native observation; using
             # its historical time would regress stateful accounting.
             timestamp = datetime.now(UTC)
-            snapshot = await self._async_observe(
+            await self._async_observe(
                 observed_at=timestamp,
                 trigger="state_change_event",
             )
-            self.async_set_updated_data(snapshot)
 
     async def _async_observe(
         self,
