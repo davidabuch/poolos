@@ -82,6 +82,12 @@ from .shadow import HomeAssistantShadowRuntime
 
 LOGGER = logging.getLogger(__name__)
 
+# Native IntelliCenter updates arrive as short multi-object bursts. Keep raw native
+# entity publication immediate, but settle the expensive full-controller observation
+# briefly so one physical change does not fan out into dozens of Recorder writes.
+NATIVE_OBSERVATION_SETTLE_SECONDS = 0.15
+NATIVE_OBSERVATION_MAX_SETTLE_PASSES = 4
+
 
 class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     """Read configured Home Assistant entities without invoking services."""
@@ -130,6 +136,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         self._independent_intellicenter_start_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_task: asyncio.Task[None] | None = None
         self._native_intellicenter_refresh_dirty = False
+        self._native_intellicenter_refresh_generation = 0
         self._post_start_active = False
         self._analysis_task: asyncio.Task[None] | None = None
         self._analysis_dirty = False
@@ -258,6 +265,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             return
 
         self._native_intellicenter_refresh_dirty = True
+        self._native_intellicenter_refresh_generation += 1
 
         if not self._post_start_active:
             return
@@ -324,11 +332,26 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     async def _async_native_intellicenter_snapshot_updated(self) -> None:
         """Publish the latest native snapshot until no callback remains pending."""
 
+        settle_passes = 0
         try:
             while self._native_intellicenter_refresh_dirty:
+                # Native updates arrive as a short burst of object-level changes.
+                # Fast publication already exposes each latest canonical native
+                # snapshot immediately. Settle only the expensive full-controller
+                # observation so the burst becomes one Recorder-visible evaluation.
+                generation = self._native_intellicenter_refresh_generation
+                if settle_passes < NATIVE_OBSERVATION_MAX_SETTLE_PASSES:
+                    await asyncio.sleep(NATIVE_OBSERVATION_SETTLE_SECONDS)
+                    if self._unloading:
+                        return
+                    if generation != self._native_intellicenter_refresh_generation:
+                        settle_passes += 1
+                        continue
+
+                settle_passes = 0
                 # Clear before the pass so a callback during any await marks a
-                # required rerun. Multiple callbacks safely coalesce because
-                # every pass reads the transport's latest immutable snapshot.
+                # required rerun. Every pass reads the transport's latest immutable
+                # snapshot, and sustained churn is bounded by the max settle passes.
                 self._native_intellicenter_refresh_dirty = False
                 if self._unloading:
                     return
