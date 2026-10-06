@@ -316,11 +316,12 @@ def test_bridge_coalesces_new_truth_without_overlapping_driver_tasks() -> None:
 
         assert len(hass.tasks) == 1
         assert driver.processed == ["epoch-1"]
-        assert authority.epochs == ["epoch-1", "epoch-2"]
+        assert authority.epochs == ["epoch-1"]
 
         driver.release.set()
         await first
         assert len(hass.tasks) == 2
+        assert authority.epochs == ["epoch-1", "epoch-2"]
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
 
@@ -818,5 +819,39 @@ def test_quick_restart_denial_is_consumed_once_and_never_retries_equality() -> N
 
         if len(hass.tasks) > 1:
             await hass.tasks[1]
+
+    asyncio.run(scenario())
+
+
+def test_inflight_task_keeps_command_authority_epoch_until_serialized_successor() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+
+        runtime.observe(
+            _snapshot(NOW),
+            None,
+            _orchestration(NOW, "delivery-epoch"),
+        )
+        first = hass.tasks[0]
+        await driver.started.wait()
+
+        for offset, identity in ((1, "consequence-1"), (2, "consequence-2")):
+            at = NOW + timedelta(seconds=offset)
+            runtime.observe(_snapshot(at), None, _orchestration(at, identity))
+
+        assert authority.epochs == ["delivery-epoch"]
+        assert runtime._latest_frame is not None
+        assert runtime._latest_frame.epoch_identity == "consequence-2"
+
+        driver.release.set()
+        await first
+
+        assert len(hass.tasks) == 2
+        assert authority.epochs == ["delivery-epoch", "consequence-2"]
+
+        await hass.tasks[1]
+        assert driver.processed == ["delivery-epoch", "consequence-2"]
 
     asyncio.run(scenario())
