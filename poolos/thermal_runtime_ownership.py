@@ -2789,8 +2789,16 @@ class ThermalRuntimeOwnershipManager:
         lease = self._state.lease
         if (
             lease is None
-            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
             or lease.lease_id != lease_id
+            or (
+                lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+                and not (
+                    lease.status is ThermalRuntimeOwnershipStatus.SUPERSEDED
+                    and lease.body_adoption is not None
+                    and lease.body_activation is None
+                    and not retain_termination_entitlement
+                )
+            )
         ):
             return self._decision(
                 ThermalRuntimeOwnershipDisposition.DENIED,
