@@ -397,6 +397,16 @@ class NativeParityCommissioningStore:
         self._load()
         self._loaded = True
 
+    def initialize_empty(self) -> None:
+        """Initialize an empty in-memory commissioning window without disk I/O."""
+
+        if self._loaded:
+            return
+        self._records = ()
+        self._last_retention_sweep_at = None
+        self._history_needs_rewrite = False
+        self._loaded = True
+
     def record(
         self,
         report: ObservationParityReport,

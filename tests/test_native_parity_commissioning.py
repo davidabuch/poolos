@@ -80,6 +80,22 @@ def _record(
     )
 
 
+
+def test_initialize_empty_skips_existing_history_and_disk_io(tmp_path) -> None:
+    root = tmp_path / "poolos_logs"
+    root.mkdir()
+    history = root / "native_parity_history.jsonl"
+    history.write_text('{"stale":"commissioning-history"}\n', encoding="utf-8")
+
+    store = NativeParityCommissioningStore(root, load_history=False)
+    store.persistence_available = False
+    store.initialize_empty()
+
+    assert store.loaded is True
+    assert store.records == ()
+    assert store.summary().total_comparison_cycles == 0
+    assert history.read_text(encoding="utf-8") == '{"stale":"commissioning-history"}\n'
+
 def test_cycle_persists_and_restart_recovers_equivalent_summary(tmp_path) -> None:
     root = tmp_path / "poolos_logs"
     store = NativeParityCommissioningStore(root)

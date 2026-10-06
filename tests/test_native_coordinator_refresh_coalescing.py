@@ -248,6 +248,7 @@ def _harness() -> Any:
                 raise
             finally:
                 self.active_observations -= 1
+            self.async_set_updated_data(canonical)
             return canonical
 
         def async_set_updated_data(self, snapshot: object) -> None:
