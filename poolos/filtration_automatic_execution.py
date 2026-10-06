@@ -38,7 +38,7 @@ from .observations import (
     ObservationSourceKind,
     PoolObservation,
 )
-from .physical_command_authority import PhysicalRequestSource
+from .physical_command_authority import PhysicalAuthorityReason, PhysicalRequestSource
 from .ownership_evidence import OwnershipDomain, OwnershipHealth, OwnershipEvidenceKind
 from .pool_circulation_ownership import (
     FiltrationCirculationLease,
@@ -894,7 +894,21 @@ class FiltrationAutomaticExecutionDriver:
         except Exception as exc:
             return self._fail(frame, f"automatic_filtration_delivery_exception:{type(exc).__name__}", failed_domain=domain)
         if not receipt.accepted:
-            return self._fail(frame, f"automatic_filtration_delivery_{receipt.status.value}", failed_domain=domain)
+            authority_reason = receipt.details.get("authority_reason")
+            if (
+                domain is OwnershipDomain.PUMP
+                and authority_reason
+                == PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE.value
+            ):
+                return self._blocked(
+                    frame,
+                    "automatic_filtration_fresh_epoch_required_after_stale_pump_context",
+                )
+            return self._fail(
+                frame,
+                f"automatic_filtration_delivery_{receipt.status.value}",
+                failed_domain=domain,
+            )
         if step is not FiltrationExecutionStep.BODY_OFF:
             assert frame.pool_pump_circuit_id is not None
             concept = (
