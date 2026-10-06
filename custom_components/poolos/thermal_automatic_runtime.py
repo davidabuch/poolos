@@ -110,9 +110,10 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         currentness = session.originating_currentness
         if (
             operating_purpose is None
-            and currentness.purpose.body is ThermalBody.HOT_TUB
-            and currentness.purpose.selected_source is PhysicalHeatMode.OFF
-            and currentness.purpose.required_pump_rpm == self.baselines.temperature_probe_rpm
+            and getattr(currentness.purpose, "body", None) is ThermalBody.HOT_TUB
+            and getattr(currentness.purpose, "selected_source", None) is PhysicalHeatMode.OFF
+            and getattr(currentness.purpose, "required_pump_rpm", None)
+            == self.baselines.temperature_probe_rpm
             and any(
                 step.metadata.get("spa_temperature_acquisition_step") == "true"
                 for step in session.execution_plan.steps
