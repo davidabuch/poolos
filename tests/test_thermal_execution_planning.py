@@ -1175,3 +1175,33 @@ def test_opportunistic_spa_reasserts_safe_source_for_positive_provenance() -> No
     assert isinstance(plan.operations[0], SetHeatMode)
     assert plan.operations[0].mode is PhysicalHeatMode.SOLAR
     assert isinstance(plan.operations[1], SetBodyActive)
+
+
+def test_spa_acquisition_cold_start_uses_probe_rpm_without_prime() -> None:
+    desired = _desired(
+        PhysicalHeatMode.OFF,
+        1500,
+        body=ThermalBody.HOT_TUB,
+        reason="spa_temperature_acquisition_required",
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0198",
+        configured_speed_concept="spa.pump_circuit.configured_speed_rpm",
+    ).build(
+        desired,
+        ThermalCurrentState(
+            NOW,
+            ThermalBody.HOT_TUB,
+            PhysicalHeatMode.GAS,
+            0,
+            body_active=False,
+        ),
+    )
+
+    assert _operation_kinds(plan) == (SetHeatMode, SetBodyActive, SetPumpSpeed)
+    assert isinstance(plan.operations[-1], SetPumpSpeed)
+    assert plan.operations[-1].rpm == 1500
+    assert all(
+        item.metadata.get("priming_step") != "true"
+        for item in plan.step_specifications
+    )
