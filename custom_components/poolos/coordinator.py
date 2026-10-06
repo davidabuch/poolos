@@ -193,7 +193,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         # Normal PoolOS operation must not depend on historical commissioning
         # parity files. Keep an empty, in-memory commissioning summary unless a
         # future explicit commissioning mode enables persistence.
-        self.native_parity_commissioning_store._loaded = True
+        self.native_parity_commissioning_store.initialize_empty()
         self.native_parity_commissioning_summary = (
             self.native_parity_commissioning_store.summary()
         )
@@ -735,8 +735,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     async def _async_export_native_intellicenter_inventory(
         self, exported_at: datetime
     ) -> None:
-        """Write complete raw discovery outside bounded HA state attributes."""
+        """Skip commissioning inventory export during normal recovery runtime."""
 
+        if not self.native_parity_commissioning_store.persistence_available:
+            return
         transport = self.independent_intellicenter_transport
         snapshot = None if transport is None else transport.latest_snapshot
         if transport is None or snapshot is None:
@@ -759,6 +761,8 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     ) -> None:
         """Persist shadow parity without affecting authoritative HA processing."""
 
+        if not self.native_parity_commissioning_store.persistence_available:
+            return
         report = self.native_intellicenter_parity_report
         transport = self.independent_intellicenter_transport
         if report is None or transport is None:
