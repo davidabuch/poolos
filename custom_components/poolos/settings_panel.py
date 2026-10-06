@@ -17,7 +17,7 @@ from .const import DOMAIN, INTEGRATION_VERSION
 
 _PANEL_FLAG = "poolos_settings_panel_registered"
 _PANEL_PATH = "poolos-settings"
-_PANEL_ELEMENT = "poolos-settings-panel"
+_PANEL_ELEMENT_PREFIX = "poolos-settings-panel-"
 _PANEL_MODULE_URL = "/poolos_static/settings-panel.js"
 
 
@@ -99,7 +99,7 @@ async def async_setup_settings_panel(hass: HomeAssistant) -> None:
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=_PANEL_PATH,
-        webcomponent_name=_PANEL_ELEMENT,
+        webcomponent_name=_PANEL_ELEMENT_PREFIX + asset_version,
         sidebar_title="PoolOS Settings",
         sidebar_icon="mdi:pool",
         module_url=(

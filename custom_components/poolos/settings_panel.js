@@ -500,6 +500,11 @@ class PoolOSSettingsPanel extends HTMLElement {
   }
 }
 
-if (!customElements.get("poolos-settings-panel")) {
-  customElements.define("poolos-settings-panel", PoolOSSettingsPanel);
+const moduleUrl = new URL(import.meta.url);
+const assetVersion = (moduleUrl.searchParams.get("v") ?? "current")
+  .replace(/[^a-zA-Z0-9_-]/g, "-")
+  .toLowerCase();
+const elementName = `poolos-settings-panel-${assetVersion.slice(-12)}`;
+if (!customElements.get(elementName)) {
+  customElements.define(elementName, PoolOSSettingsPanel);
 }

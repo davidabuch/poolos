@@ -3,6 +3,7 @@
 from pathlib import Path
 
 PANEL_BACKEND = Path("custom_components/poolos/settings_panel.py")
+PANEL_FRONTEND = Path("custom_components/poolos/settings_panel.js")
 
 
 def test_settings_panel_cache_key_tracks_frontend_content() -> None:
@@ -14,3 +15,13 @@ def test_settings_panel_cache_key_tracks_frontend_content() -> None:
     assert '+ "-"' in source
     assert "+ asset_version" in source
     assert '"asset_version": asset_version' in source
+
+
+def test_settings_panel_custom_element_tracks_frontend_content() -> None:
+    backend = PANEL_BACKEND.read_text(encoding="utf-8")
+    frontend = PANEL_FRONTEND.read_text(encoding="utf-8")
+    assert '_PANEL_ELEMENT_PREFIX = "poolos-settings-panel-"' in backend
+    assert "webcomponent_name=_PANEL_ELEMENT_PREFIX + asset_version" in backend
+    assert "const moduleUrl = new URL(import.meta.url);" in frontend
+    assert "const elementName =" in frontend
+    assert "customElements.define(elementName, PoolOSSettingsPanel)" in frontend
