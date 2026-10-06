@@ -39,5 +39,8 @@ jobs:
       - name: Run test suite
         run: python -m pytest
 
+      - name: Validate HA manifest-pinned core compatibility
+        run: python scripts/validate_ha_manifest_core_compatibility.py
+
       - name: Check patch whitespace
         run: git diff --check
