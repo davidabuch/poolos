@@ -66,6 +66,22 @@ def test_ha_setup_skips_parity_history_load_before_first_refresh() -> None:
 
 
 
+def test_coordinator_initializes_deferred_parity_store_before_summary() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    construction = coordinator.index("self.native_parity_commissioning_store =")
+    initialize = coordinator.index(
+        "self.native_parity_commissioning_store.initialize_empty()",
+        construction,
+    )
+    summary = coordinator.index(
+        "self.native_parity_commissioning_store.summary()",
+        construction,
+    )
+
+    assert construction < initialize < summary
+
+
 def test_event_driven_observation_publishes_snapshot_once() -> None:
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
 
