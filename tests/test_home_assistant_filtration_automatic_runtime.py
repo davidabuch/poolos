@@ -432,6 +432,63 @@ def test_cleanup_binding_uses_verified_body_provenance_even_if_pump_domain_never
     assert calls
 
 
+
+def test_cleanup_binding_allows_verified_body_adoption_after_pump_domain_failure() -> None:
+    module = _load_module()
+    calls: list[dict[str, object]] = []
+
+    class BindingAuthority:
+        def bind_automatic_filtration_dispatch(self, **kwargs: object) -> object:
+            calls.append(dict(kwargs))
+            return SimpleNamespace(**kwargs)
+
+    lease = SimpleNamespace(
+        lease_id="lease-adopted",
+        session_id="filtration-session",
+        verified=False,
+        body_verified=True,
+        body_activation=None,
+        body_adoption=SimpleNamespace(adoption_id="body-adoption-1"),
+    )
+    factory = module._DeliveryFactory(
+        manual=object(),
+        authority=BindingAuthority(),
+        ownership=SimpleNamespace(filtration_lease=lease),
+    )
+    module.ManualIntelliCenterFiltrationDelivery = (
+        lambda manual, context, baselines: SimpleNamespace(
+            manual=manual,
+            context=context,
+            baselines=baselines,
+        )
+    )
+    frame = SimpleNamespace(
+        epoch_identity="epoch-adopted",
+        pool_pump_circuit_id="p0102",
+        pump_session_id=None,
+        pump_session_effective_rpm=None,
+        pump_session_effective_target=None,
+    )
+
+    delivery = factory.for_operation(
+        frame=frame,
+        session_id="filtration-session",
+        operation=module.SetBodyActive(
+            equipment_id="pool",
+            active=False,
+            metadata={"reason_code": "automatic_filtration_owned_shutdown"},
+        ),
+        cleanup=True,
+    )
+
+    assert delivery.context.cleanup is True
+    assert delivery.context.ownership_lease_id == "lease-adopted"
+    assert delivery.context.body_activation_receipt_id is None
+    assert delivery.context.body_adoption_id == "body-adoption-1"
+    assert calls
+
+
+
 def test_cleanup_binding_still_rejects_unverified_body_provenance() -> None:
     module = _load_module()
     lease = SimpleNamespace(
