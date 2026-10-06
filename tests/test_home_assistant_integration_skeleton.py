@@ -49,6 +49,8 @@ def test_required_integration_files_exist() -> None:
                 "shadow.py",
         "select.py",
         "sensor.py",
+        "settings_panel.js",
+        "settings_panel.py",
         "switch.py",
         "system_health.py",
         "thermal_live_delivery.py",
