@@ -981,6 +981,54 @@ def test_pool_temperature_probe_cold_start_uses_bounded_1500_fallback() -> None:
     }
 
 
+
+def test_spa_temperature_acquisition_cold_start_skips_generic_prime() -> None:
+    desired = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="spa_temperature_acquisition_required",
+        rpm_reason_code="spa_temperature_acquisition_required",
+        rationale=("Acquire trusted Spa temperature before source selection.",),
+        criteria=("spa_temperature_acquisition",),
+        evidence={
+            "session_kind": "poolos_opportunistic",
+            "spa_temperature_trusted": False,
+        },
+    )
+    current = ThermalCurrentState(
+        observed_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        selected_source=PhysicalHeatMode.OFF,
+        pump_rpm=0,
+        body_active=False,
+    )
+
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id="p0198",
+        configured_speed_concept="spa.pump_circuit.configured_speed_rpm",
+    ).build(desired, current)
+
+    assert plan.disposition is ThermalPlanDisposition.READY
+    assert _operation_kinds(plan) == (
+        SetBodyActive,
+        SetPumpSpeed,
+    )
+    assert isinstance(plan.operations[0], SetBodyActive)
+    assert isinstance(plan.operations[1], SetPumpSpeed)
+    assert plan.operations[1].rpm == 1500
+    assert plan.step_specifications[1].metadata[
+        "spa_temperature_acquisition_step"
+    ] == "true"
+    assert "cold_start_priming_required" not in plan.change_reasons
+    assert all(
+        not isinstance(operation, SetPumpSpeed) or operation.rpm != 3000
+        for operation in plan.operations
+    )
+
+
 def test_pool_temperature_probe_does_not_reprime_existing_circulation() -> None:
     desired = ThermalDesiredState(
         evaluated_at=NOW,
