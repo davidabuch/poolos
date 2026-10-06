@@ -9146,3 +9146,35 @@ def test_promotion_boundary_never_moves_before_observation_frame() -> None:
     )
 
     assert _promotion_boundary(ownership, frame_at) == frame_at
+
+
+def test_spa_session_kind_preserves_accepted_inflight_opportunistic_body_activation() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+
+    driver.active_session = SimpleNamespace(
+        current_attempt=SimpleNamespace(
+            receipt=object(),
+            step=SimpleNamespace(
+                metadata={"spa_opportunistic_body_activation": "true"}
+            ),
+        )
+    )
+
+    assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
+
+
+def test_spa_session_kind_does_not_infer_opportunistic_without_accepted_receipt() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+
+    driver.active_session = SimpleNamespace(
+        current_attempt=SimpleNamespace(
+            receipt=None,
+            step=SimpleNamespace(
+                metadata={"spa_opportunistic_body_activation": "true"}
+            ),
+        )
+    )
+
+    assert driver.spa_session_kind() is None
