@@ -6404,6 +6404,9 @@ def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> No
         ended.reason_code
         == "runtime_ownership_relinquished:witnessed_user_hot_tub_session_ended"
     )
+    assert not ended.owns_body
+    assert not ended.owns_pump_setpoint
+    assert not ended.owns_heat_source
 
 
 def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
