@@ -2809,11 +2809,26 @@ class ThermalRuntimeOwnershipManager:
         if not reason_code.strip():
             raise ValueError("relinquishment reason_code must not be empty")
         reason = f"runtime_ownership_relinquished:{reason_code}"
+        terminal_domain_states = lease.domain_states
+        if not retain_termination_entitlement:
+            terminal_domain_states = tuple(
+                replace(
+                    state,
+                    authority=OwnershipAuthority.NONE,
+                    health=OwnershipHealth.STABLE,
+                    episode=None,
+                    command_blocker=None,
+                )
+                if state.authority is OwnershipAuthority.POOLOS
+                else state
+                for state in lease.domain_states
+            )
         terminal = replace(
             lease,
             status=ThermalRuntimeOwnershipStatus.RELINQUISHED,
             reason_code=reason,
             ended_at=relinquished_at,
+            domain_states=terminal_domain_states,
         )
         self._state = ThermalRuntimeOwnershipState(
             status=terminal.status,
