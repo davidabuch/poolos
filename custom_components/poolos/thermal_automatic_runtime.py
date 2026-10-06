@@ -109,19 +109,32 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                     operating_purpose = "priming"
         currentness = session.originating_currentness
         if operating_purpose is None:
-            progress = session.execution_progress
-            next_index = len(progress.verified_prefix)
-            if (
-                progress.accepted_current is None
-                and 0 <= next_index < len(session.execution_plan.steps)
-            ):
-                next_operation = session.execution_plan.steps[next_index].operation
-                if isinstance(next_operation, SetPumpSpeed):
-                    purpose_value = next_operation.metadata.get("operating_purpose")
-                    if isinstance(purpose_value, str) and purpose_value:
-                        operating_purpose = purpose_value
-                    elif next_operation.metadata.get("priming_step") == "true":
-                        operating_purpose = "priming"
+            progress = getattr(session, "execution_progress", None)
+            if progress is not None:
+                next_index = len(progress.verified_prefix)
+                if (
+                    progress.accepted_current is None
+                    and 0 <= next_index < len(session.execution_plan.steps)
+                ):
+                    next_operation = session.execution_plan.steps[next_index].operation
+                    if isinstance(next_operation, SetPumpSpeed):
+                        purpose_value = next_operation.metadata.get("operating_purpose")
+                        if isinstance(purpose_value, str) and purpose_value:
+                            operating_purpose = purpose_value
+                        elif next_operation.metadata.get("priming_step") == "true":
+                            operating_purpose = "priming"
+        if (
+            operating_purpose is None
+            and getattr(currentness.purpose, "body", None) is ThermalBody.HOT_TUB
+            and getattr(currentness.purpose, "selected_source", None) is PhysicalHeatMode.OFF
+            and getattr(currentness.purpose, "required_pump_rpm", None)
+            == self.baselines.temperature_probe_rpm
+            and any(
+                step.metadata.get("spa_temperature_acquisition_step") == "true"
+                for step in session.execution_plan.steps
+            )
+        ):
+            operating_purpose = PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
         if currentness.purpose.kind is ThermalExecutionPurposeKind.POOL_TEMPERATURE_PROBE:
             sequence = session.coordination.current_step_sequence
             if sequence is None:
