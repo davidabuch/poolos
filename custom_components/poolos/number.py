@@ -63,7 +63,10 @@ def _record_exact_thermal_pump_handback(
 ) -> None:
     """Return PUMP to PoolOS when explicit HA intent exactly restores its target."""
 
-    lease = runtime.thermal_runtime_orchestrator.ownership.state.lease
+    orchestrator = getattr(runtime, "thermal_runtime_orchestrator", None)
+    if orchestrator is None:
+        return
+    lease = orchestrator.ownership.state.lease
     if lease is None or lease.status.value != "owned":
         return
     if lease.body.value != body.value:
@@ -103,7 +106,7 @@ def _record_exact_thermal_pump_handback(
         reason_code="positive_operator_controller_intent",
         positive_operator_evidence=operator,
     )
-    runtime.thermal_runtime_orchestrator.ownership.record_operator_events(
+    orchestrator.ownership.record_operator_events(
         ExternalChangeBatch((event,)),
         evaluated_at=accepted_at,
     )
