@@ -2789,6 +2789,26 @@ class ThermalAutomaticExecutionDriver:
         if spa_active is False:
             # Observing Spa OFF creates a new in-process body boundary; a later
             # Spa ON is then a session this driver actually witnessed.
+            #
+            # If the current BODY origin is a prospectively adopted external-user
+            # Hot Tub session, this same witnessed OFF is the authoritative end
+            # of that user session. Relinquish the adopted BODY immediately with
+            # no cleanup or residual entitlement; PoolOS did not activate it.
+            lease = self.orchestrator.ownership.state.lease
+            if (
+                lease is not None
+                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and lease.body is ThermalBody.HOT_TUB
+                and lease.body_activation is None
+                and lease.body_adoption is not None
+                and lease.body_adoption.reason_code
+                == "witnessed_user_hot_tub_session"
+            ):
+                self.orchestrator.ownership.relinquish(
+                    lease_id=lease.lease_id,
+                    relinquished_at=frame.observed_at,
+                    reason_code="witnessed_user_hot_tub_session_ended",
+                )
             self._spa_off_observed_since_start = True
             self._active_spa_restart_ambiguity = False
             self._spa_user_session_opportunity_id = None
