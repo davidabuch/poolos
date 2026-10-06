@@ -16,6 +16,8 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     CONF_DIAGNOSTICS_ENABLED,
     CONF_PREFERRED_FILTRATION_CATCHUP_START,
+    CONF_FILTRATION_SCHEDULING_MODE,
+    CONF_TRADITIONAL_FILTRATION_START,
     CONF_PUMP_FILTRATION_RPM,
     CONF_PUMP_GAS_HEATING_RPM,
     CONF_PUMP_GRID_OUTAGE_RPM,
@@ -47,6 +49,9 @@ from .const import (
     CONF_WATER_TEMPERATURE_ENTITY,
     DEFAULT_DIAGNOSTICS_ENABLED,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+    DEFAULT_FILTRATION_SCHEDULING_MODE,
+    DEFAULT_TRADITIONAL_FILTRATION_START,
+    FILTRATION_SCHEDULING_MODE_OPTIONS,
     DEFAULT_INTELLICENTER_TRANSPORT,
     DEFAULT_SPA_SOLAR_ROOF_F,
     DEFAULT_SANITATION_RPM,
@@ -158,10 +163,33 @@ def _mapping_schema(current: dict[str, Any]) -> vol.Schema:
 
     fields[
         vol.Required(
+            CONF_FILTRATION_SCHEDULING_MODE,
+            default=current.get(
+                CONF_FILTRATION_SCHEDULING_MODE,
+                DEFAULT_FILTRATION_SCHEDULING_MODE,
+            ),
+        )
+    ] = selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=list(FILTRATION_SCHEDULING_MODE_OPTIONS),
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+    fields[
+        vol.Required(
             CONF_PREFERRED_FILTRATION_CATCHUP_START,
             default=current.get(
                 CONF_PREFERRED_FILTRATION_CATCHUP_START,
                 DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+            ),
+        )
+    ] = selector.TimeSelector()
+    fields[
+        vol.Required(
+            CONF_TRADITIONAL_FILTRATION_START,
+            default=current.get(
+                CONF_TRADITIONAL_FILTRATION_START,
+                DEFAULT_TRADITIONAL_FILTRATION_START,
             ),
         )
     ] = selector.TimeSelector()

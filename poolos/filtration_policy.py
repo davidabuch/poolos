@@ -276,6 +276,16 @@ class FiltrationDebtLedger:
         )
 
 
+class FiltrationSchedulingMode(str, Enum):
+    """Select when standalone filtration should be scheduled."""
+
+    SOLAR_TOU_OPTIMIZED = "solar_tou_optimized"
+    TRADITIONAL_TIME_BASED = "traditional_time_based"
+
+
+DEFAULT_SOLAR_LOSS_FINISH_NOW_THRESHOLD = timedelta(minutes=30)
+
+
 class FiltrationDisposition(str, Enum):
     EVIDENCE_UNAVAILABLE = "evidence_unavailable"
     SATISFIED = "satisfied"
@@ -319,6 +329,10 @@ class FiltrationPolicy:
         preferred_catchup_start: time = time(hour=20),
         completion_safety_margin: timedelta = timedelta(minutes=30),
         operational_day_boundary: time = time(hour=8),
+        scheduling_mode: FiltrationSchedulingMode = (
+            FiltrationSchedulingMode.SOLAR_TOU_OPTIMIZED
+        ),
+        traditional_start_time: time | None = None,
     ) -> None:
         if completion_safety_margin < timedelta(0):
             raise ValueError("completion_safety_margin must not be negative")
@@ -327,6 +341,15 @@ class FiltrationPolicy:
         self._preferred_catchup_start = preferred_catchup_start
         self._completion_safety_margin = completion_safety_margin
         self._operational_day_boundary = operational_day_boundary
+        self._scheduling_mode = FiltrationSchedulingMode(scheduling_mode)
+        self._traditional_start_time = traditional_start_time
+        if (
+            self._scheduling_mode is FiltrationSchedulingMode.TRADITIONAL_TIME_BASED
+            and self._traditional_start_time is None
+        ):
+            raise ValueError(
+                "traditional_start_time is required for traditional time-based filtration"
+            )
 
     def _optimized_catchup_at(
         self,
@@ -379,6 +402,26 @@ class FiltrationPolicy:
 
         return min(preferred_start, latest_safe_start)
 
+    def _traditional_start_at(self, evaluated_at: datetime) -> datetime:
+        """Return this operational day's explicitly configured start time."""
+
+        assert self._traditional_start_time is not None
+        local = self._tou_profile._local(evaluated_at)
+        local_time = local.timetz().replace(tzinfo=None)
+        operational_day = local.date()
+        if local_time < self._operational_day_boundary:
+            operational_day -= timedelta(days=1)
+        scheduled_date = (
+            operational_day
+            if self._traditional_start_time >= self._operational_day_boundary
+            else operational_day + timedelta(days=1)
+        )
+        return datetime.combine(
+            scheduled_date,
+            self._traditional_start_time,
+            tzinfo=local.tzinfo,
+        )
+
     def evaluate(
         self,
         obligation: FiltrationObligation,
@@ -427,6 +470,22 @@ class FiltrationPolicy:
                 evaluated_at,
                 maximum_tier=TimeOfUseTier.LOW_PEAK,
             )
+        elif self._scheduling_mode is FiltrationSchedulingMode.TRADITIONAL_TIME_BASED:
+            traditional_start = self._traditional_start_at(evaluated_at)
+            if self._tou_profile._local(evaluated_at) < traditional_start:
+                return FiltrationAssessment(
+                    evaluated_at,
+                    FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                    remaining,
+                    tier,
+                    traditional_start,
+                    None,
+                    (
+                        "Traditional time-based filtration is waiting for the "
+                        "configured daily start time.",
+                        "Temperature-derived filtration obligation remains active.",
+                    ),
+                )
         elif tier is TimeOfUseTier.HIGH_PEAK and safely_deferrable:
             disposition = FiltrationDisposition.DEFERRED_TOU
             reason = "Flexible filtration is deferred during the high-price period."
@@ -458,7 +517,9 @@ class FiltrationPolicy:
                 )
 
         if higher_priority_requirement or (
-            tier is TimeOfUseTier.HIGH_PEAK and safely_deferrable
+            self._scheduling_mode is FiltrationSchedulingMode.SOLAR_TOU_OPTIMIZED
+            and tier is TimeOfUseTier.HIGH_PEAK
+            and safely_deferrable
         ):
             return FiltrationAssessment(
                 evaluated_at,
@@ -572,6 +633,9 @@ class FiltrationAccountingSnapshot:
     observed_pump_rpm: float | None
     filtration_credit_factor: Fraction
     filtration_credit_band: FiltrationCreditBand
+    scheduling_mode: FiltrationSchedulingMode = FiltrationSchedulingMode.SOLAR_TOU_OPTIMIZED
+    traditional_start_time: time | None = None
+    solar_loss_finish_now_threshold: timedelta = DEFAULT_SOLAR_LOSS_FINISH_NOW_THRESHOLD
     authority: str = "none"
     command_delivery_enabled: bool = False
 
@@ -580,6 +644,18 @@ class FiltrationAccountingSnapshot:
             raise ValueError("evaluated_at must be timezone-aware")
         if self.ordinary_filtration_rpm <= 0:
             raise ValueError("ordinary_filtration_rpm must be positive")
+        object.__setattr__(
+            self, "scheduling_mode", FiltrationSchedulingMode(self.scheduling_mode)
+        )
+        if (
+            self.scheduling_mode is FiltrationSchedulingMode.TRADITIONAL_TIME_BASED
+            and self.traditional_start_time is None
+        ):
+            raise ValueError(
+                "traditional scheduling snapshots require a configured start time"
+            )
+        if self.solar_loss_finish_now_threshold < timedelta(0):
+            raise ValueError("solar loss finish-now threshold must not be negative")
         if self.authority != "none" or self.command_delivery_enabled:
             raise ValueError("filtration accounting must remain command-disabled")
         if self.currently_earning_credit != (
@@ -641,6 +717,15 @@ class FiltrationAccountingSnapshot:
                     else self.next_suitable_at.isoformat()
                 ),
                 "ordinary_filtration_rpm": self.ordinary_filtration_rpm,
+                "scheduling_mode": self.scheduling_mode.value,
+                "traditional_start_time": (
+                    None
+                    if self.traditional_start_time is None
+                    else self.traditional_start_time.isoformat()
+                ),
+                "solar_loss_finish_now_threshold_seconds": (
+                    self.solar_loss_finish_now_threshold.total_seconds()
+                ),
                 "debt_days": [item.isoformat() for item in self.debt_days],
                 "debt_retention_days": 2,
                 "restored_from_observation_history": self.restored_from_history,
@@ -693,6 +778,13 @@ class FiltrationAccountingTracker:
         operational_day_policy: FiltrationOperationalDayPolicy = (
             FiltrationOperationalDayPolicy()
         ),
+        scheduling_mode: FiltrationSchedulingMode = (
+            FiltrationSchedulingMode.SOLAR_TOU_OPTIMIZED
+        ),
+        traditional_start_time: time | None = None,
+        solar_loss_finish_now_threshold: timedelta = (
+            DEFAULT_SOLAR_LOSS_FINISH_NOW_THRESHOLD
+        ),
     ) -> None:
         self._target_policy = target_policy
         self._tou_profile = tou_profile
@@ -700,8 +792,13 @@ class FiltrationAccountingTracker:
             tou_profile,
             baselines=baselines,
             preferred_catchup_start=preferred_catchup_start,
+            scheduling_mode=scheduling_mode,
+            traditional_start_time=traditional_start_time,
         )
         self._baselines = baselines
+        self._scheduling_mode = FiltrationSchedulingMode(scheduling_mode)
+        self._traditional_start_time = traditional_start_time
+        self._solar_loss_finish_now_threshold = solar_loss_finish_now_threshold
         self._operational_day_policy = operational_day_policy
         self._timezone = ZoneInfo(tou_profile.timezone_name)
         self._ledger = FiltrationDebtLedger(())
@@ -1086,6 +1183,9 @@ class FiltrationAccountingTracker:
             tou_tier=policy.tou_tier,
             next_suitable_at=policy.next_suitable_at,
             ordinary_filtration_rpm=self._baselines.filtration_rpm,
+            scheduling_mode=self._scheduling_mode,
+            traditional_start_time=self._traditional_start_time,
+            solar_loss_finish_now_threshold=self._solar_loss_finish_now_threshold,
             reason_code=reason_code,
             rationale=policy.rationale,
             debt_days=tuple(item.day for item in self._ledger.debts),
@@ -1124,6 +1224,9 @@ class FiltrationAccountingTracker:
             tou_tier=snapshot.tou_tier,
             next_suitable_at=snapshot.next_suitable_at,
             ordinary_filtration_rpm=snapshot.ordinary_filtration_rpm,
+            scheduling_mode=snapshot.scheduling_mode,
+            traditional_start_time=snapshot.traditional_start_time,
+            solar_loss_finish_now_threshold=snapshot.solar_loss_finish_now_threshold,
             reason_code=snapshot.reason_code,
             rationale=snapshot.rationale,
             debt_days=snapshot.debt_days,

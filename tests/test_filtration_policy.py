@@ -9,6 +9,7 @@ from poolos.filtration_policy import (
     FiltrationDebtLedger,
     FiltrationObligation,
     FiltrationPolicy,
+    FiltrationSchedulingMode,
     TemperatureFiltrationPolicy,
 )
 from poolos.operational_intent import OperationalIntentType
@@ -297,3 +298,39 @@ def test_deferred_optimization_disposition_is_stable_public_contract() -> None:
 
     assert result.disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
     assert result.next_suitable_at == datetime(2026, 9, 4, 20, 0, tzinfo=LOCAL)
+
+def test_traditional_time_based_profile_waits_for_configured_start_then_runs() -> None:
+    policy = FiltrationPolicy(
+        LADWP_INITIAL_PROFILE,
+        scheduling_mode=FiltrationSchedulingMode.TRADITIONAL_TIME_BASED,
+        traditional_start_time=datetime(2026, 9, 4, 9, 0, tzinfo=LOCAL).time(),
+    )
+    obligation = FiltrationObligation(timedelta(hours=9))
+
+    early = policy.evaluate(
+        obligation,
+        evaluated_at=datetime(2026, 9, 4, 8, 30, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+    due = policy.evaluate(
+        obligation,
+        evaluated_at=datetime(2026, 9, 4, 9, 0, tzinfo=LOCAL),
+        safely_deferrable=True,
+    )
+
+    assert early.disposition is FiltrationDisposition.DEFERRED_OPTIMIZATION
+    assert early.next_suitable_at == datetime(2026, 9, 4, 9, 0, tzinfo=LOCAL)
+    assert due.disposition is FiltrationDisposition.RUN_NOW
+    assert due.intent is not None
+
+
+def test_traditional_profile_does_not_replace_temperature_derived_obligation() -> None:
+    tracker = FiltrationDebtLedger(
+        (DailyFiltrationDebt(date(2026, 9, 4), timedelta(hours=6)),)
+    )
+    raised = tracker.record_daily_temperature(
+        day=date(2026, 9, 4),
+        temperature_f=88.0,
+        required_runtime=TemperatureFiltrationPolicy().target_for(88.0),
+    )
+    assert raised.debts[0].required_runtime == timedelta(hours=10)

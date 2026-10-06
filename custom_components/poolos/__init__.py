@@ -30,11 +30,15 @@ _enable_local_vendored_core()
 
 from .const import (  # noqa: E402
     CONF_PREFERRED_FILTRATION_CATCHUP_START,
+    CONF_FILTRATION_SCHEDULING_MODE,
+    CONF_TRADITIONAL_FILTRATION_START,
     CONF_SANITATION_RPM,
     CONF_POOL_SANITATION_DURATION_MINUTES,
     CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
     DEFAULT_OPERATING_MODE,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
+    DEFAULT_FILTRATION_SCHEDULING_MODE,
+    DEFAULT_TRADITIONAL_FILTRATION_START,
     DEFAULT_SANITATION_RPM,
     DEFAULT_POOL_SANITATION_DURATION_MINUTES,
     DEFAULT_HOT_TUB_SANITATION_DURATION_MINUTES,
@@ -59,6 +63,7 @@ from .sanitation_runtime import PoolOSSanitationRuntime  # noqa: E402
 from .settings_panel import async_setup_settings_panel  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 from .thermal_automatic_runtime import PoolOSThermalAutomaticRuntime  # noqa: E402
+from poolos.filtration_policy import FiltrationSchedulingMode  # noqa: E402
 from poolos.thermal_runtime_orchestration import (  # noqa: E402
     ThermalRuntimeOrchestrator,
     assess_pool_temperature_probe_continuity,
@@ -164,10 +169,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             DEFAULT_PREFERRED_FILTRATION_CATCHUP_START
         )
 
+    scheduling_mode_text = str(
+        configured.get(
+            CONF_FILTRATION_SCHEDULING_MODE,
+            DEFAULT_FILTRATION_SCHEDULING_MODE,
+        )
+    ).strip()
+    try:
+        filtration_scheduling_mode = FiltrationSchedulingMode(scheduling_mode_text)
+    except ValueError:
+        filtration_scheduling_mode = FiltrationSchedulingMode(
+            DEFAULT_FILTRATION_SCHEDULING_MODE
+        )
+
+    traditional_start_text = str(
+        configured.get(
+            CONF_TRADITIONAL_FILTRATION_START,
+            DEFAULT_TRADITIONAL_FILTRATION_START,
+        )
+    ).strip()
+    try:
+        traditional_filtration_start = time.fromisoformat(traditional_start_text)
+    except ValueError:
+        traditional_filtration_start = time.fromisoformat(
+            DEFAULT_TRADITIONAL_FILTRATION_START
+        )
+
     filtration_runtime = PoolOSFiltrationRuntime(
         coordinator=coordinator,
         preferred_catchup_start=preferred_catchup_start,
         baselines=pump_baselines,
+        scheduling_mode=filtration_scheduling_mode,
+        traditional_start_time=traditional_filtration_start,
     )
     await filtration_runtime.async_restore(restored_at=datetime.now(UTC))
     coordinator.set_filtration_runtime_refresh(filtration_runtime.refresh)

@@ -2,7 +2,9 @@ const DOMAIN = "poolos";
 const POOL_OS_DASHBOARD_PATH = "/pool-os";
 
 const LABELS = {
+  filtration_scheduling_mode: "Filtration strategy",
   preferred_filtration_catchup_start: "TOU catch-up start",
+  traditional_filtration_start: "Traditional filtration start",
   pump_filtration_rpm: "Filtration RPM",
   pump_solar_heating_rpm: "Solar heating RPM",
   pump_gas_heating_rpm: "Gas heating RPM",
@@ -70,9 +72,39 @@ const SCHEMA = [
     flatten: true,
     schema: [
       {
+        name: "filtration_scheduling_mode",
+        required: true,
+        selector: {
+          select: {
+            options: [
+              { value: "solar_tou_optimized", label: "Solar / TOU Optimized" },
+              { value: "traditional_time_based", label: "Traditional Time-Based" },
+            ],
+            mode: "dropdown",
+            multiple: false,
+            custom_value: false,
+          },
+        },
+      },
+      {
         name: "preferred_filtration_catchup_start",
         required: true,
         ...timeSelector(),
+        visible: {
+          field: "filtration_scheduling_mode",
+          operator: "eq",
+          value: "solar_tou_optimized",
+        },
+      },
+      {
+        name: "traditional_filtration_start",
+        required: true,
+        ...timeSelector(),
+        visible: {
+          field: "filtration_scheduling_mode",
+          operator: "eq",
+          value: "traditional_time_based",
+        },
       },
       {
         name: "pump_filtration_rpm",
