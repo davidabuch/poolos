@@ -558,11 +558,22 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
 
         await self.async_prepare_unload()
 
-    async def _async_mapped_state_changed(self, _event: Event) -> None:
-        """Capture a mapped HA state/attribute change without waiting for polling."""
+    async def _async_mapped_state_changed(self, event: Event) -> None:
+        """Capture an external mapped HA change without self-observation fan-out."""
 
         if self._unloading:
             return
+
+        entity_id = str(event.data.get("entity_id", ""))
+        object_id = entity_id.partition(".")[2]
+        if object_id.startswith("poolos_native_intellicenter_"):
+            # PoolOS publishes these entities from the independent native
+            # IntelliCenter snapshot. The native callback already schedules one
+            # authoritative controller observation, so observing our own HA
+            # publication here would multiply one physical update into many
+            # Recorder-visible evaluations.
+            return
+
         async with self._observation_lock:
             if self._unloading:
                 return
