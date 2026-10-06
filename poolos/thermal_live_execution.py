@@ -2319,16 +2319,19 @@ def _step_verification_timeout(
     step: ExecutionStep,
     policy: ThermalLiveExecutionPolicy,
 ) -> timedelta:
-    """Give Pool temperature-probe RPM convergence its commissioned native bound.
+    """Give typed temperature-acquisition RPM convergence its native bound.
 
     IntelliCenter can legitimately traverse body-switch/startup pump settling
-    before the configured and actual probe RPM both reach 1500.  The generic
-    30-second thermal command bound is intentionally retained everywhere else;
-    only the explicitly typed Pool probe RPM step shares the existing
-    two-minute ownership reconciliation bound.
+    before the configured and actual 1500-RPM acquisition target converge.
+    The generic 30-second thermal command bound is intentionally retained
+    everywhere else; only explicitly typed Pool or Spa temperature-acquisition
+    RPM steps share the existing two-minute ownership reconciliation bound.
     """
 
-    if step.metadata.get("pool_temperature_probe_step") == "true":
+    if (
+        step.metadata.get("pool_temperature_probe_step") == "true"
+        or step.metadata.get("spa_temperature_acquisition_step") == "true"
+    ):
         return max(policy.verification_timeout, timedelta(seconds=120))
     return policy.verification_timeout
 
