@@ -89,7 +89,8 @@ async def async_setup_settings_panel(hass: HomeAssistant) -> None:
         return
 
     module_path = Path(__file__).resolve().parent / "settings_panel.js"
-    asset_version = sha256(module_path.read_bytes()).hexdigest()[:12]
+    module_bytes = await hass.async_add_executor_job(module_path.read_bytes)
+    asset_version = sha256(module_bytes).hexdigest()[:12]
     await hass.http.async_register_static_paths(
         [StaticPathConfig(_PANEL_MODULE_URL, str(module_path), False)]
     )
