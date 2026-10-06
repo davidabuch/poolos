@@ -65,6 +65,16 @@ def test_ha_setup_skips_parity_history_load_before_first_refresh() -> None:
     )
 
 
+
+def test_event_driven_observation_publishes_snapshot_once() -> None:
+    coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
+
+    # _async_observe() is the single publication boundary. Native and mapped
+    # state-change callers must not republish the same snapshot afterward.
+    assert coordinator.count("self.async_set_updated_data(snapshot)") == 1
+
+
+
 def test_parity_record_computes_one_post_append_summary() -> None:
     source = (ROOT / "poolos" / "native_parity_commissioning.py").read_text(encoding="utf-8")
     record_body = source[source.index("    def record("):source.index("    def summary(")]
