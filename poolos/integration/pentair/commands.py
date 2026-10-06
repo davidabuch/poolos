@@ -11,6 +11,7 @@ class PentairCommandOperation(StrEnum):
     START_PUMP = "pump.start"
     STOP_PUMP = "pump.stop"
     SET_PUMP_SPEED = "pump.set_speed"
+    SET_PUMP_FLOW = "pump.set_flow"
     SET_HYDRAULIC_ROUTE = "hydraulics.set_route"
     SET_BODY_HEATER = "body.set_heater"
 
@@ -19,6 +20,7 @@ class PentairCommandParameter(StrEnum):
     """Stable parameter names used by Pentair vendor commands."""
 
     RPM = "rpm"
+    GPM = "gpm"
     SUCTION_BODY_ID = "suction_body_id"
     SUCTION_BODY_KIND = "suction_body_kind"
     SUCTION_CIRCUIT_ID = "suction_circuit_id"
