@@ -145,12 +145,17 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         effective_pump_rpm = None
         if self.pump_speed_session is not None and operating_purpose is not None:
             pump_state = self.pump_speed_session.snapshot
+            pump_session_purpose = (
+                PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
+                if operating_purpose == "temperature_acquisition"
+                else operating_purpose
+            )
             if (
                 pump_state.active
                 and pump_state.body is not None
                 and pump_state.body.value == session.assessment.desired.body.value
                 and pump_state.purpose is not None
-                and pump_state.purpose.value == operating_purpose
+                and pump_state.purpose.value == pump_session_purpose
                 and pump_state.pump_circuit_id == pump_circuit_id
             ):
                 pump_session_id = pump_state.session_id
