@@ -154,6 +154,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             Path(hass.config.path("poolos_logs")),
             load_history=False,
         )
+        # Commissioning persistence is deliberately disabled in normal runtime.
+        # PoolOS control does not depend on sustained parity history, and loading
+        # or appending large commissioning files can create avoidable HA I/O.
+        self.native_parity_commissioning_store.persistence_available = False
         self.native_parity_commissioning_summary: NativeParityCommissioningSummary = (
             self.native_parity_commissioning_store.summary()
         )
@@ -184,14 +188,14 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         ] | None = None
 
     async def async_initialize_persistence(self) -> None:
-        """Load disk-backed commissioning state without blocking HA's event loop."""
+        """Initialize bounded runtime evidence without loading commissioning history."""
 
-        def load_and_summarize() -> NativeParityCommissioningSummary:
-            self.native_parity_commissioning_store.load()
-            return self.native_parity_commissioning_store.summary()
-
+        # Normal PoolOS operation must not depend on historical commissioning
+        # parity files. Keep an empty, in-memory commissioning summary unless a
+        # future explicit commissioning mode enables persistence.
+        self.native_parity_commissioning_store._loaded = True
         self.native_parity_commissioning_summary = (
-            await self.hass.async_add_executor_job(load_and_summarize)
+            self.native_parity_commissioning_store.summary()
         )
 
     async def _async_refresh_native_runtime_evidence(self) -> bool:
@@ -335,11 +339,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     if self._unloading:
                         return
                     self._event_refresh_count += 1
-                    snapshot = await self._async_observe(
+                    await self._async_observe(
                         observed_at=datetime.now(UTC),
                         trigger="native_intellicenter_update",
                     )
-                    self.async_set_updated_data(snapshot)
         finally:
             self._native_intellicenter_refresh_task = None
 
@@ -532,11 +535,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             # A queued event may run after a newer native observation; using
             # its historical time would regress stateful accounting.
             timestamp = datetime.now(UTC)
-            snapshot = await self._async_observe(
+            await self._async_observe(
                 observed_at=timestamp,
                 trigger="state_change_event",
             )
-            self.async_set_updated_data(snapshot)
 
     async def _async_observe(
         self,
@@ -780,7 +782,7 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         recorded_at: datetime,
         recommendation: OperatorRecommendation | None,
         recommendation_published_at: datetime | None,
-        export_evidence: bool = True,
+        export_evidence: bool = False,
     ) -> tuple[
         BehavioralInferenceReport,
         DailyOperationalRetrospective,
