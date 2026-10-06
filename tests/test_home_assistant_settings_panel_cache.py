@@ -3,6 +3,7 @@
 from pathlib import Path
 
 PANEL_BACKEND = Path("custom_components/poolos/settings_panel.py")
+PANEL_FRONTEND = Path("custom_components/poolos/settings_panel.js")
 
 
 def test_settings_panel_cache_key_tracks_frontend_content() -> None:
