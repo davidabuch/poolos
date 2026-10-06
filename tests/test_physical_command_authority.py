@@ -2223,3 +2223,47 @@ def test_reset_recovery_invalidates_queued_normal_expectations() -> None:
     authority.begin_reset_recovery()
     assert authority.diagnostics(now=NOW)["pending_expectation_count"] == 0
     assert authority.diagnostics(now=NOW)["reset_recovery_active"] is True
+
+
+def test_spa_temperature_acquisition_accepts_canonical_probe_pump_session() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-acquisition-epoch")
+    authority.synchronize_pump_speed_session(
+        session_id="spa-probe-session",
+        body="hot_tub",
+        purpose="temperature_probe",
+        pump_circuit_id="p0198",
+        effective_rpm=1500,
+    )
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="spa-acquisition-epoch",
+        session_identity="spa-acquisition-plan",
+        body="hot_tub",
+        pump_circuit_id="p0198",
+        operating_purpose="temperature_acquisition",
+        pump_session_id="spa-probe-session",
+        effective_pump_rpm=1500,
+    )
+    exact = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0198",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=1500,
+        automatic_thermal_context=context,
+    )
+
+    assert authority.assess(exact).reason is PhysicalAuthorityReason.ALLOWED
+
+    authority.synchronize_pump_speed_session(
+        session_id="spa-ordinary-session",
+        body="hot_tub",
+        purpose="ordinary_circulation",
+        pump_circuit_id="p0198",
+        effective_rpm=2600,
+    )
+    assert authority.assess(exact).reason is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
