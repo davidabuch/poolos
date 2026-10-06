@@ -257,6 +257,7 @@ class ManualIntelliCenterThermalLiveDelivery:
                 if cleanup.effective_pump_rpm is not None
                 else {
                     "temperature_acquisition": self.baselines.temperature_probe_rpm,
+                    "priming": self.baselines.priming_rpm,
                     "ordinary_circulation": self.baselines.filtration_rpm,
                     "solar_heating": self.baselines.solar_heating_rpm,
                     "gas_heating": self.baselines.gas_heating_rpm,

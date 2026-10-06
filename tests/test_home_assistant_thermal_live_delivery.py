@@ -326,6 +326,35 @@ def test_automatic_adapter_rejects_gpm_for_non_solar_gas_purpose(
     assert manual.calls == []
 
 
+
+def test_automatic_adapter_admits_exact_hot_tub_priming_purpose() -> None:
+    manual = FakeManualControl()
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="spa-priming-epoch",
+        session_identity="spa-priming-session",
+        body="hot_tub",
+        pump_circuit_id="p0101",
+        operating_purpose="priming",
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0101", rpm=3000),
+            correlation_id="spa-priming",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.calls == [("pump", "p0101", 3000)]
+
+
+
 def test_automatic_adapter_admits_exact_pool_ordinary_circulation_purpose() -> None:
     manual = FakeManualControl()
     context = AutomaticThermalDispatchContext(
