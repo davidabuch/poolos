@@ -52,13 +52,14 @@ def test_deferred_store_rejects_record_before_load(tmp_path: Path) -> None:
         )
 
 
-def test_ha_setup_loads_parity_history_through_executor_before_first_refresh() -> None:
+def test_ha_setup_skips_parity_history_load_before_first_refresh() -> None:
     init_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
     coordinator = (COMPONENT / "coordinator.py").read_text(encoding="utf-8")
 
     assert "load_history=False" in coordinator
     assert "async def async_initialize_persistence" in coordinator
-    assert "await self.hass.async_add_executor_job(load_and_summarize)" in coordinator
+    assert "native_parity_commissioning_store.initialize_empty()" in coordinator
+    assert "async_add_executor_job(load_and_summarize)" not in coordinator
     assert init_source.index("await coordinator.async_initialize_persistence()") < init_source.index(
         "await coordinator.async_config_entry_first_refresh()"
     )
