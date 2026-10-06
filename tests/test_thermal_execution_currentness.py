@@ -543,7 +543,7 @@ def test_verified_opportunistic_spa_activation_may_skip_only_unissued_priming() 
     )
     assert (
         decision.reason_code
-        == "thermal_execution_verified_spa_activation_native_circulation_supersedes_unissued_priming"
+        == "thermal_execution_residual_progress_compatible"
     )
 
     source_only = assess_execution_compatibility(
