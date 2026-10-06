@@ -861,7 +861,7 @@ def test_spa_acquisition_purpose_survives_transient_current_step_pointer() -> No
     source = MODULE_PATH.read_text(encoding="utf-8")
 
     assert "operating_purpose is None" in source
-    assert "currentness.purpose.body is ThermalBody.HOT_TUB" in source
-    assert "currentness.purpose.selected_source is PhysicalHeatMode.OFF" in source
+    assert 'getattr(currentness.purpose, "body", None) is ThermalBody.HOT_TUB' in source
+    assert 'getattr(currentness.purpose, "selected_source", None) is PhysicalHeatMode.OFF' in source
     assert 'step.metadata.get("spa_temperature_acquisition_step") == "true"' in source
     assert "operating_purpose = PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value" in source
