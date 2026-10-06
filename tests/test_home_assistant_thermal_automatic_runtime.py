@@ -131,7 +131,10 @@ class FakeAuthority:
         )
 
     def begin_automatic_thermal_epoch(self, identity: str) -> None:
-        self.epochs.append(identity)
+        # Match the real authority contract: rebinding the same observation
+        # epoch is idempotent and must not manufacture a new generation.
+        if not self.epochs or self.epochs[-1] != identity:
+            self.epochs.append(identity)
 
     def unload_automatic_thermal_driver(self) -> None:
         self.unloaded = True
