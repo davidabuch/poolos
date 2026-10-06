@@ -3603,7 +3603,7 @@ def test_owned_solar_session_survives_native_solar_active_drop() -> None:
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=127),
+                NOW + timedelta(seconds=188),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -5185,14 +5185,15 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
     assert lease.body_activation is not None
     assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
 
-    # Spa acquisition now goes directly to the exact 1500-RPM probe baseline.
+    # Spa acquisition goes directly to the exact 1500-RPM probe baseline.
     assert spa_on_verified.command_delivery_performed
     assert len(delivery.calls) == 3
     assert isinstance(delivery.calls[2], SetPumpSpeed)
     assert delivery.calls[2].rpm == 1500
 
-    # Fresh authoritative 1500-RPM evidence verifies acquisition. The trusted
-    # Spa temperature then permits a reviewed same-BODY Solar successor.
+    # Fresh authoritative 1500-RPM evidence completes acquisition. The
+    # acquisition execution retires cleanly; a later fresh epoch is responsible
+    # for creating the same-BODY Solar successor.
     acquisition_verified = asyncio.run(
         driver.process_epoch(
             _frame(
@@ -5217,8 +5218,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         )
     )
     assert not acquisition_verified.command_delivery_performed
-    assert driver.active_session is not None, acquisition_verified
-    assert driver.active_session.status is ThermalLiveExecutionStatus.READY
+    assert driver.active_session is None
     assert len(delivery.calls) == 3
 
     solar_flow = asyncio.run(
@@ -5288,7 +5288,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=188),
+                NOW + timedelta(seconds=127),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
