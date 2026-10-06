@@ -2074,6 +2074,47 @@ def test_pool_probe_rpm_uses_bounded_native_settling_window() -> None:
     ) == timedelta(seconds=120)
 
 
+def test_spa_temperature_acquisition_uses_bounded_native_settling_window() -> None:
+    """Spa BODY startup may need longer than the generic 30-second command bound."""
+
+    acquisition = ThermalDesiredState(
+        evaluated_at=NOW,
+        body=ThermalBody.HOT_TUB,
+        requested_mode="solar_preferred",
+        selected_source=PhysicalHeatMode.OFF,
+        required_pump_rpm=1500,
+        reason_code="spa_temperature_acquisition_required",
+        rpm_reason_code="spa_temperature_acquisition_required",
+        rationale=("Acquire Spa bulk-water temperature.",),
+        criteria=("commissioned_spa_temperature_acquisition",),
+        evidence={"active_operating_purpose": "temperature_acquisition"},
+    )
+    plan = ThermalExecutionPlanBuilder(
+        pump_equipment_id=TEST_SPA_PUMP_ID,
+        configured_speed_concept=SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    ).build(
+        acquisition,
+        ThermalCurrentState(
+            observed_at=NOW,
+            body=ThermalBody.HOT_TUB,
+            selected_source=PhysicalHeatMode.OFF,
+            pump_rpm=2600,
+            body_active=True,
+        ),
+    )
+    engine = ThermalLiveExecutionEngine()
+    live_policy = policy(ThermalLiveCommissioningScope.HOT_TUB)
+    session = engine.begin(plan, policy=live_policy, evidence=evidence(plan))
+    acquisition_step = session.execution_plan.steps[0]
+
+    assert acquisition_step.metadata["spa_temperature_acquisition_step"] == "true"
+    assert live_policy.verification_timeout == timedelta(seconds=30)
+    assert _step_verification_timeout(
+        acquisition_step,
+        live_policy,
+    ) == timedelta(seconds=120)
+
+
 def test_probe_authority_rejects_missing_step_provenance() -> None:
     plan = _probe_plan_for_authority()
     specification = replace(
