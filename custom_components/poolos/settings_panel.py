@@ -412,7 +412,7 @@ async def async_setup_settings_panel(hass: HomeAssistant) -> None:
         webcomponent_name=_PANEL_ELEMENT,
         sidebar_title="PoolOS Settings",
         sidebar_icon="mdi:pool",
-        module_url=_PANEL_MODULE_URL,
+        module_url=_PANEL_MODULE_URL + "?v=" + INTEGRATION_VERSION,
         require_admin=True,
         config_panel_domain=DOMAIN,
         config={"version": INTEGRATION_VERSION},
