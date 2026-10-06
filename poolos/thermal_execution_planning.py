@@ -559,16 +559,28 @@ class ThermalExecutionPlanBuilder:
                 ordering.append("body")
             if rpm_changed:
                 ordering.append("rpm")
+        elif spa_temperature_acquisition:
+            if source_changed:
+                ordering.append("source")
+                source_changed = False
+            if body_start_required:
+                ordering.append("body")
+            if rpm_changed:
+                ordering.append("rpm")
         elif opportunistic_spa_start:
             # A dormant Spa can immediately act on its configured heater when
             # activated.  Exact Solar/Off preconditioning therefore precedes
             # the only PoolOS-owned opportunistic body activation.
             ordering.append("source")
 
-        if body_start_required and not pool_temperature_acquisition:
+        if (
+            body_start_required
+            and not pool_temperature_acquisition
+            and not spa_temperature_acquisition
+        ):
             ordering.append("body")
 
-        if pool_temperature_acquisition:
+        if pool_temperature_acquisition or spa_temperature_acquisition:
             pass
         elif priming.priming_required:
             ordering.append("prime")
