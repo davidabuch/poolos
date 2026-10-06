@@ -405,6 +405,32 @@ def test_fast_native_publication_precedes_blocked_durable_observation() -> None:
     asyncio.run(exercise())
 
 
+def test_pre_observation_native_burst_coalesces_to_latest_snapshot() -> None:
+    async def exercise() -> None:
+        harness = _harness()
+        _set_last_known_native_target(harness, 97)
+        transport = _attach_transport(harness, 97)
+
+        harness._async_schedule_native_intellicenter_refresh()
+        for target in (98, 99, 100):
+            harness.transport_snapshot = _transport_snapshot(target)
+            transport.latest_snapshot = harness.transport_snapshot
+            harness._async_schedule_native_intellicenter_refresh()
+
+        assert harness.listener_targets == [97, 98, 99, 100]
+        assert harness.observe_calls == 0
+
+        await harness.pass_started[0].wait()
+        assert harness.observe_calls == 1
+        harness.pass_release[0].set()
+        await _finish_worker(harness)
+
+        assert harness.published_targets == [100]
+        assert harness._event_refresh_count == 1
+
+    asyncio.run(exercise())
+
+
 def test_fast_publication_does_not_parallelize_durable_observations() -> None:
     async def exercise() -> None:
         harness = _harness()
