@@ -23,7 +23,7 @@ def test_local_vendor_bootstrap_runs_before_coordinator_import() -> None:
 def test_source_manifest_remains_release_pinned_for_future_distribution() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@03dc89c2567447ffb08dcfc42f22026053354621",
+        "poolos@git+https://github.com/davidabuch/poolos.git@90f42c870d904545d9d46000c4c1dc2bf58a72b6",
         "pyintellicenter==0.1.20",
     ]
 
