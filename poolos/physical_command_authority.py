@@ -1823,6 +1823,10 @@ class PoolOSPhysicalCommandAuthority:
             if isinstance(context, AutomaticThermalDispatchContext)
             else "ordinary_circulation"
         )
+        if purpose == "temperature_acquisition":
+            # Spa acquisition is the thermal-policy name for the pump
+            # session's canonical temperature-probe purpose.
+            purpose = "temperature_probe"
         return self._pump_session_binding == (
             context.pump_session_id,
             context.body if isinstance(context, AutomaticThermalDispatchContext) else "pool",
