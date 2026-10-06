@@ -376,3 +376,97 @@ def test_future_independent_filtration_window_is_not_blocked_by_noon_off() -> No
         ]
         is False
     )
+
+
+def test_cleanup_binding_uses_verified_body_provenance_even_if_pump_domain_never_verified() -> None:
+    module = _load_module()
+    calls: list[dict[str, object]] = []
+
+    class BindingAuthority:
+        def bind_automatic_filtration_dispatch(self, **kwargs: object) -> object:
+            calls.append(dict(kwargs))
+            return SimpleNamespace(**kwargs)
+
+    lease = SimpleNamespace(
+        lease_id="lease-1",
+        session_id="filtration-session",
+        verified=False,
+        body_verified=True,
+        body_activation=SimpleNamespace(receipt_id="body-on-receipt"),
+        body_adoption=None,
+    )
+    factory = module._DeliveryFactory(
+        manual=object(),
+        authority=BindingAuthority(),
+        ownership=SimpleNamespace(filtration_lease=lease),
+    )
+    module.ManualIntelliCenterFiltrationDelivery = (
+        lambda manual, context, baselines: SimpleNamespace(
+            manual=manual,
+            context=context,
+            baselines=baselines,
+        )
+    )
+    frame = SimpleNamespace(
+        epoch_identity="epoch-1",
+        pool_pump_circuit_id="p0102",
+        pump_session_id=None,
+        pump_session_effective_rpm=None,
+        pump_session_effective_target=None,
+    )
+
+    delivery = factory.for_operation(
+        frame=frame,
+        session_id="filtration-session",
+        operation=module.SetBodyActive(
+            equipment_id="pool",
+            active=False,
+            metadata={"reason_code": "automatic_filtration_owned_shutdown"},
+        ),
+        cleanup=True,
+    )
+
+    assert delivery.context.cleanup is True
+    assert delivery.context.ownership_lease_id == "lease-1"
+    assert delivery.context.body_activation_receipt_id == "body-on-receipt"
+    assert calls
+
+
+def test_cleanup_binding_still_rejects_unverified_body_provenance() -> None:
+    module = _load_module()
+    lease = SimpleNamespace(
+        lease_id="lease-1",
+        session_id="filtration-session",
+        verified=False,
+        body_verified=False,
+        body_activation=SimpleNamespace(receipt_id="body-on-receipt"),
+        body_adoption=None,
+    )
+    factory = module._DeliveryFactory(
+        manual=object(),
+        authority=SimpleNamespace(),
+        ownership=SimpleNamespace(filtration_lease=lease),
+    )
+    frame = SimpleNamespace(
+        epoch_identity="epoch-1",
+        pool_pump_circuit_id="p0102",
+        pump_session_id=None,
+        pump_session_effective_rpm=None,
+        pump_session_effective_target=None,
+    )
+
+    try:
+        factory.for_operation(
+            frame=frame,
+            session_id="filtration-session",
+            operation=module.SetBodyActive(
+                equipment_id="pool",
+                active=False,
+                metadata={"reason_code": "automatic_filtration_owned_shutdown"},
+            ),
+            cleanup=True,
+        )
+    except ValueError as exc:
+        assert str(exc) == "filtration cleanup ownership is not current"
+    else:
+        raise AssertionError("unverified BODY provenance must not authorize cleanup")
