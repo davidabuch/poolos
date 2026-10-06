@@ -13,12 +13,25 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from poolos.external_change import (
+    ExternalChangeBatch,
+    ExternalChangeEvent,
+    ExternalChangePolicy,
+    ExternalSemanticEventType,
+)
 from poolos.intellicenter_readonly import (
     NativeBodyKind,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     resolve_body_pump_circuit,
     resolve_pool_pump_circuit,
 )
-from poolos.pump_speed_session import PumpSpeedSessionBody
+from poolos.ownership_evidence import (
+    OwnershipAuthority,
+    OwnershipDomain,
+    PositiveOperatorEvidence,
+)
+from poolos.pump_speed_session import PumpSpeedManualRequest, PumpSpeedSessionBody
 
 from . import PoolOSRuntimeData
 from .const import DOMAIN, INTEGRATION_VERSION
@@ -38,6 +51,62 @@ _INTELLICHLOR_OBJNAM = "CHR01"
 _INTELLICHLOR_MIN_PERCENT = 0
 _INTELLICHLOR_MAX_PERCENT = 100
 _INTELLICHLOR_STEP_PERCENT = 1
+
+
+def _record_exact_thermal_pump_handback(
+    runtime: PoolOSRuntimeData,
+    *,
+    body: PumpSpeedSessionBody,
+    pump_circuit_id: str,
+    request: PumpSpeedManualRequest,
+    accepted_at: datetime,
+) -> None:
+    """Return PUMP to PoolOS when explicit HA intent exactly restores its target."""
+
+    lease = runtime.thermal_runtime_orchestrator.ownership.state.lease
+    if lease is None or lease.status.value != "owned":
+        return
+    if lease.body.value != body.value:
+        return
+    pump = lease.domain_state(OwnershipDomain.PUMP)
+    if (
+        pump.authority is not OwnershipAuthority.OPERATOR
+        or type(pump.target_value) is not int
+        or request.requested_rpm != pump.target_value
+    ):
+        return
+
+    concept = (
+        POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+        if body is PumpSpeedSessionBody.POOL
+        else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+    )
+    operator = PositiveOperatorEvidence(
+        request_id=request.request_id,
+        authority_generation=lease.body_session_generation or lease.generation,
+        body_session_id=lease.body_session_id or lease.lease_id,
+        domain=OwnershipDomain.PUMP,
+        equipment_id="pump.rpm",
+        requested_at=request.requested_at,
+    )
+    event = ExternalChangeEvent(
+        concept=concept,
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id=pump_circuit_id,
+        previous_value=pump.observed_value,
+        new_value=request.requested_rpm,
+        observed_at=accepted_at,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_manual_configured_speed_return",
+        notification_recommended=False,
+        reconciliation_required=False,
+        reason_code="positive_operator_controller_intent",
+        positive_operator_evidence=operator,
+    )
+    runtime.thermal_runtime_orchestrator.ownership.record_operator_events(
+        ExternalChangeBatch((event,)),
+        evaluated_at=accepted_at,
+    )
 
 
 async def _async_set_manual_pump_speed(
@@ -96,11 +165,19 @@ async def _async_set_manual_pump_speed(
         session_runtime.session.manual_delivery_failed(request)
         session_runtime.synchronize_authority()
         raise
+    accepted_at = datetime.now(UTC)
     session_runtime.session.manual_delivery_accepted(
         request,
-        accepted_at=datetime.now(UTC),
+        accepted_at=accepted_at,
     )
     session_runtime.synchronize_authority()
+    _record_exact_thermal_pump_handback(
+        runtime,
+        body=body,
+        pump_circuit_id=pump_circuit_id,
+        request=request,
+        accepted_at=accepted_at,
+    )
 
 
 def _raw_snapshot(coordinator: PoolOSCoordinator) -> Any:
