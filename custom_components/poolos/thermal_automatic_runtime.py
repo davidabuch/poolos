@@ -170,6 +170,10 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 and pump_state.purpose is not None
                 and pump_state.purpose.value == operating_purpose
                 and pump_state.pump_circuit_id == pump_circuit_id
+                and not (
+                    operating_purpose == PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
+                    and pump_state.effective_rpm != self.baselines.temperature_probe_rpm
+                )
             ):
                 pump_session_id = pump_state.session_id
                 effective_pump_rpm = pump_state.effective_rpm
