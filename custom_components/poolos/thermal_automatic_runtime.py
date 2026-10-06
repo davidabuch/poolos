@@ -145,17 +145,12 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         effective_pump_rpm = None
         if self.pump_speed_session is not None and operating_purpose is not None:
             pump_state = self.pump_speed_session.snapshot
-            pump_session_purpose = (
-                PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
-                if operating_purpose == "temperature_acquisition"
-                else operating_purpose
-            )
             if (
                 pump_state.active
                 and pump_state.body is not None
                 and pump_state.body.value == session.assessment.desired.body.value
                 and pump_state.purpose is not None
-                and pump_state.purpose.value == pump_session_purpose
+                and pump_state.purpose.value == operating_purpose
                 and pump_state.pump_circuit_id == pump_circuit_id
             ):
                 pump_session_id = pump_state.session_id
@@ -594,12 +589,7 @@ class PoolOSThermalAutomaticRuntime:
             return
         self._latest_frame = frame
         self.circulation_ownership.begin_epoch(frame.epoch_identity)
-        if self._task is None:
-            # Keep one dispatched execution task bound to a stable physical-
-            # authority epoch. Native consequence frames may update the latest
-            # observation while that task is in flight, but must not revoke
-            # its exact command context before delivery/verification returns.
-            self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
+        self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
 
         checkpoint = self._restart_checkpoint
         restart_authority_pending = reason in {
@@ -916,10 +906,6 @@ class PoolOSThermalAutomaticRuntime:
             self.coordinator.async_update_listeners()
             return
         frame = self._latest_frame
-        # A frame that arrived while the previous task was active intentionally
-        # did not rotate command authority. Bind the serialized successor only
-        # now, immediately before scheduling it.
-        self.authority.begin_automatic_thermal_epoch(frame.epoch_identity)
         factory = _ManualDeliveryFactory(
             self.manual,
             self.authority,
