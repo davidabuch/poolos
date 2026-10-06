@@ -6398,7 +6398,12 @@ def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> No
     assert len(delivery.calls) == calls_before_off
     assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
     ended = orchestrator.ownership.state.lease
-    assert ended is None or ended.status is not ThermalRuntimeOwnershipStatus.OWNED
+    assert ended is not None
+    assert ended.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
+    assert (
+        ended.reason_code
+        == "runtime_ownership_relinquished:witnessed_user_hot_tub_session_ended"
+    )
 
 
 def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
