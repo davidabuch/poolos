@@ -3603,7 +3603,7 @@ def test_owned_solar_session_survives_native_solar_active_drop() -> None:
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=188),
+                NOW + timedelta(seconds=127),
                 pool_active=True,
                 pump_rpm=2900,
                 configured_rpm=2900,
@@ -5185,15 +5185,15 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
     assert lease.body_activation is not None
     assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
 
-    # A cold-start Spa acquisition must retain the canonical priming invariant.
+    # Spa acquisition now goes directly to the exact 1500-RPM probe baseline.
     assert spa_on_verified.command_delivery_performed
     assert len(delivery.calls) == 3
     assert isinstance(delivery.calls[2], SetPumpSpeed)
-    assert delivery.calls[2].rpm == 3000
+    assert delivery.calls[2].rpm == 1500
 
-    # First authoritative 3000-RPM observation starts, but does not complete,
-    # the required verified 60-second priming hold.
-    priming_hold_started = asyncio.run(
+    # Fresh authoritative 1500-RPM evidence verifies acquisition. The trusted
+    # Spa temperature then permits a reviewed same-BODY Solar successor.
+    acquisition_verified = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
@@ -5201,8 +5201,8 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
-                pump_rpm=3000,
-                configured_rpm=3000,
+                pump_rpm=1500,
+                configured_rpm=1500,
                 spa_heater="00000",
                 pool_temperature=90.0,
                 pool_target=90.0,
@@ -5216,38 +5216,8 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
             delivery_factory=factory,
         )
     )
-    assert not priming_hold_started.command_delivery_performed
-    assert len(delivery.calls) == 3
-
-    # By the end of verified priming, active exclusive Spa circulation has
-    # already made the Spa temperature trustworthy. The acquisition purpose is
-    # therefore superseded by a reviewed same-BODY Solar successor rather than
-    # commanding an unnecessary 1500-RPM step.
-    priming_complete = asyncio.run(
-        driver.process_epoch(
-            _frame(
-                orchestrator,
-                NOW + timedelta(seconds=185),
-                pool_active=False,
-                body=ThermalBody.HOT_TUB,
-                spa_active=True,
-                pump_rpm=3000,
-                configured_rpm=3000,
-                spa_heater="00000",
-                pool_temperature=90.0,
-                pool_target=90.0,
-                spa_temperature=90.0,
-                spa_target=100.0,
-                solar_temperature=140.0,
-                mode=ThermalRequestedMode.SOLAR_PREFERRED,
-                evaluator=evaluator,
-                driver=driver,
-            ),
-            delivery_factory=factory,
-        )
-    )
-    assert not priming_complete.command_delivery_performed
-    assert driver.active_session is not None, priming_complete
+    assert not acquisition_verified.command_delivery_performed
+    assert driver.active_session is not None, acquisition_verified
     assert driver.active_session.status is ThermalLiveExecutionStatus.READY
     assert len(delivery.calls) == 3
 
@@ -5255,12 +5225,12 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=186),
+                NOW + timedelta(seconds=125),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
-                pump_rpm=3000,
-                configured_rpm=3000,
+                pump_rpm=1500,
+                configured_rpm=1500,
                 spa_heater="00000",
                 pool_temperature=90.0,
                 pool_target=90.0,
@@ -5287,7 +5257,7 @@ def test_opportunistic_spa_idle_start_preserves_poolos_body_provenance(
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=187),
+                NOW + timedelta(seconds=126),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
