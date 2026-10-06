@@ -336,11 +336,10 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
                     if self._unloading:
                         return
                     self._event_refresh_count += 1
-                    snapshot = await self._async_observe(
+                    await self._async_observe(
                         observed_at=datetime.now(UTC),
                         trigger="native_intellicenter_update",
                     )
-                    self.async_set_updated_data(snapshot)
         finally:
             self._native_intellicenter_refresh_task = None
 
