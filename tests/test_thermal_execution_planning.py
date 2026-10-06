@@ -1013,13 +1013,16 @@ def test_spa_temperature_acquisition_cold_start_skips_generic_prime() -> None:
 
     assert plan.disposition is ThermalPlanDisposition.READY
     assert _operation_kinds(plan) == (
+        SetHeatMode,
         SetBodyActive,
         SetPumpSpeed,
     )
-    assert isinstance(plan.operations[0], SetBodyActive)
-    assert isinstance(plan.operations[1], SetPumpSpeed)
-    assert plan.operations[1].rpm == 1500
-    assert plan.step_specifications[1].metadata[
+    assert isinstance(plan.operations[0], SetHeatMode)
+    assert plan.operations[0].mode is PhysicalHeatMode.OFF
+    assert isinstance(plan.operations[1], SetBodyActive)
+    assert isinstance(plan.operations[2], SetPumpSpeed)
+    assert plan.operations[2].rpm == 1500
+    assert plan.step_specifications[2].metadata[
         "spa_temperature_acquisition_step"
     ] == "true"
     assert "cold_start_priming_required" not in plan.change_reasons
