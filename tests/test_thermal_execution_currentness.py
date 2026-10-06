@@ -523,7 +523,6 @@ def test_verified_opportunistic_spa_activation_may_skip_only_unissued_priming() 
     assert tuple(item.role for item in signatures) == (
         "heat_source",
         "body_activation",
-        "priming",
         "thermal_pump_target",
     )
     assert tuple(item.role for item in current.residual_plan.operations) == (
