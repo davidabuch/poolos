@@ -32,6 +32,7 @@ from poolos.observations import ObservationQuality, ObservationSourceKind, PoolO
 from poolos.ownership_evidence import OwnershipDomain, OwnershipHealth
 from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
+    PhysicalAuthorityReason,
     PhysicalRequestSource,
 )
 from poolos.pool_automatic_control_suppression import (
@@ -219,6 +220,129 @@ def _enabled_driver() -> tuple[FiltrationAutomaticExecutionDriver, _Delivery, _F
     driver.set_enabled(True, changed_at=NOW - timedelta(seconds=1), current_epoch_identity=None)
     return driver, delivery, _Factory(delivery)
 
+
+
+def test_stale_pump_session_dispatch_reobserves_instead_of_faulting_domain() -> None:
+    class RaceDelivery:
+        def __init__(self) -> None:
+            self.operations: list[PoolOperation] = []
+            self.pump_attempts = 0
+
+        @property
+        def available(self) -> bool:
+            return True
+
+        async def deliver(
+            self,
+            operation: PoolOperation,
+            *,
+            correlation_id: str,
+        ) -> CommandReceipt:
+            self.operations.append(operation)
+            if isinstance(operation, SetPumpSpeed):
+                self.pump_attempts += 1
+                if self.pump_attempts == 1:
+                    return CommandReceipt(
+                        status=CommandStatus.FAILED,
+                        command_id=correlation_id,
+                        message="stale pump session",
+                        issued_at=NOW,
+                        verification_required=True,
+                        details={
+                            "authority_reason": (
+                                PhysicalAuthorityReason
+                                .AUTOMATIC_FILTRATION_CONTEXT_STALE.value
+                            )
+                        },
+                    )
+            return CommandReceipt(
+                status=CommandStatus.ACKNOWLEDGED,
+                command_id=correlation_id,
+                message="test",
+                issued_at=NOW,
+                verification_required=True,
+            )
+
+    delivery = RaceDelivery()
+
+    @dataclass
+    class RaceFactory:
+        delivery: RaceDelivery
+
+        def for_operation(self, **kwargs: object) -> RaceDelivery:
+            del kwargs
+            return self.delivery
+
+    driver = FiltrationAutomaticExecutionDriver(PoolCirculationOwnershipRegistry())
+    driver.set_enabled(
+        True,
+        changed_at=NOW - timedelta(seconds=1),
+        current_epoch_identity=None,
+    )
+    factory = RaceFactory(delivery)
+
+    started = asyncio.run(
+        driver.process_epoch(
+            _frame(NOW, pool=False, rpm=0, configured=2600),
+            delivery_factory=factory,
+        )
+    )
+    assert started.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+
+    stale = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=0,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert stale.state is FiltrationAutomaticDriverState.BLOCKED
+    assert stale.blocker == (
+        "automatic_filtration_fresh_epoch_required_after_stale_pump_context"
+    )
+    assert stale.last_failure_reason is None
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.body_verified is True
+    assert driver.ownership.filtration_lease.verified is False
+    assert (
+        driver.ownership.filtration_lease
+        .domain_state(OwnershipDomain.PUMP).health
+        is not OwnershipHealth.FAULTED
+    )
+    assert driver.session_id is not None
+
+    retried = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=2),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert retried.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert delivery.pump_attempts == 2
+
+    owned = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert owned.state is FiltrationAutomaticDriverState.OWNED
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.verified is True
 
 def _verified_filtration_driver(
     *,
