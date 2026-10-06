@@ -101,3 +101,17 @@ def test_settings_panel_gpm_selector_uses_live_native_limits() -> None:
     assert "unitSelector(Boolean(probeGpm.supported))" in source
     assert "unitSelector(Boolean(sanitationGpm.supported))" in source
     assert "pump_target_capabilities" in source
+
+
+def test_settings_panel_exposes_mobile_return_to_poolos_dashboard() -> None:
+    source = PANEL_FRONTEND.read_text(encoding="utf-8")
+    assert 'const POOL_OS_DASHBOARD_PATH = "/pool-os";' in source
+    assert 'id="dashboard"' in source
+    assert "Back to PoolOS Dashboard" in source
+    assert "window.location.assign(POOL_OS_DASHBOARD_PATH)" in source
+    assert "flex-wrap: wrap" in source
+
+
+def test_settings_panel_frontend_url_is_versioned() -> None:
+    source = PANEL_BACKEND.read_text(encoding="utf-8")
+    assert 'module_url=_PANEL_MODULE_URL + "?v=" + INTEGRATION_VERSION' in source
