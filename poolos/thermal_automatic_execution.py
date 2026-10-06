@@ -2797,7 +2797,11 @@ class ThermalAutomaticExecutionDriver:
             lease = self.orchestrator.ownership.state.lease
             if (
                 lease is not None
-                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+                and lease.status
+                in {
+                    ThermalRuntimeOwnershipStatus.OWNED,
+                    ThermalRuntimeOwnershipStatus.SUPERSEDED,
+                }
                 and lease.body is ThermalBody.HOT_TUB
                 and lease.body_activation is None
                 and lease.body_adoption is not None
