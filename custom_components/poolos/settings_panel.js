@@ -73,21 +73,6 @@ const SCHEMA = [
         name: "preferred_filtration_catchup_start",
         required: true,
         ...timeSelector(),
-        visible: {
-          field: "filtration_scheduling_mode",
-          operator: "eq",
-          value: "solar_tou_optimized",
-        },
-      },
-      {
-        name: "traditional_filtration_start",
-        required: true,
-        ...timeSelector(),
-        visible: {
-          field: "filtration_scheduling_mode",
-          operator: "eq",
-          value: "traditional_time_based",
-        },
       },
       {
         name: "pump_filtration_rpm",
