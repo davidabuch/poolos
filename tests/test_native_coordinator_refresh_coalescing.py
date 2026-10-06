@@ -210,6 +210,7 @@ def _harness() -> Any:
             self._post_start_active = True
             self._native_intellicenter_refresh_task = None
             self._native_intellicenter_refresh_dirty = False
+            self._native_intellicenter_refresh_generation = 0
             self._independent_intellicenter_start_task = None
             self.independent_intellicenter_transport = None
             self._observation_lock = asyncio.Lock()
@@ -298,6 +299,7 @@ def _filtration_ordering_harness() -> tuple[ModuleType, Any]:
             self._unloading = False
             self._observation_lock = asyncio.Lock()
             self._native_intellicenter_refresh_dirty = False
+            self._native_intellicenter_refresh_generation = 0
             self._native_intellicenter_refresh_task = None
             self._event_refresh_count = 0
             self._reconciliation_refresh_count = 0
