@@ -817,3 +817,11 @@ def test_quick_restart_denial_is_consumed_once_and_never_retries_equality() -> N
             await hass.tasks[1]
 
     asyncio.run(scenario())
+
+
+def test_spa_temperature_acquisition_maps_to_probe_pump_session_binding() -> None:
+    source = MODULE_PATH.read_text(encoding="utf-8")
+
+    assert 'if operating_purpose == "temperature_acquisition"' in source
+    assert "PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value" in source
+    assert "pump_state.purpose.value == pump_session_purpose" in source
