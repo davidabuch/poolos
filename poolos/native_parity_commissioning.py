@@ -389,6 +389,16 @@ class NativeParityCommissioningStore:
     def loaded(self) -> bool:
         return self._loaded
 
+    def initialize_empty(self) -> None:
+        """Initialize an empty in-memory commissioning window without disk I/O."""
+
+        if self._loaded:
+            return
+        self._records = ()
+        self._last_retention_sweep_at = None
+        self._history_needs_rewrite = False
+        self._loaded = True
+
     def load(self) -> None:
         """Load retained history once; callers choose the execution context."""
 
