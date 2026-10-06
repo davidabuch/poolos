@@ -177,8 +177,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
             load_history=False,
         )
         # Commissioning parity persistence is disabled during normal runtime.
-        # Control behavior does not depend on this history, and avoiding these
-        # writes prevents the prior high-I/O commissioning failure mode.
+        # Initialize the in-memory store before exposing its summary so startup
+        # never depends on retained commissioning history or disk I/O.
+        self.native_parity_commissioning_store.initialize_empty()
         self.native_parity_commissioning_store.persistence_available = False
         self.native_parity_commissioning_summary: NativeParityCommissioningSummary = (
             self.native_parity_commissioning_store.summary()
