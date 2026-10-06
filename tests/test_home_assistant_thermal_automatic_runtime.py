@@ -865,3 +865,12 @@ def test_spa_acquisition_purpose_survives_transient_current_step_pointer() -> No
     assert 'getattr(currentness.purpose, "selected_source", None) is PhysicalHeatMode.OFF' in source
     assert 'step.metadata.get("spa_temperature_acquisition_step") == "true"' in source
     assert "operating_purpose = PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value" in source
+
+
+def test_spa_acquisition_does_not_bind_preprobe_effective_rpm() -> None:
+    source = MODULE_PATH.read_text(encoding="utf-8")
+
+    assert "operating_purpose == PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value" in source
+    assert "pump_state.effective_rpm != self.baselines.temperature_probe_rpm" in source
+    assert "pump_session_id = pump_state.session_id" in source
+    assert "effective_pump_rpm = pump_state.effective_rpm" in source
