@@ -6558,7 +6558,11 @@ def test_external_spa_off_preempts_accepted_pump_work_without_retry() -> None:
     assert all(not isinstance(item, SetBodyActive) for item in delivery.calls)
     assert (
         orchestrator.ownership.state.status
-        is ThermalRuntimeOwnershipStatus.SUPERSEDED
+        is ThermalRuntimeOwnershipStatus.RELINQUISHED
+    )
+    assert (
+        orchestrator.ownership.state.reason_code
+        == "runtime_ownership_relinquished:witnessed_user_hot_tub_session_ended"
     )
     assert orchestrator.ownership.state.lease is not None
     assert orchestrator.ownership.state.lease.body_activation is None
