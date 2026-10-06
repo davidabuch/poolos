@@ -438,22 +438,38 @@ class ThermalAutomaticExecutionDriver:
         )
 
     def spa_session_kind(self) -> SpaSessionKind | None:
-        """Return the positively proven origin of the current owned Spa BODY."""
+        """Return positively proven Spa BODY origin across an in-flight startup."""
 
         lease = self.orchestrator.ownership.state.lease
         if (
-            lease is None
-            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
-            or lease.body is not ThermalBody.HOT_TUB
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.body is ThermalBody.HOT_TUB
         ):
-            return None
-        if lease.body_activation is not None:
-            return SpaSessionKind.POOLOS_OPPORTUNISTIC
+            if lease.body_activation is not None:
+                return SpaSessionKind.POOLOS_OPPORTUNISTIC
+            if (
+                lease.body_adoption is not None
+                and lease.body_adoption.reason_code
+                == "witnessed_user_hot_tub_session"
+            ):
+                return SpaSessionKind.EXTERNAL_USER
+
+        # Native Spa-On can be observed before the accepted BODY consequence
+        # has been promoted into the ownership lease.  Preserve autonomous
+        # provenance only for the exact in-flight opportunistic BODY activation
+        # that already has an accepted command receipt.  This avoids briefly
+        # reclassifying PoolOS's own startup as an external user session while
+        # remaining fail-closed for arbitrary Spa-On observations.
+        session = self.active_session
+        attempt = None if session is None else session.current_attempt
         if (
-            lease.body_adoption is not None
-            and lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+            attempt is not None
+            and attempt.receipt is not None
+            and attempt.step.metadata.get("spa_opportunistic_body_activation")
+            == "true"
         ):
-            return SpaSessionKind.EXTERNAL_USER
+            return SpaSessionKind.POOLOS_OPPORTUNISTIC
         return None
 
     def spa_thermal_operator_owned(self) -> bool:
