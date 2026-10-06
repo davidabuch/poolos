@@ -516,6 +516,12 @@ class ThermalExecutionPlanBuilder:
             and desired.selected_source is PhysicalHeatMode.OFF
             and desired.required_pump_rpm is not None
         )
+        spa_temperature_acquisition = (
+            desired.body is ThermalBody.HOT_TUB
+            and desired.reason_code == "spa_temperature_acquisition_required"
+            and desired.selected_source is PhysicalHeatMode.OFF
+            and desired.required_pump_rpm is not None
+        )
         circulation_required = desired.required_pump_rpm is not None
         body_start_required = circulation_required and current.body_active is False
 
