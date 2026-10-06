@@ -383,6 +383,24 @@ async def _finish_worker(harness: Any) -> None:
     assert harness.max_active_observations == 1
 
 
+def test_event_observation_excludes_poolos_native_projection_entities() -> None:
+    module = _load_coordinator_module()
+
+    assert module._event_observation_entity_ids(
+        (
+            "sensor.poolos_native_intellicenter_pump_rpm",
+            "binary_sensor.poolos_native_intellicenter_pool_active",
+            "climate.poolos_native_intellicenter_pool_thermostat",
+            "light.poolos_native_intellicenter_pool_light",
+            "binary_sensor.1_powerwall_grid_status",
+            "input_boolean.poolos_simulate_grid_outage",
+        )
+    ) == (
+        "binary_sensor.1_powerwall_grid_status",
+        "input_boolean.poolos_simulate_grid_outage",
+    )
+
+
 def test_fast_native_publication_precedes_blocked_durable_observation() -> None:
     async def exercise() -> None:
         harness = _harness()
