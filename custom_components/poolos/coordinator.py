@@ -89,6 +89,21 @@ NATIVE_OBSERVATION_SETTLE_SECONDS = 0.15
 NATIVE_OBSERVATION_MAX_SETTLE_PASSES = 4
 
 
+def _event_observation_entity_ids(entity_ids: tuple[str, ...]) -> tuple[str, ...]:
+    """Exclude PoolOS's own native projections from HA event subscriptions."""
+
+    return tuple(
+        entity_id
+        for entity_id in entity_ids
+        if not (
+            "." in entity_id
+            and entity_id.split(".", 1)[1].startswith(
+                "poolos_native_intellicenter_"
+            )
+        )
+    )
+
+
 class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
     """Read configured Home Assistant entities without invoking services."""
 
@@ -502,7 +517,9 @@ class PoolOSCoordinator(DataUpdateCoordinator[ObservationSnapshot]):
         if self._unloading or self._remove_state_listener is not None:
             return
         configured = {**dict(self.config_entry.data), **dict(self.config_entry.options)}
-        entity_ids = configured_entity_ids(configured)
+        entity_ids = _event_observation_entity_ids(
+            configured_entity_ids(configured)
+        )
         if not entity_ids:
             return
         self._remove_state_listener = async_track_state_change_event(
