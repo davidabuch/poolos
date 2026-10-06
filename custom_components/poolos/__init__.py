@@ -56,6 +56,7 @@ from .observation import ObservationSnapshot  # noqa: E402
 from .pump_baselines import compose_pump_baseline_runtime  # noqa: E402
 from .pump_speed_session import PoolOSPumpSpeedSessionRuntime  # noqa: E402
 from .sanitation_runtime import PoolOSSanitationRuntime  # noqa: E402
+from .settings_panel import async_setup_settings_panel  # noqa: E402
 from .thermal_runtime import PoolOSThermalRuntime  # noqa: E402
 from .thermal_automatic_runtime import PoolOSThermalAutomaticRuntime  # noqa: E402
 from poolos.thermal_runtime_orchestration import (  # noqa: E402
@@ -140,6 +141,8 @@ async def async_migrate_entry(
 
 async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
     """Set up read-only PoolOS observation from a config entry."""
+
+    await async_setup_settings_panel(hass)
 
     coordinator = PoolOSCoordinator(hass, entry)
     await coordinator.async_initialize_persistence()
