@@ -312,7 +312,16 @@ def test_native_intellicenter_push_propagation_uses_observation_lock() -> None:
     assert "self._event_refresh_count += 1" in method
     assert "await self._async_observe(" in method
     assert 'trigger="native_intellicenter_update"' in method
-    assert "self.async_set_updated_data(snapshot)" in method
+    assert "self.async_set_updated_data(snapshot)" not in method
+
+    observe = coordinator.split(
+        "async def _async_observe(",
+        1,
+    )[1].split(
+        "def _refresh_native_intellicenter_parity",
+        1,
+    )[0]
+    assert "self.async_set_updated_data(snapshot)" in observe
 
 
 def test_native_intellicenter_push_callback_is_removed_on_stop() -> None:
