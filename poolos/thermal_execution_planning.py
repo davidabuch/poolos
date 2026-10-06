@@ -560,7 +560,7 @@ class ThermalExecutionPlanBuilder:
             if rpm_changed:
                 ordering.append("rpm")
         elif spa_temperature_acquisition:
-            if source_changed:
+            if opportunistic_spa_start or source_changed:
                 ordering.append("source")
                 source_changed = False
             if body_start_required:
