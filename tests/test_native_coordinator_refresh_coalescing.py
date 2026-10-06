@@ -731,6 +731,45 @@ def test_live_equivalent_target_transition_needs_no_periodic_reconciliation() ->
     asyncio.run(exercise())
 
 
+def test_self_published_native_entity_event_does_not_reobserve() -> None:
+    async def exercise() -> None:
+        _module, harness = _filtration_ordering_harness()
+        before = len(harness.calls)
+
+        await harness._async_mapped_state_changed(
+            SimpleNamespace(
+                data={
+                    "entity_id": (
+                        "sensor.poolos_native_intellicenter_pump_rpm"
+                    )
+                }
+            )
+        )
+
+        assert len(harness.calls) == before
+        assert harness._event_refresh_count == 0
+
+    asyncio.run(exercise())
+
+
+def test_external_mapped_entity_event_still_reobserves_immediately() -> None:
+    async def exercise() -> None:
+        _module, harness = _filtration_ordering_harness()
+
+        await harness._async_mapped_state_changed(
+            SimpleNamespace(
+                data={"entity_id": "binary_sensor.1_powerwall_grid_status"}
+            )
+        )
+
+        assert [trigger for trigger, _ in harness.calls] == [
+            "state_change_event"
+        ]
+        assert harness._event_refresh_count == 1
+
+    asyncio.run(exercise())
+
+
 def test_native_then_delayed_mapped_events_do_not_regress_filtration_time() -> None:
     """Normal coordinator caller ordering must not feed historical trigger time."""
 
@@ -773,7 +812,7 @@ def test_native_then_delayed_mapped_events_do_not_regress_filtration_time() -> N
                 harness._native_intellicenter_refresh_dirty = True
                 await harness._async_native_intellicenter_snapshot_updated()
                 await harness._async_mapped_state_changed(
-                    SimpleNamespace(time_fired=delayed_event_at)
+                    SimpleNamespace(time_fired=delayed_event_at, data={"entity_id": "binary_sensor.1_powerwall_grid_status"})
                 )
         finally:
             module.datetime = real_datetime
@@ -810,7 +849,7 @@ def test_periodic_native_and_mapped_refreshes_share_monotonic_sampling_time() ->
                 minutes=2, seconds=1
             )
             await harness._async_mapped_state_changed(
-                SimpleNamespace(time_fired=start + timedelta(minutes=1))
+                SimpleNamespace(time_fired=start + timedelta(minutes=1), data={"entity_id": "binary_sensor.1_powerwall_grid_status"})
             )
 
             calls_before_stale_publication = len(harness.calls)
@@ -854,7 +893,7 @@ def test_restore_mixed_refresh_handoff_suppresses_only_stale_publication() -> No
         try:
             _ControlledCoordinatorDateTime.current = high_water - timedelta(seconds=5)
             await harness._async_mapped_state_changed(
-                SimpleNamespace(time_fired=high_water - timedelta(seconds=15))
+                SimpleNamespace(time_fired=high_water - timedelta(seconds=15), data={"entity_id": "binary_sensor.1_powerwall_grid_status"})
             )
 
             _ControlledCoordinatorDateTime.current = high_water + timedelta(seconds=25)
@@ -926,7 +965,8 @@ def test_seeded_internal_refresh_interleavings_preserve_ledger_monotonicity() ->
                     await harness._async_mapped_state_changed(
                         SimpleNamespace(
                             time_fired=current
-                            - timedelta(seconds=generator.randrange(1, 31))
+                            - timedelta(seconds=generator.randrange(1, 31)),
+                            data={"entity_id": "binary_sensor.1_powerwall_grid_status"},
                         )
                     )
                 if index % 7 == 0:
