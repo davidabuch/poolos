@@ -530,7 +530,9 @@ class ThermalExecutionPlanBuilder:
 
         priming = self.priming_policy.evaluate(
             circulation_requested=(
-                circulation_required and not pool_temperature_acquisition
+                circulation_required
+                and not pool_temperature_acquisition
+                and not spa_temperature_acquisition
             ),
             currently_circulating=(
                 current.pump_rpm is not None and current.pump_rpm > 0
