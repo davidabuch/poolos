@@ -94,7 +94,8 @@ def test_exact_ha_rpm_return_bridges_to_thermal_domain_handback() -> None:
     assert "POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT" in source
     assert "SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT" in source
     assert '"accepted_manual_configured_speed_return"' in source
-    assert "runtime.thermal_runtime_orchestrator.ownership.record_operator_events(" in source
+    assert 'getattr(runtime, "thermal_runtime_orchestrator", None)' in source
+    assert "orchestrator.ownership.record_operator_events(" in source
     assert "_record_exact_thermal_pump_handback(" in source
 
 
