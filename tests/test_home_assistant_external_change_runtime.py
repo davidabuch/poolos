@@ -746,6 +746,68 @@ def test_conflicting_simultaneous_pump_claims_fail_closed_deterministically() ->
     ]
 
 
+def test_operator_owned_pump_is_not_reported_as_external_drift() -> None:
+    """A positive PUMP takeover must remove PoolOS pump intent from drift."""
+
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    assessment = SimpleNamespace(
+        pool=_body_assessment(
+            module,
+            active=True,
+            disposition="ready",
+            selected_source="solar",
+            rpm=2900,
+        ),
+        hot_tub=_body_assessment(
+            module,
+            active=False,
+            disposition="already_converged",
+            selected_source="off",
+            rpm=None,
+        ),
+    )
+    context = {
+        "body": "pool",
+        "generation": 1,
+        "session_id": "pool-session-1",
+        "established_at": datetime(2026, 9, 1, 11, 59, tzinfo=UTC),
+        "pump_authority": "poolos",
+        "thermal_authority": "poolos",
+    }
+    runtime = module.PoolOSExternalChangeRuntime(
+        hass=SimpleNamespace(bus=SimpleNamespace(async_fire=lambda *args: None)),
+        authority=authority,
+        thermal_runtime=_thermal_runtime(module, assessment=assessment),
+        operator_context_provider=lambda: context,
+    )
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    runtime.process(
+        _thermal_native(now, pump_rpm=2900),
+        _transport(now),
+        1,
+    )
+    runtime.process(
+        _thermal_native(now + timedelta(seconds=1), pump_rpm=3100),
+        _transport(now + timedelta(seconds=1)),
+        1,
+    )
+
+    assert runtime.diagnostics()["state"] == "DRIFT"
+    assert runtime.diagnostics()["active_drift_concepts"] == ["pump.rpm"]
+
+    # Ownership processing has now accepted the configured-speed operator
+    # request and transferred only the PUMP domain to the operator.
+    context["pump_authority"] = "operator"
+    runtime.refresh_ownership()
+
+    assert "pump.rpm" not in runtime._ownership().intended_values
+    assert runtime.diagnostics()["state"] == "MONITORING"
+    assert runtime.diagnostics()["active_drift_count"] == 0
+    assert runtime.diagnostics()["active_drift_concepts"] == []
+
+
 def test_assessment_refresh_recomputes_drift_without_native_transition() -> None:
     module = _load_module()
     authority = PoolOSPhysicalCommandAuthority()

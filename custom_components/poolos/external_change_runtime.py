@@ -359,7 +359,22 @@ class PoolOSExternalChangeRuntime:
             desired = body_assessment.plan.desired
             if desired.required_pump_rpm is not None:
                 pump_claims.add(desired.required_pump_rpm)
-        if "pump.rpm" in accepted_intent:
+        operator_context = (
+            None
+            if self.operator_context_provider is None
+            else self.operator_context_provider()
+        )
+        pump_operator_owned = bool(
+            operator_context
+            and operator_context.get("pump_authority") == "operator"
+        )
+        if pump_operator_owned:
+            # Positive operator ownership of the PUMP domain means PoolOS no
+            # longer owns a current pump.rpm intent for drift diagnostics.
+            # The configured baseline remains policy, but the active session
+            # override is not unexplained drift and must not be reconciled.
+            pass
+        elif "pump.rpm" in accepted_intent:
             intended["pump.rpm"] = accepted_intent["pump.rpm"]
         elif len(pump_claims) == 1:
             intended["pump.rpm"] = next(iter(pump_claims))
