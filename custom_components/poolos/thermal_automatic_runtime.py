@@ -98,14 +98,13 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         operating_purpose = None
         current_sequence = session.coordination.current_step_sequence
         if current_sequence is not None:
-            current_operation = session.execution_plan.steps[
-                current_sequence - 1
-            ].operation
+            current_step = session.execution_plan.steps[current_sequence - 1]
+            current_operation = current_step.operation
             if isinstance(current_operation, SetPumpSpeed):
-                purpose_value = current_operation.metadata.get("operating_purpose")
+                purpose_value = current_step.metadata.get("operating_purpose")
                 if isinstance(purpose_value, str) and purpose_value:
                     operating_purpose = purpose_value
-                elif current_operation.metadata.get("priming_step") == "true":
+                elif current_step.metadata.get("priming_step") == "true":
                     operating_purpose = "priming"
         currentness = session.originating_currentness
         if operating_purpose is None:
@@ -116,12 +115,13 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                     progress.accepted_current is None
                     and 0 <= next_index < len(session.execution_plan.steps)
                 ):
-                    next_operation = session.execution_plan.steps[next_index].operation
+                    next_step = session.execution_plan.steps[next_index]
+                    next_operation = next_step.operation
                     if isinstance(next_operation, SetPumpSpeed):
-                        purpose_value = next_operation.metadata.get("operating_purpose")
+                        purpose_value = next_step.metadata.get("operating_purpose")
                         if isinstance(purpose_value, str) and purpose_value:
                             operating_purpose = purpose_value
-                        elif next_operation.metadata.get("priming_step") == "true":
+                        elif next_step.metadata.get("priming_step") == "true":
                             operating_purpose = "priming"
         if (
             operating_purpose is None
