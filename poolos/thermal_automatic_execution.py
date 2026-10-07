@@ -482,6 +482,18 @@ class ThermalAutomaticExecutionDriver:
             return SpaSessionKind.POOLOS_OPPORTUNISTIC
         return None
 
+    def pool_thermal_operator_owned(self) -> bool:
+        """Return whether fresh operator evidence currently owns Pool THERMAL."""
+
+        lease = self.orchestrator.ownership.state.lease
+        return bool(
+            lease is not None
+            and lease.status is ThermalRuntimeOwnershipStatus.OWNED
+            and lease.body is ThermalBody.POOL
+            and lease.domain_state(OwnershipDomain.THERMAL).authority
+            is OwnershipAuthority.OPERATOR
+        )
+
     def spa_thermal_operator_owned(self) -> bool:
         """Return whether fresh operator evidence currently owns Spa THERMAL."""
 

@@ -405,6 +405,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     )
     spa_session_kind_provider = thermal_automatic_runtime.driver.spa_session_kind
     external_change_runtime.spa_session_kind_provider = spa_session_kind_provider
+    def pool_thermal_operator_owned_or_current_intent() -> bool:
+        if thermal_automatic_runtime.driver.pool_thermal_operator_owned():
+            return True
+        native = coordinator.native_intellicenter_snapshot
+        if native is None:
+            return False
+        return any(
+            event.concept == "pool.raw_heater_id"
+            and event.observed_at == native.generated_at
+            and event.positive_operator_evidence is not None
+            and event.positive_operator_evidence.domain is OwnershipDomain.THERMAL
+            for event in external_change_runtime.latest_batch.events
+        )
+
+    thermal_runtime.set_pool_thermal_operator_owned_provider(
+        pool_thermal_operator_owned_or_current_intent
+    )
+
     def spa_thermal_operator_owned_or_current_intent() -> bool:
         if thermal_automatic_runtime.driver.spa_thermal_operator_owned():
             return True

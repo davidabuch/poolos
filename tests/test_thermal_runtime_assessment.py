@@ -84,6 +84,7 @@ def evidence(
     probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None,
     trusted_spa: bool = True,
     spa_session_kind: SpaSessionKind | None = None,
+    pool_thermal_operator_owned: bool = False,
     pump_session_body: PumpSpeedSessionBody | None = None,
     pump_session_purpose: PumpSpeedSessionPurpose | None = None,
     pump_session_pump_circuit_id: str | None = None,
@@ -140,6 +141,7 @@ def evidence(
             else None
         ),
         spa_session_kind=spa_session_kind,
+        pool_thermal_operator_owned=pool_thermal_operator_owned,
         pump_session_body=pump_session_body,
         pump_session_purpose=pump_session_purpose,
         pump_session_pump_circuit_id=pump_session_pump_circuit_id,
@@ -164,6 +166,39 @@ def test_current_pool_solar_session_override_replaces_only_matching_rpm_requirem
 
     assert result.pool.plan.desired.required_pump_rpm == 3200
     assert result.pool.plan.desired.evidence["current_operating_purpose"] == "solar_heating"
+
+
+def test_operator_owned_pool_gas_preserves_source_and_requires_3000_pump_only() -> None:
+    native = values()
+    native["pool.raw_heater_id"] = "H0001"
+    native["solar.active"] = False
+    native["heater.active"] = True
+    native["pump.rpm"] = 2900
+    native["pool.pump_circuit.configured_speed_rpm"] = 2900
+
+    result = ThermalRuntimeEvaluator().evaluate(
+        evidence(
+            native_values=native,
+            pool_mode=ThermalRequestedMode.SOLAR,
+            pool_thermal_operator_owned=True,
+            pump_session_body=PumpSpeedSessionBody.POOL,
+            pump_session_purpose=PumpSpeedSessionPurpose.GAS,
+            pump_session_pump_circuit_id="p0102",
+            pump_session_effective_rpm=3000,
+        ),
+        live_policy=pool_policy(),
+    )
+
+    desired = result.pool.plan.desired
+    assert desired.selected_source is PhysicalHeatMode.GAS
+    assert desired.required_pump_rpm == 3000
+    assert desired.reason_code == "operator_pool_source_override"
+    assert desired.evidence["thermal_operator_owned"] is True
+    assert desired.evidence["current_operating_purpose"] == "gas_heating"
+    assert len(result.pool.plan.operations) == 1
+    operation = result.pool.plan.operations[0]
+    assert isinstance(operation, SetPumpSpeed)
+    assert operation.rpm == 3000
 
 
 def test_stale_or_cross_body_session_override_cannot_change_thermal_requirement() -> None:
