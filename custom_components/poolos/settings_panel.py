@@ -53,11 +53,11 @@ def _pump_target_capabilities(entry: ConfigEntry) -> dict[str, dict[str, Any]]:
     """Return fail-closed live GPM capability for exposed automatic purposes."""
 
     runtime = getattr(entry, "runtime_data", None)
-    manual = (
-        None if runtime is None else getattr(runtime, "manual_intellicenter", None)
+    provider = (
+        None if runtime is None else getattr(runtime, "pump_capability_provider", None)
     )
-    if manual is None:
-        unavailable = _unsupported_capability("manual_transport_not_configured")
+    if provider is None:
+        unavailable = _unsupported_capability("pump_capability_provider_not_configured")
         return {
             "filtration": dict(unavailable),
             "solar_heating": dict(unavailable),
@@ -66,8 +66,37 @@ def _pump_target_capabilities(entry: ConfigEntry) -> dict[str, dict[str, Any]]:
             "sanitation": dict(unavailable),
         }
 
-    pool = dict(manual.pump_flow_capability(body="pool"))
-    spa = dict(manual.pump_flow_capability(body="hot_tub"))
+    pool_profile = provider.pump_capability_profile(body="pool")
+    spa_profile = provider.pump_capability_profile(body="hot_tub")
+
+    pool = (
+        _unsupported_capability("pool_pump_capability_not_proven")
+        if pool_profile is None or not pool_profile.as_mapping()["gpm_control"]
+        else {
+            "supported": True,
+            "reason": "canonical_pump_flow_control_proven",
+            "pump_circuit_id": pool_profile.pump_circuit_id,
+            "parent_pump_id": pool_profile.pump_id,
+            "minimum_gpm": pool_profile.minimum_gpm,
+            "maximum_gpm": pool_profile.maximum_gpm,
+            "provider": pool_profile.provider,
+            "evidence_source": pool_profile.evidence_source.value,
+        }
+    )
+    spa = (
+        _unsupported_capability("hot_tub_pump_capability_not_proven")
+        if spa_profile is None or not spa_profile.as_mapping()["gpm_control"]
+        else {
+            "supported": True,
+            "reason": "canonical_pump_flow_control_proven",
+            "pump_circuit_id": spa_profile.pump_circuit_id,
+            "parent_pump_id": spa_profile.pump_id,
+            "minimum_gpm": spa_profile.minimum_gpm,
+            "maximum_gpm": spa_profile.maximum_gpm,
+            "provider": spa_profile.provider,
+            "evidence_source": spa_profile.evidence_source.value,
+        }
+    )
 
     filtration = dict(pool)
     if not pool.get("supported") or not spa.get("supported"):
