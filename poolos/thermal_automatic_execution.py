@@ -3449,7 +3449,7 @@ class ThermalAutomaticExecutionDriver:
         if (
             self.active_session is not None
             or self.orchestrator.ownership.state.status
-            is not ThermalRuntimeOwnershipStatus.UNOWNED
+            is ThermalRuntimeOwnershipStatus.OWNED
             or frame.thermal is None
             or frame.pool_automatic_control_suppressed
             or not frame.pool_opportunity_id
