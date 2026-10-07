@@ -12,6 +12,7 @@ from poolos.physical_command_authority import (
     SanitationDispatchContext,
 )
 from poolos.sanitation import SanitationAction, SanitationActionKind
+from poolos.pump_operating_target import PumpTargetUnit
 
 from .manual_intellicenter import (
     ManualIntelliCenterCommandError,
@@ -57,12 +58,21 @@ class ManualIntelliCenterSanitationDelivery:
                     sanitation_context=self.context,
                 )
             elif action.kind is SanitationActionKind.PUMP_SET:
-                await self.manual.async_set_pump_circuit_speed(
-                    self.context.pump_circuit_id,
-                    int(action.requested_value),
-                    request_source=PhysicalRequestSource.SANITATION,
-                    sanitation_context=self.context,
-                )
+                target = self.context.sanitation_target
+                if target is not None and target.unit is PumpTargetUnit.GPM:
+                    await self.manual.async__set_pump_circuit_flow(
+                        self.context.pump_circuit_id,
+                        int(action.requested_value),
+                        request_source=PhysicalRequestSource.SANITATION,
+                        sanitation_context=self.context,
+                    )
+                else:
+                    await self.manual.async_set_pump_circuit_speed(
+                        self.context.pump_circuit_id,
+                        int(action.requested_value),
+                        request_source=PhysicalRequestSource.SANITATION,
+                        sanitation_context=self.context,
+                    )
             else:
                 raise ValueError("unsupported sanitation action")
         except (ManualIntelliCenterCommandError, ValueError) as exc:
