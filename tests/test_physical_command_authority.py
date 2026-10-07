@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchPurpose,
     AutomaticThermalDispatchContext,
@@ -2271,7 +2272,9 @@ def test_spa_exit_pool_restore_cleanup_is_exact_reduction_only_authority() -> No
 
 def test_hot_tub_priming_authority_uses_configured_priming_baseline() -> None:
     baselines = PumpOperatingBaselines(priming_rpm=2875)
-    authority = ready(baselines=baselines)
+    authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
     authority.configure_automatic_thermal(
         driver_enabled=True,
         thermal_live_enabled=True,
