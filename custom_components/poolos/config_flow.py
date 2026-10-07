@@ -395,39 +395,3 @@ def _settings_schema(current: dict[str, Any]) -> vol.Schema:
             )
         ] = _positive_whole_gpm
     return vol.Schema(fields)
-
-
-def _positive_whole_gpm(value: Any) -> int:
-    """Validate a user-facing whole-number GPM target without unit conversion."""
-
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise vol.Invalid("GPM target must be a whole number")
-    numeric = float(value)
-    result = int(numeric)
-    if numeric != float(result) or result <= 0:
-        raise vol.Invalid("GPM target must be a positive whole number")
-    return result
-
-
-def _settings_schema(current: dict[str, Any]) -> vol.Schema:
-    """Extend the legacy RPM settings with commissioned GPM purposes only."""
-
-    fields = dict(_mapping_schema(current).schema)
-    for unit_key, gpm_key in (
-        (CONF_PUMP_FILTRATION_UNIT, CONF_PUMP_FILTRATION_GPM),
-        (CONF_PUMP_SOLAR_HEATING_UNIT, CONF_PUMP_SOLAR_HEATING_GPM),
-        (CONF_PUMP_GAS_HEATING_UNIT, CONF_PUMP_GAS_HEATING_GPM),
-    ):
-        fields[
-            vol.Required(
-                unit_key,
-                default=current.get(unit_key, DEFAULT_PUMP_TARGET_UNIT),
-            )
-        ] = vol.In(PUMP_TARGET_UNIT_OPTIONS)
-        fields[
-            vol.Optional(
-                gpm_key,
-                default=current.get(gpm_key, vol.UNDEFINED),
-            )
-        ] = _positive_whole_gpm
-    return vol.Schema(fields)
