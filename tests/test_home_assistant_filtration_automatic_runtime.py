@@ -346,7 +346,7 @@ def test_rpm_target_session_observation_does_not_raise_and_overrides_filtration_
             effective_rpm_for=lambda **_: None,
         ),
         target_session=SimpleNamespace(
-            snapshot=SimpleNamespace(active=True),
+            snapshot=SimpleNamespace(active=True, session_id="rpm-target-session"),
             effective_target_for=lambda **_: PumpOperatingTarget(PumpTargetUnit.RPM, 2600),
         ),
     )
