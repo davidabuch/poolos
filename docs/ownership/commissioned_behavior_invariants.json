@@ -73,6 +73,30 @@
         "tests/test_thermal_automatic_execution.py::test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown",
         "tests/test_thermal_automatic_execution.py::test_normal_day_pool_and_spa_complete_lifecycle"
       ]
+    },
+    {
+      "id": "OWN-XBODY-001",
+      "scenario_id": 40,
+      "title": "Opportunistic Spa Solar yields cleanly to a fresh Pool Solar demand",
+      "status": "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR",
+      "acceptance": "After Pool target satisfaction leaves the system idle, a qualified PoolOS opportunistic Hot Tub Solar session may start and converge at Solar/H0002 with 2900 RPM and PoolOS ownership. If a fresh Pool thermal demand then appears, the Hot Tub session must yield cleanly, Spa must turn OFF, Pool may reacquire through its trusted-temperature/probe preparation path, and the successor must converge to Pool Solar/H0002 at 2900 RPM with fresh PoolOS BODY/PUMP/THERMAL ownership and no stale cross-body ownership leakage.",
+      "production_proofs": [
+        {
+          "path": "poolos/thermal_automatic_execution.py",
+          "symbol": "process_epoch"
+        },
+        {
+          "path": "poolos/thermal_runtime_ownership.py",
+          "symbol": "handoff"
+        },
+        {
+          "path": "poolos/spa_thermal_policy.py",
+          "symbol": "SpaSessionKind"
+        }
+      ],
+      "regression_proofs": [
+        "tests/test_thermal_automatic_execution.py::test_commissioned_opportunistic_spa_to_pool_solar_handoff"
+      ]
     }
   ]
 }
