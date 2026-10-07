@@ -1460,7 +1460,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     )
     assert spa_pump_command.runtime_ownership_status is ThermalRuntimeOwnershipStatus.OWNED
 
-    spa_pump_verified = asyncio.run(
+    asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
