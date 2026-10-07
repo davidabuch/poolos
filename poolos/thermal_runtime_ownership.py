@@ -1946,6 +1946,115 @@ class ThermalRuntimeOwnershipManager:
             ))
         return replace(lease, domain_states=tuple(states))
 
+    def adopt_current_pump_setpoint(
+        self,
+        *,
+        adopted_at: datetime,
+        intended_rpm: int,
+        evidence: ThermalRuntimeOwnershipEvidence,
+        opportunity_id: str,
+        reason_code: str,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Prospectively adopt an already-converged PUMP domain in an owned session.
+
+        This is intentionally narrower than BODY adoption. It is permitted only
+        when the active lease already owns BODY, PUMP currently has no PoolOS or
+        operator authority, and fresh native configured/actual RPM observations
+        both match the exact current PoolOS requirement. No historical command
+        provenance is fabricated.
+        """
+
+        _require_aware(adopted_at, "adopted_at")
+        previous = self._state.status
+        lease = self._state.lease
+
+        def deny(reason: str) -> ThermalRuntimeOwnershipDecision:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_pump_adoption_denied:" + reason,
+                previous,
+                adopted_at,
+            )
+
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            return deny("active_owned_lease_unavailable")
+        if not opportunity_id.strip() or not reason_code.strip():
+            raise ValueError("pump adoption opportunity and reason must not be empty")
+        if isinstance(intended_rpm, bool) or intended_rpm <= 0:
+            raise ValueError("adopted pump RPM must be positive")
+        if evidence.evaluated_at != adopted_at:
+            return deny("evidence_epoch_mismatch")
+
+        pump_state = lease.domain_state(OwnershipDomain.PUMP)
+        if pump_state.authority is OwnershipAuthority.OPERATOR:
+            return deny("operator_owns_pump")
+        if lease.pump_setpoint is not None or lease.pump_adoption is not None:
+            return deny("pump_origin_already_present")
+        if pump_state.authority is OwnershipAuthority.POOLOS:
+            return deny("pump_already_owned")
+        if not (
+            evidence.pump_observation_fresh
+            and evidence.pump_observation_usable
+            and evidence.configured_pump_speed_observation_fresh
+            and evidence.configured_pump_speed_observation_usable
+            and evidence.pump_observed_at is not None
+            and evidence.configured_pump_speed_observed_at is not None
+            and evidence.pump_observed_at <= adopted_at
+            and evidence.configured_pump_speed_observed_at <= adopted_at
+            and type(evidence.pump_rpm) is int
+            and type(evidence.configured_pump_speed_rpm) is int
+            and abs(evidence.pump_rpm - intended_rpm) <= self.pump_rpm_tolerance
+            and abs(evidence.configured_pump_speed_rpm - intended_rpm)
+            <= self.pump_rpm_tolerance
+        ):
+            return deny("pump_adoption_evidence_unusable")
+
+        adoption = ThermalRuntimeConceptAdoption(
+            adoption_id=_concept_adoption_id(
+                generation=lease.generation,
+                concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+                opportunity_id=opportunity_id,
+                adopted_at=adopted_at,
+            ),
+            concept=ThermalRuntimeOwnedConcept.PUMP_SETPOINT,
+            intended_value=intended_rpm,
+            observed_at=_required_datetime(evidence.pump_observed_at),
+            opportunity_id=opportunity_id,
+            reason_code=reason_code,
+            adopted_at=adopted_at,
+        )
+        states = {state.domain: state for state in lease.domain_states}
+        states[OwnershipDomain.PUMP] = DomainOwnershipState(
+            OwnershipDomain.PUMP,
+            authority=OwnershipAuthority.POOLOS,
+            health=OwnershipHealth.STABLE,
+            evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+            command_blocker=None,
+            target_value=intended_rpm,
+            observed_value=evidence.pump_rpm,
+            observed_at=evidence.pump_observed_at,
+        )
+        updated = replace(
+            lease,
+            last_confirmed_at=max(lease.last_confirmed_at, adopted_at),
+            reason_code="runtime_ownership_retained:prospective_pump_adoption",
+            pump_adoption=adoption,
+            pump_session_id=None,
+            pump_session_effective_rpm=intended_rpm,
+            domain_states=tuple(states.values()),
+        )
+        self._state = replace(
+            self._state,
+            lease=updated,
+            reason_code=updated.reason_code,
+        )
+        return self._decision(
+            ThermalRuntimeOwnershipDisposition.ESTABLISHED,
+            updated.reason_code,
+            previous,
+            adopted_at,
+        )
+
     def _confirm_accepted_consequence(
         self,
         lease: ThermalRuntimeOwnershipLease,
