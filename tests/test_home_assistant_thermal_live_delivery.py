@@ -646,3 +646,36 @@ def test_automatic_adapter_binds_non_default_pool_rpm_to_exact_purpose() -> None
     assert configured.status is CommandStatus.ACKNOWLEDGED
     assert wrong_purpose.status is CommandStatus.REJECTED
     assert manual.calls == [("pump", "p0102", 2950)]
+
+
+def test_adapter_delivers_exact_spa_exit_pool_restore_cleanup_as_false() -> None:
+    manual = FakeManualControl()
+    context = cleanup_context(
+        purpose=AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+        operation="body_active",
+        target="B1101",
+        value=False,
+        body=ThermalBody.POOL,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    accepted = asyncio.run(
+        delivery.deliver(
+            SetBodyActive(equipment_id=ThermalBody.POOL, active=False),
+            correlation_id="spa-exit-pool-off",
+        )
+    )
+    rejected = asyncio.run(
+        delivery.deliver(
+            SetBodyActive(equipment_id=ThermalBody.POOL, active=True),
+            correlation_id="spa-exit-pool-on",
+        )
+    )
+
+    assert accepted.status is CommandStatus.ACKNOWLEDGED
+    assert rejected.status is CommandStatus.REJECTED
+    assert manual.calls == [("body", "B1101", False)]
