@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchPurpose,
     AutomaticThermalDispatchContext,
