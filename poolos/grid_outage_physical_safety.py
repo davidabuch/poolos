@@ -537,7 +537,10 @@ class GridOutagePhysicalSafetyEngine:
     def unload(self, *, unloaded_at: datetime) -> None:
         _require_aware(unloaded_at)
         self._unloaded = True
-        self.gate_requested = False
+        # Preserve the commissioned desired gate state across config-entry
+        # unload/reload.  _unloaded still makes physical authority ineffective
+        # and prevents stale work from replaying; clearing gate_requested here
+        # would cause RestoreEntity to persist a false OFF intent.
         self.gate_generation += 1
         self._enabled_after = None
         self._outage_epoch_id = None
