@@ -679,3 +679,41 @@ def test_adapter_delivers_exact_spa_exit_pool_restore_cleanup_as_false() -> None
     assert accepted.status is CommandStatus.ACKNOWLEDGED
     assert rejected.status is CommandStatus.REJECTED
     assert manual.calls == [("body", "B1101", False)]
+
+
+def test_adapter_admits_exact_hot_tub_priming_rpm() -> None:
+    manual = FakeManualControl()
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="spa-prime-epoch",
+        session_identity="spa-prime-session",
+        body="hot_tub",
+        pump_circuit_id="p0101",
+        operating_purpose="priming",
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    accepted = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(
+                equipment_id="p0101",
+                rpm=3000,
+                metadata={"reason_code": "cold_start_pump_priming"},
+            ),
+            correlation_id="spa-prime-3000",
+        )
+    )
+    rejected = asyncio.run(
+        delivery.deliver(
+            SetPumpSpeed(equipment_id="p0101", rpm=2900),
+            correlation_id="spa-prime-wrong-rpm",
+        )
+    )
+
+    assert accepted.status is CommandStatus.ACKNOWLEDGED
+    assert rejected.status is CommandStatus.REJECTED
+    assert manual.calls == [("pump", "p0101", 3000)]
