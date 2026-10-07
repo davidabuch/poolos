@@ -446,29 +446,38 @@ class PoolOSGridOutagePhysicalSafetySwitch(RestoreEntity, SwitchEntity):
     def __init__(self, entry: ConfigEntry[PoolOSRuntimeData]) -> None:
         self._runtime = entry.runtime_data
         self._attr_unique_id = f"{entry.entry_id}_grid_outage_physical_safety"
+        self._commissioned_desired_enabled = False
 
     @property
     def is_on(self) -> bool:
-        return self._runtime.grid_outage_safety_runtime.enabled
+        # The HA switch represents persistent operator intent, not the
+        # restart-reset runtime authority gate.  Runtime unload must fail closed
+        # without rewriting the commissioned desired state to OFF.
+        return self._commissioned_desired_enabled
 
     async def async_added_to_hass(self) -> None:
         """Restore only explicit gate intent; never restore outage authority."""
 
         await super().async_added_to_hass()
         previous = await self.async_get_last_state()
-        if previous is not None and previous.state == "on":
+        self._commissioned_desired_enabled = (
+            previous is not None and previous.state == "on"
+        )
+        if self._commissioned_desired_enabled:
             # set_enabled() still requires a fresh authoritative frame after
             # enable, so restart persistence cannot replay stale outage work.
             self._runtime.grid_outage_safety_runtime.set_enabled(True)
-            self.async_write_ha_state()
+        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
+        self._commissioned_desired_enabled = True
         self._runtime.grid_outage_safety_runtime.set_enabled(True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         del kwargs
+        self._commissioned_desired_enabled = False
         self._runtime.grid_outage_safety_runtime.set_enabled(False)
         self.async_write_ha_state()
 
