@@ -257,7 +257,7 @@ class AutomaticThermalCleanupAuthority:
                 and self.target == expected_target
                 and self.requested_value is False
             ):
-                raise ValueError("body cleanup authority must be exact owned-body Off")
+                raise ValueError("body cleanup authority must be exact reduction-only body Off")
         elif self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION:
             if not (
                 self.body == "pool"
@@ -411,6 +411,7 @@ class AutomaticThermalDispatchContext:
         cleanup_purposes = {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
         }
         if self.purpose in cleanup_purposes:
             if self.cleanup_authority is None:
