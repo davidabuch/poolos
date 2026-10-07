@@ -48,6 +48,7 @@ from poolos.observations import (
     ObservationSourceKind,
     PoolObservation,
 )
+from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain
 from poolos.pool_temperature_probe_execution import (
     PoolTemperatureProbeContinuityEvidence,
     PoolTemperatureProbeExecutionPhase,
