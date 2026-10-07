@@ -266,6 +266,7 @@ class ManualIntelliCenterThermalLiveDelivery:
                 else {
                     "temperature_acquisition": self.baselines.temperature_probe_rpm,
                     "ordinary_circulation": self.baselines.filtration_rpm,
+                    "priming": self.baselines.priming_rpm,
                     "solar_heating": self.baselines.solar_heating_rpm,
                     "gas_heating": self.baselines.gas_heating_rpm,
                 }.get(cleanup.operating_purpose or "")
