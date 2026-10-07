@@ -98,7 +98,10 @@ from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
-from poolos.pump_capability import (  # noqa: E402\n    CommissionedPumpCapability,\n    PumpCapabilityProvider,\n)
+from poolos.pump_capability import (  # noqa: E402
+    CommissionedPumpCapability,
+    PumpCapabilityProvider,
+)
 from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
