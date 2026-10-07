@@ -755,6 +755,63 @@ def test_stale_and_superseded_plans_are_denied() -> None:
     assert "plan_superseded" in newer_plan.blocking_reasons
 
 
+def test_temperature_probe_gpm_late_binding_does_not_expand_to_priming() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 24)
+    probe_policy = ThermalLiveExecutionPolicy(
+        thermal_live_execution_enabled=True,
+        commissioning_scope=ThermalLiveCommissioningScope.POOL,
+        pump_session_id="probe-target-session",
+        pump_session_body="pool",
+        pump_session_purpose="temperature_acquisition",
+        pump_session_pump_circuit_id=TEST_POOL_PUMP_ID,
+        pump_session_effective_target=target,
+    )
+    semantic_probe = SetPumpSpeed(
+        operation_id="semantic-probe-pump",
+        equipment_id=TEST_POOL_PUMP_ID,
+        rpm=probe_policy.baselines.temperature_probe_rpm,
+        metadata={
+            "operating_purpose": "temperature_acquisition",
+            "pool_temperature_probe_step": "true",
+        },
+    )
+
+    live_probe = ThermalLiveExecutionEngine._live_operation(
+        plan,
+        semantic_probe,
+        policy=probe_policy,
+        source_thermal_plan_id=plan.plan_id,
+    )
+
+    assert isinstance(live_probe, SetPumpFlow)
+    assert live_probe.gpm == 24
+    assert live_probe.operation_id == semantic_probe.operation_id
+
+    semantic_priming = replace(
+        semantic_probe,
+        operation_id="semantic-priming-pump",
+        rpm=probe_policy.baselines.priming_rpm,
+        metadata={
+            "operating_purpose": "priming",
+            "priming_step": "true",
+        },
+    )
+    live_priming = ThermalLiveExecutionEngine._live_operation(
+        plan,
+        semantic_priming,
+        policy=probe_policy,
+        source_thermal_plan_id=plan.plan_id,
+    )
+    assert isinstance(live_priming, SetPumpSpeed)
+    assert live_priming.rpm == probe_policy.baselines.priming_rpm
+
+
 def test_solar_gpm_live_derivative_preserves_semantic_plan_identity() -> None:
     plan = thermal_plan(
         PhysicalHeatMode.OFF,
