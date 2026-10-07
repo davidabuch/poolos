@@ -17,7 +17,9 @@ from .intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
     NativeRawObject,
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
 from .physical_command_authority import (
@@ -138,8 +140,11 @@ THERMAL_RUNTIME_TAKEOVER_CONCEPTS = frozenset(
         "pool.active",
         "spa.active",
         "pump.rpm",
+        "pump.gpm",
         POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
         SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         "waterfall.active",
@@ -153,7 +158,9 @@ GRID_OUTAGE_SAFETY_TAKEOVER_CONCEPTS = frozenset(
         "pool.active",
         "spa.active",
         "pump.rpm",
+        "pump.gpm",
         POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+        POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
         "pool.raw_heater_id",
         "spa.raw_heater_id",
         "pool_light.active",
@@ -225,7 +232,15 @@ _POLICIES: Mapping[str, tuple[ExternalChangePolicy, bool]] = MappingProxyType(
             ExternalChangePolicy.ACCEPT,
             False,
         ),
+        POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT: (
+            ExternalChangePolicy.ACCEPT,
+            False,
+        ),
         SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT: (
+            ExternalChangePolicy.ACCEPT,
+            False,
+        ),
+        SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT: (
             ExternalChangePolicy.ACCEPT,
             False,
         ),
@@ -245,19 +260,24 @@ _POLICIES: Mapping[str, tuple[ExternalChangePolicy, bool]] = MappingProxyType(
 )
 
 _CONTEXTUAL_RECONCILE = frozenset(
-    {"pump.rpm", "pool.raw_heater_id", "spa.raw_heater_id"}
+    {"pump.rpm", "pump.gpm", "pool.raw_heater_id", "spa.raw_heater_id"}
 )
 
 _EXTERNAL_PUMP_RPM_TOLERANCE = 25.0
+_EXTERNAL_PUMP_GPM_TOLERANCE = 2.0
 
 
 def _semantically_aligned(concept: str, intended: Any, observed: Any) -> bool:
     """Return whether current native truth is aligned with owned intent."""
 
-    if concept != "pump.rpm":
+    tolerance = {
+        "pump.rpm": _EXTERNAL_PUMP_RPM_TOLERANCE,
+        "pump.gpm": _EXTERNAL_PUMP_GPM_TOLERANCE,
+    }.get(concept)
+    if tolerance is None:
         return intended == observed
     try:
-        return abs(float(observed) - float(intended)) <= _EXTERNAL_PUMP_RPM_TOLERANCE
+        return abs(float(observed) - float(intended)) <= tolerance
     except (TypeError, ValueError, OverflowError):
         return intended == observed
 
