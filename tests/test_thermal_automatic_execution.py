@@ -1041,6 +1041,105 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
 
 
 
+def test_pool_solar_reacquires_after_terminal_user_spa_relinquishment() -> None:
+    """A terminal user-Spa lease must not block a fresh independent Pool Solar epoch."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0102",
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_pump_circuit_id="p0102",
+                spa_heater="H0001",
+                heater_active=True,
+                spa_heating_demand_active=True,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    spa_lease = orchestrator.ownership.state.lease
+    assert spa_lease is not None
+    assert spa_lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    prior_generation = spa_lease.generation
+    relinquished = orchestrator.ownership.relinquish(
+        lease_id=spa_lease.lease_id,
+        relinquished_at=NOW + timedelta(seconds=2),
+        reason_code="witnessed_user_hot_tub_session_ended",
+    )
+    assert relinquished.disposition is ThermalRuntimeOwnershipDisposition.RELINQUISHED
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=3),
+                pool_active=True,
+                spa_active=False,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                pool_temperature=80.0,
+                pool_target=90.0,
+                solar_temperature=125.0,
+                mode=ThermalRequestedMode.SOLAR,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:after-user-spa",
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    lease = orchestrator.ownership.state.lease
+    assert result.state is ThermalAutomaticDriverState.CONVERGED
+    assert lease is not None
+    assert lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert lease.generation == prior_generation + 1
+    assert lease.body is ThermalBody.POOL
+    assert lease.owns_body
+    assert lease.owns_pump_setpoint
+    assert lease.owns_heat_source
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.opportunity_id == "pool:thermal:after-user-spa"
+
+
 def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> None:
     """Critical contract: target satisfied shuts down, then 130 F Spa Solar can qualify."""
 
