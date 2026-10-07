@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMMISSIONED_BEHAVIOR_REGISTRY = (
     ROOT / "docs" / "ownership" / "commissioned_behavior_invariants.json"
 )
-REQUIRED_COMMISSIONED_BEHAVIOR_IDS = {"OWN-049A"}
+REQUIRED_COMMISSIONED_BEHAVIOR_IDS = {"OWN-002A", "OWN-006A", "OWN-049A"}
 
 
 class ProofLevel(StrEnum):
