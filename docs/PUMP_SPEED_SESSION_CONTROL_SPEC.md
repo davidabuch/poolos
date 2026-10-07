@@ -624,3 +624,80 @@ Implementation must be incremental: first establish the canonical unit-aware
 policy while proving exact RPM backward compatibility, then add native
 capability-gated GPM delivery and verification, and only then expose GPM choices
 in the user-facing settings surface.
+
+## 32. Unit-Aware Pump Operating Targets (RPM / GPM)
+
+PoolOS pump governance is generalized from an RPM-only requirement to an exact
+unit-aware pump operating target.
+
+A target is the pair:
+
+`(unit, value)`
+
+where unit is one of:
+
+- RPM;
+- GPM.
+
+This does not merge RPM and GPM or infer one from the other. PoolOS must never
+convert GPM into an estimated RPM, or RPM into an estimated GPM, for automatic
+control. A VSF/VF controller that accepts a flow setpoint owns the physical
+closed-loop work required to achieve that flow.
+
+Existing installations remain backward compatible:
+
+- every existing configured RPM value remains unchanged;
+- absence of any unit-selection option means RPM;
+- an RPM-only pump follows the exact existing RPM execution path;
+- adding GPM support must not change ownership, session, filtration, thermal,
+  outage, priming, probe, or sanitation semantics for RPM-only installations.
+
+For a pump that proves native flow-control capability, each semantic purpose may
+select its unit independently. Mixed-mode policy is valid. For example:
+
+- Filtration: GPM;
+- Solar: GPM;
+- Gas: GPM;
+- Probe: RPM;
+- Priming: RPM;
+- Grid outage: RPM.
+
+The unit is part of the policy fingerprint and semantic pump-session identity.
+A unit transition is therefore an intentional pump-policy transition and must not
+be treated as numeric equality merely because the numbers happen to match.
+
+Configured intent and physical verification remain separate:
+
+- RPM target -> verify the configured PMPCIRC mode/setpoint and actual pump RPM;
+- GPM target -> verify the configured PMPCIRC mode/setpoint and actual pump flow;
+- actual RPM is not operator-intent evidence for a GPM-controlled session;
+- actual GPM is not operator-intent evidence for an RPM-controlled session.
+
+Manual override semantics generalize to the configured target in the active unit.
+An explicit operator change to the PMPCIRC mode or configured setpoint is positive
+pump-domain intent when it satisfies the existing attribution/session contract.
+Physical RPM/GPM drift by itself is not proof of operator intent.
+
+Automatic GPM authority remains fail-closed. Before a GPM command, PoolOS must
+prove all of the following from current native evidence:
+
+1. the exact body-bound PMPCIRC identity;
+2. the parent pump supports flow control;
+3. the configured target is within the native pump's current MINF/MAXF limits;
+4. the current execution/session/policy binding is still current;
+5. the exact operation is authorized for the current purpose;
+6. later authoritative observations verify PMPCIRC mode/setpoint and physical
+   flow convergence within the reviewed GPM tolerance.
+
+A VS or other RPM-only pump must never be offered or dispatched a GPM target.
+A VF-only pump must fail closed for an RPM target rather than silently converting
+units. A VSF pump may use either mode per purpose.
+
+The existing PUMP ownership domain remains unchanged. Acquiring or verifying a
+GPM target does not grant BODY or THERMAL authority, and changing units does not
+manufacture provenance.
+
+Implementation must be incremental: first establish the canonical unit-aware
+policy while proving exact RPM backward compatibility, then add native
+capability-gated GPM delivery and verification, and only then expose GPM choices
+in the user-facing settings surface.
