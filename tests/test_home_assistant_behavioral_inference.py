@@ -20,7 +20,7 @@ def test_manifest_advances_to_080_and_matching_core_tag() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == "0.11.88"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@43c2161cc28f0f54e6b0a6a5adc8b61ae372eb26",
+        "poolos@git+https://github.com/davidabuch/poolos.git@d7df4934ecc33d3ea2d67d2399b5ca24db9ac50d",
         "pyintellicenter==0.1.20",
     ]
     assert manifest["iot_class"] == "local_push"
