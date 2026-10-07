@@ -106,7 +106,7 @@ def _probe_session(operation):
         ),
         execution_plan=SimpleNamespace(
             plan_id="probe-plan",
-            steps=(SimpleNamespace(operation=operation),),
+            steps=(SimpleNamespace(operation=operation, metadata={}),),
         ),
         coordination=SimpleNamespace(current_step_sequence=1),
         originating_currentness=SimpleNamespace(
@@ -158,3 +158,67 @@ def test_real_ha_factory_binds_all_three_canonical_pool_probe_operations() -> No
         assert context.purpose.value == "pool_temperature_probe"
         assert context.probe_authority is not None
         assert context.probe_authority.operation_id == operation.operation_id
+
+
+def test_real_ha_factory_binds_spa_priming_from_execution_step_metadata() -> None:
+    """Live 2026-10-06: adopted user Spa priming must bind as priming, not purpose-less."""
+
+    module = _production_factory_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-priming-epoch")
+
+    operation = SetPumpSpeed(
+        operation_id="spa-prime-3000",
+        equipment_id="p0101",
+        rpm=3000,
+        metadata={"reason_code": "cold_start_pump_priming"},
+    )
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            operations=(operation,),
+            desired=SimpleNamespace(body=SimpleNamespace(value="hot_tub")),
+        ),
+        execution_plan=SimpleNamespace(
+            plan_id="spa-prime-plan",
+            steps=(
+                SimpleNamespace(
+                    operation=operation,
+                    metadata={"priming_step": "true"},
+                ),
+            ),
+        ),
+        coordination=SimpleNamespace(current_step_sequence=1),
+        originating_currentness=SimpleNamespace(
+            purpose=SimpleNamespace(
+                kind=ThermalExecutionPurposeKind.THERMAL_CONTROL,
+                body=SimpleNamespace(value="hot_tub"),
+                selected_source=PhysicalHeatMode.OFF,
+                required_pump_rpm=2600,
+            )
+        ),
+        execution_progress=SimpleNamespace(
+            verified_prefix=(),
+            accepted_current=None,
+        ),
+    )
+
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+    )
+    delivery = factory.for_session(
+        session,
+        epoch_identity="spa-priming-epoch",
+    )
+    context = delivery.kwargs["automatic_thermal_context"]
+
+    assert context.body == "hot_tub"
+    assert context.pump_circuit_id == "p0101"
+    assert context.operating_purpose == "priming"
