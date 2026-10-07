@@ -2812,6 +2812,9 @@ class ThermalAutomaticExecutionDriver:
         if frame.thermal is None:
             return
         spa_active = frame.thermal.hot_tub.body_active
+        pool_active = frame.thermal.pool.body_active
+        prior_spa_active = self._last_spa_active
+        prior_pool_active = self._last_pool_active
         if spa_active is False:
             # Observing Spa OFF creates a new in-process body boundary; a later
             # Spa ON is then a session this driver actually witnessed.
@@ -2819,10 +2822,11 @@ class ThermalAutomaticExecutionDriver:
             # If the current BODY origin is a prospectively adopted external-user
             # Hot Tub session, this same witnessed OFF is the authoritative end
             # of that user session. Relinquish the adopted BODY immediately with
-            # no cleanup or residual entitlement; PoolOS did not activate it.
+            # no generic cleanup or residual entitlement; PoolOS did not activate it.
             lease = self.orchestrator.ownership.state.lease
-            if (
-                lease is not None
+            ending_witnessed_user_spa = bool(
+                prior_spa_active is True
+                and lease is not None
                 and lease.status
                 in {
                     ThermalRuntimeOwnershipStatus.OWNED,
@@ -2833,7 +2837,23 @@ class ThermalAutomaticExecutionDriver:
                 and lease.body_adoption is not None
                 and lease.body_adoption.reason_code
                 == "witnessed_user_hot_tub_session"
+            )
+            if (
+                ending_witnessed_user_spa
+                and prior_pool_active is False
+                and pool_active is True
             ):
+                # IntelliCenter may restore the pre-Spa Pool circuit as a
+                # topology consequence of Spa Off. This is not Pool ownership.
+                # Retain only a one-shot reduction token so current policy can
+                # decide whether the restored Pool is justified or must return
+                # to Off.
+                self._post_spa_pool_restore_token = (
+                    f"spa-exit-pool-restore:{frame.epoch_identity}"
+                )
+                self._post_spa_pool_restore_attempt = None
+            if ending_witnessed_user_spa:
+                assert lease is not None
                 self.orchestrator.ownership.relinquish(
                     lease_id=lease.lease_id,
                     relinquished_at=frame.observed_at,
@@ -2844,7 +2864,7 @@ class ThermalAutomaticExecutionDriver:
             self._spa_user_session_opportunity_id = None
         elif (
             spa_active is True
-            and self._last_spa_active is False
+            and prior_spa_active is False
             and self._spa_off_observed_since_start
         ):
             lease = self.orchestrator.ownership.state.lease
@@ -2856,13 +2876,13 @@ class ThermalAutomaticExecutionDriver:
             )
             if not poolos_started_spa:
                 # This process observed the physical OFF -> ON boundary without
-                # PoolOS BODY-start provenance.  That is a fresh user-session
+                # PoolOS BODY-start provenance. That is a fresh user-session
                 # opportunity from which BODY may be prospectively adopted.
-                # The token remains stable for this physical Spa session.
                 self._spa_user_session_opportunity_id = (
                     f"spa-user-session:{frame.epoch_identity}"
                 )
         self._last_spa_active = spa_active
+        self._last_pool_active = pool_active
 
     def _session_body(
         self,
