@@ -6474,6 +6474,56 @@ def test_user_spa_eco_heat_transitions_gas_to_solar_without_body_restart() -> No
     assert not ended.owns_pump_setpoint
     assert not ended.owns_heat_source
 
+    # A fresh independent Pool/Solar opportunity may immediately establish a
+    # new generation after the user-ended Spa lease. The terminal predecessor
+    # is history, not a blocker to prospective authority.
+    pool_successor = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=130),
+                pool_active=True,
+                body=ThermalBody.POOL,
+                spa_active=False,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=True,
+                heater_active=False,
+                pool_temperature=88.0,
+                pool_target=90.0,
+                solar_temperature=118.0,
+                mode=ThermalRequestedMode.SOLAR,
+                driver=driver,
+                evaluator=evaluator,
+                pool_opportunity_id="pool:thermal:post-user-spa",
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+    successor_lease = orchestrator.ownership.state.lease
+    assert successor_lease is not None
+    assert successor_lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert successor_lease.generation == ended.generation + 1
+    assert successor_lease.body is ThermalBody.POOL
+    assert successor_lease.owns_body
+    assert successor_lease.owns_pump_setpoint
+    assert successor_lease.owns_heat_source
+    assert successor_lease.body_adoption is not None
+    assert (
+        successor_lease.body_adoption.opportunity_id
+        == "pool:thermal:post-user-spa"
+    )
+    assert successor_lease.pump_adoption is not None
+    assert successor_lease.pump_adoption.intended_value == 2900
+    assert successor_lease.heat_source_adoption is not None
+    assert (
+        successor_lease.heat_source_adoption.intended_value
+        is PhysicalHeatMode.SOLAR
+    )
+    assert pool_successor.state is ThermalAutomaticDriverState.CONVERGED
+    assert pool_successor.blocker is None
+
 
 def test_user_spa_already_at_gas_rpm_adopts_body_without_inferred_domains() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
