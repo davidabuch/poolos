@@ -122,7 +122,7 @@
       ],
       "regression_proofs": [
         "tests/test_thermal_runtime_assessment.py::test_operator_owned_pool_gas_preserves_source_and_requires_3000_pump_only",
-        "tests/test_domain_handback_lifecycle.py::test_thermal_handoff_does_not_spill_into_pump_or_body_ownership"
+        "tests/test_domain_handback_lifecycle.py::test_spa_pump_and_thermal_handback_preserve_continuous_body"
       ]
     }
   ]
