@@ -92,7 +92,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         pump_targets = {
             operation.equipment_id
             for operation in session.assessment.operations
-            if isinstance(operation, SetPumpSpeed)
+            if isinstance(operation, (SetPumpSpeed, SetPumpFlow))
         }
         if len(pump_targets) > 1:
             raise ValueError("thermal plan contains conflicting pump identities")
@@ -102,7 +102,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         if current_sequence is not None:
             current_step = session.execution_plan.steps[current_sequence - 1]
             current_operation = current_step.operation
-            if isinstance(current_operation, SetPumpSpeed):
+            if isinstance(current_operation, (SetPumpSpeed, SetPumpFlow)):
                 purpose_value = current_step.metadata.get("operating_purpose")
                 if isinstance(purpose_value, str) and purpose_value:
                     operating_purpose = purpose_value
@@ -119,7 +119,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                 ):
                     next_step = session.execution_plan.steps[next_index]
                     next_operation = next_step.operation
-                    if isinstance(next_operation, SetPumpSpeed):
+                    if isinstance(next_operation, (SetPumpSpeed, SetPumpFlow)):
                         purpose_value = next_step.metadata.get("operating_purpose")
                         if isinstance(purpose_value, str) and purpose_value:
                             operating_purpose = purpose_value
