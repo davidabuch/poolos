@@ -22,6 +22,57 @@
         "tests/test_commissioned_behavior_invariants.py::test_own_049a_user_hot_tub_off_preserves_future_autonomy_after_body_adoption_retires",
         "tests/test_commissioned_behavior_invariants.py::test_own_049a_stale_or_opportunistic_evidence_does_not_bypass_restraint"
       ]
+    },
+    {
+      "id": "OWN-002A",
+      "scenario_id": 2,
+      "title": "Pool Solar cold start from OFF/probe converges through preparation to H0002 at 2900 RPM",
+      "status": "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR",
+      "acceptance": "From a quiescent Pool opportunity, PoolOS may activate Pool, acquire trustworthy water temperature at 1500 RPM, advance through the 2600-RPM Solar-preparation step, verify Solar/H0002 engagement, and converge at 2900 RPM while retaining PoolOS BODY/PUMP/THERMAL ownership.",
+      "production_proofs": [
+        {
+          "path": "poolos/thermal_automatic_execution.py",
+          "symbol": "_begin_verified_probe_acquisition"
+        },
+        {
+          "path": "custom_components/poolos/thermal_automatic_runtime.py",
+          "symbol": "_ManualDeliveryFactory"
+        },
+        {
+          "path": "poolos/thermal_live_execution.py",
+          "symbol": "advance"
+        }
+      ],
+      "regression_proofs": [
+        "tests/test_v0111_pool_probe_binding_regression.py::test_real_ha_factory_preserves_pool_solar_preparation_operating_purpose",
+        "tests/test_thermal_automatic_execution.py::test_quiescent_solar_cold_start_verifies_h0002_before_engagement",
+        "tests/test_thermal_automatic_execution.py::test_normal_day_pool_and_spa_complete_lifecycle"
+      ]
+    },
+    {
+      "id": "OWN-006A",
+      "scenario_id": 6,
+      "title": "Pool Solar target satisfaction shuts Pool OFF and pump to 0 when filtration is deferred",
+      "status": "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR",
+      "acceptance": "When PoolOS-owned Pool Solar reaches or exceeds the Pool target and filtration does not independently require immediate circulation, Solar ends, Pool is commanded OFF, actual pump 0 is verified, the circulation owner is released, and future independent autonomy remains available.",
+      "production_proofs": [
+        {
+          "path": "poolos/thermal_termination.py",
+          "symbol": "assess"
+        },
+        {
+          "path": "poolos/thermal_automatic_execution.py",
+          "symbol": "_process_cleanup"
+        },
+        {
+          "path": "poolos/circulation_successor.py",
+          "symbol": "assess"
+        }
+      ],
+      "regression_proofs": [
+        "tests/test_thermal_automatic_execution.py::test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown",
+        "tests/test_thermal_automatic_execution.py::test_normal_day_pool_and_spa_complete_lifecycle"
+      ]
     }
   ]
 }
