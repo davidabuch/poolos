@@ -1971,7 +1971,7 @@ class ThermalRuntimeOwnershipManager:
         def deny(reason: str) -> ThermalRuntimeOwnershipDecision:
             return self._decision(
                 ThermalRuntimeOwnershipDisposition.DENIED,
-                "runtime_ownership_pump_adoption_denied:" + reason,
+                "runtime_ownership_adoption_denied:" + reason,
                 previous,
                 adopted_at,
             )
@@ -2037,10 +2037,8 @@ class ThermalRuntimeOwnershipManager:
         updated = replace(
             lease,
             last_confirmed_at=max(lease.last_confirmed_at, adopted_at),
-            reason_code="runtime_ownership_retained:prospective_pump_adoption",
+            reason_code="runtime_ownership_established:prospective_domain_adoption",
             pump_adoption=adoption,
-            pump_session_id=None,
-            pump_session_effective_rpm=intended_rpm,
             domain_states=tuple(states.values()),
         )
         self._state = replace(
