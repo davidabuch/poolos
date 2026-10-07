@@ -363,6 +363,7 @@ class ThermalRuntimeEvidence:
     pool_temperature_probe_continuity: PoolTemperatureProbeContinuityEvidence | None = None
     spa_temperature_evidence: SpaTemperatureEvidence | None = None
     spa_session_kind: SpaSessionKind | None = None
+    pool_thermal_operator_owned: bool = False
     spa_thermal_operator_owned: bool = False
     pump_session_body: PumpSpeedSessionBody | None = None
     pump_session_id: str | None = None
@@ -1369,6 +1370,44 @@ class ThermalRuntimeEvaluator:
                 purpose=active_purpose.purpose,
                 pump_circuit_id=pump_circuit_id,
             )
+            if (
+                evidence.pool_thermal_operator_owned
+                and active_purpose.active_source
+                in {PhysicalHeatMode.GAS, PhysicalHeatMode.SOLAR}
+                and active_purpose.required_pump_rpm is not None
+            ):
+                # Scenario OWN-014: an explicit operator heat-source choice
+                # owns THERMAL only. Preserve that exact physical source while
+                # PoolOS continues governing the independent pump purpose.
+                operator_rpm = (
+                    session_rpm
+                    if session_rpm is not None
+                    else active_purpose.required_pump_rpm
+                )
+                desired = replace(
+                    desired,
+                    selected_source=active_purpose.active_source,
+                    required_pump_rpm=operator_rpm,
+                    reason_code="operator_pool_source_override",
+                    rpm_reason_code=(
+                        "operating_purpose:"
+                        f"{active_purpose.purpose.value}:{operator_rpm}_rpm"
+                    ),
+                    rationale=(
+                        "Operator owns the current Pool heat-source selection.",
+                        "PoolOS preserves that source and independently governs pump speed for active heat delivery.",
+                    ),
+                    criteria=(
+                        "pool_thermal_operator_owned",
+                        "source_selection_preserved",
+                        "pump_domain_remains_poolos",
+                    ),
+                    evidence={
+                        **dict(desired.evidence),
+                        "thermal_operator_owned": True,
+                        "operator_selected_source": active_purpose.active_source.value,
+                    },
+                )
             purpose_blockers = desired.blockers
             if not active_purpose.evidence_usable:
                 purpose_blockers = tuple(
