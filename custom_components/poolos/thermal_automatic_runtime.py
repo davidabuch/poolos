@@ -21,6 +21,7 @@ from poolos.integration import (
     PhysicalHeatMode,
     SetBodyActive,
     SetHeatMode,
+    SetPumpFlow,
     SetPumpSpeed,
     ThermalBody,
 )
@@ -28,7 +29,8 @@ from poolos.external_change import ExternalChangeBatch
 from poolos.ownership_evidence import OwnershipAuthority, OwnershipDomain, PositiveOperatorEvidence
 from poolos.pool_circulation_ownership import PoolCirculationOwner, PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
-from poolos.pump_speed_session import PumpSpeedSessionPurpose, PumpSpeedSessionRuntime
+from poolos.pump_operating_target import PumpTargetUnit
+from poolos.pump_speed_session import PumpSpeedSessionPurpose
 from poolos.pool_temperature_probe_execution import PoolTemperatureProbeExecutionPhase
 from poolos.pool_automatic_control_suppression import (
     PoolAutomaticControlSuppression,
@@ -77,7 +79,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
     manual: ManualIntelliCenterControl
     authority: PoolOSPhysicalCommandAuthority
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
-    pump_speed_session: PumpSpeedSessionRuntime | None = None
+    pump_speed_session: PoolOSPumpSpeedSessionRuntime | None = None
 
     def for_session(
         self,
@@ -101,7 +103,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             current_operation = session.execution_plan.steps[
                 current_sequence - 1
             ].operation
-            if isinstance(current_operation, SetPumpSpeed):
+            if isinstance(current_operation, (SetPumpSpeed, SetPumpFlow)):
                 purpose_value = current_operation.metadata.get("operating_purpose")
                 if isinstance(purpose_value, str) and purpose_value:
                     operating_purpose = purpose_value
@@ -196,6 +198,7 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             probe_operation_id=probe_operation_id,
             pump_session_id=pump_session_id,
             effective_pump_rpm=effective_pump_rpm,
+            effective_pump_target=effective_pump_target,
         )
         return ManualIntelliCenterThermalLiveDelivery(
             manual=self.manual,
@@ -548,6 +551,20 @@ class PoolOSThermalAutomaticRuntime:
             if self.pump_speed_session is None
             else self.pump_speed_session.session.snapshot
         )
+        target_session = (
+            None
+            if self.pump_speed_session is None
+            or self.pump_speed_session.target_session is None
+            else self.pump_speed_session.target_session.snapshot
+        )
+        use_target_session = bool(
+            target_session is not None
+            and target_session.active
+            and target_session.effective_target is not None
+            and target_session.effective_target.unit is PumpTargetUnit.GPM
+            and target_session.purpose is not None
+            and target_session.purpose.value in {"solar_heating", "gas_heating"}
+        )
         frame = ThermalAutomaticExecutionFrame(
             epoch_identity=orchestration.snapshot_identity,
             observed_at=snapshot.generated_at,
@@ -561,23 +578,58 @@ class PoolOSThermalAutomaticRuntime:
                 commissioning_scope=self.thermal_runtime.commissioning_scope,
                 baselines=self.baselines,
                 pump_session_id=(
-                    None if pump_session is None else pump_session.session_id
+                    target_session.session_id
+                    if use_target_session and target_session is not None
+                    else (None if pump_session is None else pump_session.session_id)
                 ),
                 pump_session_body=(
-                    None
-                    if pump_session is None or pump_session.body is None
-                    else pump_session.body.value
+                    target_session.body.value
+                    if (
+                        use_target_session
+                        and target_session is not None
+                        and target_session.body is not None
+                    )
+                    else (
+                        None
+                        if pump_session is None or pump_session.body is None
+                        else pump_session.body.value
+                    )
                 ),
                 pump_session_purpose=(
-                    None
-                    if pump_session is None or pump_session.purpose is None
-                    else pump_session.purpose.value
+                    target_session.purpose.value
+                    if (
+                        use_target_session
+                        and target_session is not None
+                        and target_session.purpose is not None
+                    )
+                    else (
+                        None
+                        if pump_session is None or pump_session.purpose is None
+                        else pump_session.purpose.value
+                    )
                 ),
                 pump_session_pump_circuit_id=(
-                    None if pump_session is None else pump_session.pump_circuit_id
+                    target_session.pump_circuit_id
+                    if use_target_session and target_session is not None
+                    else (
+                        None
+                        if pump_session is None
+                        else pump_session.pump_circuit_id
+                    )
                 ),
                 pump_session_effective_rpm=(
-                    None if pump_session is None else pump_session.effective_rpm
+                    None
+                    if use_target_session
+                    else (
+                        None
+                        if pump_session is None
+                        else pump_session.effective_rpm
+                    )
+                ),
+                pump_session_effective_target=(
+                    target_session.effective_target
+                    if use_target_session and target_session is not None
+                    else None
                 ),
             ),
             physical_authority_ready=ready,
@@ -950,7 +1002,7 @@ class PoolOSThermalAutomaticRuntime:
             self.manual,
             self.authority,
             self.baselines,
-            None if self.pump_speed_session is None else self.pump_speed_session.session,
+            self.pump_speed_session,
         )
         self._task = self.hass.async_create_task(
             self.driver.process_epoch(frame, delivery_factory=factory),
