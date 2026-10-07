@@ -58,9 +58,9 @@ def test_integration_forwards_only_control_center_platforms() -> None:
 
 def test_manifest_advances_control_center_version() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.11.88"
+    assert manifest["version"] == "0.11.89"
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@d7df4934ecc33d3ea2d67d2399b5ca24db9ac50d",
+        "poolos@git+https://github.com/davidabuch/poolos.git@a8fc637c98ca5802349f72933b05560afa85bad1",
         "pyintellicenter==0.1.20",
     ]
 
