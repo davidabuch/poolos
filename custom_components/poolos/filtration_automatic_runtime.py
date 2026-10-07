@@ -30,6 +30,7 @@ from poolos.physical_command_authority import (
 )
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import PumpTargetUnit
 from poolos.pump_speed_session import (
     PumpSpeedOverrideState,
     PumpSpeedSessionBody,
