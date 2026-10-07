@@ -96,6 +96,7 @@ from poolos.thermal_runtime_orchestration import (
 from poolos.thermal_runtime_ownership import (
     ThermalRuntimeConceptProvenance,
     ThermalRuntimeOwnedConcept,
+    ThermalRuntimeOwnershipDisposition,
     ThermalRuntimeOwnershipStatus,
 )
 from poolos.time_of_use_policy import LADWP_INITIAL_PROFILE
