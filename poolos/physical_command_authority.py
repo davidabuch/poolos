@@ -388,6 +388,7 @@ class AutomaticThermalDispatchContext:
     runtime_binding: str = ""
     pump_session_id: str | None = None
     effective_pump_rpm: int | None = None
+    effective_pump_target: PumpOperatingTarget | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
@@ -504,6 +505,7 @@ class AutomaticFiltrationDispatchContext:
     runtime_binding: str = ""
     pump_session_id: str | None = None
     effective_pump_rpm: int | None = None
+    effective_pump_target: PumpOperatingTarget | None = None
 
     def __post_init__(self) -> None:
         if self.generation < 1:
