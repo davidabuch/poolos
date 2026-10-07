@@ -172,22 +172,40 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             probe_operation_id = operation.operation_id
         pump_session_id = None
         effective_pump_rpm = None
+        effective_pump_target = None
         if self.pump_speed_session is not None and operating_purpose is not None:
-            pump_state = self.pump_speed_session.snapshot
+            target_runtime = self.pump_speed_session.target_session
+            target_state = None if target_runtime is None else target_runtime.snapshot
             if (
-                pump_state.active
-                and pump_state.body is not None
-                and pump_state.body.value == session.assessment.desired.body.value
-                and pump_state.purpose is not None
-                and pump_state.purpose.value == operating_purpose
-                and pump_state.pump_circuit_id == pump_circuit_id
-                and not (
-                    operating_purpose == PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
-                    and pump_state.effective_rpm != self.baselines.temperature_probe_rpm
-                )
+                target_state is not None
+                and target_state.active
+                and target_state.body is not None
+                and target_state.body.value == session.assessment.desired.body.value
+                and target_state.purpose is not None
+                and target_state.purpose.value == operating_purpose
+                and target_state.pump_circuit_id == pump_circuit_id
+                and target_state.effective_target is not None
+                and target_state.effective_target.unit is PumpTargetUnit.GPM
+                and operating_purpose in {"solar_heating", "gas_heating"}
             ):
-                pump_session_id = pump_state.session_id
-                effective_pump_rpm = pump_state.effective_rpm
+                pump_session_id = target_state.session_id
+                effective_pump_target = target_state.effective_target
+            else:
+                pump_state = self.pump_speed_session.session.snapshot
+                if (
+                    pump_state.active
+                    and pump_state.body is not None
+                    and pump_state.body.value == session.assessment.desired.body.value
+                    and pump_state.purpose is not None
+                    and pump_state.purpose.value == operating_purpose
+                    and pump_state.pump_circuit_id == pump_circuit_id
+                    and not (
+                        operating_purpose == PumpSpeedSessionPurpose.TEMPERATURE_PROBE.value
+                        and pump_state.effective_rpm != self.baselines.temperature_probe_rpm
+                    )
+                ):
+                    pump_session_id = pump_state.session_id
+                    effective_pump_rpm = pump_state.effective_rpm
         context = self.authority.bind_automatic_thermal_dispatch(
             epoch_identity=epoch_identity,
             session_identity=session.execution_plan.plan_id,
