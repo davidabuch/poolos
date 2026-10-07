@@ -1554,16 +1554,33 @@ def test_manual_plain_pool_gpm_session_normalizes_and_verifies_in_flow_domain() 
     driver, delivery, factory = _enabled_driver()
     target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
 
-    first = asyncio.run(
+    body_start = asyncio.run(
         driver.process_epoch(
             _frame(
                 NOW,
+                pool=False,
+                rpm=0,
+                configured=2600,
+                gpm=0,
+                configured_gpm=50,
+                pump_session_id="gpm-session",
+                pump_session_effective_target=target,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert body_start.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+
+    flow_start = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
                 pool=True,
                 rpm=2200,
                 configured=2600,
                 gpm=50,
                 configured_gpm=50,
-                satisfied=True,
                 pump_session_id="gpm-session",
                 pump_session_effective_target=target,
             ),
@@ -1571,21 +1588,19 @@ def test_manual_plain_pool_gpm_session_normalizes_and_verifies_in_flow_domain() 
         )
     )
 
-    assert first.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
-    assert len(delivery.operations) == 1
-    assert isinstance(delivery.operations[0], SetPumpFlow)
-    assert delivery.operations[0].gpm == 42
+    assert flow_start.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetPumpFlow)
+    assert delivery.operations[-1].gpm == 42
 
     verified = asyncio.run(
         driver.process_epoch(
             _frame(
-                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=2),
                 pool=True,
                 rpm=2050,
                 configured=2600,
                 gpm=43,
                 configured_gpm=42,
-                satisfied=True,
                 pump_session_id="gpm-session",
                 pump_session_effective_target=target,
             ),
@@ -1597,37 +1612,52 @@ def test_manual_plain_pool_gpm_session_normalizes_and_verifies_in_flow_domain() 
     assert driver.ownership.filtration_lease.verified
 
 
-
 def test_gpm_verification_does_not_accept_matching_rpm_without_flow_truth() -> None:
     driver, delivery, factory = _enabled_driver()
     target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+
     asyncio.run(
         driver.process_epoch(
             _frame(
                 NOW,
-                pool=True,
-                rpm=2600,
+                pool=False,
+                rpm=0,
                 configured=2600,
-                gpm=50,
+                gpm=0,
                 configured_gpm=50,
-                satisfied=True,
                 pump_session_id="gpm-session",
                 pump_session_effective_target=target,
             ),
             delivery_factory=factory,
         )
     )
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=1),
+                pool=True,
+                rpm=2600,
+                configured=2600,
+                gpm=50,
+                configured_gpm=50,
+                pump_session_id="gpm-session",
+                pump_session_effective_target=target,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert isinstance(delivery.operations[-1], SetPumpFlow)
+    assert delivery.operations[-1].gpm == 42
 
     pending = asyncio.run(
         driver.process_epoch(
             _frame(
-                NOW + timedelta(seconds=1),
+                NOW + timedelta(seconds=2),
                 pool=True,
                 rpm=42,
                 configured=42,
                 gpm=50,
                 configured_gpm=42,
-                satisfied=True,
                 pump_session_id="gpm-session",
                 pump_session_effective_target=target,
             ),
