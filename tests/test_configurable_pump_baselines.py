@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.pump_priming_policy import PumpPrimingPolicy
 from poolos.spa_thermal_policy import (
     SpaHeatingMode,
@@ -103,6 +104,86 @@ def test_effective_policy_defaults_and_strict_configuration_validation() -> None
         configured[CONST.CONF_PUMP_FILTRATION_RPM] = invalid
         with pytest.raises(ValueError):
             PUMP_BASELINES.effective_pump_operating_baselines(configured)
+
+
+def test_existing_config_builds_exact_all_rpm_target_policy() -> None:
+    graph = PUMP_BASELINES.compose_pump_baseline_runtime(configured_values())
+
+    assert graph.targets.filtration == PumpOperatingTarget(
+        PumpTargetUnit.RPM, NON_DEFAULT_BASELINES.filtration_rpm
+    )
+    assert graph.targets.solar_heating == PumpOperatingTarget(
+        PumpTargetUnit.RPM, NON_DEFAULT_BASELINES.solar_heating_rpm
+    )
+    assert graph.targets.gas_heating == PumpOperatingTarget(
+        PumpTargetUnit.RPM, NON_DEFAULT_BASELINES.gas_heating_rpm
+    )
+    assert graph.targets.temperature_probe == PumpOperatingTarget(
+        PumpTargetUnit.RPM, NON_DEFAULT_BASELINES.temperature_probe_rpm
+    )
+    assert graph.targets.priming == PumpOperatingTarget(
+        PumpTargetUnit.RPM, NON_DEFAULT_BASELINES.priming_rpm
+    )
+    assert graph.targets.grid_outage == PumpOperatingTarget(
+        PumpTargetUnit.RPM, NON_DEFAULT_BASELINES.grid_outage_rpm
+    )
+    assert graph.targets.sanitation == PumpOperatingTarget(PumpTargetUnit.RPM, 3200)
+    assert graph.targets.spillway == PumpOperatingTarget(PumpTargetUnit.RPM, 2900)
+
+
+def test_mixed_target_policy_is_explicit_and_does_not_convert_units() -> None:
+    configured = {
+        **configured_values(),
+        CONST.CONF_PUMP_FILTRATION_UNIT: "gpm",
+        CONST.CONF_PUMP_FILTRATION_GPM: 42,
+        CONST.CONF_PUMP_SOLAR_HEATING_UNIT: "gpm",
+        CONST.CONF_PUMP_SOLAR_HEATING_GPM: 48,
+        CONST.CONF_PUMP_GAS_HEATING_UNIT: "gpm",
+        CONST.CONF_PUMP_GAS_HEATING_GPM: 55,
+        CONST.CONF_PUMP_TEMPERATURE_PROBE_UNIT: "rpm",
+        CONST.CONF_PUMP_PRIMING_UNIT: "rpm",
+        CONST.CONF_PUMP_GRID_OUTAGE_UNIT: "rpm",
+        CONST.CONF_SANITATION_UNIT: "gpm",
+        CONST.CONF_SANITATION_GPM: 60,
+    }
+
+    targets = PUMP_BASELINES.effective_pump_operating_targets(configured)
+
+    assert targets.filtration == PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    assert targets.solar_heating == PumpOperatingTarget(PumpTargetUnit.GPM, 48)
+    assert targets.gas_heating == PumpOperatingTarget(PumpTargetUnit.GPM, 55)
+    assert targets.temperature_probe == PumpOperatingTarget(PumpTargetUnit.RPM, 1550)
+    assert targets.priming == PumpOperatingTarget(PumpTargetUnit.RPM, 3050)
+    assert targets.grid_outage == PumpOperatingTarget(PumpTargetUnit.RPM, 1600)
+    assert targets.sanitation == PumpOperatingTarget(PumpTargetUnit.GPM, 60)
+
+
+def test_gpm_mode_requires_explicit_positive_whole_number_target() -> None:
+    for invalid in (None, True, 0, -1, 40.5, "40"):
+        configured = {
+            **configured_values(),
+            CONST.CONF_PUMP_FILTRATION_UNIT: "gpm",
+        }
+        if invalid is not None:
+            configured[CONST.CONF_PUMP_FILTRATION_GPM] = invalid
+        with pytest.raises(ValueError):
+            PUMP_BASELINES.effective_pump_operating_targets(configured)
+
+
+def test_unit_change_changes_target_policy_fingerprint_but_not_legacy_rpm_policy() -> None:
+    rpm_config = configured_values()
+    mixed_config = {
+        **rpm_config,
+        CONST.CONF_PUMP_FILTRATION_UNIT: "gpm",
+        CONST.CONF_PUMP_FILTRATION_GPM: 42,
+    }
+
+    rpm_graph = PUMP_BASELINES.compose_pump_baseline_runtime(rpm_config)
+    mixed_graph = PUMP_BASELINES.compose_pump_baseline_runtime(mixed_config)
+
+    assert rpm_graph.baselines == mixed_graph.baselines == NON_DEFAULT_BASELINES
+    assert rpm_graph.baselines.fingerprint == mixed_graph.baselines.fingerprint
+    assert rpm_graph.targets.fingerprint != mixed_graph.targets.fingerprint
 
 
 def test_home_assistant_number_selector_integral_floats_are_normalized() -> None:

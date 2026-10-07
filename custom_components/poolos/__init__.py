@@ -35,6 +35,18 @@ from .const import (  # noqa: E402
     CONF_SANITATION_RPM,
     CONF_POOL_SANITATION_DURATION_MINUTES,
     CONF_HOT_TUB_SANITATION_DURATION_MINUTES,
+    CONF_POOL_COMMISSIONED_PUMP_MODE,
+    CONF_POOL_COMMISSIONED_PUMP_PROVIDER,
+    CONF_POOL_COMMISSIONED_PUMP_ID,
+    CONF_POOL_COMMISSIONED_PUMP_MIN_GPM,
+    CONF_POOL_COMMISSIONED_PUMP_MAX_GPM,
+    CONF_SPA_COMMISSIONED_PUMP_MODE,
+    CONF_SPA_COMMISSIONED_PUMP_PROVIDER,
+    CONF_SPA_COMMISSIONED_PUMP_ID,
+    CONF_SPA_COMMISSIONED_PUMP_MIN_GPM,
+    CONF_SPA_COMMISSIONED_PUMP_MAX_GPM,
+    COMMISSIONED_PUMP_MODE_AUTOMATIC,
+    COMMISSIONED_PUMP_MODE_RPM_GPM,
     DEFAULT_OPERATING_MODE,
     DEFAULT_PREFERRED_FILTRATION_CATCHUP_START,
     DEFAULT_FILTRATION_SCHEDULING_MODE,
@@ -86,6 +98,10 @@ from poolos.intellicenter_readonly import (  # noqa: E402
     NativeIntelliCenterTransportSnapshot,
 )
 from poolos.pump_speed_session import PumpSpeedSessionPurpose  # noqa: E402
+from poolos.pump_capability import (  # noqa: E402
+    CommissionedPumpCapability,
+    PumpCapabilityProvider,
+)
 from poolos.sanitation import SanitationBody  # noqa: E402
 from poolos.grid_outage_confirmation import GridOutageDisposition  # noqa: E402
 from poolos.pool_circulation_ownership import (  # noqa: E402
@@ -115,6 +131,7 @@ class PoolOSRuntimeData:
     loaded_at: str
     operating_mode: str
     manual_intellicenter: ManualIntelliCenterControl | None
+    pump_capability_provider: PumpCapabilityProvider | None
     filtration_runtime: PoolOSFiltrationRuntime
     thermal_runtime: PoolOSThermalRuntime
     physical_command_authority: PoolOSPhysicalCommandAuthority
@@ -142,6 +159,65 @@ async def async_migrate_entry(
     """Remove retired legacy IntelliCenter HA shadow mappings."""
 
     return migrate_config_entry(hass, entry)
+
+
+def _commissioned_pump_capabilities(
+    configured: dict[str, object],
+) -> dict[str, CommissionedPumpCapability]:
+    """Build exact-identity per-body commissioning evidence or fail closed."""
+
+    result: dict[str, CommissionedPumpCapability] = {}
+    bindings = (
+        (
+            "pool",
+            CONF_POOL_COMMISSIONED_PUMP_MODE,
+            CONF_POOL_COMMISSIONED_PUMP_PROVIDER,
+            CONF_POOL_COMMISSIONED_PUMP_ID,
+            CONF_POOL_COMMISSIONED_PUMP_MIN_GPM,
+            CONF_POOL_COMMISSIONED_PUMP_MAX_GPM,
+        ),
+        (
+            "hot_tub",
+            CONF_SPA_COMMISSIONED_PUMP_MODE,
+            CONF_SPA_COMMISSIONED_PUMP_PROVIDER,
+            CONF_SPA_COMMISSIONED_PUMP_ID,
+            CONF_SPA_COMMISSIONED_PUMP_MIN_GPM,
+            CONF_SPA_COMMISSIONED_PUMP_MAX_GPM,
+        ),
+    )
+    for body, mode_key, provider_key, pump_id_key, minimum_key, maximum_key in bindings:
+        mode = str(
+            configured.get(mode_key, COMMISSIONED_PUMP_MODE_AUTOMATIC)
+        ).strip()
+        if mode == COMMISSIONED_PUMP_MODE_AUTOMATIC:
+            continue
+
+        provider = str(configured.get(provider_key, "")).strip()
+        pump_id = str(configured.get(pump_id_key, "")).strip()
+        if not provider or not pump_id:
+            continue
+
+        try:
+            result[body] = CommissionedPumpCapability(
+                provider=provider,
+                pump_id=pump_id,
+                flow_control_supported=mode == COMMISSIONED_PUMP_MODE_RPM_GPM,
+                minimum_gpm=(
+                    int(configured[minimum_key])
+                    if mode == COMMISSIONED_PUMP_MODE_RPM_GPM
+                    and minimum_key in configured
+                    else None
+                ),
+                maximum_gpm=(
+                    int(configured[maximum_key])
+                    if mode == COMMISSIONED_PUMP_MODE_RPM_GPM
+                    and maximum_key in configured
+                    else None
+                ),
+            )
+        except (TypeError, ValueError):
+            continue
+    return result
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bool:
@@ -217,6 +293,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     pump_speed_session = PoolOSPumpSpeedSessionRuntime(
         pump_composition.pump_speed_session,
         physical_command_authority,
+        pump_composition.pump_target_session,
     )
     physical_command_authority.require_automatic_restraint_restoration()
     pool_automatic_control = PoolAutomaticControlSuppression()
@@ -287,6 +364,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             host=manual_host,
             command_authority=physical_command_authority,
             transport=str(configured.get("intellicenter_transport", "tcp")),
+            commissioned_pump_capabilities=_commissioned_pump_capabilities(configured),
             pool_manual_off_requested=arm_manual_pool_off,
             spa_manual_off_requested=arm_manual_spa_off,
         )
@@ -410,6 +488,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
         default_rpm=int(configured.get(CONF_SANITATION_RPM, DEFAULT_SANITATION_RPM)),
+        default_target=pump_composition.targets.sanitation,
         pool_duration_seconds=60 * int(
             configured.get(
                 CONF_POOL_SANITATION_DURATION_MINUTES,
@@ -527,6 +606,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
         manual_intellicenter=manual_intellicenter,
+        pump_capability_provider=manual_intellicenter,
         filtration_runtime=filtration_runtime,
         thermal_runtime=thermal_runtime,
         physical_command_authority=physical_command_authority,

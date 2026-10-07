@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from .clock import FixedClock
 from .execution_models import ExecutionStep, VerificationStatus
-from .integration import SetBodyActive, SetHeatMode, SetPumpSpeed
+from .integration import SetBodyActive, SetHeatMode, SetPumpFlow, SetPumpSpeed
 from .observations import (
     FreshnessPolicy,
     ObservationFreshness,
@@ -430,7 +430,14 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _numeric_tolerance(step: ExecutionStep, observation_id: str) -> float | None:
-    if not isinstance(step.operation, SetPumpSpeed) or observation_id != "pump.rpm":
+    supported = (
+        isinstance(step.operation, SetPumpSpeed)
+        and observation_id == "pump.rpm"
+    ) or (
+        isinstance(step.operation, SetPumpFlow)
+        and observation_id == "pump.gpm"
+    )
+    if not supported:
         return None
     raw = step.metadata.get(f"numeric_tolerance:{observation_id}")
     if raw is None:
@@ -453,6 +460,12 @@ def _is_bounded_command_settling_step(step: ExecutionStep) -> bool:
         return "pump.rpm" in expected and all(
             concept == "pump.rpm"
             or concept.endswith(".pump_circuit.configured_speed_rpm")
+            for concept in expected
+        )
+    if isinstance(operation, SetPumpFlow):
+        return "pump.gpm" in expected and all(
+            concept == "pump.gpm"
+            or concept.endswith(".pump_circuit.configured_flow_gpm")
             for concept in expected
         )
     if isinstance(operation, SetBodyActive):

@@ -6,6 +6,7 @@ from .capabilities import (
     PENTAIR_SHARED_EQUIPMENT_ROUTING,
     PENTAIR_START_STOP,
     PENTAIR_VARIABLE_SPEED,
+    PENTAIR_VARIABLE_FLOW,
 )
 from .commands import PentairCommandOperation, PentairCommandParameter
 from .translator import PentairTranslator
@@ -16,6 +17,7 @@ __all__ = [
     "PENTAIR_SHARED_EQUIPMENT_ROUTING",
     "PENTAIR_START_STOP",
     "PENTAIR_VARIABLE_SPEED",
+    "PENTAIR_VARIABLE_FLOW",
     "PentairCommandOperation",
     "PentairCommandParameter",
     "PentairTranslator",

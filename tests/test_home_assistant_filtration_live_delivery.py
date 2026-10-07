@@ -10,8 +10,9 @@ import sys
 from types import ModuleType
 
 from poolos.hal import CommandStatus
-from poolos.integration import SetBodyActive, SetPumpSpeed
+from poolos.integration import SetBodyActive, SetPumpFlow, SetPumpSpeed
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.physical_command_authority import AutomaticFiltrationDispatchContext
 
 
@@ -67,6 +68,13 @@ class FakeManual:
         self.body_calls.append((*args, kwargs))
 
     async def async_set_pump_circuit_speed(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        self.pump_calls.append((*args, kwargs))
+
+    async def async__set_pump_circuit_flow(
         self,
         *args: object,
         **kwargs: object,
@@ -163,3 +171,63 @@ def test_non_default_filtration_rpm_reaches_manual_gateway_exactly() -> None:
     assert configured.status is CommandStatus.ACKNOWLEDGED
     assert old_default.status is CommandStatus.REJECTED
     assert manual.pump_calls[0][0:2] == ("p0102", 2650)
+
+
+
+def test_exact_gpm_filtration_target_reaches_private_flow_gateway() -> None:
+    module = _load_module()
+    manual = FakeManual()
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    context = AutomaticFiltrationDispatchContext(
+        generation=1,
+        epoch_identity="epoch-gpm",
+        session_identity="session-gpm",
+        operation_identity="operation-gpm",
+        operation="pump_circuit_flow",
+        target="p0102",
+        requested_value=42,
+        pump_circuit_id="p0102",
+        pump_session_id="pump-target-session",
+        effective_pump_target=target,
+    )
+    delivery = module.ManualIntelliCenterFiltrationDelivery(manual, context)
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetPumpFlow(equipment_id="p0102", gpm=42),
+            correlation_id="gpm",
+        )
+    )
+
+    assert receipt.status is CommandStatus.ACKNOWLEDGED
+    assert manual.pump_calls[0][0:2] == ("p0102", 42)
+    assert manual.pump_calls[0][-1]["request_source"].value == "automatic_filtration"
+    assert manual.pump_calls[0][-1]["automatic_filtration_context"] == context
+
+
+def test_gpm_filtration_delivery_rejects_wrong_flow_before_gateway() -> None:
+    module = _load_module()
+    manual = FakeManual()
+    context = AutomaticFiltrationDispatchContext(
+        generation=1,
+        epoch_identity="epoch-gpm",
+        session_identity="session-gpm",
+        operation_identity="operation-gpm",
+        operation="pump_circuit_flow",
+        target="p0102",
+        requested_value=42,
+        pump_circuit_id="p0102",
+        pump_session_id="pump-target-session",
+        effective_pump_target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+    )
+    delivery = module.ManualIntelliCenterFiltrationDelivery(manual, context)
+
+    receipt = asyncio.run(
+        delivery.deliver(
+            SetPumpFlow(equipment_id="p0102", gpm=50),
+            correlation_id="wrong-gpm",
+        )
+    )
+
+    assert receipt.status is CommandStatus.REJECTED
+    assert manual.pump_calls == []

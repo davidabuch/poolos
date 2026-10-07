@@ -17,12 +17,14 @@ from poolos.integration import (
     SetBodyActive,
     SetHeatMode,
     SetHydraulicRoute,
+    SetPumpFlow,
     SetPumpSpeed,
     StartPump,
     StopPump,
     ThermalBody,
 )
 from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
@@ -37,6 +39,7 @@ from poolos.observations import (
     ObservationStore,
     PoolObservation,
 )
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.thermal_execution_planning import (
     ThermalCurrentState,
     ThermalDesiredState,
@@ -750,6 +753,213 @@ def test_stale_and_superseded_plans_are_denied() -> None:
     assert "thermal_plan_stale" in stale.blocking_reasons
     assert "evaluation_superseded" in newer_evaluation.blocking_reasons
     assert "plan_superseded" in newer_plan.blocking_reasons
+
+
+def test_temperature_probe_gpm_late_binding_does_not_expand_to_priming() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 24)
+    probe_policy = ThermalLiveExecutionPolicy(
+        thermal_live_execution_enabled=True,
+        commissioning_scope=ThermalLiveCommissioningScope.POOL,
+        pump_session_id="probe-target-session",
+        pump_session_body="pool",
+        pump_session_purpose="temperature_acquisition",
+        pump_session_pump_circuit_id=TEST_POOL_PUMP_ID,
+        pump_session_effective_target=target,
+    )
+    semantic_probe = SetPumpSpeed(
+        operation_id="semantic-probe-pump",
+        equipment_id=TEST_POOL_PUMP_ID,
+        rpm=probe_policy.baselines.temperature_probe_rpm,
+        metadata={
+            "operating_purpose": "temperature_acquisition",
+            "pool_temperature_probe_step": "true",
+        },
+    )
+
+    live_probe = ThermalLiveExecutionEngine._live_operation(
+        plan,
+        semantic_probe,
+        policy=probe_policy,
+        source_thermal_plan_id=plan.plan_id,
+    )
+
+    assert isinstance(live_probe, SetPumpFlow)
+    assert live_probe.gpm == 24
+    assert live_probe.operation_id == semantic_probe.operation_id
+
+    semantic_priming = replace(
+        semantic_probe,
+        operation_id="semantic-priming-pump",
+        rpm=probe_policy.baselines.priming_rpm,
+        metadata={
+            "operating_purpose": "priming",
+            "priming_step": "true",
+        },
+    )
+    live_priming = ThermalLiveExecutionEngine._live_operation(
+        plan,
+        semantic_priming,
+        policy=probe_policy,
+        source_thermal_plan_id=plan.plan_id,
+    )
+    assert isinstance(live_priming, SetPumpSpeed)
+    assert live_priming.rpm == probe_policy.baselines.priming_rpm
+
+
+def test_solar_gpm_live_derivative_preserves_semantic_plan_identity() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    gpm_policy = ThermalLiveExecutionPolicy(
+        thermal_live_execution_enabled=True,
+        commissioning_scope=ThermalLiveCommissioningScope.POOL,
+        pump_session_id="target-session",
+        pump_session_body="pool",
+        pump_session_purpose="solar_heating",
+        pump_session_pump_circuit_id=TEST_POOL_PUMP_ID,
+        pump_session_effective_target=target,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(
+        plan,
+        policy=gpm_policy,
+        evidence=evidence(plan),
+    )
+
+    first = session.execution_plan.steps[0]
+    assert isinstance(plan.operations[0], SetPumpSpeed)
+    assert isinstance(first.operation, SetPumpFlow)
+    assert first.operation.operation_id == plan.operations[0].operation_id
+    assert first.operation.gpm == 42
+    assert first.expected_observations == {
+        POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT: 42,
+        "pump.gpm": 42,
+    }
+    # Currentness/progress remains expressed in the original thermal semantic
+    # operation rather than the transport-unit derivative.
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=gpm_policy,
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    assert waiting.execution_progress.accepted_current is not None
+    assert waiting.execution_progress.accepted_current.operation_type == "SetPumpSpeed"
+    assert waiting.ownership.commanded_pump_target == target
+    assert waiting.ownership.commanded_pump_rpm is None
+
+
+def test_solar_gpm_verification_requires_flow_truth_not_matching_rpm() -> None:
+    plan = thermal_plan(
+        PhysicalHeatMode.OFF,
+        2600,
+        PhysicalHeatMode.SOLAR,
+        2900,
+    )
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    gpm_policy = ThermalLiveExecutionPolicy(
+        thermal_live_execution_enabled=True,
+        commissioning_scope=ThermalLiveCommissioningScope.POOL,
+        pump_session_id="target-session",
+        pump_session_body="pool",
+        pump_session_purpose="solar_heating",
+        pump_session_pump_circuit_id=TEST_POOL_PUMP_ID,
+        pump_session_effective_target=target,
+    )
+    engine = ThermalLiveExecutionEngine()
+    session = engine.begin(plan, policy=gpm_policy, evidence=evidence(plan))
+    waiting = asyncio.run(
+        engine.deliver_current_step(
+            session,
+            policy=gpm_policy,
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+
+    # Keep hydraulics physically valid in RPM telemetry, but omit pump.gpm.
+    # The GPM step must not be verified merely because unrelated RPM telemetry
+    # happens to be fresh and healthy.
+    wrong = store("pump.rpm", 2900, at=NOW + timedelta(seconds=1))
+    wrong.put(
+        PoolObservation(
+            observation_id=POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+            value=42,
+            observed_at=NOW + timedelta(seconds=1),
+            source_kind=ObservationSourceKind.LIVE,
+            source_id="native-intellicenter",
+            quality=ObservationQuality.GOOD,
+            confidence=1.0,
+        )
+    )
+    not_verified = engine.verify_current_step(
+        waiting,
+        wrong,
+        current_context=waiting.originating_context,
+        policy=gpm_policy,
+        evaluated_at=NOW + timedelta(seconds=1),
+        source_id="native-intellicenter",
+    )
+    assert not_verified.status is not ThermalLiveExecutionStatus.READY
+    assert not_verified.status is not ThermalLiveExecutionStatus.COMPLETED
+
+    # Verification failure/supersession is intentionally fail-closed, so prove
+    # successful GPM convergence in an independent fresh execution session.
+    session2 = engine.begin(plan, policy=gpm_policy, evidence=evidence(plan))
+    waiting2 = asyncio.run(
+        engine.deliver_current_step(
+            session2,
+            policy=gpm_policy,
+            evidence=evidence(plan),
+            delivery=FakeThermalDelivery(),
+        )
+    )
+    # GPM controls the target, but actual RPM remains independent hydraulic
+    # continuity evidence that the pump is physically running.
+    correct = store("pump.rpm", 2500, at=NOW + timedelta(seconds=2))
+    correct.put(
+        PoolObservation(
+            observation_id="pump.gpm",
+            value=43,
+            observed_at=NOW + timedelta(seconds=2),
+            source_kind=ObservationSourceKind.LIVE,
+            source_id="native-intellicenter",
+            quality=ObservationQuality.GOOD,
+            confidence=1.0,
+        )
+    )
+    correct.put(
+        PoolObservation(
+            observation_id=POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+            value=42,
+            observed_at=NOW + timedelta(seconds=2),
+            source_kind=ObservationSourceKind.LIVE,
+            source_id="native-intellicenter",
+            quality=ObservationQuality.GOOD,
+            confidence=1.0,
+        )
+    )
+    verified = engine.verify_current_step(
+        waiting2,
+        correct,
+        current_context=waiting2.originating_context,
+        policy=gpm_policy,
+        evaluated_at=NOW + timedelta(seconds=2),
+        source_id="native-intellicenter",
+    )
+    assert verified.status is ThermalLiveExecutionStatus.READY
 
 
 def test_no_second_step_is_delivered_before_first_native_verification() -> None:

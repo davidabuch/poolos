@@ -17,7 +17,13 @@ from poolos.filtration_automatic_execution import (
 from poolos.external_change import ExternalChangeBatch
 from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_confirmation import GridOutageDisposition
-from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
+from poolos.integration import (
+    PoolOperation,
+    SetBodyActive,
+    SetPumpFlow,
+    SetPumpSpeed,
+    ThermalBody,
+)
 from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
@@ -69,6 +75,10 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             operation_name = "body_active"
             target = "B1101"
             value: bool | int = operation.active
+        elif isinstance(operation, SetPumpFlow):
+            operation_name = "pump_circuit_flow"
+            target = operation.equipment_id
+            value = operation.gpm
         elif isinstance(operation, SetPumpSpeed):
             operation_name = "pump_circuit_speed"
             target = operation.equipment_id
@@ -98,16 +108,9 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             else:
                 assert lease.body_adoption is not None
                 body_adoption_id = lease.body_adoption.adoption_id
-        pump_session_id = None
-        effective_pump_rpm = None
-        if self.pump_speed_session is not None:
-            effective_pump_rpm = self.pump_speed_session.effective_rpm_for(
-                body=PumpSpeedSessionBody.POOL,
-                purpose=PumpSpeedSessionPurpose.ORDINARY,
-                pump_circuit_id=frame.pool_pump_circuit_id,
-            )
-            if effective_pump_rpm is not None:
-                pump_session_id = self.pump_speed_session.snapshot.session_id
+        pump_session_id = frame.pump_session_id
+        effective_pump_rpm = frame.pump_session_effective_rpm
+        effective_pump_target = frame.pump_session_effective_target
         context = self.authority.bind_automatic_filtration_dispatch(
             epoch_identity=frame.epoch_identity,
             session_identity=session_id,
@@ -122,6 +125,7 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             body_adoption_id=body_adoption_id,
             pump_session_id=pump_session_id,
             effective_pump_rpm=effective_pump_rpm,
+            effective_pump_target=effective_pump_target,
         )
         return ManualIntelliCenterFiltrationDelivery(
             self.manual,
@@ -198,17 +202,29 @@ class PoolOSFiltrationAutomaticRuntime:
             "filtration", eligible=eligible, observed_at=snapshot.generated_at,
         )
         pump_session_state = None
+        target_session_state = None
         session_rpm = None
+        session_target = None
         if filtration is not None and self.pump_speed_session is not None:
             pump_session_state = self.pump_speed_session.session.snapshot
+            circuit_id = (
+                "" if thermal is None or thermal.pool_pump_circuit_id is None
+                else thermal.pool_pump_circuit_id
+            )
+            if self.pump_speed_session.target_session is not None:
+                target_session_state = self.pump_speed_session.target_session.snapshot
+                session_target = self.pump_speed_session.target_session.effective_target_for(
+                    body=PumpSpeedSessionBody.POOL,
+                    purpose=PumpSpeedSessionPurpose.ORDINARY,
+                    pump_circuit_id=circuit_id,
+                )
             session_rpm = self.pump_speed_session.session.effective_rpm_for(
                 body=PumpSpeedSessionBody.POOL,
                 purpose=PumpSpeedSessionPurpose.ORDINARY,
-                pump_circuit_id=(
-                    "" if thermal is None or thermal.pool_pump_circuit_id is None
-                    else thermal.pool_pump_circuit_id
-                ),
+                pump_circuit_id=circuit_id,
             )
+            if session_target is not None and session_target.unit is PumpTargetUnit.RPM:
+                session_rpm = session_target.value
             if session_rpm is not None:
                 filtration = replace(
                     filtration,
@@ -256,14 +272,30 @@ class PoolOSFiltrationAutomaticRuntime:
                 self.pool_automatic_control.blocks_opportunity("filtration")
             ),
             pump_session_id=(
-                pump_session_state.session_id if session_rpm is not None else None
+                target_session_state.session_id
+                if session_target is not None and target_session_state is not None
+                else (
+                    pump_session_state.session_id
+                    if session_rpm is not None and pump_session_state is not None
+                    else None
+                )
             ),
             pump_session_effective_rpm=session_rpm,
+            pump_session_effective_target=session_target,
             pump_session_override_current=bool(
-                session_rpm is not None
-                and pump_session_state is not None
-                and pump_session_state.override_state
-                is PumpSpeedOverrideState.VERIFIED
+                (
+                    session_target is not None
+                    and target_session_state is not None
+                    and target_session_state.override_state
+                    is PumpSpeedOverrideState.VERIFIED
+                )
+                or (
+                    session_target is None
+                    and session_rpm is not None
+                    and pump_session_state is not None
+                    and pump_session_state.override_state
+                    is PumpSpeedOverrideState.VERIFIED
+                )
             ),
         )
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:

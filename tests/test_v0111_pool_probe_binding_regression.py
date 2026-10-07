@@ -32,6 +32,23 @@ def test_pool_temperature_probe_authority_admits_exact_1500_rpm_step() -> None:
     assert authority.requested_value == 1500
 
 
+def test_pool_temperature_probe_authority_admits_exact_gpm_step() -> None:
+    """A commissioned probe may bind an exact flow-domain pump step."""
+
+    authority = AutomaticThermalProbeAuthority(
+        generation=1,
+        epoch_identity="live-gpm-probe-epoch",
+        operation_id="probe-gpm-step",
+        operation="pump_circuit_flow",
+        target="p0101",
+        requested_value=24,
+    )
+
+    assert authority.operation == "pump_circuit_flow"
+    assert authority.target == "p0101"
+    assert authority.requested_value == 24
+
+
 def _production_factory_module():
     """Load the real HA automatic-runtime module with only HA dependencies stubbed."""
     import importlib.util

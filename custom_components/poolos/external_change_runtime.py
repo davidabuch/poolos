@@ -18,7 +18,9 @@ from poolos.intellicenter_readonly import (
     NativeIntelliCenterObservationSnapshot,
     NativeIntelliCenterTransportSnapshot,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
 )
 from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
 from poolos.physical_command_authority import PoolOSPhysicalCommandAuthority
@@ -232,18 +234,25 @@ class PoolOSExternalChangeRuntime:
         ):
             return batch
         prefix = "pool" if body == "pool" else "spa"
-        pump_concept = (
-            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
-            if prefix == "pool"
-            else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
-        )
+        pump_concepts = {
+            (
+                POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+                if prefix == "pool"
+                else SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+            ): "pump.rpm",
+            (
+                POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+                if prefix == "pool"
+                else SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+            ): "pump.gpm",
+        }
         attributed = []
         for event in batch.events:
             domain = None
             equipment_id = None
-            if event.concept == pump_concept:
+            if event.concept in pump_concepts:
                 domain = OwnershipDomain.PUMP
-                equipment_id = "pump.rpm"
+                equipment_id = pump_concepts[event.concept]
             elif event.concept == f"{prefix}.raw_heater_id":
                 domain = OwnershipDomain.THERMAL
                 equipment_id = f"{prefix}.raw_heater_id"
