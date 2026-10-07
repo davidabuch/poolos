@@ -1433,7 +1433,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     # Native startup/priming may transiently run above the steady-state
     # target.  PoolOS must converge the opportunistic Spa to Solar/2900
     # without treating that attributable transient as external takeover.
-    spa_solar = asyncio.run(
+    asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
@@ -1503,7 +1503,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
 
     # Model verified Spa-off / hydraulics-idle consequence, then require a
     # fresh Pool generation rather than a cross-body ownership transfer.
-    pool_successor = asyncio.run(
+    asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
