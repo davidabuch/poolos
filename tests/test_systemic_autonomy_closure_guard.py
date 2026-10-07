@@ -345,7 +345,7 @@ REASON_SIGNALS = (
 # Stage 2 replaces aggregate takeover reasons with domain evidence and bounded
 # reconciliation reasons. Keep the resulting production reason surface frozen.
 REASON_FAMILY_COUNT = 227
-REASON_FAMILY_SHA256 = "a7986bdb0a288323c94c97257e2dff2962a83d2890b57475b89813424da8ea98"
+REASON_FAMILY_SHA256 = "10891c6f16d591e8a7cfaec35be7563c2dbdf02a2bdcfc8aa25632e028e98fe8"
 
 
 @cache
