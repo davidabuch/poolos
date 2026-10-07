@@ -3062,12 +3062,8 @@ class ThermalAutomaticExecutionDriver:
             and prior_spa_active is False
             and self._spa_off_observed_since_start
         ):
-            lease = self.orchestrator.ownership.state.lease
-            poolos_started_spa = bool(
-                lease is not None
-                and lease.status is ThermalRuntimeOwnershipStatus.OWNED
-                and lease.body is ThermalBody.HOT_TUB
-                and lease.body_activation is not None
+            poolos_started_spa = (
+                self.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
             )
             if not poolos_started_spa:
                 # This process observed the physical OFF -> ON boundary without
