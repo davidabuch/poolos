@@ -238,7 +238,11 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
         cleanup_body = ThermalBody.POOL
         if candidate.action is ThermalCirculationCleanupAction.BODY_DEACTIVATION:
             assert isinstance(operation, SetBodyActive)
-            purpose = AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            purpose = (
+                AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP
+                if operation.metadata.get("spa_exit_pool_restore_cleanup") is True
+                else AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            )
             physical_operation = "body_active"
             cleanup_body = ThermalBody(operation.equipment_id)
             target = "B1101" if cleanup_body is ThermalBody.POOL else "B1202"
