@@ -189,6 +189,7 @@ def _gateway(
     gateway._state = ManualIntelliCenterState.AVAILABLE
     gateway._command_lock = asyncio.Lock()
     gateway._last_error_code = None
+    gateway._commissioned_pump_capabilities = {}
     gateway._command_authority = PoolOSPhysicalCommandAuthority()
     gateway._command_authority.resolve_maintenance(False)
     gateway._command_authority.set_controller_mode("auto")
@@ -1316,6 +1317,7 @@ def test_gpm_capability_reports_exact_live_body_bound_limits(
     profile_data = dict(profile.as_mapping())
     assert profile_data["rpm_control"] is True
     assert profile_data["gpm_control"] is True
+    assert profile_data["gpm_control_status"] == "supported"
     assert profile_data["provider"] == "intellicenter"
     assert profile_data["evidence_source"] == "native"
 
@@ -1347,6 +1349,7 @@ def test_gpm_capability_fails_closed_without_unique_live_flow_assignment(
     profile_data = dict(profile.as_mapping())
     assert profile_data["rpm_control"] is True
     assert profile_data["gpm_control"] is False
+    assert profile_data["gpm_control_status"] == "unsupported"
 
 
 def test_gpm_gateway_uses_atomic_mode_and_setpoint_payload_on_flow_capable_pump(
