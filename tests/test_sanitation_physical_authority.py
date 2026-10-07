@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+import pytest
+
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PhysicalCommandRequest,
@@ -15,7 +18,14 @@ def ready() -> PoolOSPhysicalCommandAuthority:
     return authority
 
 
-def sanitation_request(authority: PoolOSPhysicalCommandAuthority, *, operation: str, target: str, value: bool | int | str):
+def sanitation_request(
+    authority: PoolOSPhysicalCommandAuthority,
+    *,
+    operation: str,
+    target: str,
+    value: bool | int | str,
+    sanitation_target: PumpOperatingTarget | None = None,
+):
     context = authority.bind_sanitation_dispatch(
         session_id="sanitation-session",
         body="hot_tub",
@@ -24,6 +34,7 @@ def sanitation_request(authority: PoolOSPhysicalCommandAuthority, *, operation: 
         requested_value=value,
         pump_circuit_id="p0103",
         sanitation_rpm=3200,
+        sanitation_target=sanitation_target,
     )
     return PhysicalCommandRequest(
         operation=operation,
@@ -211,3 +222,71 @@ def test_rejected_heat_and_cancel_body_off_do_not_leak_operator_ownership_intent
 
     assert len(seen) == 1
     assert seen[0][0].operation == "pump_circuit_speed"
+
+
+def test_sanitation_exact_gpm_envelope_is_allowed_and_unit_bound() -> None:
+    authority = ready()
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    authority.begin_sanitation_session(
+        body="hot_tub",
+        session_id="sanitation-session",
+        sanitation_rpm=3200,
+        sanitation_target=target,
+    )
+
+    allowed = sanitation_request(
+        authority,
+        operation="pump_circuit_flow",
+        target="p0103",
+        value=42,
+        sanitation_target=target,
+    )
+    assert authority.assess(allowed).allowed
+
+    with pytest.raises(ValueError, match="exact sanitation envelope"):
+        sanitation_request(
+            authority,
+            operation="pump_circuit_flow",
+            target="p0103",
+            value=43,
+            sanitation_target=target,
+        )
+
+    with pytest.raises(ValueError, match="exact sanitation envelope"):
+        sanitation_request(
+            authority,
+            operation="pump_circuit_speed",
+            target="p0103",
+            value=42,
+            sanitation_target=target,
+        )
+
+
+def test_grid_outage_preempts_gpm_sanitation_dispatch() -> None:
+    authority = ready()
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    authority.begin_sanitation_session(
+        body="hot_tub",
+        session_id="sanitation-session",
+        sanitation_rpm=3200,
+        sanitation_target=target,
+    )
+    request = sanitation_request(
+        authority,
+        operation="pump_circuit_flow",
+        target="p0103",
+        value=42,
+        sanitation_target=target,
+    )
+    authority.set_grid_outage_domain_state(
+        active=True,
+        outage_epoch_id="outage-gpm",
+    )
+    authority.begin_grid_outage_frame(
+        outage_epoch_id="outage-gpm",
+        frame_identity="frame-gpm",
+    )
+    assert (
+        authority.assess(request).reason
+        is PhysicalAuthorityReason.SANITATION_PAUSED_OUTAGE
+    )
