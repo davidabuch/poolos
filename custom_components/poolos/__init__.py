@@ -115,6 +115,7 @@ class PoolOSRuntimeData:
     loaded_at: str
     operating_mode: str
     manual_intellicenter: ManualIntelliCenterControl | None
+    pump_capability_provider: PumpCapabilityProvider | None
     filtration_runtime: PoolOSFiltrationRuntime
     thermal_runtime: PoolOSThermalRuntime
     physical_command_authority: PoolOSPhysicalCommandAuthority
@@ -529,6 +530,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         loaded_at=datetime.now(UTC).isoformat(),
         operating_mode=DEFAULT_OPERATING_MODE,
         manual_intellicenter=manual_intellicenter,
+        pump_capability_provider=manual_intellicenter,
         filtration_runtime=filtration_runtime,
         thermal_runtime=thermal_runtime,
         physical_command_authority=physical_command_authority,
