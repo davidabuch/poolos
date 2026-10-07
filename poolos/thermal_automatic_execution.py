@@ -322,7 +322,17 @@ class ThermalAutomaticExecutionDriver:
         default=False, init=False, repr=False
     )
     _last_spa_active: bool | None = field(default=None, init=False, repr=False)
+    _last_pool_active: bool | None = field(default=None, init=False, repr=False)
     _spa_user_session_opportunity_id: str | None = field(
+        default=None, init=False, repr=False
+    )
+    _spa_user_session_prior_pool_active: bool = field(
+        default=False, init=False, repr=False
+    )
+    _post_spa_pool_restore_token: str | None = field(
+        default=None, init=False, repr=False
+    )
+    _post_spa_pool_restore_attempt: ThermalCirculationCleanupAttempt | None = field(
         default=None, init=False, repr=False
     )
     _active_spa_restart_ambiguity: bool = field(
