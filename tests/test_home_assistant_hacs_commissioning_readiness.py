@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT = ROOT / "custom_components" / "poolos"
 EXPECTED_VERSION = "0.11.88"
-EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@7226ee6a6d0201d0e597f1441c05ecc34916ea7d"
+EXPECTED_CORE_REQUIREMENT = "poolos@git+https://github.com/davidabuch/poolos.git@36fa5eb7c5a869af5ed3b205933edbb7474ef2ba"
 EXPECTED_PROTOCOL_REQUIREMENT = "pyintellicenter==0.1.20"
 
 

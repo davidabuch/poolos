@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.physical_command_authority import (
     AutomaticFiltrationDispatchPurpose,
     AutomaticThermalDispatchContext,
@@ -2266,4 +2267,38 @@ def test_spa_exit_pool_restore_cleanup_is_exact_reduction_only_authority() -> No
     assert (
         authority.assess(allowed).reason
         is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
+
+
+def test_hot_tub_priming_authority_uses_configured_priming_baseline() -> None:
+    baselines = PumpOperatingBaselines(priming_rpm=2875)
+    authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="both",
+    )
+    authority.begin_automatic_thermal_epoch("spa-prime-epoch")
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="spa-prime-epoch",
+        session_identity="spa-prime-session",
+        body="hot_tub",
+        pump_circuit_id="p0101",
+        operating_purpose="priming",
+    )
+    allowed = PhysicalCommandRequest(
+        operation="pump_circuit_speed",
+        target="p0101",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=2875,
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.ALLOWED
+
+    wrong = replace(allowed, requested_value=3000)
+    assert (
+        authority.assess(wrong).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
     )
