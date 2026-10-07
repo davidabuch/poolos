@@ -284,7 +284,7 @@ def test_real_ha_factory_preserves_pool_solar_preparation_operating_purpose() ->
         originating_currentness=SimpleNamespace(
             purpose=SimpleNamespace(
                 kind=ThermalExecutionPurposeKind.THERMAL_CONTROL,
-                body=PhysicalHeatMode.SOLAR.__class__("solar") if False else SimpleNamespace(value="pool"),
+                body=SimpleNamespace(value="pool"),
                 selected_source=PhysicalHeatMode.SOLAR,
                 required_pump_rpm=2600,
             )
