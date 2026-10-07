@@ -761,6 +761,13 @@ class ThermalAutomaticExecutionDriver:
                 "automatic_thermal_grid_not_authoritatively_on",
             )
 
+        post_spa_restore_result = await self._process_post_spa_pool_restore_cleanup(
+            frame,
+            delivery_factory=delivery_factory,
+        )
+        if post_spa_restore_result is not None:
+            return post_spa_restore_result
+
         engagement_result = self._process_solar_engagement(frame)
         if engagement_result is not None:
             return engagement_result
@@ -1880,6 +1887,193 @@ class ThermalAutomaticExecutionDriver:
             failure=None,
             command_delivery_performed=True,
         )
+
+    async def _process_post_spa_pool_restore_cleanup(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+        *,
+        delivery_factory: ThermalAutomaticDeliveryFactory,
+    ) -> ThermalAutomaticDriverAssessment | None:
+        """Reduce only a witnessed, unjustified Pool restore after user Spa Off."""
+
+        token = self._post_spa_pool_restore_token
+        attempt = self._post_spa_pool_restore_attempt
+        if token is None and attempt is None:
+            return None
+        if frame.thermal is None:
+            return self._blocked(frame, "spa_exit_pool_restore_evidence_unavailable")
+
+        pool = frame.thermal.pool
+        hot_tub = frame.thermal.hot_tub
+
+        if attempt is not None:
+            if attempt.candidate.provenance_id != token:
+                self._post_spa_pool_restore_attempt = None
+                self._post_spa_pool_restore_token = None
+                return self._blocked(frame, "spa_exit_pool_restore_stale_attempt")
+            if hot_tub.body_active is True:
+                self._post_spa_pool_restore_attempt = None
+                self._post_spa_pool_restore_token = None
+                return None
+            if (
+                pool.body_active is False
+                and hot_tub.body_active is False
+                and pool.actual_pump_rpm == 0
+            ):
+                self._post_spa_pool_restore_attempt = None
+                self._post_spa_pool_restore_token = None
+                return self._publish(
+                    state=ThermalAutomaticDriverState.CONVERGED,
+                    evaluated_at=frame.observed_at,
+                    blocker="spa_exit_pool_restore_cleanup_verified",
+                    frame=frame,
+                    body=pool,
+                    preflight=None,
+                    failure=None,
+                    command_delivery_performed=False,
+                )
+            if frame.observed_at >= attempt.deadline:
+                self._post_spa_pool_restore_attempt = None
+                self._post_spa_pool_restore_token = None
+                return self._publish(
+                    state=ThermalAutomaticDriverState.FAILED,
+                    evaluated_at=frame.observed_at,
+                    blocker="spa_exit_pool_restore_cleanup_timed_out",
+                    frame=frame,
+                    body=pool,
+                    preflight=None,
+                    failure="spa_exit_pool_restore_cleanup_timed_out",
+                    command_delivery_performed=False,
+                )
+            return self._publish(
+                state=ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION,
+                evaluated_at=frame.observed_at,
+                blocker=None,
+                frame=frame,
+                body=pool,
+                preflight=None,
+                failure=None,
+                command_delivery_performed=False,
+            )
+
+        # A later independent reason to run Pool wins. The reduction token
+        # grants no ownership and may never suppress real Solar or immediate
+        # filtration.
+        desired = pool.plan.desired
+        independently_required = bool(
+            desired.selected_source is not PhysicalHeatMode.OFF
+            or desired.required_pump_rpm is not None
+            or pool.filtration_immediate_circulation_required is not False
+        )
+        if independently_required:
+            self._post_spa_pool_restore_token = None
+            return None
+        if hot_tub.body_active is not False or pool.body_active is not True:
+            self._post_spa_pool_restore_token = None
+            return None
+
+        safety = pool.live_safety_evidence
+        if (
+            safety is None
+            or not safety.required_observations_fresh
+            or not safety.observation_health_acceptable
+            or not safety.hydraulic_safety_acceptable
+            or safety.contradictory_evidence
+        ):
+            return self._blocked(frame, "spa_exit_pool_restore_safety_evidence_unavailable")
+        if desired.evidence.get("solar_active") is not False:
+            return self._blocked(frame, "spa_exit_pool_restore_active_heat_not_safe")
+
+        operation = SetBodyActive(
+            equipment_id=ThermalBody.POOL.value,
+            active=False,
+            metadata={
+                "spa_exit_pool_restore_cleanup": True,
+                "reason_code": "spa_exit_pool_restore_not_currently_justified",
+            },
+        )
+        candidate = ThermalCirculationCleanupCandidate(
+            candidate_id=f"spa-exit-pool-cleanup:{frame.epoch_identity}",
+            epoch_identity=frame.epoch_identity,
+            evaluated_at=frame.observed_at,
+            provenance_id=token,
+            provenance_generation=1,
+            action=ThermalCirculationCleanupAction.BODY_DEACTIVATION,
+            operation=operation,
+            arbitration_reason_code="spa_exit_pool_restore_not_currently_justified",
+        )
+        try:
+            delivery = delivery_factory.for_cleanup(
+                candidate,
+                epoch_identity=frame.epoch_identity,
+            )
+        except (RuntimeError, ValueError) as exc:
+            return self._blocked(
+                frame,
+                f"spa_exit_pool_restore_binding_failed:{_bounded(str(exc))}",
+            )
+        if not delivery.available:
+            return self._blocked(frame, "spa_exit_pool_restore_delivery_unavailable")
+
+        correlation_id = (
+            f"spa-exit-pool-cleanup:{token}:{candidate.operation.operation_id}"
+        )
+        self._delivery_in_flight = True
+        try:
+            try:
+                receipt = await delivery.deliver(
+                    candidate.operation,
+                    correlation_id=correlation_id,
+                )
+            except Exception as exc:
+                self._post_spa_pool_restore_token = None
+                reason = f"spa_exit_pool_restore_delivery_exception:{type(exc).__name__}"
+                return self._publish(
+                    state=ThermalAutomaticDriverState.FAILED,
+                    evaluated_at=frame.observed_at,
+                    blocker=reason,
+                    frame=frame,
+                    body=pool,
+                    preflight=None,
+                    failure=reason,
+                    command_delivery_performed=False,
+                )
+        finally:
+            self._delivery_in_flight = False
+        if not receipt.accepted:
+            self._post_spa_pool_restore_token = None
+            reason = f"spa_exit_pool_restore_delivery_{receipt.status.value}"
+            return self._publish(
+                state=ThermalAutomaticDriverState.FAILED,
+                evaluated_at=frame.observed_at,
+                blocker=reason,
+                frame=frame,
+                body=pool,
+                preflight=None,
+                failure=reason,
+                command_delivery_performed=False,
+            )
+
+        self._post_spa_pool_restore_attempt = ThermalCirculationCleanupAttempt(
+            candidate=candidate,
+            correlation_id=correlation_id,
+            receipt_id=receipt.command_id,
+            delivered_at=frame.observed_at,
+            deadline=frame.observed_at + frame.live_policy.verification_timeout,
+        )
+        self._accepted_delivery_count += 1
+        self._last_accepted_correlation_id = correlation_id
+        return self._publish(
+            state=ThermalAutomaticDriverState.AWAITING_CLEANUP_VERIFICATION,
+            evaluated_at=frame.observed_at,
+            blocker=None,
+            frame=frame,
+            body=pool,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=True,
+        )
+
 
     async def _process_cleanup(
         self,
