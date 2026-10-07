@@ -99,6 +99,31 @@
         "tests/test_thermal_automatic_execution.py::test_spa_off_to_on_with_accepted_opportunistic_receipt_is_not_user_session",
         "tests/test_thermal_automatic_execution.py::test_spa_off_to_on_without_poolos_receipt_remains_user_session_opportunity"
       ]
+    },
+    {
+      "id": "OWN-014",
+      "scenario_id": 14,
+      "title": "Manual Pool heat-source override preserves operator THERMAL while PoolOS governs pump purpose and supports handback",
+      "status": "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR",
+      "acceptance": "Starting from PoolOS-owned Pool Solar/H0002 at 2900 RPM, an explicit operator change to Gas/H0001 transfers THERMAL authority to the operator without losing Pool BODY ownership; PoolOS independently retains or reacquires PUMP authority and converges active Gas heating to 3000 RPM without fighting the selected source. When the operator changes Gas back to Solar, THERMAL authority hands back to PoolOS and the system converges to Solar/H0002 at 2900 RPM with stable PoolOS BODY/PUMP/THERMAL ownership.",
+      "production_proofs": [
+        {
+          "path": "poolos/thermal_runtime_assessment.py",
+          "symbol": "ThermalRuntimeEvaluator"
+        },
+        {
+          "path": "poolos/thermal_automatic_execution.py",
+          "symbol": "ThermalAutomaticExecutionDriver"
+        },
+        {
+          "path": "custom_components/poolos/thermal_runtime.py",
+          "symbol": "ThermalRuntime"
+        }
+      ],
+      "regression_proofs": [
+        "tests/test_thermal_runtime_assessment.py::test_operator_owned_pool_gas_preserves_source_and_requires_3000_pump_only",
+        "tests/test_domain_handback_lifecycle.py::test_thermal_handoff_does_not_spill_into_pump_or_body_ownership"
+      ]
     }
   ]
 }
