@@ -108,7 +108,10 @@ def _frame(
     pump_circuit_id: str | None = "p0102",
     pump_session_id: str | None = None,
     pump_session_effective_rpm: int | None = None,
+    pump_session_effective_target: PumpOperatingTarget | None = None,
     pump_session_override_current: bool = False,
+    gpm: int | None = None,
+    configured_gpm: int | None = None,
 ) -> FiltrationAutomaticExecutionFrame:
     values = (
         ("pool.active", pool),
