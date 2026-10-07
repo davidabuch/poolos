@@ -754,6 +754,7 @@ class ManualIntelliCenterControl:
         manual_body: str | None = None,
         automatic_thermal_context: AutomaticThermalDispatchContext | None = None,
         automatic_filtration_context: AutomaticFiltrationDispatchContext | None = None,
+        sanitation_context: SanitationDispatchContext | None = None,
         request_id: str | None = None,
         pump_session_id: str | None = None,
     ) -> ManualCommandReceipt:
@@ -777,7 +778,11 @@ class ManualIntelliCenterControl:
         body = (
             automatic_thermal_context.body
             if automatic_thermal_context is not None
-            else ("hot_tub" if manual_body == "hot_tub" else "pool")
+            else (
+                sanitation_context.body
+                if sanitation_context is not None
+                else ("hot_tub" if manual_body == "hot_tub" else "pool")
+            )
         )
         parent_id, minimum, maximum = self._pump_circuit_flow_limits(
             pump_circuit_objnam,
@@ -807,6 +812,7 @@ class ManualIntelliCenterControl:
             manual_pump_session_id=pump_session_id,
             automatic_thermal_context=automatic_thermal_context,
             automatic_filtration_context=automatic_filtration_context,
+            sanitation_context=sanitation_context,
         )
         await self._async_deliver(
             request=request,
