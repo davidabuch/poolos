@@ -21,6 +21,8 @@ from poolos.intellicenter_readonly import (
     NativeRawAttribute,
     NativeRawObject,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
 )
 from poolos.ownership_evidence import OwnershipDomain, PositiveOperatorEvidence
@@ -30,6 +32,11 @@ from poolos.observations import (
     PoolObservation,
 )
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import (
+    PumpOperatingTarget,
+    PumpOperatingTargetPolicy,
+    PumpTargetUnit,
+)
 from poolos.physical_command_authority import (
     NativeConsequenceAttribution,
     PhysicalRequestSource,
@@ -42,6 +49,7 @@ from poolos.pump_speed_session import (
     PumpSpeedSessionPurpose,
     PumpSpeedSessionRuntime,
 )
+from poolos.pump_target_session import PumpTargetSessionRuntime
 
 
 NOW = datetime(2026, 9, 10, 17, 0, tzinfo=UTC)
@@ -71,7 +79,16 @@ PoolOSPumpSpeedSessionRuntime = _runtime_class()
 
 
 def _observation(concept: str, value: object, *, at: datetime = NOW) -> PoolObservation:
-    source = "p0102" if concept == POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT else concept
+    source = (
+        "p0102"
+        if concept
+        in {
+            POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+            POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+            POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+        }
+        else concept
+    )
     return PoolObservation(
         concept,
         value,
@@ -145,6 +162,112 @@ def _transport(*, at: datetime = NOW, configured: int = 2900) -> NativeIntelliCe
     )
 
 
+def _gpm_policy() -> PumpOperatingTargetPolicy:
+    legacy = PumpOperatingTargetPolicy.from_rpm_baselines(PumpOperatingBaselines())
+    return PumpOperatingTargetPolicy(
+        filtration=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+        solar_heating=PumpOperatingTarget(PumpTargetUnit.GPM, 48),
+        gas_heating=PumpOperatingTarget(PumpTargetUnit.GPM, 55),
+        temperature_probe=legacy.temperature_probe,
+        priming=legacy.priming,
+        grid_outage=legacy.grid_outage,
+        sanitation=legacy.sanitation,
+        spillway=legacy.spillway,
+    )
+
+
+def _gpm_native(
+    *,
+    at: datetime = NOW,
+    configured: int = 42,
+    solar: bool = False,
+) -> NativeIntelliCenterObservationSnapshot:
+    values = {
+        "intellicenter.system_mode": "auto",
+        "pool.active": True,
+        "spa.active": False,
+        "pool.raw_heater_id": "H0002",
+        "solar.active": solar,
+        "heater.active": False,
+        POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT: "gpm",
+        POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT: configured,
+    }
+    return NativeIntelliCenterObservationSnapshot(
+        generated_at=at,
+        status=NativeIntelliCenterStatus.AVAILABLE,
+        source_id="native",
+        observations=tuple(
+            _observation(concept, value, at=at) for concept, value in values.items()
+        ),
+        missing_concepts=(),
+    )
+
+
+def _gpm_transport(
+    *,
+    at: datetime = NOW,
+    configured: int = 42,
+) -> NativeIntelliCenterTransportSnapshot:
+    raw = NativeRawObject(
+        native_id="p0102",
+        object_type="PMPCIRC",
+        subtype=None,
+        name="Pool",
+        parent_id="PMP01",
+        observed_at=at,
+        attributes=(
+            NativeRawAttribute("CIRCUIT", "C0006"),
+            NativeRawAttribute("SELECT", "GPM"),
+            NativeRawAttribute("PARENT", "PMP01"),
+            NativeRawAttribute("SPEED", str(configured)),
+        ),
+    )
+    return NativeIntelliCenterTransportSnapshot(
+        source_id="native",
+        observed_at=at,
+        connected=True,
+        temperature_unit="°F",
+        pumps=(
+            NativePumpState(
+                "PMP01",
+                "Pump",
+                True,
+                2100.0,
+                float(configured),
+                None,
+                450.0,
+                3450.0,
+                15.0,
+                140.0,
+            ),
+        ),
+        raw_inventory=(raw,),
+    )
+
+
+def _gpm_event(*, at: datetime, before: int, after: int) -> ExternalChangeEvent:
+    return ExternalChangeEvent(
+        concept=POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+        semantic_event_type=ExternalSemanticEventType.NATIVE_VALUE_CHANGED,
+        native_object_id="p0102",
+        previous_value=float(before),
+        new_value=float(after),
+        observed_at=at,
+        external_policy=ExternalChangePolicy.ACCEPT,
+        action_taken="accepted_native_value",
+        notification_recommended=False,
+        reconciliation_required=False,
+        positive_operator_evidence=PositiveOperatorEvidence(
+            request_id="native-operator:gpm",
+            authority_generation=8,
+            body_session_id="pool-session-8",
+            domain=OwnershipDomain.PUMP,
+            equipment_id="pump.gpm",
+            requested_at=at,
+        ),
+    )
+
+
 def _event(*, at: datetime, before: int, after: int) -> ExternalChangeEvent:
     return ExternalChangeEvent(
         concept=POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
@@ -198,6 +321,88 @@ def _spa_transport(*, at: datetime = NOW, configured: int = 2600) -> NativeIntel
         ),
     )
     return replace(_transport(at=at, configured=configured), raw_inventory=(raw,))
+
+
+def test_gpm_policy_uses_unit_aware_session_and_retires_legacy_rpm_binding() -> None:
+    baselines = PumpOperatingBaselines()
+    authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
+    target_session = PumpTargetSessionRuntime(_gpm_policy())
+    runtime = PoolOSPumpSpeedSessionRuntime(
+        PumpSpeedSessionRuntime(baselines),
+        authority,
+        target_session,
+    )
+
+    runtime.synchronize(_gpm_native(), _gpm_transport(), connection_generation=1)
+
+    target_state = target_session.snapshot
+    assert target_state.active
+    assert target_state.purpose is PumpSpeedSessionPurpose.ORDINARY
+    assert target_state.effective_target == PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    assert runtime.session.snapshot.active is False
+    assert authority._pump_session_binding is None
+    assert authority.diagnostics(now=NOW)["pump_target_session_binding"] == {
+        "session_id": target_state.session_id,
+        "body": "pool",
+        "purpose": "ordinary_circulation",
+        "pump_circuit_id": "p0102",
+        "unit": "gpm",
+        "value": 42,
+    }
+
+
+def test_gpm_configured_flow_change_is_session_scoped_operator_override() -> None:
+    baselines = PumpOperatingBaselines()
+    authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
+    target_session = PumpTargetSessionRuntime(_gpm_policy())
+    runtime = PoolOSPumpSpeedSessionRuntime(
+        PumpSpeedSessionRuntime(baselines),
+        authority,
+        target_session,
+    )
+    runtime.synchronize(_gpm_native(), _gpm_transport(), connection_generation=1)
+
+    at = NOW + timedelta(seconds=1)
+    changed = _gpm_native(at=at, configured=50)
+    runtime.synchronize(
+        changed,
+        _gpm_transport(at=at, configured=50),
+        connection_generation=1,
+    )
+    runtime.apply_external_changes(
+        ExternalChangeBatch((_gpm_event(at=at, before=42, after=50),)),
+        changed,
+    )
+
+    state = target_session.snapshot
+    assert state.override_state is PumpSpeedOverrideState.VERIFIED
+    assert state.override_source is PumpSpeedOverrideSource.EXTERNAL_UNATTRIBUTED
+    assert state.effective_target == PumpOperatingTarget(PumpTargetUnit.GPM, 50)
+
+
+def test_all_rpm_policy_keeps_existing_ha_session_and_authority_path() -> None:
+    baselines = PumpOperatingBaselines(filtration_rpm=2650)
+    authority = PoolOSPhysicalCommandAuthority(baselines=baselines)
+    target_session = PumpTargetSessionRuntime(
+        PumpOperatingTargetPolicy.from_rpm_baselines(baselines)
+    )
+    runtime = PoolOSPumpSpeedSessionRuntime(
+        PumpSpeedSessionRuntime(baselines),
+        authority,
+        target_session,
+    )
+
+    runtime.synchronize(
+        _native(configured=2650),
+        _transport(configured=2650),
+        connection_generation=1,
+    )
+
+    assert runtime.session.snapshot.active
+    assert runtime.session.snapshot.effective_rpm == 2650
+    assert authority._pump_session_binding is not None
+    assert authority._pump_session_binding[4] == 2650
+    assert authority.diagnostics(now=NOW)["pump_target_session_binding"]["unit"] == "rpm"
 
 
 def test_ha_adapter_established_configured_speed_transition_is_manual_override() -> None:
