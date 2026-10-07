@@ -223,6 +223,7 @@ class AutomaticThermalDispatchPurpose(StrEnum):
     TERMINATION = "termination"
     CIRCULATION_BODY_CLEANUP = "circulation_body_cleanup"
     CIRCULATION_PUMP_NORMALIZATION = "circulation_pump_normalization"
+    SPA_EXIT_POOL_RESTORE_CLEANUP = "spa_exit_pool_restore_cleanup"
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +246,10 @@ class AutomaticThermalCleanupAuthority:
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         object.__setattr__(self, "purpose", AutomaticThermalDispatchPurpose(self.purpose))
-        if self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP:
+        if self.purpose in {
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+        }:
             expected_target = "B1101" if self.body == "pool" else "B1202"
             if not (
                 self.operation == "body_active"
@@ -253,7 +257,7 @@ class AutomaticThermalCleanupAuthority:
                 and self.target == expected_target
                 and self.requested_value is False
             ):
-                raise ValueError("body cleanup authority must be exact owned-body Off")
+                raise ValueError("body cleanup authority must be exact reduction-only body Off")
         elif self.purpose is AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION:
             if not (
                 self.body == "pool"
@@ -407,6 +411,7 @@ class AutomaticThermalDispatchContext:
         cleanup_purposes = {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
         }
         if self.purpose in cleanup_purposes:
             if self.cleanup_authority is None:
@@ -1088,6 +1093,7 @@ class PoolOSPhysicalCommandAuthority:
         if purpose in {
             AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
             AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
         }:
             cleanup = self._automatic_thermal_cleanup_authority
             if (
@@ -2089,6 +2095,7 @@ def _automatic_thermal_request_matches_context(
     if context.purpose in {
         AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
         AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+        AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
     }:
         cleanup = context.cleanup_authority
         return bool(

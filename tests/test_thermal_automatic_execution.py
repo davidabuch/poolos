@@ -9148,3 +9148,197 @@ def test_spa_session_kind_does_not_infer_opportunistic_without_accepted_receipt(
     )
 
     assert driver.spa_session_kind() is None
+
+
+def test_own_040_spa_off_restored_pool_is_reduced_when_policy_is_tou_deferred() -> None:
+    """Scenario 40: Spa exit must not blindly replay pre-Spa Pool circulation."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0102",
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(
+        True,
+        changed_at=NOW,
+        current_epoch_identity=baseline.epoch_identity,
+    )
+
+    # Witness a user-started Spa body and allow PoolOS to adopt only the
+    # execution of that user session.
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                spa_pump_circuit_id="p0102",
+                spa_heater="00000",
+                spa_temperature=98.0,
+                spa_target=101.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                solar_temperature=85.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.body is ThermalBody.HOT_TUB
+    assert lease.body_adoption is not None
+    assert lease.body_adoption.reason_code == "witnessed_user_hot_tub_session"
+
+    calls_before_exit = len(delivery.calls)
+    restored = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=2),
+                pool_active=True,
+                body=ThermalBody.POOL,
+                spa_active=False,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=False,
+                solar_temperature=85.0,
+                pool_temperature=86.0,
+                pool_target=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(hours=4),
+                filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert restored.command_delivery_performed
+    assert len(delivery.calls) == calls_before_exit + 1
+    assert isinstance(delivery.calls[-1], SetBodyActive)
+    assert delivery.calls[-1].equipment_id == ThermalBody.POOL.value
+    assert delivery.calls[-1].active is False
+    assert delivery.calls[-1].metadata.get("spa_exit_pool_restore_cleanup") is True
+
+    verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=3),
+                pool_active=False,
+                body=ThermalBody.POOL,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                solar_active=False,
+                solar_temperature=85.0,
+                pool_temperature=86.0,
+                pool_target=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                filtration_remaining=timedelta(hours=4),
+                filtration_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                filtration_independent_disposition=FiltrationDisposition.DEFERRED_OPTIMIZATION,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert verified.state is ThermalAutomaticDriverState.CONVERGED
+    assert verified.blocker == "spa_exit_pool_restore_cleanup_verified"
+    assert orchestrator.ownership.state.status is ThermalRuntimeOwnershipStatus.RELINQUISHED
+
+
+def test_own_040_spa_exit_does_not_suppress_independently_required_pool() -> None:
+    """A fresh Solar successor wins over the one-shot Spa-exit reduction token."""
+
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+    delivery = FakeDelivery()
+    factory = FakeDeliveryFactory(delivery)
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_pump_circuit_id="p0102",
+        driver=driver,
+        evaluator=evaluator,
+    )
+    driver.note_disabled_epoch(baseline)
+    driver.set_enabled(True, changed_at=NOW, current_epoch_identity=baseline.epoch_identity)
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=1),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                spa_pump_circuit_id="p0102",
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    calls_before_exit = len(delivery.calls)
+
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=2),
+                pool_active=True,
+                body=ThermalBody.POOL,
+                spa_active=False,
+                pump_rpm=2600,
+                configured_rpm=2600,
+                pool_heater="H0002",
+                solar_active=True,
+                solar_temperature=125.0,
+                pool_temperature=80.0,
+                pool_target=90.0,
+                mode=ThermalRequestedMode.SOLAR,
+                pool_opportunity_id="pool:thermal:fresh-after-spa",
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=factory,
+        )
+    )
+
+    assert not any(
+        isinstance(operation, SetBodyActive) and operation.active is False
+        for operation in delivery.calls[calls_before_exit:]
+    )

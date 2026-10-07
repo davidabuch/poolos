@@ -8,6 +8,7 @@ import pytest
 
 from scripts.validate_ha_manifest_core_compatibility import (
     CompatibilityGateError,
+    collect_poolos_attribute_references,
     collect_poolos_imports,
     manifest_poolos_requirement,
 )
@@ -41,3 +42,12 @@ def test_gate_rejects_mutable_poolos_requirement(tmp_path: Path) -> None:
     )
     with pytest.raises(CompatibilityGateError, match="immutable"):
         manifest_poolos_requirement(manifest)
+
+
+def test_gate_scans_referenced_enum_members() -> None:
+    attributes = collect_poolos_attribute_references()
+    assert (
+        "poolos.physical_command_authority",
+        "AutomaticThermalDispatchPurpose",
+        "SPA_EXIT_POOL_RESTORE_CLEANUP",
+    ) in attributes
