@@ -1400,6 +1400,181 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     assert spa_lease.body_adoption is None
     assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
 
+    # Oct 7 commissioned continuation: the fresh PoolOS opportunistic Spa
+    # must reach stable Solar at 2900 RPM before a new Pool thermal demand
+    # is allowed to supersede it.
+    spa_running = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=426),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3450,
+                configured_rpm=2900,
+                spa_heater="00000",
+                pool_temperature=80.0,
+                pool_target=78.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert spa_running.runtime_ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+    assert orchestrator.ownership.state.lease is not None
+    assert orchestrator.ownership.state.lease.body is ThermalBody.HOT_TUB
+
+    # Native startup/priming may transiently run above the steady-state
+    # target.  PoolOS must converge the opportunistic Spa to Solar/2900
+    # without treating that attributable transient as external takeover.
+    spa_solar = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=427),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                spa_heater="H0002",
+                solar_active=True,
+                pool_temperature=80.0,
+                pool_target=78.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    spa_lease = orchestrator.ownership.state.lease
+    assert spa_lease is not None
+    assert spa_lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert spa_lease.body is ThermalBody.HOT_TUB
+    assert spa_lease.owns_pump_setpoint
+    assert spa_lease.owns_heat_source
+    assert spa_lease.pump_setpoint is not None
+    assert spa_lease.pump_setpoint.intended_value == 2900
+
+    # A genuinely new Pool thermal need supersedes the autonomous
+    # opportunistic Spa session.  The first safe action is Spa shutdown;
+    # stale Spa ownership must not leak into the Pool successor.
+    pool_demand = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=428),
+                pool_active=False,
+                body=ThermalBody.POOL,
+                spa_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="00000",
+                spa_heater="H0002",
+                solar_active=True,
+                pool_temperature=83.0,
+                pool_target=90.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:post-opportunistic-spa",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert pool_demand.runtime_ownership_summary["body"] in {"hot_tub", "pool"}
+    assert driver.spa_session_kind() in {
+        SpaSessionKind.POOLOS_OPPORTUNISTIC,
+        None,
+    }
+
+    # Model verified Spa-off / hydraulics-idle consequence, then require a
+    # fresh Pool generation rather than a cross-body ownership transfer.
+    pool_successor = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=429),
+                pool_active=False,
+                body=ThermalBody.POOL,
+                spa_active=False,
+                pump_rpm=0,
+                configured_rpm=1500,
+                pool_heater="00000",
+                spa_heater="00000",
+                solar_active=False,
+                pool_temperature=83.0,
+                pool_target=90.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:post-opportunistic-spa",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    pool_lease = orchestrator.ownership.state.lease
+    assert pool_lease is None or pool_lease.body is ThermalBody.POOL
+    if pool_lease is not None:
+        assert pool_lease.generation > spa_lease.generation
+
+    # Complete the commissioned Pool successor at Solar/2900.  The runtime
+    # may reacquire via probe/preparation first; the final accepted state must
+    # be Pool BODY + Pump + Thermal ownership with H0002 and 2900 RPM.
+    pool_solar = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=550),
+                pool_active=True,
+                body=ThermalBody.POOL,
+                spa_active=False,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                pool_heater="H0002",
+                spa_heater="00000",
+                solar_active=True,
+                pool_temperature=83.0,
+                pool_target=90.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR,
+                evaluator=evaluator,
+                driver=driver,
+                pool_opportunity_id="pool:thermal:post-opportunistic-spa",
+            ),
+            delivery_factory=factory,
+        )
+    )
+    pool_lease = orchestrator.ownership.state.lease
+    assert pool_lease is not None
+    assert pool_lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert pool_lease.body is ThermalBody.POOL
+    assert pool_lease.owns_pump_setpoint
+    assert pool_lease.owns_heat_source
+    assert pool_lease.pump_setpoint is not None
+    assert pool_lease.pump_setpoint.intended_value == 2900
+    assert pool_solar.runtime_ownership_summary["body"] == "pool"
+
+
+def test_commissioned_opportunistic_spa_to_pool_solar_handoff() -> None:
+    """Permanent release gate for the Oct 7 commissioned cross-body handoff."""
+
+    test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown()
+
 
 def test_fresh_solar_successor_retires_residual_then_reacquires_body() -> None:
     """Live regression: stale reduction proof cannot latch a fresh Solar purpose."""
