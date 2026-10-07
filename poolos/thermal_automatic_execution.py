@@ -1984,6 +1984,7 @@ class ThermalAutomaticExecutionDriver:
         if desired.evidence.get("solar_active") is not False:
             return self._blocked(frame, "spa_exit_pool_restore_active_heat_not_safe")
 
+        assert token is not None
         operation = SetBodyActive(
             equipment_id=ThermalBody.POOL.value,
             active=False,
