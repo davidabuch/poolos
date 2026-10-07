@@ -114,11 +114,22 @@ class ThermalRuntimeConceptProvenance:
     receipt_id: str
     correlation_id: str
     intended_value: bool | int | PhysicalHeatMode
+    pump_target_unit: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("operation_id", "receipt_id", "correlation_id"):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
+        concept = ThermalRuntimeOwnedConcept(self.concept)
+        object.__setattr__(self, "concept", concept)
+        if concept is ThermalRuntimeOwnedConcept.PUMP_SETPOINT:
+            if self.pump_target_unit is not None and self.pump_target_unit not in {
+                "rpm",
+                "gpm",
+            }:
+                raise ValueError("pump setpoint provenance unit must be rpm or gpm")
+        elif self.pump_target_unit is not None:
+            raise ValueError("pump target unit is valid only for pump setpoint provenance")
 
 
 @dataclass(frozen=True, slots=True)
