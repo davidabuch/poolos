@@ -17,7 +17,7 @@ from poolos.filtration_automatic_execution import (
 from poolos.external_change import ExternalChangeBatch
 from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_confirmation import GridOutageDisposition
-from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed, ThermalBody
+from poolos.integration import (\n    PoolOperation,\n    SetBodyActive,\n    SetPumpFlow,\n    SetPumpSpeed,\n    ThermalBody,\n)
 from poolos.physical_command_authority import (
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
