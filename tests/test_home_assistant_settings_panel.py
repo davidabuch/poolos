@@ -76,8 +76,10 @@ def test_settings_panel_exposes_only_commissioned_gpm_purposes() -> None:
     assert "_settings_schema(current)" in backend
     assert "_validate_live_gpm_settings" in backend
     assert "pump_target_capabilities" in backend
-    assert 'pump_flow_capability(body="pool")' in backend
-    assert 'pump_flow_capability(body="hot_tub")' in backend
+    assert 'pump_capability_profile(body="pool")' in backend
+    assert 'pump_capability_profile(body="hot_tub")' in backend
+    assert '"evidence_source"' in backend
+    assert '"provider"' in backend
 
     # Priming and outage intentionally remain RPM-only safety/startup slices.
     for forbidden in (
