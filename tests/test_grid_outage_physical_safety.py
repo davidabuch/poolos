@@ -290,6 +290,25 @@ def test_gate_defaults_off_and_enable_requires_a_later_frame() -> None:
     assert same.reason_code == "grid_outage_fresh_frame_required_after_enable"
 
 
+def test_unload_preserves_commissioned_gate_intent_but_invalidates_runtime() -> None:
+    engine = enabled_engine()
+    assert engine.gate_requested is True
+
+    engine.unload(unloaded_at=NOW)
+
+    assert engine.gate_requested is True
+    assert engine.assessment is not None
+    assert engine.assessment.lifecycle is GridOutageSafetyLifecycle.UNLOADED
+    assert engine.assessment.candidate is None
+    assert not engine.assessment.command_delivery_enabled
+
+    # An unloaded engine cannot process new work even though the persisted
+    # operator intent remains armed for the next fresh runtime generation.
+    result = engine.evaluate(frame())
+    assert result.lifecycle is GridOutageSafetyLifecycle.UNLOADED
+    assert result.candidate is None
+
+
 def test_disabling_gate_immediately_clears_candidate_readiness_diagnostics() -> None:
     engine = enabled_engine()
     ready = engine.evaluate(
