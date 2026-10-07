@@ -19,6 +19,12 @@ const LABELS = {
   pump_temperature_probe_gpm: "Temperature probe flow",
   pump_priming_rpm: "Priming RPM",
   pump_grid_outage_rpm: "Grid outage RPM",
+  pool_commissioned_pump_mode: "Pool pump capability commissioning",
+  pool_commissioned_pump_min_gpm: "Pool commissioned minimum flow",
+  pool_commissioned_pump_max_gpm: "Pool commissioned maximum flow",
+  spa_commissioned_pump_mode: "Hot Tub pump capability commissioning",
+  spa_commissioned_pump_min_gpm: "Hot Tub commissioned minimum flow",
+  spa_commissioned_pump_max_gpm: "Hot Tub commissioned maximum flow",
   spa_solar_roof_f: "Spa Solar roof threshold",
   sanitation_unit: "Sanitation pump target",
   sanitation_rpm: "Sanitation RPM",
@@ -93,7 +99,26 @@ const gpmSelector = (capability) => numberSelector(
   "gpm",
 );
 
-const buildSchema = (capabilities = {}) => {
+const commissioningSelector = (record = {}) => ({
+  selector: {
+    select: {
+      options: [
+        { value: "automatic", label: "Automatic discovery" },
+        ...(record.eligible
+          ? [
+              { value: "rpm_only", label: "Commission as RPM-only" },
+              { value: "rpm_gpm", label: "Commission as RPM + GPM" },
+            ]
+          : []),
+      ],
+      mode: "dropdown",
+      multiple: false,
+      custom_value: false,
+    },
+  },
+});
+
+const buildSchema = (capabilities = {}, commissioning = {}) => {
   const filtrationGpm = capabilities.filtration ?? {};
   const solarGpm = capabilities.solar_heating ?? {};
   const gasGpm = capabilities.gas_heating ?? {};
@@ -277,6 +302,56 @@ const buildSchema = (capabilities = {}) => {
         required: true,
         ...numberSelector(450, 3450, 10, "rpm"),
       },
+      {
+        name: "pool_commissioned_pump_mode",
+        required: true,
+        ...commissioningSelector(commissioning.pool ?? {}),
+      },
+      {
+        name: "pool_commissioned_pump_min_gpm",
+        required: true,
+        ...numberSelector(1, 300, 1, "gpm"),
+        visible: {
+          field: "pool_commissioned_pump_mode",
+          operator: "eq",
+          value: "rpm_gpm",
+        },
+      },
+      {
+        name: "pool_commissioned_pump_max_gpm",
+        required: true,
+        ...numberSelector(1, 300, 1, "gpm"),
+        visible: {
+          field: "pool_commissioned_pump_mode",
+          operator: "eq",
+          value: "rpm_gpm",
+        },
+      },
+      {
+        name: "spa_commissioned_pump_mode",
+        required: true,
+        ...commissioningSelector(commissioning.hot_tub ?? {}),
+      },
+      {
+        name: "spa_commissioned_pump_min_gpm",
+        required: true,
+        ...numberSelector(1, 300, 1, "gpm"),
+        visible: {
+          field: "spa_commissioned_pump_mode",
+          operator: "eq",
+          value: "rpm_gpm",
+        },
+      },
+      {
+        name: "spa_commissioned_pump_max_gpm",
+        required: true,
+        ...numberSelector(1, 300, 1, "gpm"),
+        visible: {
+          field: "spa_commissioned_pump_mode",
+          operator: "eq",
+          value: "rpm_gpm",
+        },
+      },
     ],
   },
   {
@@ -427,6 +502,7 @@ class PoolOSSettingsPanel extends HTMLElement {
     this._saving = false;
     this._message = "";
     this._capabilities = {};
+    this._commissioning = {};
   }
 
   set hass(value) {
@@ -469,6 +545,7 @@ class PoolOSSettingsPanel extends HTMLElement {
       this._initial = JSON.stringify(this._data);
       this._version = response.version;
       this._capabilities = { ...(response.pump_target_capabilities ?? {}) };
+      this._commissioning = { ...(response.pump_capability_commissioning ?? {}) };
     } catch (err) {
       this._message = `Unable to load PoolOS settings: ${err?.message ?? err}`;
     } finally {
@@ -490,6 +567,7 @@ class PoolOSSettingsPanel extends HTMLElement {
       this._data = { ...response.settings };
       this._initial = JSON.stringify(this._data);
       this._capabilities = { ...(response.pump_target_capabilities ?? this._capabilities) };
+      this._commissioning = { ...(response.pump_capability_commissioning ?? this._commissioning) };
       this._message = "Saved. PoolOS is reloading with the new configuration.";
     } catch (err) {
       this._message = `Save failed: ${err?.message ?? err}`;
@@ -615,7 +693,7 @@ class PoolOSSettingsPanel extends HTMLElement {
     if (!form) return;
     form.hass = this._hass;
     form.data = this._data;
-    form.schema = buildSchema(this._capabilities);
+    form.schema = buildSchema(this._capabilities, this._commissioning);
     form.computeLabel = (schema) => LABELS[schema.name] ?? schema.title ?? schema.name;
     if (!form._poolosBound) {
       form._poolosBound = true;
