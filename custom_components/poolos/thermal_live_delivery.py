@@ -198,14 +198,20 @@ class ManualIntelliCenterThermalLiveDelivery:
         if (
             cleanup is not None
             and cleanup.purpose
-            is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            in {
+                AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+                AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+            }
             and operation.active is not False
         ):
             raise ValueError("Pool cleanup authority permits only body deactivation")
         if operation.active is False and not (
             cleanup is not None
             and cleanup.purpose
-            is AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP
+            in {
+                AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+                AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+            }
             and cleanup.body == body.value
             and cleanup.cleanup_authority is not None
             and cleanup.cleanup_authority.operation == "body_active"
