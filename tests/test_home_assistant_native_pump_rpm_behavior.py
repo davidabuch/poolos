@@ -1279,6 +1279,60 @@ def test_queued_manual_rpm_loses_stale_session_authority_inside_command_lock(
     asyncio.run(scenario())
 
 
+def test_gpm_capability_reports_exact_live_body_bound_limits(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(
+        objnam="PMP01",
+        subtype="VSF",
+        minimum_flow=15,
+        maximum_flow=130,
+    )
+    circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=2600,
+    )
+    gateway, _recorder = _gateway([pump, circuit])
+
+    capability = dict(gateway.pump_flow_capability(body="pool"))
+
+    assert capability == {
+        "supported": True,
+        "reason": "live_native_flow_limits_proven",
+        "pump_circuit_id": "p0102",
+        "parent_pump_id": "PMP01",
+        "minimum_gpm": 15,
+        "maximum_gpm": 130,
+    }
+
+
+def test_gpm_capability_fails_closed_without_unique_live_flow_assignment(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    pump = pump_object_factory(
+        objnam="PMP01",
+        subtype="VS",
+        minimum_flow=None,
+        maximum_flow=None,
+    )
+    circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+        circuit_id="C0006",
+    )
+    gateway, _recorder = _gateway([pump, circuit])
+
+    capability = dict(gateway.pump_flow_capability(body="pool"))
+
+    assert capability["supported"] is False
+    assert capability["reason"] == "unique_flow_capable_pmpcirc_not_proven"
+
+
 def test_gpm_gateway_uses_atomic_mode_and_setpoint_payload_on_flow_capable_pump(
     pump_object_factory,
     pump_circuit_object_factory,
@@ -1372,9 +1426,9 @@ def test_gpm_gateway_enforces_live_parent_flow_limits(
     assert recorder.calls == []
 
 
-def test_gpm_gateway_is_not_user_facing_until_unit_aware_session_authority_exists() -> None:
+def test_gpm_gateway_reports_guarded_settings_exposure_without_direct_entity_surface() -> None:
     source = MODULE_PATH.read_text(encoding="utf-8")
-    assert '"pump_gpm_user_facing_control_enabled": False' in source
+    assert '"pump_gpm_user_facing_control_enabled": True' in source
     assert '"pump_circuit_flow_internal"' in source
 
 
