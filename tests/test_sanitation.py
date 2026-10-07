@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.sanitation import (
     SanitationBody,
     SanitationController,
@@ -21,8 +22,10 @@ def observation(
     other: bool | None = False,
     heat: str | None = "00000",
     rpm: float | None = 3200,
+    gpm: float | None = None,
     manual_off: bool = False,
     manual_rpm: int | None = None,
+    manual_gpm: int | None = None,
     usable: bool = True,
 ) -> SanitationObservation:
     return SanitationObservation(
@@ -32,17 +35,20 @@ def observation(
         other_body_active=other,
         heat_source_id=heat,
         pump_rpm=rpm,
+        pump_gpm=gpm,
         body_evidence_usable=usable,
         thermal_evidence_usable=usable,
         pump_evidence_usable=usable,
         positive_manual_body_off=manual_off,
         positive_manual_pump_change_rpm=manual_rpm,
+        positive_manual_pump_change_gpm=manual_gpm,
     )
 
 
 def active_controller(
     body: SanitationBody = SanitationBody.HOT_TUB,
     duration: int = 4 * 60 * 60,
+    target: PumpOperatingTarget | None = None,
 ) -> SanitationController:
     controller = SanitationController()
     controller.start(
@@ -50,6 +56,7 @@ def active_controller(
         requested_at=NOW,
         target_rpm=3200,
         duration_seconds=duration,
+        target=target,
     )
     return controller
 
@@ -236,3 +243,84 @@ def test_completion_requires_verified_body_off() -> None:
     )
     assert done.session is None
     assert done.reason_code == "sanitation_completed"
+
+
+def test_gpm_sanitation_sets_and_verifies_flow_not_numeric_rpm() -> None:
+    controller = active_controller(
+        target=PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    )
+
+    needs_flow = controller.observe(
+        observation(rpm=2800, gpm=30)
+    )
+    assert needs_flow.action is not None
+    assert needs_flow.action.kind.value == "pump_set"
+    assert needs_flow.action.requested_value == 42
+    assert needs_flow.action.reason_code == "sanitation_set_pump_gpm"
+
+    # A numerically matching RPM is not GPM convergence.
+    still_needs_flow = controller.observe(
+        observation(at=NOW + timedelta(seconds=1), rpm=42, gpm=30)
+    )
+    assert still_needs_flow.action is not None
+    assert still_needs_flow.action.reason_code == "sanitation_set_pump_gpm"
+
+    active = controller.observe(
+        observation(at=NOW + timedelta(seconds=2), rpm=2400, gpm=43)
+    )
+    assert active.session is not None
+    assert active.session.lifecycle is SanitationLifecycle.ACTIVE
+    assert active.action is None
+
+
+def test_gpm_sanitation_manual_override_and_handback_are_unit_scoped() -> None:
+    controller = active_controller(
+        duration=600,
+        target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+    )
+    controller.observe(observation(gpm=42))
+
+    yielded = controller.observe(
+        observation(
+            at=NOW + timedelta(minutes=1),
+            rpm=2500,
+            gpm=50,
+            manual_gpm=50,
+        )
+    )
+    assert yielded.session is not None
+    assert yielded.session.lifecycle is SanitationLifecycle.PAUSED_PUMP_OVERRIDE
+    assert yielded.pump_owner == "external"
+
+    handed_back = controller.observe(
+        observation(
+            at=NOW + timedelta(minutes=2),
+            rpm=2450,
+            gpm=42,
+            manual_gpm=42,
+        )
+    )
+    assert handed_back.session is not None
+    assert handed_back.pump_owner == "poolos_sanitation"
+
+
+def test_gpm_sanitation_persistence_preserves_unit_and_legacy_payloads_stay_rpm() -> None:
+    controller = active_controller(
+        duration=600,
+        target=PumpOperatingTarget(PumpTargetUnit.GPM, 42),
+    )
+    assert controller.session is not None
+    payload = controller.session.persistent_dict()
+
+    restarted = SanitationController()
+    restored = restarted.restore(payload)
+    assert restored.session is not None
+    assert restored.session.pump_target == PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+
+    legacy_payload = dict(payload)
+    legacy_payload.pop("target_unit")
+    legacy_payload.pop("target_gpm")
+    legacy_payload["target_rpm"] = 3200
+    legacy = SanitationController().restore(legacy_payload)
+    assert legacy.session is not None
+    assert legacy.session.pump_target == PumpOperatingTarget(PumpTargetUnit.RPM, 3200)

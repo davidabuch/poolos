@@ -37,6 +37,50 @@ CONF_PUMP_PRIMING_RPM = "pump_priming_rpm"
 CONF_PUMP_GRID_OUTAGE_RPM = "pump_grid_outage_rpm"
 CONF_SANITATION_RPM = "sanitation_rpm"
 DEFAULT_SANITATION_RPM = 3200
+
+# Unit-aware pump target policy. Existing installations omit these keys and
+# therefore remain exact RPM-only configurations.
+PUMP_TARGET_UNIT_RPM = "rpm"
+PUMP_TARGET_UNIT_GPM = "gpm"
+PUMP_TARGET_UNIT_OPTIONS = (PUMP_TARGET_UNIT_RPM, PUMP_TARGET_UNIT_GPM)
+DEFAULT_PUMP_TARGET_UNIT = PUMP_TARGET_UNIT_RPM
+
+CONF_PUMP_FILTRATION_UNIT = "pump_filtration_unit"
+CONF_PUMP_FILTRATION_GPM = "pump_filtration_gpm"
+CONF_PUMP_SOLAR_HEATING_UNIT = "pump_solar_heating_unit"
+CONF_PUMP_SOLAR_HEATING_GPM = "pump_solar_heating_gpm"
+CONF_PUMP_GAS_HEATING_UNIT = "pump_gas_heating_unit"
+CONF_PUMP_GAS_HEATING_GPM = "pump_gas_heating_gpm"
+CONF_PUMP_TEMPERATURE_PROBE_UNIT = "pump_temperature_probe_unit"
+CONF_PUMP_TEMPERATURE_PROBE_GPM = "pump_temperature_probe_gpm"
+CONF_PUMP_PRIMING_UNIT = "pump_priming_unit"
+CONF_PUMP_PRIMING_GPM = "pump_priming_gpm"
+CONF_PUMP_GRID_OUTAGE_UNIT = "pump_grid_outage_unit"
+CONF_PUMP_GRID_OUTAGE_GPM = "pump_grid_outage_gpm"
+CONF_SANITATION_UNIT = "sanitation_unit"
+CONF_SANITATION_GPM = "sanitation_gpm"
+
+# Optional installer commissioning used only when automatic adapter evidence is UNKNOWN.
+COMMISSIONED_PUMP_MODE_AUTOMATIC = "automatic"
+COMMISSIONED_PUMP_MODE_RPM_ONLY = "rpm_only"
+COMMISSIONED_PUMP_MODE_RPM_GPM = "rpm_gpm"
+COMMISSIONED_PUMP_MODE_OPTIONS = (
+    COMMISSIONED_PUMP_MODE_AUTOMATIC,
+    COMMISSIONED_PUMP_MODE_RPM_ONLY,
+    COMMISSIONED_PUMP_MODE_RPM_GPM,
+)
+DEFAULT_COMMISSIONED_PUMP_MODE = COMMISSIONED_PUMP_MODE_AUTOMATIC
+
+CONF_POOL_COMMISSIONED_PUMP_MODE = "pool_commissioned_pump_mode"
+CONF_POOL_COMMISSIONED_PUMP_PROVIDER = "pool_commissioned_pump_provider"
+CONF_POOL_COMMISSIONED_PUMP_ID = "pool_commissioned_pump_id"
+CONF_POOL_COMMISSIONED_PUMP_MIN_GPM = "pool_commissioned_pump_min_gpm"
+CONF_POOL_COMMISSIONED_PUMP_MAX_GPM = "pool_commissioned_pump_max_gpm"
+CONF_SPA_COMMISSIONED_PUMP_MODE = "spa_commissioned_pump_mode"
+CONF_SPA_COMMISSIONED_PUMP_PROVIDER = "spa_commissioned_pump_provider"
+CONF_SPA_COMMISSIONED_PUMP_ID = "spa_commissioned_pump_id"
+CONF_SPA_COMMISSIONED_PUMP_MIN_GPM = "spa_commissioned_pump_min_gpm"
+CONF_SPA_COMMISSIONED_PUMP_MAX_GPM = "spa_commissioned_pump_max_gpm"
 CONF_POOL_SANITATION_DURATION_MINUTES = "pool_sanitation_duration_minutes"
 DEFAULT_POOL_SANITATION_DURATION_MINUTES = 240
 CONF_HOT_TUB_SANITATION_DURATION_MINUTES = "hot_tub_sanitation_duration_minutes"

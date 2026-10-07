@@ -61,11 +61,14 @@ from .integration import (
     PoolOperation,
     SetBodyActive,
     SetHeatMode,
+    SetPumpFlow,
     SetPumpSpeed,
     ThermalBody,
 )
 from .intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     is_pmpcirc_native_id,
 )
 from .native_configuration_policy import (
@@ -80,6 +83,7 @@ from .observations import (
     ObservationStore,
 )
 from .operating_baselines import PumpOperatingBaselines
+from .pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from .thermal_execution_planning import (
     ThermalExecutionPlanAssessment,
     ThermalPlanDisposition,
@@ -165,6 +169,7 @@ class ThermalLiveExecutionPolicy:
     pump_session_purpose: str | None = None
     pump_session_pump_circuit_id: str | None = None
     pump_session_effective_rpm: int | None = None
+    pump_session_effective_target: PumpOperatingTarget | None = None
 
     def __post_init__(self) -> None:
         if self.maximum_plan_age <= timedelta(0):
@@ -173,17 +178,30 @@ class ThermalLiveExecutionPolicy:
             raise ValueError("verification_timeout must be positive")
         if self.observation_freshness <= timedelta(0):
             raise ValueError("observation_freshness must be positive")
-        session_values = (
+        identity_values = (
             self.pump_session_id,
             self.pump_session_body,
             self.pump_session_purpose,
             self.pump_session_pump_circuit_id,
-            self.pump_session_effective_rpm,
         )
-        if any(value is not None for value in session_values) and any(
-            value is None for value in session_values
-        ):
-            raise ValueError("thermal pump session policy binding must be complete")
+        if self.pump_session_effective_target is not None:
+            if any(value is None for value in identity_values):
+                raise ValueError("thermal pump target session binding must be complete")
+            if self.pump_session_effective_target.unit is PumpTargetUnit.GPM:
+                if self.pump_session_effective_rpm is not None:
+                    raise ValueError("GPM thermal session cannot carry effective RPM")
+            elif (
+                self.pump_session_effective_rpm is not None
+                and self.pump_session_effective_rpm
+                != self.pump_session_effective_target.value
+            ):
+                raise ValueError("thermal RPM target bindings disagree")
+        else:
+            session_values = (*identity_values, self.pump_session_effective_rpm)
+            if any(value is not None for value in session_values) and any(
+                value is None for value in session_values
+            ):
+                raise ValueError("thermal pump session policy binding must be complete")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -400,6 +418,7 @@ class ThermalLiveExecutionOwnership:
     pump_receipt_id: str | None = None
     pump_correlation_id: str | None = None
     commanded_pump_rpm: int | None = None
+    commanded_pump_target: PumpOperatingTarget | None = None
     pump_accepted_at: datetime | None = None
     heat_source_operation_id: str | None = None
     heat_source_receipt_id: str | None = None
@@ -470,6 +489,23 @@ class ThermalLiveExecutionOwnership:
                 pump_receipt_id=receipt.command_id,
                 pump_correlation_id=correlation_id,
                 commanded_pump_rpm=operation.rpm,
+                commanded_pump_target=PumpOperatingTarget(
+                    PumpTargetUnit.RPM,
+                    operation.rpm,
+                ),
+                pump_accepted_at=accepted_at,
+            )
+        if isinstance(operation, SetPumpFlow):
+            return replace(
+                self,
+                pump_operation_id=operation.operation_id,
+                pump_receipt_id=receipt.command_id,
+                pump_correlation_id=correlation_id,
+                commanded_pump_rpm=None,
+                commanded_pump_target=PumpOperatingTarget(
+                    PumpTargetUnit.GPM,
+                    operation.gpm,
+                ),
                 pump_accepted_at=accepted_at,
             )
         if isinstance(operation, SetHeatMode):
@@ -498,6 +534,7 @@ class ThermalLiveExecutionOwnership:
             pump_receipt_id=None,
             pump_correlation_id=None,
             commanded_pump_rpm=None,
+            commanded_pump_target=None,
             pump_accepted_at=None,
             heat_source_operation_id=None,
             heat_source_receipt_id=None,
@@ -572,7 +609,12 @@ class ThermalLiveExecutionSession:
         """Return accepted/verified progress without inferring from hardware."""
 
         verified = tuple(
-            operation_signature(attempt.step.operation, attempt.step.metadata)
+            operation_signature(
+                self.assessment.operations[attempt.step.sequence - 1],
+                self.assessment.step_specifications[
+                    attempt.step.sequence - 1
+                ].metadata,
+            )
             for attempt in self.attempts
             if attempt.lifecycle.status is ExecutionStepStatus.VERIFIED
         )
@@ -582,8 +624,12 @@ class ThermalLiveExecutionSession:
             or self.current_attempt.receipt is None
             or self.current_attempt.lifecycle.status is ExecutionStepStatus.VERIFIED
             else operation_signature(
-                self.current_attempt.step.operation,
-                self.current_attempt.step.metadata,
+                self.assessment.operations[
+                    self.current_attempt.step.sequence - 1
+                ],
+                self.assessment.step_specifications[
+                    self.current_attempt.step.sequence - 1
+                ].metadata,
             )
         )
         return ThermalExecutionProgress(
@@ -1255,7 +1301,7 @@ class ThermalLiveExecutionEngine:
                 "thermal live execution not authorized:"
                 + ",".join(authorization.blocking_reasons)
             )
-        proposal = self._proposal(assessment, evidence)
+        proposal = self._proposal(assessment, evidence, policy)
         generic_authorization = ExecutionAuthorization(
             authorization_id=authorization.authorization_id,
             proposal_id=proposal.proposal_id,
@@ -1270,7 +1316,10 @@ class ThermalLiveExecutionEngine:
             ExecutionPlanBuildRequest(
                 proposal=proposal,
                 authorization=generic_authorization,
-                step_specifications=self._live_step_specifications(assessment),
+                step_specifications=self._live_step_specifications(
+                    assessment,
+                    policy,
+                ),
                 metadata={
                     **dict(authorization.provenance),
                     "thermal_live_execution": "true",
@@ -1383,6 +1432,7 @@ class ThermalLiveExecutionEngine:
             session,
             step=step,
             authorization=authorization,
+            policy=policy,
         )
         if binding_reasons:
             return self._terminal(
@@ -1911,10 +1961,13 @@ class ThermalLiveExecutionEngine:
     def _proposal(
         assessment: ThermalExecutionPlanAssessment,
         evidence: ThermalLiveSafetyEvidence,
+        policy: ThermalLiveExecutionPolicy,
     ) -> ExecutionProposal:
         operations = tuple(
             ThermalLiveExecutionEngine._live_operation(
+                assessment,
                 operation,
+                policy=policy,
                 source_thermal_plan_id=assessment.plan_id,
             )
             for operation in assessment.operations
@@ -1944,43 +1997,88 @@ class ThermalLiveExecutionEngine:
     @staticmethod
     def _live_step_specifications(
         assessment: ThermalExecutionPlanAssessment,
+        policy: ThermalLiveExecutionPolicy,
     ) -> tuple[ExecutionStepSpecification, ...]:
-        return tuple(
-            ExecutionStepSpecification(
-                operation_id=specification.operation_id,
-                preconditions={
-                    **dict(specification.preconditions),
-                    "command_delivery_enabled": True,
-                    "thermal_live_authorization_required": True,
-                },
-                expected_observations=specification.expected_observations,
-                verification_required=specification.verification_required,
-                metadata={
-                    **dict(specification.metadata),
-                    "source_thermal_plan_id": assessment.plan_id,
-                    "thermal_live_authorization_required": "true",
-                },
+        specifications: list[ExecutionStepSpecification] = []
+        for operation, specification in zip(
+            assessment.operations,
+            assessment.step_specifications,
+            strict=True,
+        ):
+            target = _thermal_live_gpm_target(assessment, operation, policy)
+            expected = specification.expected_observations
+            metadata = dict(specification.metadata)
+            if target is not None:
+                configured_concept = (
+                    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+                    if assessment.desired.body is ThermalBody.POOL
+                    else SPA_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT
+                )
+                expected = {
+                    configured_concept: target.value,
+                    "pump.gpm": target.value,
+                }
+                metadata = {
+                    **metadata,
+                    "verification_truth": "authoritative_native_pump_gpm",
+                    f"numeric_tolerance:{configured_concept}": "0",
+                    "numeric_tolerance:pump.gpm": str(target.verification_tolerance),
+                    "physical_pump_target_unit": PumpTargetUnit.GPM.value,
+                    "semantic_required_rpm": str(
+                        assessment.desired.required_pump_rpm or ""
+                    ),
+                }
+            specifications.append(
+                ExecutionStepSpecification(
+                    operation_id=specification.operation_id,
+                    preconditions={
+                        **dict(specification.preconditions),
+                        "command_delivery_enabled": True,
+                        "thermal_live_authorization_required": True,
+                    },
+                    expected_observations=expected,
+                    verification_required=specification.verification_required,
+                    metadata={
+                        **metadata,
+                        "source_thermal_plan_id": assessment.plan_id,
+                        "thermal_live_authorization_required": "true",
+                    },
+                )
             )
-            for specification in assessment.step_specifications
-        )
+        return tuple(specifications)
 
     @staticmethod
     def _live_operation(
+        assessment: ThermalExecutionPlanAssessment,
         operation: PoolOperation,
         *,
+        policy: ThermalLiveExecutionPolicy,
         source_thermal_plan_id: str,
     ) -> PoolOperation:
         """Return the exact typed live derivative of one Phase 1 operation."""
 
-        return replace(
-            operation,
-            metadata={
-                **dict(operation.metadata),
-                "command_delivery_enabled": True,
-                "thermal_live_authorized_path": True,
-                "source_thermal_plan_id": source_thermal_plan_id,
-            },
-        )
+        metadata = {
+            **dict(operation.metadata),
+            "command_delivery_enabled": True,
+            "thermal_live_authorized_path": True,
+            "source_thermal_plan_id": source_thermal_plan_id,
+        }
+        target = _thermal_live_gpm_target(assessment, operation, policy)
+        if target is not None:
+            return SetPumpFlow(
+                equipment_id=operation.equipment_id,
+                gpm=target.value,
+                correlation_id=operation.correlation_id,
+                metadata={
+                    **metadata,
+                    "physical_pump_target_unit": PumpTargetUnit.GPM.value,
+                    "semantic_required_rpm": str(
+                        assessment.desired.required_pump_rpm or ""
+                    ),
+                },
+                operation_id=operation.operation_id,
+            )
+        return replace(operation, metadata=metadata)
 
     @staticmethod
     def _operation_binding_reasons(
@@ -1988,6 +2086,7 @@ class ThermalLiveExecutionEngine:
         *,
         step: ExecutionStep,
         authorization: ThermalLiveAuthorizationResult,
+        policy: ThermalLiveExecutionPolicy,
     ) -> tuple[str, ...]:
         """Bind the authorized Phase 1 operation to the exact delivered object."""
 
@@ -1996,7 +2095,9 @@ class ThermalLiveExecutionEngine:
             return ("authorized_operation_step_out_of_range",)
         assessment_operation = session.assessment.operations[step_index]
         expected_live_operation = ThermalLiveExecutionEngine._live_operation(
+            session.assessment,
             assessment_operation,
+            policy=policy,
             source_thermal_plan_id=session.assessment.plan_id,
         )
         reasons: list[str] = []
@@ -2296,6 +2397,62 @@ def _hydraulic_continuity_failure_reason(
             return f"target_body_unexpectedly_active:{target.value}"
         return f"target_body_inactive:{target.value}"
     return None
+
+
+def _session_effective_target(
+    policy: ThermalLiveExecutionPolicy,
+    *,
+    body: ThermalBody,
+    purpose: str,
+    pump_circuit_id: str,
+) -> PumpOperatingTarget | None:
+    if (
+        policy.pump_session_id is None
+        or policy.pump_session_body != body.value
+        or policy.pump_session_purpose != purpose
+        or policy.pump_session_pump_circuit_id != pump_circuit_id
+    ):
+        return None
+    return policy.pump_session_effective_target
+
+
+def _thermal_live_gpm_target(
+    assessment: ThermalExecutionPlanAssessment,
+    operation: PoolOperation,
+    policy: ThermalLiveExecutionPolicy,
+) -> PumpOperatingTarget | None:
+    """Late-bind probe/Solar/Gas pump delivery into the GPM domain."""
+
+    if not isinstance(operation, SetPumpSpeed):
+        return None
+    purpose_raw = operation.metadata.get("operating_purpose")
+    purpose = purpose_raw if isinstance(purpose_raw, str) else ""
+    if purpose not in {
+        "temperature_acquisition",
+        "solar_heating",
+        "gas_heating",
+    }:
+        return None
+    if purpose == "temperature_acquisition":
+        if operation.rpm != policy.baselines.temperature_probe_rpm:
+            return None
+    else:
+        expected_source = (
+            PhysicalHeatMode.SOLAR
+            if purpose == "solar_heating"
+            else PhysicalHeatMode.GAS
+        )
+        if assessment.desired.selected_source is not expected_source:
+            return None
+    target = _session_effective_target(
+        policy,
+        body=assessment.desired.body,
+        purpose=purpose,
+        pump_circuit_id=operation.equipment_id,
+    )
+    if target is None or target.unit is not PumpTargetUnit.GPM:
+        return None
+    return target
 
 
 def _session_effective_rpm(

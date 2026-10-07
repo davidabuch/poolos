@@ -82,6 +82,8 @@ from poolos.intellicenter_readonly import (
 # pyintellicenter 0.1.20 does not export these constants at package top level.
 _SETTMP_ATTR = "SETTMP"
 _SETPT_ATTR = "SETPT"
+_MINF_ATTR = "MINF"
+_MAXF_ATTR = "MAXF"
 
 # IntelliCenter notification semantics depend on the BODY RequestParamList
 # subscription shape.  This is the proven attribute set used by the working
@@ -1081,6 +1083,8 @@ def _copy_pump(item: PoolObject) -> NativePumpState | None:
         power_watts=_number(item[PWR_ATTR]),
         minimum_rpm=minimum_rpm,
         maximum_rpm=maximum_rpm,
+        minimum_gpm=_positive_number(item[_MINF_ATTR]),
+        maximum_gpm=_positive_number(item[_MAXF_ATTR]),
     )
 
 

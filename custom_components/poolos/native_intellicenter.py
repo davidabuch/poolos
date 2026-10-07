@@ -180,6 +180,10 @@ def native_transport_snapshot(
                 rpm=_number(item.rpm),
                 gpm=_number(item.flow_gpm),
                 power_watts=_number(item.power_watts),
+                minimum_rpm=_number(getattr(item, "minimum_rpm", None)),
+                maximum_rpm=_number(getattr(item, "maximum_rpm", None)),
+                minimum_gpm=_number(getattr(item, "minimum_flow_gpm", None)),
+                maximum_gpm=_number(getattr(item, "maximum_flow_gpm", None)),
             )
             for item in getattr(snapshot, "pumps", ())
         ),
