@@ -22,8 +22,12 @@ from poolos.filtration_policy import (
     FiltrationObservation,
 )
 from poolos.hal import CommandReceipt, CommandStatus
-from poolos.integration import PoolOperation, SetBodyActive, SetPumpSpeed
-from poolos.intellicenter_readonly import POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT
+from poolos.integration import PoolOperation, SetBodyActive, SetPumpFlow, SetPumpSpeed
+from poolos.intellicenter_readonly import (
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+)
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.observations import ObservationQuality, ObservationSourceKind, PoolObservation
 from poolos.ownership_evidence import OwnershipDomain, OwnershipHealth
 from poolos.physical_command_authority import (
@@ -111,6 +115,12 @@ def _frame(
         ("spa.active", spa),
         ("pump.rpm", rpm),
         (POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT, configured),
+        *((() if gpm is None else (("pump.gpm", gpm),))),
+        *((
+            ()
+            if configured_gpm is None
+            else ((POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT, configured_gpm),)
+        )),
         ("waterfall.active", False),
         ("jets.active", False),
         ("slide.active", False),
@@ -156,6 +166,7 @@ def _frame(
         external_changes=changes,
         pump_session_id=pump_session_id,
         pump_session_effective_rpm=pump_session_effective_rpm,
+        pump_session_effective_target=pump_session_effective_target,
         pump_session_override_current=pump_session_override_current,
     )
 
