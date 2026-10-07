@@ -10,6 +10,7 @@ PANEL_BACKEND = COMPONENT / "settings_panel.py"
 PANEL_FRONTEND = COMPONENT / "settings_panel.js"
 MANIFEST = COMPONENT / "manifest.json"
 INIT = COMPONENT / "__init__.py"
+CONFIG_FLOW = COMPONENT / "config_flow.py"
 
 
 def test_settings_panel_is_registered_from_poolos_setup() -> None:
@@ -101,3 +102,28 @@ def test_settings_panel_gpm_selector_uses_live_native_limits() -> None:
     assert "unitSelector(Boolean(probeGpm.supported))" in source
     assert "unitSelector(Boolean(sanitationGpm.supported))" in source
     assert "pump_target_capabilities" in source
+
+
+def test_settings_schema_has_one_effective_definition_with_full_gpm_commissioning_surface() -> None:
+    source = CONFIG_FLOW.read_text(encoding="utf-8")
+    assert source.count("def _settings_schema(") == 1
+    assert source.count("def _positive_whole_gpm(") == 1
+    for symbol in (
+        "CONF_POOL_COMMISSIONED_PUMP_MODE",
+        "CONF_POOL_COMMISSIONED_PUMP_MIN_GPM",
+        "CONF_POOL_COMMISSIONED_PUMP_MAX_GPM",
+        "CONF_SPA_COMMISSIONED_PUMP_MODE",
+        "CONF_SPA_COMMISSIONED_PUMP_MIN_GPM",
+        "CONF_SPA_COMMISSIONED_PUMP_MAX_GPM",
+        "CONF_PUMP_FILTRATION_UNIT",
+        "CONF_PUMP_FILTRATION_GPM",
+        "CONF_PUMP_SOLAR_HEATING_UNIT",
+        "CONF_PUMP_SOLAR_HEATING_GPM",
+        "CONF_PUMP_GAS_HEATING_UNIT",
+        "CONF_PUMP_GAS_HEATING_GPM",
+        "CONF_PUMP_TEMPERATURE_PROBE_UNIT",
+        "CONF_PUMP_TEMPERATURE_PROBE_GPM",
+        "CONF_SANITATION_UNIT",
+        "CONF_SANITATION_GPM",
+    ):
+        assert symbol in source
