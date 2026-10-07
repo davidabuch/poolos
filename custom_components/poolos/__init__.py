@@ -411,6 +411,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
         authority=physical_command_authority,
         manual=manual_intellicenter,
         default_rpm=int(configured.get(CONF_SANITATION_RPM, DEFAULT_SANITATION_RPM)),
+        default_target=pump_composition.targets.sanitation,
         pool_duration_seconds=60 * int(
             configured.get(
                 CONF_POOL_SANITATION_DURATION_MINUTES,
