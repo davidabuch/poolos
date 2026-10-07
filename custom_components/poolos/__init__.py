@@ -454,6 +454,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             ),
             "session_id": lease.body_session_id or lease.lease_id,
             "established_at": lease.established_at,
+            "pump_authority": lease.domain_state(
+                OwnershipDomain.PUMP
+            ).authority.value,
+            "thermal_authority": lease.domain_state(
+                OwnershipDomain.THERMAL
+            ).authority.value,
         }
 
     external_change_runtime.operator_context_provider = current_operator_context
