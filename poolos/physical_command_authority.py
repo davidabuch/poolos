@@ -246,7 +246,11 @@ class AutomaticThermalCleanupAuthority:
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} must not be empty")
         object.__setattr__(self, "purpose", AutomaticThermalDispatchPurpose(self.purpose))
-        if self.purpose in {\n            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,\n            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,\n        }:\n            expected_target = "B1101" if self.body == "pool" else "B1202"
+        if self.purpose in {
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+        }:
+            expected_target = "B1101" if self.body == "pool" else "B1202"
             if not (
                 self.operation == "body_active"
                 and self.body in {"pool", "hot_tub"}
@@ -1085,7 +1089,12 @@ class PoolOSPhysicalCommandAuthority:
         purpose = AutomaticThermalDispatchPurpose(purpose)
         cleanup = None
         probe = None
-        if purpose in {\n            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,\n            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,\n            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,\n        }:\n            cleanup = self._automatic_thermal_cleanup_authority
+        if purpose in {
+            AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+            AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+            AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+        }:
+            cleanup = self._automatic_thermal_cleanup_authority
             if (
                 cleanup is None
                 or cleanup_candidate_identity != cleanup.candidate_identity
@@ -2082,7 +2091,12 @@ def _automatic_thermal_request_matches_context(
             and request.target == body_target
             and request.requested_value == "00000"
         )
-    if context.purpose in {\n        AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,\n        AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,\n        AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,\n    }:\n        cleanup = context.cleanup_authority
+    if context.purpose in {
+        AutomaticThermalDispatchPurpose.CIRCULATION_BODY_CLEANUP,
+        AutomaticThermalDispatchPurpose.CIRCULATION_PUMP_NORMALIZATION,
+        AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+    }:
+        cleanup = context.cleanup_authority
         return bool(
             cleanup is not None
             and request.operation == cleanup.operation
