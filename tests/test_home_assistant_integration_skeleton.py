@@ -148,6 +148,8 @@ def test_grid_outage_safety_switch_persists_explicit_operator_enablement() -> No
 
     assert "RestoreEntity, SwitchEntity" in block
     assert "async_get_last_state()" in block
+    assert "_commissioned_desired_enabled" in block
+    assert "return self._commissioned_desired_enabled" in block
     assert 'previous.state == "on"' in block
     assert "set_enabled(True)" in block
     assert "set_enabled(False)" in block
