@@ -239,3 +239,72 @@ def test_real_ha_factory_binds_spa_priming_from_execution_step_metadata() -> Non
     assert context.body == "hot_tub"
     assert context.pump_circuit_id == "p0101"
     assert context.operating_purpose == "priming"
+
+
+def test_real_ha_factory_preserves_pool_solar_preparation_operating_purpose() -> None:
+    """Live 2026-10-07: probe -> 2600 Solar preparation must not bind as priming."""
+
+    module = _production_factory_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("pool-solar-prep-epoch")
+
+    operation = SetPumpSpeed(
+        operation_id="pool-solar-prep-2600",
+        equipment_id="p0102",
+        rpm=2600,
+        metadata={
+            "reason_code": "operating_baseline:solar_preparation:2600_rpm",
+            "operating_purpose": "ordinary_circulation",
+        },
+    )
+    session = SimpleNamespace(
+        assessment=SimpleNamespace(
+            operations=(operation,),
+            desired=SimpleNamespace(body=SimpleNamespace(value="pool")),
+        ),
+        execution_plan=SimpleNamespace(
+            plan_id="pool-solar-prep-plan",
+            steps=(
+                SimpleNamespace(
+                    operation=operation,
+                    metadata={
+                        "verification_truth": "authoritative_native_pump_rpm",
+                    },
+                ),
+            ),
+        ),
+        coordination=SimpleNamespace(current_step_sequence=1),
+        originating_currentness=SimpleNamespace(
+            purpose=SimpleNamespace(
+                kind=ThermalExecutionPurposeKind.THERMAL_CONTROL,
+                body=SimpleNamespace(value="pool"),
+                selected_source=PhysicalHeatMode.SOLAR,
+                required_pump_rpm=2600,
+            )
+        ),
+        execution_progress=SimpleNamespace(
+            verified_prefix=(),
+            accepted_current=None,
+        ),
+    )
+
+    factory = module._ManualDeliveryFactory(
+        manual=object(),
+        authority=authority,
+    )
+    delivery = factory.for_session(
+        session,
+        epoch_identity="pool-solar-prep-epoch",
+    )
+    context = delivery.kwargs["automatic_thermal_context"]
+
+    assert context.body == "pool"
+    assert context.pump_circuit_id == "p0102"
+    assert context.operating_purpose == "ordinary_circulation"

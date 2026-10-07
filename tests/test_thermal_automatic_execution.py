@@ -1041,7 +1041,7 @@ def test_independent_pool_thermal_opportunity_prospectively_adopts_preexisting_b
 
 
 def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> None:
-    """Live 2026-09-22 regression: adopted Solar must still own Pool OFF/pump0."""
+    """Critical contract: target satisfied shuts down, then 130 F Spa Solar can qualify."""
 
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
@@ -1316,7 +1316,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
                 pool_target=78.0,
                 spa_temperature=90.0,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=130.0,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
@@ -1342,7 +1342,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
                 pool_target=78.0,
                 spa_temperature=90.0,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=130.0,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
@@ -1377,7 +1377,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
                 pool_target=78.0,
                 spa_temperature=90.0,
                 spa_target=100.0,
-                solar_temperature=140.0,
+                solar_temperature=130.0,
                 mode=ThermalRequestedMode.SOLAR_PREFERRED,
                 evaluator=evaluator,
                 driver=driver,
