@@ -1431,13 +1431,73 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
     assert orchestrator.ownership.state.lease.body is ThermalBody.HOT_TUB
 
     # Native startup/priming may transiently run above the steady-state
-    # target.  PoolOS must converge the opportunistic Spa to Solar/2900
-    # without treating that attributable transient as external takeover.
-    asyncio.run(
+    # target.  PoolOS first accepts the 2900-RPM Spa target while actual RPM
+    # is still at the attributable startup value, then requires a fresh
+    # authoritative 2900-RPM observation before source engagement.
+    spa_pump_command = asyncio.run(
         driver.process_epoch(
             _frame(
                 orchestrator,
                 NOW + timedelta(seconds=427),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3450,
+                configured_rpm=2900,
+                spa_heater="00000",
+                solar_active=False,
+                pool_temperature=80.0,
+                pool_target=78.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    assert spa_pump_command.runtime_ownership_status is ThermalRuntimeOwnershipStatus.OWNED
+
+    spa_pump_verified = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=428),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=2900,
+                configured_rpm=2900,
+                spa_heater="00000",
+                solar_active=False,
+                pool_temperature=80.0,
+                pool_target=78.0,
+                spa_temperature=90.0,
+                spa_target=100.0,
+                solar_temperature=130.0,
+                mode=ThermalRequestedMode.SOLAR_PREFERRED,
+                evaluator=evaluator,
+                driver=driver,
+            ),
+            delivery_factory=factory,
+        )
+    )
+    spa_lease = orchestrator.ownership.state.lease
+    assert spa_lease is not None
+    assert spa_lease.status is ThermalRuntimeOwnershipStatus.OWNED
+    assert spa_lease.body is ThermalBody.HOT_TUB
+    assert spa_lease.owns_pump_setpoint
+    assert spa_lease.pump_setpoint is not None
+    assert spa_lease.pump_setpoint.intended_value == 2900
+
+    # Solar selection/engagement is a separate verified consequence.
+    asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=429),
                 pool_active=False,
                 body=ThermalBody.HOT_TUB,
                 spa_active=True,
@@ -1473,7 +1533,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=428),
+                NOW + timedelta(seconds=430),
                 pool_active=False,
                 body=ThermalBody.POOL,
                 spa_active=True,
@@ -1507,7 +1567,7 @@ def test_prospectively_adopted_pool_solar_owns_target_satisfied_shutdown() -> No
         driver.process_epoch(
             _frame(
                 orchestrator,
-                NOW + timedelta(seconds=429),
+                NOW + timedelta(seconds=431),
                 pool_active=False,
                 body=ThermalBody.POOL,
                 spa_active=False,
