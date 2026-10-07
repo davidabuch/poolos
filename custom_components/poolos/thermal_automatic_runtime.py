@@ -103,7 +103,9 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
             current_step = session.execution_plan.steps[current_sequence - 1]
             current_operation = current_step.operation
             if isinstance(current_operation, (SetPumpSpeed, SetPumpFlow)):
-                purpose_value = current_step.metadata.get("operating_purpose")
+                purpose_value = current_operation.metadata.get("operating_purpose")
+                if not isinstance(purpose_value, str) or not purpose_value:
+                    purpose_value = current_step.metadata.get("operating_purpose")
                 if isinstance(purpose_value, str) and purpose_value:
                     operating_purpose = purpose_value
                 elif current_step.metadata.get("priming_step") == "true":
@@ -120,7 +122,9 @@ class _ManualDeliveryFactory(ThermalAutomaticDeliveryFactory):
                     next_step = session.execution_plan.steps[next_index]
                     next_operation = next_step.operation
                     if isinstance(next_operation, (SetPumpSpeed, SetPumpFlow)):
-                        purpose_value = next_step.metadata.get("operating_purpose")
+                        purpose_value = next_operation.metadata.get("operating_purpose")
+                        if not isinstance(purpose_value, str) or not purpose_value:
+                            purpose_value = next_step.metadata.get("operating_purpose")
                         if isinstance(purpose_value, str) and purpose_value:
                             operating_purpose = purpose_value
                         elif next_step.metadata.get("priming_step") == "true":
