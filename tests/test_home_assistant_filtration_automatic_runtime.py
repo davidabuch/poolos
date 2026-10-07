@@ -14,6 +14,7 @@ from poolos.external_change import ExternalChangeBatch
 from poolos.filtration_policy import FiltrationDisposition
 from poolos.grid_outage_confirmation import GridOutageDisposition
 from poolos.physical_command_authority import PhysicalAuthorityReason
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.thermal_runtime_orchestration import ThermalOrchestrationLifecycle
 
 
@@ -323,3 +324,39 @@ def test_future_independent_filtration_window_is_not_blocked_by_noon_off() -> No
                     external_changes=ExternalChangeBatch(()))
     assert not runtime._latest_frame.pool_automatic_control_suppressed
     assert runtime.pool_automatic_control.state.suppressed
+
+
+def test_rpm_target_session_observation_does_not_raise_and_overrides_filtration_rpm() -> None:
+    @dataclass(frozen=True)
+    class FiltrationFrame:
+        evaluated_at: datetime
+        independent_disposition: FiltrationDisposition
+        ordinary_filtration_rpm: int
+
+    module = _load_module()
+    runtime, *_ = _runtime(module)
+    runtime.filtration_runtime.assessment = FiltrationFrame(
+        evaluated_at=NOW,
+        independent_disposition=FiltrationDisposition.RUN_NOW,
+        ordinary_filtration_rpm=2900,
+    )
+    runtime.pump_speed_session = SimpleNamespace(
+        session=SimpleNamespace(
+            snapshot=SimpleNamespace(active=False),
+            effective_rpm_for=lambda **_: None,
+        ),
+        target_session=SimpleNamespace(
+            snapshot=SimpleNamespace(active=True, session_id="rpm-target-session", override_state=module.PumpSpeedOverrideState.VERIFIED),
+            effective_target_for=lambda **_: PumpOperatingTarget(PumpTargetUnit.RPM, 2600),
+        ),
+    )
+
+    runtime.observe(
+        _snapshot(NOW),
+        _orchestration("rpm-target-session"),
+        external_changes=ExternalChangeBatch(()),
+    )
+
+    assert runtime._latest_frame is not None
+    assert runtime._latest_frame.filtration is not None
+    assert runtime._latest_frame.filtration.ordinary_filtration_rpm == 2600
