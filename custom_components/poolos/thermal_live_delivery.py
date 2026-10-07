@@ -17,11 +17,13 @@ from poolos.integration import (
     PoolOperation,
     SetBodyActive,
     SetHeatMode,
+    SetPumpFlow,
     SetPumpSpeed,
     ThermalBody,
 )
 from poolos.intellicenter_readonly import is_pmpcirc_native_id
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import PumpTargetUnit
 from poolos.physical_command_authority import (
     AutomaticThermalDispatchContext,
     AutomaticThermalDispatchPurpose,
@@ -82,6 +84,14 @@ class ManualIntelliCenterThermalLiveDelivery:
                 manual_receipt = await self.manual.async_set_body_active(
                     body_id,
                     operation.active,
+                    request_source=self.request_source,
+                    automatic_thermal_context=self.automatic_thermal_context,
+                )
+            elif isinstance(operation, SetPumpFlow):
+                self._validate_flow(operation)
+                manual_receipt = await self.manual.async__set_pump_circuit_flow(
+                    operation.equipment_id,
+                    operation.gpm,
                     request_source=self.request_source,
                     automatic_thermal_context=self.automatic_thermal_context,
                 )
@@ -291,6 +301,37 @@ class ManualIntelliCenterThermalLiveDelivery:
             return
         if operation.rpm not in allowed:
             raise ValueError("unsupported thermal pump RPM baseline")
+
+    def _validate_flow(self, operation: SetPumpFlow) -> None:
+        if not is_pmpcirc_native_id(operation.equipment_id):
+            raise ValueError("unsupported thermal pump circuit")
+        context = self.automatic_thermal_context
+        normal_source = bool(
+            context is not None
+            and context.purpose is AutomaticThermalDispatchPurpose.NORMAL
+            and context.operating_purpose in {"solar_heating", "gas_heating"}
+        )
+        probe = bool(
+            context is not None
+            and context.purpose
+            is AutomaticThermalDispatchPurpose.POOL_TEMPERATURE_PROBE
+            and context.operating_purpose == "temperature_acquisition"
+            and context.probe_authority is not None
+            and context.probe_authority.operation == "pump_circuit_flow"
+            and context.probe_authority.target == operation.equipment_id
+            and context.probe_authority.requested_value == operation.gpm
+        )
+        if (
+            context is None
+            or not (normal_source or probe)
+            or context.pump_circuit_id != operation.equipment_id
+            or context.effective_pump_target is None
+            or context.effective_pump_target.unit is not PumpTargetUnit.GPM
+            or context.effective_pump_target.value != operation.gpm
+        ):
+            raise ValueError(
+                "thermal GPM requires exact probe or Solar/Gas target authority"
+            )
 
     @staticmethod
     def _validate_heat_mode(operation: SetHeatMode) -> tuple[str, str]:
