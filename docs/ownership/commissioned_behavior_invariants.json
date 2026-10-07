@@ -79,7 +79,7 @@
       "scenario_id": 40,
       "title": "Opportunistic Spa Solar yields cleanly to a fresh Pool Solar demand",
       "status": "OWNER_ACCEPTED_COMMISSIONED_BEHAVIOR",
-      "acceptance": "After Pool target satisfaction leaves the system idle, a qualified PoolOS opportunistic Hot Tub Solar session may start and converge at Solar/H0002 with 2900 RPM and PoolOS ownership. If a fresh Pool thermal demand then appears, the Hot Tub session must yield through source/body/pump cleanup, and a distinct new Pool generation must converge to Pool Solar/H0002 at 2900 RPM without stale cross-body ownership leakage.",
+      "acceptance": "After Pool target satisfaction leaves the system idle, a qualified PoolOS opportunistic Hot Tub Solar session may start and converge at Solar/H0002 with 2900 RPM and PoolOS ownership. Accepted in-flight PoolOS Spa BODY-start provenance must survive the OFF-to-ON observation boundary and must never be misclassified as a user session before lease promotion. If a fresh Pool thermal demand then appears, the Hot Tub session must yield through source/body/pump cleanup, and a distinct new Pool generation must converge to Pool Solar/H0002 at 2900 RPM without stale cross-body ownership leakage.",
       "production_proofs": [
         {
           "path": "poolos/thermal_automatic_execution.py",
