@@ -12,6 +12,8 @@ import pytest
 from poolos.intellicenter_readonly import (
     NATIVE_TARGET_CONCEPTS,
     POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT,
+    POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT,
     SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,
     NativeBodyKind,
     NativeBodyState,
@@ -30,6 +32,7 @@ from poolos.intellicenter_readonly import (
     NativeSystemState,
     resolve_pool_pump_circuit,
     resolve_body_pump_circuit,
+    resolve_body_pump_target,
 )
 from poolos.observations import ObservationQuality
 from poolos.observation_parity import ObservationParityEngine
@@ -81,6 +84,8 @@ def transport(*, connected: bool = True) -> NativeIntelliCenterTransportSnapshot
                 1234.0,
                 minimum_rpm=950.0,
                 maximum_rpm=3450.0,
+                minimum_gpm=15.0,
+                maximum_gpm=140.0,
             ),
         ),
         intellichlors=(
@@ -166,6 +171,125 @@ def test_body_specific_pmpcirc_identity_and_configured_speed_are_distinct() -> N
     assert by_id[SPA_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT].source_id.endswith(
         ":p0198"
     )
+
+
+def test_gpm_pmpcirc_resolves_only_through_unit_aware_target_identity() -> None:
+    base = transport()
+    gpm_pool = NativeRawObject(
+        native_id="p0102",
+        object_type="PMPCIRC",
+        subtype=None,
+        name="Pool",
+        parent_id="PMP01",
+        observed_at=NOW,
+        attributes=(
+            NativeRawAttribute("CIRCUIT", "C0006"),
+            NativeRawAttribute("SELECT", "GPM"),
+            NativeRawAttribute("PARENT", "PMP01"),
+            NativeRawAttribute("SPEED", "42"),
+        ),
+    )
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        bodies=base.bodies,
+        pumps=base.pumps,
+        temperatures=base.temperatures,
+        circuits=base.circuits,
+        intellichlors=base.intellichlors,
+        systems=base.systems,
+        raw_inventory=(
+            gpm_pool,
+            *(item for item in base.raw_inventory if item.native_id != "p0102"),
+        ),
+    )
+
+    target = resolve_body_pump_target(snapshot, body=NativeBodyKind.POOL)
+    assert target is not None
+    assert target.native_id == "p0102"
+    assert target.target.unit.value == "gpm"
+    assert target.target.value == 42
+    assert target.minimum_value == 15
+    assert target.maximum_value == 140
+
+    # The already-commissioned RPM resolver remains deliberately RPM-only.
+    assert resolve_pool_pump_circuit(snapshot) is None
+    assert resolve_body_pump_circuit(snapshot, body=NativeBodyKind.POOL) is None
+
+    mapped = NativeIntelliCenterReadAdapter().map_snapshot(snapshot, generated_at=NOW)
+    by_id = {item.observation_id: item for item in mapped.observations}
+    assert by_id[POOL_PUMP_CIRCUIT_CONFIGURED_MODE_CONCEPT].value == "gpm"
+    assert by_id[POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT].value == 42.0
+    assert by_id[POOL_PUMP_CIRCUIT_CONFIGURED_FLOW_CONCEPT].unit == "gpm"
+    assert POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT not in by_id
+
+
+def test_gpm_pmpcirc_fails_closed_without_parent_flow_capability() -> None:
+    base = transport()
+    rpm_only_pump = NativePumpState(
+        "PMP01",
+        "Filter Pump",
+        True,
+        2200.0,
+        42.0,
+        1234.0,
+        minimum_rpm=950.0,
+        maximum_rpm=3450.0,
+    )
+    gpm_pool = NativeRawObject(
+        native_id="p0102",
+        object_type="PMPCIRC",
+        subtype=None,
+        name="Pool",
+        parent_id="PMP01",
+        observed_at=NOW,
+        attributes=(
+            NativeRawAttribute("CIRCUIT", "C0006"),
+            NativeRawAttribute("SELECT", "GPM"),
+            NativeRawAttribute("PARENT", "PMP01"),
+            NativeRawAttribute("SPEED", "42"),
+        ),
+    )
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        pumps=(rpm_only_pump,),
+        raw_inventory=(gpm_pool,),
+    )
+
+    assert resolve_body_pump_target(snapshot, body=NativeBodyKind.POOL) is None
+
+
+def test_gpm_pmpcirc_fails_closed_when_target_is_outside_live_flow_limits() -> None:
+    base = transport()
+    invalid = NativeRawObject(
+        native_id="p0102",
+        object_type="PMPCIRC",
+        subtype=None,
+        name="Pool",
+        parent_id="PMP01",
+        observed_at=NOW,
+        attributes=(
+            NativeRawAttribute("CIRCUIT", "C0006"),
+            NativeRawAttribute("SELECT", "GPM"),
+            NativeRawAttribute("PARENT", "PMP01"),
+            NativeRawAttribute("SPEED", "145"),
+        ),
+    )
+    snapshot = NativeIntelliCenterTransportSnapshot(
+        source_id=base.source_id,
+        observed_at=base.observed_at,
+        connected=True,
+        temperature_unit=base.temperature_unit,
+        pumps=base.pumps,
+        raw_inventory=(invalid,),
+    )
+
+    assert resolve_body_pump_target(snapshot, body=NativeBodyKind.POOL) is None
 
 
 def test_native_models_are_immutable_and_adapter_surface_is_read_only() -> None:
