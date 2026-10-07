@@ -92,6 +92,11 @@ class PoolOSThermalRuntime:
         init=False,
         repr=False,
     )
+    _pool_thermal_operator_owned_provider: Callable[[], bool] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     _spa_thermal_operator_owned_provider: Callable[[], bool] | None = field(
         default=None,
         init=False,
@@ -169,6 +174,14 @@ class PoolOSThermalRuntime:
         """Attach in-memory autonomous Spa provenance without persisting it."""
 
         self._spa_session_kind_provider = provider
+
+    def set_pool_thermal_operator_owned_provider(
+        self,
+        provider: Callable[[], bool] | None,
+    ) -> None:
+        """Attach exact current Pool THERMAL operator provenance."""
+
+        self._pool_thermal_operator_owned_provider = provider
 
     def set_spa_thermal_operator_owned_provider(
         self,
@@ -360,6 +373,11 @@ class PoolOSThermalRuntime:
                         None
                         if self._spa_session_kind_provider is None
                         else self._spa_session_kind_provider()
+                    ),
+                    pool_thermal_operator_owned=(
+                        False
+                        if self._pool_thermal_operator_owned_provider is None
+                        else self._pool_thermal_operator_owned_provider()
                     ),
                     spa_thermal_operator_owned=(
                         False
