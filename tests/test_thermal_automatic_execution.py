@@ -9135,6 +9135,115 @@ def test_spa_session_kind_preserves_accepted_inflight_opportunistic_body_activat
     assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
 
 
+def test_spa_off_to_on_with_accepted_opportunistic_receipt_is_not_user_session() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_heater="00000",
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=100.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver._accept_epoch(baseline)
+    assert driver._spa_off_observed_since_start
+
+    driver.active_session = SimpleNamespace(
+        current_attempt=SimpleNamespace(
+            receipt=object(),
+            step=SimpleNamespace(
+                metadata={"spa_opportunistic_body_activation": "true"}
+            ),
+        )
+    )
+    spa_on = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_heater="00000",
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=100.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        evaluator=evaluator,
+        driver=driver,
+    )
+
+    driver._accept_epoch(spa_on)
+
+    assert driver.spa_session_kind() is SpaSessionKind.POOLOS_OPPORTUNISTIC
+    assert driver._spa_user_session_opportunity_id is None
+
+
+def test_spa_off_to_on_without_poolos_receipt_remains_user_session_opportunity() -> None:
+    orchestrator = ThermalRuntimeOrchestrator()
+    driver = ThermalAutomaticExecutionDriver(orchestrator)
+    evaluator = ThermalRuntimeEvaluator()
+
+    baseline = _frame(
+        orchestrator,
+        NOW,
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=False,
+        pump_rpm=0,
+        configured_rpm=2600,
+        spa_heater="00000",
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=100.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        evaluator=evaluator,
+        driver=driver,
+    )
+    driver._accept_epoch(baseline)
+
+    spa_on = _frame(
+        orchestrator,
+        NOW + timedelta(seconds=1),
+        pool_active=False,
+        body=ThermalBody.HOT_TUB,
+        spa_active=True,
+        pump_rpm=2600,
+        configured_rpm=2600,
+        spa_heater="00000",
+        pool_temperature=90.0,
+        pool_target=90.0,
+        spa_temperature=90.0,
+        spa_target=100.0,
+        solar_temperature=140.0,
+        mode=ThermalRequestedMode.SOLAR_PREFERRED,
+        evaluator=evaluator,
+        driver=driver,
+    )
+
+    driver._accept_epoch(spa_on)
+
+    assert driver.spa_session_kind() is None
+    assert driver._spa_user_session_opportunity_id is not None
+
+
 def test_spa_session_kind_does_not_infer_opportunistic_without_accepted_receipt() -> None:
     orchestrator = ThermalRuntimeOrchestrator()
     driver = ThermalAutomaticExecutionDriver(orchestrator)
