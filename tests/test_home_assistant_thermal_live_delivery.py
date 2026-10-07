@@ -14,11 +14,13 @@ from poolos.integration import (
     PhysicalHeatMode,
     SetBodyActive,
     SetHeatMode,
+    SetPumpFlow,
     SetPumpSpeed,
     StartPump,
     ThermalBody,
 )
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.pump_operating_target import PumpOperatingTarget, PumpTargetUnit
 from poolos.physical_command_authority import (
     AutomaticThermalCleanupAuthority,
     AutomaticThermalDispatchContext,
@@ -97,6 +99,16 @@ class FakeManualControl:
         self.call_options.append(kwargs)
         self.calls.append(("pump", target, rpm))
         return ManualCommandReceipt(target, "pump_circuit_speed", rpm)
+
+    async def async__set_pump_circuit_flow(
+        self,
+        target: str,
+        gpm: int,
+        **kwargs: object,
+    ) -> ManualCommandReceipt:
+        self.call_options.append(kwargs)
+        self.calls.append(("flow", target, gpm))
+        return ManualCommandReceipt(target, "pump_circuit_flow", gpm)
 
     async def async_set_body_heat_source(
         self,
@@ -237,6 +249,81 @@ def test_automatic_adapter_binds_exact_context_to_manual_gateway() -> None:
             "automatic_thermal_context": context,
         }
     ]
+
+
+def test_automatic_adapter_delivers_exact_solar_gpm_target() -> None:
+    manual = FakeManualControl()
+    target = PumpOperatingTarget(PumpTargetUnit.GPM, 42)
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="solar-gpm-epoch",
+        session_identity="solar-gpm-session",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose="solar_heating",
+        pump_session_id="pump-target-session",
+        effective_pump_target=target,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    accepted = asyncio.run(
+        delivery.deliver(
+            SetPumpFlow(equipment_id="p0102", gpm=42),
+            correlation_id="solar-gpm",
+        )
+    )
+    wrong = asyncio.run(
+        delivery.deliver(
+            SetPumpFlow(equipment_id="p0102", gpm=43),
+            correlation_id="wrong-solar-gpm",
+        )
+    )
+
+    assert accepted.status is CommandStatus.ACKNOWLEDGED
+    assert wrong.status is CommandStatus.REJECTED
+    assert manual.calls == [("flow", "p0102", 42)]
+    assert manual.call_options[0]["automatic_thermal_context"] == context
+
+
+@pytest.mark.parametrize(
+    ("purpose", "dispatch_purpose"),
+    (
+        ("priming", AutomaticThermalDispatchPurpose.NORMAL),
+        ("temperature_acquisition", AutomaticThermalDispatchPurpose.NORMAL),
+    ),
+)
+def test_automatic_adapter_rejects_gpm_for_non_solar_gas_purpose(
+    purpose: str,
+    dispatch_purpose: AutomaticThermalDispatchPurpose,
+) -> None:
+    manual = FakeManualControl()
+    context = AutomaticThermalDispatchContext(
+        generation=1,
+        epoch_identity="not-gpm-epoch",
+        session_identity="not-gpm-session",
+        body="pool",
+        pump_circuit_id="p0102",
+        operating_purpose=purpose,
+        purpose=dispatch_purpose,
+    )
+    delivery = ManualIntelliCenterThermalLiveDelivery(
+        manual=manual,
+        request_source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        automatic_thermal_context=context,
+    )
+
+    result = asyncio.run(
+        delivery.deliver(
+            SetPumpFlow(equipment_id="p0102", gpm=42),
+            correlation_id="forbidden-gpm",
+        )
+    )
+    assert result.status is CommandStatus.REJECTED
+    assert manual.calls == []
 
 
 def test_automatic_adapter_admits_exact_pool_ordinary_circulation_purpose() -> None:
