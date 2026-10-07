@@ -6169,6 +6169,7 @@ def test_new_user_spa_inherited_gas_is_neutralized_without_fresh_thermal_intent(
     assert desired.selected_source is PhysicalHeatMode.OFF
     assert desired.required_pump_rpm == driver.baselines.filtration_rpm
     assert desired.evidence["thermal_operator_owned"] is False
+    assert desired.evidence["active_operating_purpose"] == "ordinary_circulation"
     assert first.thermal.hot_tub.plan.operations
     assert isinstance(first.thermal.hot_tub.plan.operations[0], SetHeatMode)
     assert first.thermal.hot_tub.plan.operations[0].mode is PhysicalHeatMode.OFF

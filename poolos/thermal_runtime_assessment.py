@@ -1615,6 +1615,7 @@ class ThermalRuntimeEvaluator:
                 evidence={
                     "session_kind": spa_session_kind.value,
                     "selected_source": "gas",
+                    "active_operating_purpose": "ordinary_circulation",
                     "spa_temperature_disposition": (
                         None
                         if spa_temperature is None
