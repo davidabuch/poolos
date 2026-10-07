@@ -9238,7 +9238,7 @@ def test_own_040_spa_off_restored_pool_is_reduced_when_policy_is_tou_deferred() 
     assert restored.command_delivery_performed
     assert len(delivery.calls) == calls_before_exit + 1
     assert isinstance(delivery.calls[-1], SetBodyActive)
-    assert delivery.calls[-1].equipment_id is ThermalBody.POOL
+    assert delivery.calls[-1].equipment_id == ThermalBody.POOL.value
     assert delivery.calls[-1].active is False
     assert delivery.calls[-1].metadata.get("spa_exit_pool_restore_cleanup") is True
 
