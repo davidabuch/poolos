@@ -125,6 +125,41 @@ def collect_poolos_attribute_references(
     return references
 
 
+
+def collect_poolos_constructor_keywords(
+    component: Path = COMPONENT,
+) -> set[tuple[str, str, tuple[str, ...]]]:
+    """Collect keyword arguments passed to directly imported PoolOS symbols."""
+
+    calls: set[tuple[str, str, tuple[str, ...]]] = set()
+    for path in sorted(component.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        local_imports: dict[str, tuple[str, str]] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module = node.module
+            if module is None or not (
+                module == "poolos" or module.startswith("poolos.")
+            ):
+                continue
+            for alias in node.names:
+                if alias.name != "*":
+                    local_imports[alias.asname or alias.name] = (module, alias.name)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            imported = local_imports.get(node.func.id)
+            if imported is None:
+                continue
+            keywords = tuple(
+                sorted(keyword.arg for keyword in node.keywords if keyword.arg is not None)
+            )
+            if keywords:
+                calls.add((imported[0], imported[1], keywords))
+    return calls
+
 def install_requirement(requirement: str, target: Path) -> None:
     """Install the manifest-pinned core into an isolated target directory."""
 
@@ -147,6 +182,7 @@ def install_requirement(requirement: str, target: Path) -> None:
 def validate_imports(
     imports: dict[str, set[str]],
     attributes: set[tuple[str, str, str]],
+    constructor_keywords: set[tuple[str, str, tuple[str, ...]]],
     target: Path,
 ) -> None:
     """Validate modules, symbols, and referenced members using only target."""
@@ -154,9 +190,13 @@ def validate_imports(
     payload = {
         "imports": {module: sorted(names) for module, names in sorted(imports.items())},
         "attributes": sorted([list(item) for item in attributes]),
+        "constructor_keywords": sorted(
+            [[module, symbol, list(keywords)] for module, symbol, keywords in constructor_keywords]
+        ),
     }
     checker = r"""
 import importlib
+import inspect
 import json
 import sys
 
@@ -164,6 +204,7 @@ target = sys.argv[1]
 payload = json.loads(sys.argv[2])
 imports = payload["imports"]
 attributes = payload["attributes"]
+constructor_keywords = payload["constructor_keywords"]
 sys.path[:] = [target] + [p for p in sys.path if p and "site-packages" not in p]
 
 failures = []
@@ -188,6 +229,27 @@ for module_name, symbol_name, attribute_name in attributes:
         failures.append(
             f"{module_name}.{symbol_name}: missing referenced attribute {attribute_name}"
         )
+
+for module_name, symbol_name, keywords in constructor_keywords:
+    module = loaded.get(module_name)
+    if module is None or not hasattr(module, symbol_name):
+        continue
+    symbol = getattr(module, symbol_name)
+    try:
+        signature = inspect.signature(symbol)
+    except (TypeError, ValueError):
+        continue
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if accepts_kwargs:
+        continue
+    for keyword in keywords:
+        if keyword not in signature.parameters:
+            failures.append(
+                f"{module_name}.{symbol_name}: constructor missing keyword {keyword}"
+            )
 
 if failures:
     print("HA manifest/core compatibility FAILED", file=sys.stderr)
@@ -215,19 +277,21 @@ def main() -> None:
     requirement = manifest_poolos_requirement()
     imports = collect_poolos_imports()
     attributes = collect_poolos_attribute_references()
+    constructor_keywords = collect_poolos_constructor_keywords()
 
     with tempfile.TemporaryDirectory(prefix="poolos-ha-core-gate-") as tmp:
         target = Path(tmp) / "site"
         target.mkdir()
         install_requirement(requirement, target)
-        validate_imports(imports, attributes, target)
+        validate_imports(imports, attributes, constructor_keywords, target)
 
     revision = requirement.rsplit("@", 1)[1]
     symbol_count = sum(len(names) for names in imports.values())
     print(
         "PASS: HA integration is compatible with manifest-pinned PoolOS core "
         f"{revision} ({symbol_count} imported symbols and "
-        f"{len(attributes)} referenced attributes checked)."
+        f"{len(attributes)} referenced attributes and "
+        f"{len(constructor_keywords)} constructor call shapes checked)."
     )
 
 
