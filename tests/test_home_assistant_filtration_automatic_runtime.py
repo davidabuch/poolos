@@ -327,8 +327,19 @@ def test_future_independent_filtration_window_is_not_blocked_by_noon_off() -> No
 
 
 def test_rpm_target_session_observation_does_not_raise_and_overrides_filtration_rpm() -> None:
+    @dataclass(frozen=True)
+    class FiltrationFrame:
+        evaluated_at: datetime
+        independent_disposition: FiltrationDisposition
+        ordinary_filtration_rpm: int
+
     module = _load_module()
     runtime, *_ = _runtime(module)
+    runtime.filtration_runtime.assessment = FiltrationFrame(
+        evaluated_at=NOW,
+        independent_disposition=FiltrationDisposition.RUN_NOW,
+        ordinary_filtration_rpm=2900,
+    )
     runtime.pump_speed_session = SimpleNamespace(
         session=SimpleNamespace(
             snapshot=SimpleNamespace(active=False),
