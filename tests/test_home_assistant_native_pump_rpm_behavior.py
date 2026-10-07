@@ -1322,6 +1322,56 @@ def test_gpm_capability_reports_exact_live_body_bound_limits(
     assert profile_data["evidence_source"] == "native"
 
 
+def test_vs_pump_constant_gpm_telemetry_never_implies_flow_control(
+    pump_object_factory,
+    pump_circuit_object_factory,
+) -> None:
+    """A VS pump may report nominal GPM while remaining strictly RPM-controlled."""
+
+    pump = pump_object_factory(
+        objnam="PMP01",
+        subtype="VS",
+        rpm=1500,
+        gpm=55,
+        minimum_rpm=600,
+        maximum_rpm=3450,
+        minimum_flow=None,
+        maximum_flow=None,
+    )
+    circuit = pump_circuit_object_factory(
+        objnam="p0102",
+        pump_id="PMP01",
+        circuit_id="C0006",
+        mode="RPM",
+        rpm_setpoint=1500,
+    )
+    gateway, recorder = _gateway([pump, circuit])
+
+    profile = gateway.pump_capability_profile(body="pool")
+    assert profile is not None
+    profile_data = dict(profile.as_mapping())
+    assert profile_data["rpm_control"] is True
+    assert profile_data["rpm_sensing"] is True
+    assert profile_data["gpm_sensing"] is True
+    assert profile_data["gpm_control"] is False
+    assert profile_data["gpm_control_status"] == "unsupported"
+    assert profile_data["minimum_gpm"] is None
+    assert profile_data["maximum_gpm"] is None
+
+    with pytest.raises(
+        ManualIntelliCenterCommandError,
+        match="unique live flow-capable Pool PMPCIRC",
+    ):
+        _run(
+            gateway.async__set_pump_circuit_flow(
+                "p0102",
+                55,
+                manual_body="pool",
+            )
+        )
+    assert recorder.calls == []
+
+
 def test_gpm_capability_fails_closed_without_unique_live_flow_assignment(
     pump_object_factory,
     pump_circuit_object_factory,
