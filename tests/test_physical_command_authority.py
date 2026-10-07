@@ -2223,3 +2223,47 @@ def test_reset_recovery_invalidates_queued_normal_expectations() -> None:
     authority.begin_reset_recovery()
     assert authority.diagnostics(now=NOW)["pending_expectation_count"] == 0
     assert authority.diagnostics(now=NOW)["reset_recovery_active"] is True
+
+
+def test_spa_exit_pool_restore_cleanup_is_exact_reduction_only_authority() -> None:
+    authority = ready()
+    authority.configure_automatic_thermal(
+        driver_enabled=True,
+        thermal_live_enabled=True,
+        commissioning_scope="pool",
+    )
+    authority.begin_automatic_thermal_epoch("spa-exit-epoch")
+    cleanup = authority.register_automatic_thermal_cleanup(
+        epoch_identity="spa-exit-epoch",
+        candidate_identity="spa-exit-candidate",
+        body="pool",
+        purpose=AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+        operation="body_active",
+        target="B1101",
+        requested_value=False,
+    )
+    context = authority.bind_automatic_thermal_dispatch(
+        epoch_identity="spa-exit-epoch",
+        session_identity="cleanup:spa-exit",
+        body="pool",
+        purpose=AutomaticThermalDispatchPurpose.SPA_EXIT_POOL_RESTORE_CLEANUP,
+        cleanup_candidate_identity=cleanup.candidate_identity,
+    )
+    allowed = PhysicalCommandRequest(
+        operation="body_active",
+        target="B1101",
+        source=PhysicalRequestSource.AUTOMATIC_THERMAL,
+        requested_value=False,
+        automatic_thermal_context=context,
+    )
+    assert authority.assess(allowed).reason is PhysicalAuthorityReason.ALLOWED
+
+    assert (
+        authority.assess(replace(allowed, requested_value=True)).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_OPERATION_UNAUTHORIZED
+    )
+    authority.begin_automatic_thermal_epoch("next-epoch")
+    assert (
+        authority.assess(allowed).reason
+        is PhysicalAuthorityReason.AUTOMATIC_THERMAL_CONTEXT_STALE
+    )
