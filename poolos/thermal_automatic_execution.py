@@ -3635,7 +3635,7 @@ class ThermalAutomaticExecutionDriver:
             intended_rpm=required_rpm,
             evidence=adoption_evidence,
             opportunity_id=lease.body_adoption.opportunity_id,
-            reason_code="witnessed_user_hot_tub_pump_convergence",
+            reason_code="witnessed_user_hot_tub_session",
         )
         if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
             return None
