@@ -874,3 +874,12 @@ def test_spa_acquisition_does_not_bind_preprobe_effective_rpm() -> None:
     assert "pump_state.effective_rpm != self.baselines.temperature_probe_rpm" in source
     assert "pump_session_id = pump_state.session_id" in source
     assert "effective_pump_rpm = pump_state.effective_rpm" in source
+
+
+def test_delivery_factory_reads_canonical_pump_operation_operating_purpose() -> None:
+    source = MODULE_PATH.read_text(encoding="utf-8")
+
+    assert 'current_operation.metadata.get("operating_purpose")' in source
+    assert 'next_operation.metadata.get("operating_purpose")' in source
+    assert 'current_step.metadata.get("operating_purpose")' in source
+    assert 'next_step.metadata.get("operating_purpose")' in source
