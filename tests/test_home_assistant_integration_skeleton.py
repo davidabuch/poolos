@@ -68,7 +68,7 @@ def test_manifest_declares_safe_single_entry_config_flow() -> None:
     assert manifest["config_flow"] is True
     assert manifest["single_config_entry"] is True
     assert manifest["requirements"] == [
-        "poolos@git+https://github.com/davidabuch/poolos.git@90f42c870d904545d9d46000c4c1dc2bf58a72b6",
+        "poolos@git+https://github.com/davidabuch/poolos.git@69c0b2213e31a8d5dac2dc679dbb7de0dfbb8af6",
         "pyintellicenter==0.1.20",
     ]
     assert manifest["version"] == "0.11.88"
