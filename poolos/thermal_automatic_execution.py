@@ -844,6 +844,10 @@ class ThermalAutomaticExecutionDriver:
         if converged_spa_adoption is not None:
             return converged_spa_adoption
 
+        user_spa_pump_adoption = self._prospective_owned_user_spa_pump_adoption(frame)
+        if user_spa_pump_adoption is not None:
+            return user_spa_pump_adoption
+
         body = self._session_body(frame)
         if self.active_session is not None:
             if frame.orchestration.lifecycle not in {
@@ -3565,6 +3569,76 @@ class ThermalAutomaticExecutionDriver:
         )
         if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
             return self._blocked(frame, decision.reason_code, body=body)
+
+        return self._publish(
+            state=ThermalAutomaticDriverState.CONVERGED,
+            evaluated_at=frame.observed_at,
+            blocker=None,
+            frame=frame,
+            body=body,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=False,
+        )
+
+    def _prospective_owned_user_spa_pump_adoption(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> ThermalAutomaticDriverAssessment | None:
+        """Adopt exact converged Spa pump policy after BODY-only user adoption.
+
+        A witnessed external-user Spa session can begin with BODY adoption only.
+        If PoolOS then independently requires a pump RPM and fresh configured
+        plus actual native RPM both converge exactly to that requirement without
+        positive operator PUMP ownership, adopt only the PUMP domain. This does
+        not fabricate a SetPumpSpeed receipt and does not alter BODY or THERMAL.
+        """
+
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            self.active_session is not None
+            or lease is None
+            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+            or lease.body is not ThermalBody.HOT_TUB
+            or lease.body_adoption is None
+            or lease.body_adoption.reason_code != "witnessed_user_hot_tub_session"
+            or lease.owns_pump_setpoint
+            or lease.domain_state(OwnershipDomain.PUMP).authority
+            is OwnershipAuthority.OPERATOR
+            or frame.thermal is None
+            or frame.spa_automatic_control_suppressed
+        ):
+            return None
+
+        body = frame.thermal.hot_tub
+        required_rpm = body.plan.desired.required_pump_rpm
+        if (
+            body.body_active is not True
+            or required_rpm is None
+            or body.plan.desired.evidence.get("session_kind")
+            != SpaSessionKind.EXTERNAL_USER.value
+            or body.plan.disposition is not ThermalPlanDisposition.ALREADY_CONVERGED
+            or body.execution_currentness.purpose.kind
+            is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+        ):
+            return None
+
+        adoption_evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=frame.observed_at,
+            observations={item.observation_id: item for item in frame.observations},
+            body=body,
+            external_changes=frame.external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+        )
+        decision = self.orchestrator.ownership.adopt_current_pump_setpoint(
+            adopted_at=frame.observed_at,
+            intended_rpm=required_rpm,
+            evidence=adoption_evidence,
+            opportunity_id=lease.body_adoption.opportunity_id,
+            reason_code="witnessed_user_hot_tub_pump_convergence",
+        )
+        if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
+            return None
 
         return self._publish(
             state=ThermalAutomaticDriverState.CONVERGED,
