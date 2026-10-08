@@ -464,3 +464,55 @@ def test_pending_body_dispatch_rechecks_material_authority() -> None:
         await first
         await hass.tasks[-1]
     asyncio.run(scenario())
+
+
+def test_pending_cleanup_revalidates_exact_current_body_entitlement() -> None:
+    from poolos.physical_command_authority import (
+        PhysicalCommandRequest, PhysicalRequestSource, PoolOSPhysicalCommandAuthority,
+    )
+    from poolos.integration import SetBodyActive
+
+    module = _load_module()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.begin_automatic_filtration_epoch("epoch-a")
+    lease = SimpleNamespace(
+        lease_id="lease-a", session_id="session-a",
+        pool_pump_circuit_id="p0102", body_verified=True,
+        body_activation=SimpleNamespace(receipt_id="receipt-a"), body_adoption=None,
+    )
+    ownership = SimpleNamespace(
+        filtration_lease=lease, filtration_may_deliver=lambda **_: True,
+        domain_permission_blocker=lambda _: None,
+    )
+    checker = module.PoolOSFiltrationAutomaticRuntime._cleanup_current
+    authority.bind_filtration_cleanup_currentness(
+        lambda ctx: checker(SimpleNamespace(ownership=ownership), ctx)
+    )
+    factory = module._DeliveryFactory(
+        manual=object(), authority=authority, ownership=ownership,
+    )
+    original = module.ManualIntelliCenterFiltrationDelivery
+    module.ManualIntelliCenterFiltrationDelivery = lambda *args: args
+    try:
+        frame = SimpleNamespace(
+            epoch_identity="epoch-a", pool_pump_circuit_id="p0102",
+            pump_session_id=None, pump_session_effective_rpm=None,
+            pump_session_effective_target=None,
+        )
+        ctx = factory.for_operation(
+            frame=frame, session_id="session-a",
+            operation=SetBodyActive(equipment_id="pool", active=False),
+            cleanup=True,
+        )[1]
+        request = PhysicalCommandRequest(
+            operation="body_active", target="B1101", requested_value=False,
+            source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+            automatic_filtration_context=ctx,
+        )
+        assert authority.assess(request).allowed
+        ownership.filtration_lease = None
+        assert not authority.assess(request).allowed
+    finally:
+        module.ManualIntelliCenterFiltrationDelivery = original
