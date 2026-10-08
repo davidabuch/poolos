@@ -327,16 +327,61 @@ class PoolOSFiltrationAutomaticRuntime:
         )
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
             return
+        previous = self._latest_frame
         self._latest_frame = frame
-        # Match thermal's serialized admission: native callbacks may update
-        # pending truth but cannot revoke an in-flight admitted dispatch.
-        if self._task is None:
+        # Preserve admission only for truly equivalent read-only keepalives.
+        # Material native truth or ownership changes revoke queued commands
+        # before the final gateway can dispatch them.
+        if (
+            self._task is None
+            or previous is None
+            or self._material_authority_signature(previous)
+            != self._material_authority_signature(frame)
+        ):
             self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled and self.ownership.filtration_lease is None:
             self.driver.process_disabled_epoch(frame)
             self.coordinator.async_update_listeners()
             return
         self._schedule_if_idle()
+
+    def _material_authority_signature(
+        self, frame: FiltrationAutomaticExecutionFrame
+    ) -> tuple[object, ...]:
+        from poolos.clock import FixedClock
+        from poolos.native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
+
+        return (
+            frame.physical_authority_ready,
+            frame.physical_authority_blocker,
+            frame.grid_on,
+            frame.pool_pump_circuit_id,
+            frame.thermal_candidate_ready,
+            frame.thermal_owned,
+            frame.pool_automatic_control_suppressed,
+            frame.pump_session_id,
+            frame.pump_session_effective_rpm,
+            frame.pump_session_effective_target,
+            frame.pump_session_override_current,
+            frame.filtration,
+            tuple(frame.external_changes.events),
+            self.ownership.owner,
+            self.ownership.filtration_lease,
+            tuple(
+                (
+                    obs.observation_id,
+                    obs.value,
+                    obs.quality,
+                    obs.source_kind,
+                    obs.confidence,
+                    obs.freshness(
+                        clock=FixedClock(frame.observed_at),
+                        policy=NATIVE_STEADY_STATE_FRESHNESS,
+                    ),
+                )
+                for obs in frame.observations
+            ),
+        )
 
     def diagnostics(self) -> dict[str, object]:
         return {
