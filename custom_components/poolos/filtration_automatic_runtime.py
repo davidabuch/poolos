@@ -156,6 +156,9 @@ class PoolOSFiltrationAutomaticRuntime:
     _latest_frame: FiltrationAutomaticExecutionFrame | None = field(
         default=None, init=False, repr=False
     )
+    _latest_material_signature: tuple[object, ...] | None = field(
+        default=None, init=False, repr=False
+    )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
@@ -328,15 +331,17 @@ class PoolOSFiltrationAutomaticRuntime:
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
             return
         previous = self._latest_frame
+        previous_material_signature = self._latest_material_signature
+        current_material_signature = self._material_authority_signature(frame)
         self._latest_frame = frame
+        self._latest_material_signature = current_material_signature
         # Preserve admission only for truly equivalent read-only keepalives.
         # Material native truth or ownership changes revoke queued commands
         # before the final gateway can dispatch them.
         if (
             self._task is None
             or previous is None
-            or self._material_authority_signature(previous)
-            != self._material_authority_signature(frame)
+            or previous_material_signature != current_material_signature
         ):
             self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled and self.ownership.filtration_lease is None:
