@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import logging
+from math import isfinite
+from typing import Callable
 
 from homeassistant.core import HomeAssistant
 
@@ -32,6 +34,7 @@ from poolos.physical_command_authority import (
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
 from poolos.ownership_evidence import OwnershipDomain
 from poolos.operating_baselines import PumpOperatingBaselines
+from poolos.observations import PoolObservation
 from poolos.pump_operating_target import PumpTargetUnit
 from poolos.pump_speed_session import (
     PumpSpeedOverrideState,
@@ -65,6 +68,9 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
     ownership: PoolCirculationOwnershipRegistry
     baselines: PumpOperatingBaselines = PumpOperatingBaselines()
     pump_speed_session: PumpSpeedSessionRuntime | None = None
+    on_admission: Callable[
+        [FiltrationAutomaticExecutionFrame, AutomaticFiltrationDispatchContext], None
+    ] | None = None
 
     def for_operation(
         self,
@@ -131,6 +137,8 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             effective_pump_rpm=effective_pump_rpm,
             effective_pump_target=effective_pump_target,
         )
+        if self.on_admission is not None:
+            self.on_admission(frame, context)
         return ManualIntelliCenterFiltrationDelivery(
             self.manual,
             context,
@@ -159,6 +167,9 @@ class PoolOSFiltrationAutomaticRuntime:
     _latest_material_signature: tuple[object, ...] | None = field(
         default=None, init=False, repr=False
     )
+    _admitted_context: AutomaticFiltrationDispatchContext | None = field(
+        default=None, init=False, repr=False
+    )
     _task: asyncio.Task[object] | None = field(default=None, init=False, repr=False)
     _unloaded: bool = field(default=False, init=False, repr=False)
     _desired_enabled: bool = field(default=False, init=False, repr=False)
@@ -184,7 +195,14 @@ class PoolOSFiltrationAutomaticRuntime:
                     and lease.body_adoption.adoption_id == context.body_adoption_id)
             )
             and self.ownership.filtration_may_deliver(
-                epoch_identity=context.epoch_identity,
+                # The immutable dispatch context is independently fenced by
+                # the physical authority. Check live circulation arbitration
+                # in its latest epoch, including any new thermal reservation.
+                epoch_identity=(
+                    context.epoch_identity
+                    if getattr(self, "_latest_frame", None) is None
+                    else self._latest_frame.epoch_identity
+                ),
                 session_id=context.session_identity,
             )
             and self.ownership.domain_permission_blocker(OwnershipDomain.BODY) is None
@@ -356,6 +374,31 @@ class PoolOSFiltrationAutomaticRuntime:
         from poolos.clock import FixedClock
         from poolos.native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
 
+        lease = self.ownership.filtration_lease
+        context = self._admitted_context
+        body_on_pending = bool(
+            context is not None
+            and context.operation == "body_active"
+            and context.requested_value is True
+        )
+
+        def physical_value(observation: PoolObservation) -> object:
+            # Motor RPM is execution feedback, not operator intent. Its
+            # usability remains material; configured PMPCIRC intent stays exact.
+            if observation.observation_id == "pump.rpm":
+                value = observation.value
+                if type(value) in {int, float} and isfinite(value) and value >= 0:
+                    return "usable_motor_rpm"
+            if (
+                body_on_pending
+                and observation.observation_id == "pool.active"
+                and type(observation.value) is bool
+            ):
+                # An independently authorized BODY ON may see Pool ON before
+                # dispatch. This preserves admission, never creates provenance.
+                return "body_on_pending"
+            return observation.value
+
         return (
             frame.physical_authority_ready,
             frame.physical_authority_blocker,
@@ -379,13 +422,27 @@ class PoolOSFiltrationAutomaticRuntime:
             ),
             tuple(frame.external_changes.events),
             self.ownership.owner,
-            self.ownership.filtration_lease,
+            None if lease is None else (
+                lease.lease_id, lease.generation, lease.session_id,
+                lease.pool_pump_circuit_id, lease.established_at,
+                lease.body_activation, lease.body_adoption, lease.body_verified,
+                lease.pump_setpoint, lease.pump_session_id,
+                lease.pump_session_effective_rpm,
+                lease.body_session_id, lease.body_session_generation,
+                tuple(
+                    (state.domain, state.authority, state.permission_denial(),
+                     state.command_blocker,
+                     state.positive_operator_evidence, state.last_handback_evidence)
+                    for state in lease.domain_states
+                ),
+            ),
             tuple(
                 (
                     obs.observation_id,
-                    obs.value,
+                    physical_value(obs),
                     obs.quality,
                     obs.source_kind,
+                    obs.source_id,
                     obs.confidence,
                     obs.freshness(
                         clock=FixedClock(frame.observed_at),
@@ -395,6 +452,17 @@ class PoolOSFiltrationAutomaticRuntime:
                 for obs in frame.observations
             ),
         )
+
+    def _command_admitted(
+        self,
+        frame: FiltrationAutomaticExecutionFrame,
+        context: AutomaticFiltrationDispatchContext,
+    ) -> None:
+        # Freeze after the driver's synchronous verification/reservation work,
+        # before the first transport await. Confirmation bookkeeping must not
+        # invalidate its own command, but subsequent authority changes must.
+        self._admitted_context = context
+        self._latest_material_signature = self._material_authority_signature(frame)
 
     def diagnostics(self) -> dict[str, object]:
         return {
@@ -455,6 +523,7 @@ class PoolOSFiltrationAutomaticRuntime:
             self.ownership,
             self.baselines,
             None if self.pump_speed_session is None else self.pump_speed_session.session,
+            self._command_admitted,
         )
         frame = self._latest_frame
         # Admit the queued successor only after the prior task has finished.
@@ -469,6 +538,7 @@ class PoolOSFiltrationAutomaticRuntime:
         if task is not self._task:
             return
         self._task = None
+        self._admitted_context = None
         try:
             task.result()
         except asyncio.CancelledError:
