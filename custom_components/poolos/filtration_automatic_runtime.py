@@ -366,9 +366,9 @@ class PoolOSFiltrationAutomaticRuntime:
             (
                 None if frame.filtration is None
                 else (
-                    frame.filtration.immediate_circulation_required,
-                    frame.filtration.ordinary_filtration_rpm,
-                    frame.filtration.scheduling_mode,
+                    getattr(frame.filtration, "immediate_circulation_required", None),
+                    getattr(frame.filtration, "ordinary_filtration_rpm", None),
+                    getattr(frame.filtration, "scheduling_mode", None),
                     frame.filtration.independent_disposition,
                 )
             ),
