@@ -160,7 +160,30 @@ class PoolOSFiltrationAutomaticRuntime:
 
     def __post_init__(self) -> None:
         self.driver = FiltrationAutomaticExecutionDriver(self.ownership)
+        self.authority.bind_filtration_cleanup_currentness(self._cleanup_current)
         self.authority.configure_automatic_filtration(enabled=False)
+
+    def _cleanup_current(self, context: AutomaticFiltrationDispatchContext) -> bool:
+        """Live final-gateway check, independent of a previously bound receipt."""
+        lease = self.ownership.filtration_lease
+        return bool(
+            lease is not None
+            and lease.body_verified
+            and lease.lease_id == context.ownership_lease_id
+            and lease.session_id == context.session_identity
+            and lease.pool_pump_circuit_id == context.pump_circuit_id
+            and (
+                (lease.body_activation is not None
+                 and lease.body_activation.receipt_id == context.body_activation_receipt_id)
+                or (lease.body_adoption is not None
+                    and lease.body_adoption.adoption_id == context.body_adoption_id)
+            )
+            and self.ownership.filtration_may_deliver(
+                epoch_identity=context.epoch_identity,
+                session_id=context.session_identity,
+            )
+            and self.ownership.domain_permission_blocker(OwnershipDomain.BODY) is None
+        )
 
     @property
     def enabled(self) -> bool:
