@@ -487,10 +487,11 @@ class PoolCirculationOwnershipRegistry:
         """Retain verified provenance while current evidence is unusable."""
 
         lease = self.filtration_lease
-        if lease is None or lease.session_id != session_id or not lease.verified:
-            raise ValueError("filtration suspension requires the verified lease")
+        if lease is None or lease.session_id != session_id or not lease.body_verified:
+            raise ValueError("filtration suspension requires verified BODY provenance")
         if self.owner not in {
             PoolCirculationOwner.FILTRATION,
+            PoolCirculationOwner.FILTRATION_ACQUIRING,
             PoolCirculationOwner.FILTRATION_SUSPENDED,
         }:
             raise ValueError("only the current filtration owner may be suspended")
@@ -510,9 +511,9 @@ class PoolCirculationOwnershipRegistry:
             self.owner is not PoolCirculationOwner.FILTRATION_SUSPENDED
             or lease is None
             or lease.session_id != session_id
-            or not lease.verified
+            or not lease.body_verified
         ):
-            raise ValueError("filtration resumption requires the suspended lease")
+            raise ValueError("filtration resumption requires the suspended BODY lease")
         self.filtration_lease = replace(
             lease,
             last_confirmed_at=confirmed_at,

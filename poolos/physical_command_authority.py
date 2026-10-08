@@ -801,6 +801,9 @@ class PoolOSPhysicalCommandAuthority:
     _automatic_filtration_context: AutomaticFiltrationDispatchContext | None = field(
         default=None, init=False, repr=False
     )
+    _filtration_cleanup_current: Callable[[AutomaticFiltrationDispatchContext], bool] | None = field(
+        default=None, init=False, repr=False
+    )
     _grid_outage_gate_enabled: bool = field(default=False, init=False, repr=False)
     _grid_outage_loaded: bool = field(default=True, init=False, repr=False)
     _grid_outage_generation: int = field(default=0, init=False, repr=False)
@@ -1361,6 +1364,12 @@ class PoolOSPhysicalCommandAuthority:
         )
         self._automatic_filtration_context = context
         return context
+
+    def bind_filtration_cleanup_currentness(
+        self, check: Callable[[AutomaticFiltrationDispatchContext], bool] | None
+    ) -> None:
+        """Check exact live circulation entitlement at the final dispatch edge."""
+        self._filtration_cleanup_current = check
 
     def unload_automatic_filtration_driver(self) -> None:
         """Make late filtration work inert without issuing cleanup."""
@@ -1988,6 +1997,12 @@ class PoolOSPhysicalCommandAuthority:
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_GATE_DISABLED
         if not _automatic_filtration_request_matches_context(request, context):
             return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_OPERATION_UNAUTHORIZED
+        if (
+            context.purpose is AutomaticFiltrationDispatchPurpose.OWNED_BODY_CLEANUP
+            and self._filtration_cleanup_current is not None
+            and not self._filtration_cleanup_current(context)
+        ):
+            return PhysicalAuthorityReason.AUTOMATIC_FILTRATION_CONTEXT_STALE
         return PhysicalAuthorityReason.ALLOWED
 
     def _pump_session_context_current(

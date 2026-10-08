@@ -25,10 +25,12 @@ from poolos.integration import (
     ThermalBody,
 )
 from poolos.physical_command_authority import (
+    AutomaticFiltrationDispatchContext,
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.ownership_evidence import OwnershipDomain
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pump_operating_target import PumpTargetUnit
 from poolos.pump_speed_session import (
@@ -160,7 +162,30 @@ class PoolOSFiltrationAutomaticRuntime:
 
     def __post_init__(self) -> None:
         self.driver = FiltrationAutomaticExecutionDriver(self.ownership)
+        self.authority.bind_filtration_cleanup_currentness(self._cleanup_current)
         self.authority.configure_automatic_filtration(enabled=False)
+
+    def _cleanup_current(self, context: AutomaticFiltrationDispatchContext) -> bool:
+        """Live final-gateway check, independent of a previously bound receipt."""
+        lease = self.ownership.filtration_lease
+        return bool(
+            lease is not None
+            and lease.body_verified
+            and lease.lease_id == context.ownership_lease_id
+            and lease.session_id == context.session_identity
+            and lease.pool_pump_circuit_id == context.pump_circuit_id
+            and (
+                (lease.body_activation is not None
+                 and lease.body_activation.receipt_id == context.body_activation_receipt_id)
+                or (lease.body_adoption is not None
+                    and lease.body_adoption.adoption_id == context.body_adoption_id)
+            )
+            and self.ownership.filtration_may_deliver(
+                epoch_identity=context.epoch_identity,
+                session_id=context.session_identity,
+            )
+            and self.ownership.domain_permission_blocker(OwnershipDomain.BODY) is None
+        )
 
     @property
     def enabled(self) -> bool:
@@ -302,16 +327,69 @@ class PoolOSFiltrationAutomaticRuntime:
         )
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
             return
+        previous = self._latest_frame
         self._latest_frame = frame
-        # Match thermal's serialized admission: native callbacks may update
-        # pending truth but cannot revoke an in-flight admitted dispatch.
-        if self._task is None:
+        # Preserve admission only for truly equivalent read-only keepalives.
+        # Material native truth or ownership changes revoke queued commands
+        # before the final gateway can dispatch them.
+        if (
+            self._task is None
+            or previous is None
+            or self._material_authority_signature(previous)
+            != self._material_authority_signature(frame)
+        ):
             self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled and self.ownership.filtration_lease is None:
             self.driver.process_disabled_epoch(frame)
             self.coordinator.async_update_listeners()
             return
         self._schedule_if_idle()
+
+    def _material_authority_signature(
+        self, frame: FiltrationAutomaticExecutionFrame
+    ) -> tuple[object, ...]:
+        from poolos.clock import FixedClock
+        from poolos.native_observation_freshness import NATIVE_STEADY_STATE_FRESHNESS
+
+        return (
+            frame.physical_authority_ready,
+            frame.physical_authority_blocker,
+            frame.grid_on,
+            frame.pool_pump_circuit_id,
+            frame.thermal_candidate_ready,
+            frame.thermal_owned,
+            frame.pool_automatic_control_suppressed,
+            frame.pump_session_id,
+            frame.pump_session_effective_rpm,
+            frame.pump_session_effective_target,
+            frame.pump_session_override_current,
+            (
+                None if frame.filtration is None
+                else (
+                    getattr(frame.filtration, "immediate_circulation_required", None),
+                    getattr(frame.filtration, "ordinary_filtration_rpm", None),
+                    getattr(frame.filtration, "scheduling_mode", None),
+                    frame.filtration.independent_disposition,
+                )
+            ),
+            tuple(frame.external_changes.events),
+            self.ownership.owner,
+            self.ownership.filtration_lease,
+            tuple(
+                (
+                    obs.observation_id,
+                    obs.value,
+                    obs.quality,
+                    obs.source_kind,
+                    obs.confidence,
+                    obs.freshness(
+                        clock=FixedClock(frame.observed_at),
+                        policy=NATIVE_STEADY_STATE_FRESHNESS,
+                    ),
+                )
+                for obs in frame.observations
+            ),
+        )
 
     def diagnostics(self) -> dict[str, object]:
         return {

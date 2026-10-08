@@ -1735,3 +1735,71 @@ def test_partial_acquisition_pump_rejection_still_reaches_verified_body_off() ->
         FiltrationAutomaticDriverState.DISABLED,
     }
     assert driver.ownership.filtration_lease is None
+
+
+def test_partial_verified_body_retains_completion_across_temporary_evidence_loss() -> None:
+    driver, delivery, factory = _enabled_driver()
+    asyncio.run(driver.process_epoch(
+        _frame(NOW, pool=False, rpm=0, configured=2600),
+        delivery_factory=factory,
+    ))
+    delivery.accepted = False
+    asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=1), pool=True, rpm=2900, configured=2600),
+        delivery_factory=factory,
+    ))
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.body_verified and not lease.verified
+    delivery.accepted = True
+    suspended = asyncio.run(driver.process_epoch(
+        _frame(
+            NOW + timedelta(seconds=2), pool=True, rpm=2900, configured=2600,
+            satisfied=True, missing=("pool.active",),
+        ), delivery_factory=factory,
+    ))
+    assert suspended.state is FiltrationAutomaticDriverState.SUSPENDED
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.lease_id == lease.lease_id
+    assert driver.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
+    resumed = asyncio.run(driver.process_epoch(
+        _frame(
+            NOW + timedelta(seconds=3), pool=True, rpm=2900, configured=2600,
+            satisfied=True,
+        ), delivery_factory=factory,
+    ))
+    assert resumed.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is False
+
+
+def test_shutdown_stale_configured_evidence_retains_completion_until_pump_zero() -> None:
+    driver, delivery, factory = _verified_filtration_driver()
+    accepted = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=3), pool=True, rpm=2600, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert accepted.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert driver.attempt is not None
+    deadline = driver.attempt.deadline
+    asyncio.run(driver.process_epoch(
+        _frame(
+            NOW + timedelta(seconds=4), pool=False, rpm=900, configured=2600,
+            satisfied=True, missing=(POOL_PUMP_CIRCUIT_CONFIGURED_SPEED_CONCEPT,),
+        ), delivery_factory=factory,
+    ))
+    still = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=5), pool=False, rpm=900, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert driver.ownership.filtration_lease is not None
+    assert driver.attempt is not None
+    assert driver.attempt.deadline == deadline
+    assert still.state in {
+        FiltrationAutomaticDriverState.SUSPENDED,
+        FiltrationAutomaticDriverState.AWAITING_REOBSERVATION,
+    }
+    asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=6), pool=False, rpm=0, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert driver.ownership.filtration_lease is None

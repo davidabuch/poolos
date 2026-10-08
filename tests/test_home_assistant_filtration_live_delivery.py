@@ -31,7 +31,13 @@ def _load_module() -> ModuleType:
     class ManualIntelliCenterCommandError(RuntimeError):
         pass
 
+    class ManualIntelliCenterCommandNotDispatchedError(ManualIntelliCenterCommandError):
+        pass
+
     manual.ManualIntelliCenterCommandError = ManualIntelliCenterCommandError
+    manual.ManualIntelliCenterCommandNotDispatchedError = (
+        ManualIntelliCenterCommandNotDispatchedError
+    )
     manual.ManualIntelliCenterControl = object
     sys.modules[manual.__name__] = manual
     spec = importlib.util.spec_from_file_location(
@@ -231,3 +237,31 @@ def test_gpm_filtration_delivery_rejects_wrong_flow_before_gateway() -> None:
 
     assert receipt.status is CommandStatus.REJECTED
     assert manual.pump_calls == []
+
+
+def test_gateway_not_dispatched_cleanup_denial_does_not_poison_body() -> None:
+    module = _load_module()
+
+    class RejectedManual(FakeManual):
+        async def async_set_body_active(self, *args: object, **kwargs: object) -> None:
+            raise module.ManualIntelliCenterCommandNotDispatchedError(
+                "authority changed before transport"
+            )
+
+    manual = RejectedManual()
+    delivery = module.ManualIntelliCenterFiltrationDelivery(
+        manual, AutomaticFiltrationDispatchContext(
+            generation=1, epoch_identity="epoch-1", session_identity="session-1",
+            operation_identity="operation-1", operation="body_active",
+            target="B1101", requested_value=False, pump_circuit_id="p0102",
+            ownership_lease_id="lease-1", body_activation_receipt_id="receipt-1",
+            purpose="owned_body_cleanup",
+        ),
+    )
+    receipt = asyncio.run(delivery.deliver(
+        SetBodyActive(equipment_id="pool", active=False),
+        correlation_id="denied-cleanup",
+    ))
+    assert receipt.status is CommandStatus.REJECTED
+    assert receipt.details["definitely_not_dispatched"] is True
+    assert not receipt.accepted

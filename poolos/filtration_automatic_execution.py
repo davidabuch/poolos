@@ -365,7 +365,7 @@ class FiltrationAutomaticExecutionDriver:
             return self._blocked(frame, "automatic_filtration_reenable_required")
         suspended = (
             lease is not None
-            and lease.verified
+            and lease.body_verified
             and self.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
         )
         if suspended:
@@ -397,7 +397,7 @@ class FiltrationAutomaticExecutionDriver:
             # Consume only on the first fully usable recovery decision frame.
             # Incomplete startup evidence leaves recovery armed.
             self._restart_recovery_adoption_armed = False
-        if lease is not None and lease.verified and _transient_evidence_loss(blocker):
+        if lease is not None and lease.body_verified and _transient_evidence_loss(blocker):
             self.ownership.suspend_filtration(session_id=lease.session_id)
             return self._publish(
                 FiltrationAutomaticDriverState.SUSPENDED,
@@ -601,6 +601,31 @@ class FiltrationAutomaticExecutionDriver:
             if (
                 self.attempt is not None
                 and self.attempt.step is FiltrationExecutionStep.BODY_OFF
+            ):
+                actual = _live_state(by_id.get("pump.rpm"), frame.observed_at)
+                completed = (
+                    pool.usable
+                    and _later(pool.observed_at, self.attempt.delivered_at)
+                    and actual.usable
+                    and type(actual.value) in {int, float}
+                    and actual.value == 0
+                    and _later(actual.observed_at, self.attempt.delivered_at)
+                )
+                if not completed:
+                    return self._publish(
+                        FiltrationAutomaticDriverState.SUSPENDED,
+                        at=frame.observed_at,
+                        blocker=(
+                            "automatic_filtration_cleanup_verification_timed_out"
+                            if frame.observed_at >= self.attempt.deadline
+                            else "automatic_filtration_cleanup_verification_pending"
+                        ),
+                        frame=frame,
+                        command=False,
+                    )
+            if (
+                self.attempt is not None
+                and self.attempt.step is FiltrationExecutionStep.BODY_OFF
                 and not _later(pool.observed_at, self.attempt.delivered_at)
             ):
                 return self._publish(
@@ -626,6 +651,22 @@ class FiltrationAutomaticExecutionDriver:
             )
         if pool.value is not True:
             raise AssertionError("usable Pool activity must be an exact boolean")
+        # Partial acquisition has no verified PUMP contract to reconcile.
+        # Retain accepted BODY provenance without inventing PUMP ownership.
+        if lease.body_verified and not lease.verified:
+            if self.attempt is not None:
+                return self._publish(
+                    FiltrationAutomaticDriverState.SUSPENDED,
+                    at=frame.observed_at,
+                    blocker=(
+                        "automatic_filtration_cleanup_verification_timed_out"
+                        if frame.observed_at >= self.attempt.deadline
+                        else "automatic_filtration_cleanup_verification_pending"
+                    ),
+                    frame=frame,
+                    command=False,
+                )
+            return None
         pump_provenance = lease.pump_setpoint
         expected_target: object
         if pump_provenance is not None:
@@ -876,7 +917,10 @@ class FiltrationAutomaticExecutionDriver:
         except Exception as exc:
             return self._fail(frame, f"automatic_filtration_delivery_exception:{type(exc).__name__}", failed_domain=domain)
         if not receipt.accepted:
-            return self._fail(frame, f"automatic_filtration_delivery_{receipt.status.value}", failed_domain=domain)
+            reason = f"automatic_filtration_delivery_{receipt.status.value}"
+            if receipt.details.get("definitely_not_dispatched") is True:
+                return self._blocked(frame, reason)
+            return self._fail(frame, reason, failed_domain=domain)
         if step is not FiltrationExecutionStep.BODY_OFF:
             assert frame.pool_pump_circuit_id is not None
             concept = (
