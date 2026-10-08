@@ -1706,18 +1706,13 @@ def test_partial_acquisition_pump_rejection_still_reaches_verified_body_off() ->
         _frame(NOW, pool=False, rpm=0, configured=2600),
         delivery_factory=factory,
     ))
-    asyncio.run(driver.process_epoch(
+    delivery.accepted = False
+    failed_pump = asyncio.run(driver.process_epoch(
         _frame(NOW + timedelta(seconds=1), pool=True, rpm=2900, configured=2600),
         delivery_factory=factory,
     ))
     lease = driver.ownership.filtration_lease
     assert lease is not None and lease.body_verified and not lease.verified
-
-    delivery.accepted = False
-    failed_pump = asyncio.run(driver.process_epoch(
-        _frame(NOW + timedelta(seconds=2), pool=True, rpm=2900, configured=2600),
-        delivery_factory=factory,
-    ))
     assert failed_pump.state is FiltrationAutomaticDriverState.FAILED
     assert driver.ownership.filtration_lease is not None
     assert driver.ownership.filtration_lease.body_verified
