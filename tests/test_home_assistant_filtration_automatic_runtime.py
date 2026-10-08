@@ -360,3 +360,71 @@ def test_rpm_target_session_observation_does_not_raise_and_overrides_filtration_
     assert runtime._latest_frame is not None
     assert runtime._latest_frame.filtration is not None
     assert runtime._latest_frame.filtration.ordinary_filtration_rpm == 2600
+
+
+def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
+    """A verified BODY ON remains cleanable after PUMP acquisition fails."""
+    from poolos.integration import SetBodyActive
+
+    module = _load_module()
+    captured: list[dict[str, object]] = []
+
+    class BindingAuthority:
+        def bind_automatic_filtration_dispatch(self, **kwargs: object) -> object:
+            captured.append(kwargs)
+            return object()
+
+    original = module.ManualIntelliCenterFiltrationDelivery
+    module.ManualIntelliCenterFiltrationDelivery = lambda *args: args
+    try:
+        lease = SimpleNamespace(
+            lease_id="lease-1",
+            session_id="filtration-1",
+            body_verified=True,
+            verified=False,
+            body_activation=SimpleNamespace(receipt_id="accepted-body-on-1"),
+            body_adoption=None,
+        )
+        factory = module._DeliveryFactory(
+            manual=object(),
+            authority=BindingAuthority(),
+            ownership=SimpleNamespace(filtration_lease=lease),
+        )
+        frame = SimpleNamespace(
+            epoch_identity="epoch-1",
+            pool_pump_circuit_id="p0102",
+            pump_session_id=None,
+            pump_session_effective_rpm=None,
+            pump_session_effective_target=None,
+        )
+        operation = SetBodyActive(equipment_id="pool", active=False)
+        factory.for_operation(
+            frame=frame, session_id="filtration-1",
+            operation=operation, cleanup=True,
+        )
+        assert captured[0]["ownership_lease_id"] == "lease-1"
+        assert captured[0]["body_activation_receipt_id"] == "accepted-body-on-1"
+        assert captured[0]["cleanup"] is True
+
+        # No verified BODY, wrong session or missing accepted provenance:
+        # never grant an OFF capability.
+        for changes in (
+            {"body_verified": False},
+            {"session_id": "other-session"},
+            {"body_activation": None},
+        ):
+            captured.clear()
+            modified = SimpleNamespace(**{**vars(lease), **changes})
+            factory.ownership = SimpleNamespace(filtration_lease=modified)
+            try:
+                factory.for_operation(
+                    frame=frame, session_id="filtration-1",
+                    operation=operation, cleanup=True,
+                )
+            except ValueError as exc:
+                assert "cleanup ownership" in str(exc)
+            else:
+                raise AssertionError("unauthorized cleanup was bound")
+            assert not captured
+    finally:
+        module.ManualIntelliCenterFiltrationDelivery = original
