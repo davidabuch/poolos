@@ -96,7 +96,7 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             if (
                 lease is None
                 or lease.session_id != session_id
-                or not lease.verified
+                or not lease.body_verified
                 or (
                     lease.body_activation is None
                     and lease.body_adoption is None
