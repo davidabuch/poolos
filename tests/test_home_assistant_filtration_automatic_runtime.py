@@ -367,12 +367,16 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
     from poolos.integration import SetBodyActive
 
     module = _load_module()
-    captured: list[dict[str, object]] = []
+    from poolos.physical_command_authority import (
+        PhysicalCommandRequest,
+        PhysicalRequestSource,
+        PoolOSPhysicalCommandAuthority,
+    )
 
-    class BindingAuthority:
-        def bind_automatic_filtration_dispatch(self, **kwargs: object) -> object:
-            captured.append(kwargs)
-            return object()
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.begin_automatic_filtration_epoch("epoch-1")
 
     original = module.ManualIntelliCenterFiltrationDelivery
     module.ManualIntelliCenterFiltrationDelivery = lambda *args: args
@@ -387,7 +391,7 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
         )
         factory = module._DeliveryFactory(
             manual=object(),
-            authority=BindingAuthority(),
+            authority=authority,
             ownership=SimpleNamespace(filtration_lease=lease),
         )
         frame = SimpleNamespace(
@@ -398,13 +402,20 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
             pump_session_effective_target=None,
         )
         operation = SetBodyActive(equipment_id="pool", active=False)
-        factory.for_operation(
+        delivery = factory.for_operation(
             frame=frame, session_id="filtration-1",
             operation=operation, cleanup=True,
         )
-        assert captured[0]["ownership_lease_id"] == "lease-1"
-        assert captured[0]["body_activation_receipt_id"] == "accepted-body-on-1"
-        assert captured[0]["cleanup"] is True
+        context = delivery[1]
+        assert context.ownership_lease_id == "lease-1"
+        assert context.body_activation_receipt_id == "accepted-body-on-1"
+        assert authority.assess(PhysicalCommandRequest(
+            operation="body_active",
+            target="B1101",
+            requested_value=False,
+            source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+            automatic_filtration_context=context,
+        )).allowed
 
         # No verified BODY, wrong session or missing accepted provenance:
         # never grant an OFF capability.
@@ -413,8 +424,7 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
             {"session_id": "other-session"},
             {"body_activation": None},
         ):
-            captured.clear()
-            modified = SimpleNamespace(**{**vars(lease), **changes})
+             modified = SimpleNamespace(**{**vars(lease), **changes})
             object.__setattr__(factory, "ownership", SimpleNamespace(filtration_lease=modified))
             try:
                 factory.for_operation(
@@ -425,6 +435,5 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
                 assert "cleanup ownership" in str(exc)
             else:
                 raise AssertionError("unauthorized cleanup was bound")
-            assert not captured
-    finally:
+     finally:
         module.ManualIntelliCenterFiltrationDelivery = original
