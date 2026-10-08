@@ -1697,3 +1697,46 @@ def test_cleanup_binding_rejection_is_not_a_physical_body_fault() -> None:
     assert driver.ownership.filtration_lease.lease_id == original.lease_id
     assert driver.ownership.domain_permission_blocker(OwnershipDomain.BODY) is None
     assert len(delivery.operations) == 2
+
+
+def test_partial_acquisition_pump_rejection_still_reaches_verified_body_off() -> None:
+    """Oct 7-8: accepted BODY ON, PUMP rejected, debt zero, OFF must converge."""
+    driver, delivery, factory = _enabled_driver()
+    asyncio.run(driver.process_epoch(
+        _frame(NOW, pool=False, rpm=0, configured=2600),
+        delivery_factory=factory,
+    ))
+    asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=1), pool=True, rpm=2900, configured=2600),
+        delivery_factory=factory,
+    ))
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.body_verified and not lease.verified
+
+    delivery.accepted = False
+    failed_pump = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=2), pool=True, rpm=2900, configured=2600),
+        delivery_factory=factory,
+    ))
+    assert failed_pump.state is FiltrationAutomaticDriverState.FAILED
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.body_verified
+
+    delivery.accepted = True
+    cleanup = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=3), pool=True, rpm=2900, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert cleanup.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is False
+
+    completed = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=4), pool=False, rpm=0, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert completed.state in {
+        FiltrationAutomaticDriverState.BLOCKED,
+        FiltrationAutomaticDriverState.DISABLED,
+    }
+    assert driver.ownership.filtration_lease is None
