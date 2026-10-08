@@ -2053,6 +2053,107 @@ class ThermalRuntimeOwnershipManager:
             adopted_at,
         )
 
+    def adopt_current_heat_source(
+        self,
+        *,
+        adopted_at: datetime,
+        intended_source: PhysicalHeatMode,
+        evidence: ThermalRuntimeOwnershipEvidence,
+        opportunity_id: str,
+        reason_code: str,
+    ) -> ThermalRuntimeOwnershipDecision:
+        """Prospectively adopt an already-converged THERMAL domain in an owned session.
+
+        This is permitted only when BODY is already PoolOS-owned, THERMAL has no
+        current operator authority, and fresh native heat-source evidence exactly
+        matches PoolOS's current desired source. No historical command receipt is
+        fabricated.
+        """
+
+        _require_aware(adopted_at, "adopted_at")
+        intended_source = PhysicalHeatMode(intended_source)
+        previous = self._state.status
+        lease = self._state.lease
+
+        def deny(reason: str) -> ThermalRuntimeOwnershipDecision:
+            return self._decision(
+                ThermalRuntimeOwnershipDisposition.DENIED,
+                "runtime_ownership_adoption_denied:" + reason,
+                previous,
+                adopted_at,
+            )
+
+        if lease is None or lease.status is not ThermalRuntimeOwnershipStatus.OWNED:
+            return deny("active_owned_lease_unavailable")
+        if not opportunity_id.strip() or not reason_code.strip():
+            raise ValueError("thermal adoption opportunity and reason must not be empty")
+        if evidence.evaluated_at != adopted_at:
+            return deny("evidence_epoch_mismatch")
+
+        thermal_state = lease.domain_state(OwnershipDomain.THERMAL)
+        if thermal_state.authority is OwnershipAuthority.OPERATOR:
+            return deny("operator_owns_thermal")
+        if lease.heat_source is not None or lease.heat_source_adoption is not None:
+            return deny("thermal_origin_already_present")
+        if thermal_state.authority is OwnershipAuthority.POOLOS:
+            return deny("thermal_already_owned")
+        if not (
+            evidence.heat_source_observation_fresh
+            and evidence.heat_source_observation_usable
+            and evidence.heat_source_observed_at is not None
+            and evidence.heat_source_observed_at <= adopted_at
+            and evidence.effective_heat_source is intended_source
+        ):
+            return deny("heat_source_adoption_evidence_unusable")
+
+        adoption = ThermalRuntimeConceptAdoption(
+            adoption_id=_concept_adoption_id(
+                generation=lease.generation,
+                concept=ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+                opportunity_id=opportunity_id,
+                adopted_at=adopted_at,
+            ),
+            concept=ThermalRuntimeOwnedConcept.HEAT_SOURCE,
+            intended_value=intended_source,
+            observed_at=_required_datetime(evidence.heat_source_observed_at),
+            opportunity_id=opportunity_id,
+            reason_code=reason_code,
+            adopted_at=adopted_at,
+        )
+        states = {state.domain: state for state in lease.domain_states}
+        states[OwnershipDomain.THERMAL] = DomainOwnershipState(
+            OwnershipDomain.THERMAL,
+            authority=OwnershipAuthority.POOLOS,
+            health=OwnershipHealth.STABLE,
+            evidence_kind=OwnershipEvidenceKind.LEGITIMATE_LIFECYCLE_TRANSITION,
+            command_blocker=None,
+            target_value=intended_source.value,
+            observed_value=(
+                None
+                if evidence.effective_heat_source is None
+                else evidence.effective_heat_source.value
+            ),
+            observed_at=evidence.heat_source_observed_at,
+        )
+        updated = replace(
+            lease,
+            last_confirmed_at=max(lease.last_confirmed_at, adopted_at),
+            reason_code="runtime_ownership_established:prospective_domain_adoption",
+            heat_source_adoption=adoption,
+            domain_states=tuple(states.values()),
+        )
+        self._state = replace(
+            self._state,
+            lease=updated,
+            reason_code=updated.reason_code,
+        )
+        return self._decision(
+            ThermalRuntimeOwnershipDisposition.ESTABLISHED,
+            updated.reason_code,
+            previous,
+            adopted_at,
+        )
+
     def _confirm_accepted_consequence(
         self,
         lease: ThermalRuntimeOwnershipLease,
