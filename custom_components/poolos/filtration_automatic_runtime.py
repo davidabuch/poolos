@@ -96,7 +96,8 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             if (
                 lease is None
                 or lease.session_id != session_id
-                or not lease.verified
+                or lease.pool_pump_circuit_id != frame.pool_pump_circuit_id
+                or not lease.body_verified
                 or (
                     lease.body_activation is None
                     and lease.body_adoption is None
@@ -302,7 +303,10 @@ class PoolOSFiltrationAutomaticRuntime:
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
             return
         self._latest_frame = frame
-        self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
+        # Match thermal's serialized admission: native callbacks may update
+        # pending truth but cannot revoke an in-flight admitted dispatch.
+        if self._task is None:
+            self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled and self.ownership.filtration_lease is None:
             self.driver.process_disabled_epoch(frame)
             self.coordinator.async_update_listeners()
@@ -370,6 +374,8 @@ class PoolOSFiltrationAutomaticRuntime:
             None if self.pump_speed_session is None else self.pump_speed_session.session,
         )
         frame = self._latest_frame
+        # Admit the queued successor only after the prior task has finished.
+        self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
         self._task = self.hass.async_create_task(
             self.driver.process_epoch(frame, delivery_factory=factory),
             "PoolOS automatic filtration execution epoch",

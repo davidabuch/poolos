@@ -232,10 +232,12 @@ def test_bridge_coalesces_new_truth_without_overlapping_tasks() -> None:
 
         assert driver.processed == ["epoch-1"]
         assert len(hass.tasks) == 1
-        assert authority.epochs == ["epoch-1", "epoch-2"]
+        # In-flight admitted command remains bound to epoch-1 until completion.
+        assert authority.epochs == ["epoch-1", "epoch-1"]
 
         driver.release.set()
         await first
+        assert authority.epochs[-1] == "epoch-2"
         assert len(hass.tasks) == 2
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
@@ -360,3 +362,82 @@ def test_rpm_target_session_observation_does_not_raise_and_overrides_filtration_
     assert runtime._latest_frame is not None
     assert runtime._latest_frame.filtration is not None
     assert runtime._latest_frame.filtration.ordinary_filtration_rpm == 2600
+
+
+def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
+    """A verified BODY ON remains cleanable after PUMP acquisition fails."""
+    from poolos.integration import SetBodyActive
+
+    module = _load_module()
+    from poolos.physical_command_authority import (
+        PhysicalCommandRequest,
+        PhysicalRequestSource,
+        PoolOSPhysicalCommandAuthority,
+    )
+
+    authority = PoolOSPhysicalCommandAuthority()
+    authority.resolve_maintenance(False)
+    authority.set_controller_mode("auto")
+    authority.begin_automatic_filtration_epoch("epoch-1")
+
+    original = module.ManualIntelliCenterFiltrationDelivery
+    module.ManualIntelliCenterFiltrationDelivery = lambda *args: args
+    try:
+        lease = SimpleNamespace(
+            lease_id="lease-1",
+            session_id="filtration-1",
+            pool_pump_circuit_id="p0102",
+            body_verified=True,
+            verified=False,
+            body_activation=SimpleNamespace(receipt_id="accepted-body-on-1"),
+            body_adoption=None,
+        )
+        factory = module._DeliveryFactory(
+            manual=object(),
+            authority=authority,
+            ownership=SimpleNamespace(filtration_lease=lease),
+        )
+        frame = SimpleNamespace(
+            epoch_identity="epoch-1",
+            pool_pump_circuit_id="p0102",
+            pump_session_id=None,
+            pump_session_effective_rpm=None,
+            pump_session_effective_target=None,
+        )
+        operation = SetBodyActive(equipment_id="pool", active=False)
+        delivery = factory.for_operation(
+            frame=frame, session_id="filtration-1",
+            operation=operation, cleanup=True,
+        )
+        context = delivery[1]
+        assert context.ownership_lease_id == "lease-1"
+        assert context.body_activation_receipt_id == "accepted-body-on-1"
+        assert authority.assess(PhysicalCommandRequest(
+            operation="body_active",
+            target="B1101",
+            requested_value=False,
+            source=PhysicalRequestSource.AUTOMATIC_FILTRATION,
+            automatic_filtration_context=context,
+        )).allowed
+
+        # No verified BODY, wrong session or missing accepted provenance:
+        # never grant an OFF capability.
+        for changes in (
+            {"body_verified": False},
+            {"session_id": "other-session"},
+            {"pool_pump_circuit_id": "p9999"},
+            {"body_activation": None},
+        ):
+            modified = SimpleNamespace(**{**vars(lease), **changes})
+            object.__setattr__(factory, "ownership", SimpleNamespace(filtration_lease=modified))
+            try:
+                factory.for_operation(
+                    frame=frame, session_id="filtration-1",
+                    operation=operation, cleanup=True,
+                )
+            except ValueError as exc:
+                assert "cleanup ownership" in str(exc)
+            else:
+                raise AssertionError("unauthorized cleanup was bound")
+    finally:
+        module.ManualIntelliCenterFiltrationDelivery = original

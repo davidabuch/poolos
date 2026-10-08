@@ -1668,3 +1668,70 @@ def test_gpm_verification_does_not_accept_matching_rpm_without_flow_truth() -> N
     assert driver.ownership.filtration_lease is not None
     assert not driver.ownership.filtration_lease.verified
 
+
+
+def test_cleanup_binding_rejection_is_not_a_physical_body_fault() -> None:
+    """A pre-dispatch denial must not poison BODY authority or lose provenance."""
+    driver, delivery, _ = _verified_filtration_driver()
+    original = driver.ownership.filtration_lease
+    assert original is not None
+
+    class RejectBinding:
+        def for_operation(self, **kwargs: object) -> _Delivery:
+            del kwargs
+            raise ValueError("filtration cleanup ownership is not current")
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True, rpm=2600, configured=2600, satisfied=True,
+            ),
+            delivery_factory=RejectBinding(),
+        )
+    )
+    assert result.state is FiltrationAutomaticDriverState.BLOCKED
+    assert result.blocker is not None
+    assert result.blocker.startswith("automatic_filtration_delivery_binding_failed:")
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.lease_id == original.lease_id
+    assert driver.ownership.domain_permission_blocker(OwnershipDomain.BODY) is None
+    assert len(delivery.operations) == 2
+
+
+def test_partial_acquisition_pump_rejection_still_reaches_verified_body_off() -> None:
+    """Oct 7-8: accepted BODY ON, PUMP rejected, debt zero, OFF must converge."""
+    driver, delivery, factory = _enabled_driver()
+    asyncio.run(driver.process_epoch(
+        _frame(NOW, pool=False, rpm=0, configured=2600),
+        delivery_factory=factory,
+    ))
+    delivery.accepted = False
+    failed_pump = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=1), pool=True, rpm=2900, configured=2600),
+        delivery_factory=factory,
+    ))
+    lease = driver.ownership.filtration_lease
+    assert lease is not None and lease.body_verified and not lease.verified
+    assert failed_pump.state is FiltrationAutomaticDriverState.FAILED
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.body_verified
+
+    delivery.accepted = True
+    cleanup = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=3), pool=True, rpm=2900, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert cleanup.state is FiltrationAutomaticDriverState.AWAITING_REOBSERVATION
+    assert isinstance(delivery.operations[-1], SetBodyActive)
+    assert delivery.operations[-1].active is False
+
+    completed = asyncio.run(driver.process_epoch(
+        _frame(NOW + timedelta(seconds=4), pool=False, rpm=0, configured=2600, satisfied=True),
+        delivery_factory=factory,
+    ))
+    assert completed.state in {
+        FiltrationAutomaticDriverState.BLOCKED,
+        FiltrationAutomaticDriverState.DISABLED,
+    }
+    assert driver.ownership.filtration_lease is None
