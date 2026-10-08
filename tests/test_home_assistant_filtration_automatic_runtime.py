@@ -104,6 +104,9 @@ class FakeAuthority:
     configurations: list[bool] = field(default_factory=list)
     unloaded: bool = False
 
+    def bind_filtration_cleanup_currentness(self, check: object) -> None:
+        self.cleanup_check = check
+
     def configure_automatic_filtration(self, *, enabled: bool) -> None:
         self.configurations.append(enabled)
 
