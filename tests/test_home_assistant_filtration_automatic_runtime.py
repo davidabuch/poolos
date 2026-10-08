@@ -454,7 +454,7 @@ def test_pending_body_dispatch_rechecks_material_authority() -> None:
         runtime.observe(_snapshot(NOW), _orchestration("epoch-a"), external_changes=ExternalChangeBatch(()))
         first = hass.tasks[0]
         await driver.started.wait()
-        runtime.thermal_runtime.assessment = SimpleNamespace(pool_pump_circuit_id="p0202")
+        runtime.thermal_runtime.assessment = SimpleNamespace(pool_pump_circuit_id="p0103")
         runtime.observe(
             _snapshot(NOW + timedelta(seconds=1)), _orchestration("epoch-b"),
             external_changes=ExternalChangeBatch(()),
