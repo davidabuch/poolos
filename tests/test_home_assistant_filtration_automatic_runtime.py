@@ -232,10 +232,12 @@ def test_bridge_coalesces_new_truth_without_overlapping_tasks() -> None:
 
         assert driver.processed == ["epoch-1"]
         assert len(hass.tasks) == 1
-        assert authority.epochs == ["epoch-1", "epoch-2"]
+        # In-flight admitted command remains bound to epoch-1 until completion.
+        assert authority.epochs == ["epoch-1", "epoch-1"]
 
         driver.release.set()
         await first
+        assert authority.epochs[-1] == "epoch-2"
         assert len(hass.tasks) == 2
         await hass.tasks[1]
         assert driver.processed == ["epoch-1", "epoch-2"]
