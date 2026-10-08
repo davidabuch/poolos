@@ -426,7 +426,7 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
             {"session_id": "other-session"},
             {"body_activation": None},
         ):
-             modified = SimpleNamespace(**{**vars(lease), **changes})
+            modified = SimpleNamespace(**{**vars(lease), **changes})
             object.__setattr__(factory, "ownership", SimpleNamespace(filtration_lease=modified))
             try:
                 factory.for_operation(
@@ -437,5 +437,5 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
                 assert "cleanup ownership" in str(exc)
             else:
                 raise AssertionError("unauthorized cleanup was bound")
-     finally:
+    finally:
         module.ManualIntelliCenterFiltrationDelivery = original
