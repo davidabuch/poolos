@@ -250,7 +250,13 @@ def test_gateway_not_dispatched_cleanup_denial_does_not_poison_body() -> None:
 
     manual = RejectedManual()
     delivery = module.ManualIntelliCenterFiltrationDelivery(
-        manual, _context(operation="body_active", target="B1101", value=False),
+        manual, AutomaticFiltrationDispatchContext(
+            generation=1, epoch_identity="epoch-1", session_identity="session-1",
+            operation_identity="operation-1", operation="body_active",
+            target="B1101", requested_value=False, pump_circuit_id="p0102",
+            ownership_lease_id="lease-1", body_activation_receipt_id="receipt-1",
+            purpose="owned_body_cleanup",
+        ),
     )
     receipt = asyncio.run(delivery.deliver(
         SetBodyActive(equipment_id="pool", active=False),
