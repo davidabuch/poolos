@@ -365,7 +365,7 @@ class FiltrationAutomaticExecutionDriver:
             return self._blocked(frame, "automatic_filtration_reenable_required")
         suspended = (
             lease is not None
-            and lease.verified
+            and lease.body_verified
             and self.ownership.owner is PoolCirculationOwner.FILTRATION_SUSPENDED
         )
         if suspended:
@@ -397,7 +397,7 @@ class FiltrationAutomaticExecutionDriver:
             # Consume only on the first fully usable recovery decision frame.
             # Incomplete startup evidence leaves recovery armed.
             self._restart_recovery_adoption_armed = False
-        if lease is not None and lease.verified and _transient_evidence_loss(blocker):
+        if lease is not None and lease.body_verified and _transient_evidence_loss(blocker):
             self.ownership.suspend_filtration(session_id=lease.session_id)
             return self._publish(
                 FiltrationAutomaticDriverState.SUSPENDED,
@@ -651,6 +651,22 @@ class FiltrationAutomaticExecutionDriver:
             )
         if pool.value is not True:
             raise AssertionError("usable Pool activity must be an exact boolean")
+        # Partial acquisition has no verified PUMP contract to reconcile.
+        # Retain accepted BODY provenance without inventing PUMP ownership.
+        if lease.body_verified and not lease.verified:
+            if self.attempt is not None:
+                return self._publish(
+                    FiltrationAutomaticDriverState.SUSPENDED,
+                    at=frame.observed_at,
+                    blocker=(
+                        "automatic_filtration_cleanup_verification_timed_out"
+                        if frame.observed_at >= self.attempt.deadline
+                        else "automatic_filtration_cleanup_verification_pending"
+                    ),
+                    frame=frame,
+                    command=False,
+                )
+            return None
         pump_provenance = lease.pump_setpoint
         expected_target: object
         if pump_provenance is not None:
