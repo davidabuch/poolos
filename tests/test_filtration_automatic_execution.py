@@ -1668,3 +1668,32 @@ def test_gpm_verification_does_not_accept_matching_rpm_without_flow_truth() -> N
     assert driver.ownership.filtration_lease is not None
     assert not driver.ownership.filtration_lease.verified
 
+
+
+def test_cleanup_binding_rejection_is_not_a_physical_body_fault() -> None:
+    """A pre-dispatch denial must not poison BODY authority or lose provenance."""
+    driver, delivery, _ = _verified_filtration_driver()
+    original = driver.ownership.filtration_lease
+    assert original is not None
+
+    class RejectBinding:
+        def for_operation(self, **kwargs: object) -> _Delivery:
+            del kwargs
+            raise ValueError("filtration cleanup ownership is not current")
+
+    result = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                NOW + timedelta(seconds=3),
+                pool=True, rpm=2600, configured=2600, satisfied=True,
+            ),
+            delivery_factory=RejectBinding(),
+        )
+    )
+    assert result.state is FiltrationAutomaticDriverState.BLOCKED
+    assert result.blocker is not None
+    assert result.blocker.startswith("automatic_filtration_delivery_binding_failed:")
+    assert driver.ownership.filtration_lease is not None
+    assert driver.ownership.filtration_lease.lease_id == original.lease_id
+    assert driver.ownership.domain_permission_blocker(OwnershipDomain.BODY) is None
+    assert len(delivery.operations) == 2
