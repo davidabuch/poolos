@@ -363,7 +363,15 @@ class PoolOSFiltrationAutomaticRuntime:
             frame.pump_session_effective_rpm,
             frame.pump_session_effective_target,
             frame.pump_session_override_current,
-            frame.filtration,
+            (
+                None if frame.filtration is None
+                else (
+                    frame.filtration.immediate_circulation_required,
+                    frame.filtration.ordinary_filtration_rpm,
+                    frame.filtration.scheduling_mode,
+                    frame.filtration.independent_disposition,
+                )
+            ),
             tuple(frame.external_changes.events),
             self.ownership.owner,
             self.ownership.filtration_lease,
