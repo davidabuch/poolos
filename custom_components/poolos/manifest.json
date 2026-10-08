@@ -16,9 +16,9 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/davidabuch/poolos/issues",
   "requirements": [
-    "poolos@git+https://github.com/davidabuch/poolos.git@2892922c74bbb488ef6d37281ef7620196ffa75d",
+    "poolos@git+https://github.com/davidabuch/poolos.git@73a4820285d05c843c9febb2298ef7e9a1b93f5a",
     "pyintellicenter==0.1.20"
   ],
   "single_config_entry": true,
-  "version": "0.11.90"
+  "version": "0.11.91"
 }
