@@ -25,10 +25,12 @@ from poolos.integration import (
     ThermalBody,
 )
 from poolos.physical_command_authority import (
+    AutomaticFiltrationDispatchContext,
     PhysicalAuthorityReason,
     PoolOSPhysicalCommandAuthority,
 )
 from poolos.pool_circulation_ownership import PoolCirculationOwnershipRegistry
+from poolos.ownership import OwnershipDomain
 from poolos.operating_baselines import PumpOperatingBaselines
 from poolos.pump_operating_target import PumpTargetUnit
 from poolos.pump_speed_session import (
