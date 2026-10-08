@@ -864,7 +864,7 @@ class FiltrationAutomaticExecutionDriver:
                 cleanup=cleanup,
             )
         except (RuntimeError, ValueError) as exc:
-            return self._fail(frame, f"automatic_filtration_delivery_binding_failed:{_bounded(str(exc))}", failed_domain=domain)
+            return self._blocked(frame, f"automatic_filtration_delivery_binding_failed:{_bounded(str(exc))}")
         if not delivery.available:
             return self._blocked(frame, "automatic_filtration_delivery_unavailable")
         correlation_id = f"automatic-filtration:{self.session_id}:{operation.operation_id}"
