@@ -444,3 +444,23 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
                 raise AssertionError("unauthorized cleanup was bound")
     finally:
         module.ManualIntelliCenterFiltrationDelivery = original
+
+
+def test_pending_body_dispatch_rechecks_material_authority() -> None:
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+        runtime.observe(_snapshot(NOW), _orchestration("epoch-a"), external_changes=ExternalChangeBatch(()))
+        first = hass.tasks[0]
+        await driver.started.wait()
+        runtime.thermal_runtime.assessment = SimpleNamespace(pool_pump_circuit_id="p0202")
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=1)), _orchestration("epoch-b"),
+            external_changes=ExternalChangeBatch(()),
+        )
+        assert authority.epochs[-1] == "epoch-b"
+        driver.release.set()
+        await first
+        await hass.tasks[-1]
+    asyncio.run(scenario())
