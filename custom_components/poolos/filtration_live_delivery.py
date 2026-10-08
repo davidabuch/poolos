@@ -23,6 +23,7 @@ from poolos.physical_command_authority import (
 
 from .manual_intellicenter import (
     ManualIntelliCenterCommandError,
+    ManualIntelliCenterCommandNotDispatchedError,
     ManualIntelliCenterControl,
 )
 
@@ -98,9 +99,9 @@ class ManualIntelliCenterFiltrationDelivery(FiltrationAutomaticDeliveryPort):
                 authority_reason = exc.__cause__.decision.reason.value
             return CommandReceipt(
                 status=(
-                    CommandStatus.FAILED
-                    if isinstance(exc, ManualIntelliCenterCommandError)
-                    else CommandStatus.REJECTED
+                    CommandStatus.REJECTED
+                    if isinstance(exc, (ManualIntelliCenterCommandNotDispatchedError, ValueError))
+                    else CommandStatus.FAILED
                 ),
                 command_id=correlation_id,
                 message=str(exc),
@@ -109,6 +110,9 @@ class ManualIntelliCenterFiltrationDelivery(FiltrationAutomaticDeliveryPort):
                 details={
                     "error_type": type(exc).__name__,
                     "authority_reason": authority_reason,
+                    "definitely_not_dispatched": isinstance(
+                        exc, (ManualIntelliCenterCommandNotDispatchedError, ValueError)
+                    ),
                 },
             )
         return CommandReceipt(
