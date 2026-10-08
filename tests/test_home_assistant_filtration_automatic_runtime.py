@@ -386,6 +386,7 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
         lease = SimpleNamespace(
             lease_id="lease-1",
             session_id="filtration-1",
+            pool_pump_circuit_id="p0102",
             body_verified=True,
             verified=False,
             body_activation=SimpleNamespace(receipt_id="accepted-body-on-1"),
@@ -424,6 +425,7 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
         for changes in (
             {"body_verified": False},
             {"session_id": "other-session"},
+            {"pool_pump_circuit_id": "p9999"},
             {"body_activation": None},
         ):
             modified = SimpleNamespace(**{**vars(lease), **changes})
