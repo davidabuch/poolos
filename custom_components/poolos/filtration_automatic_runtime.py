@@ -96,6 +96,7 @@ class _DeliveryFactory(FiltrationAutomaticDeliveryFactory):
             if (
                 lease is None
                 or lease.session_id != session_id
+                or lease.pool_pump_circuit_id != frame.pool_pump_circuit_id
                 or not lease.body_verified
                 or (
                     lease.body_activation is None
