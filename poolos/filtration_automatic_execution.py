@@ -876,7 +876,10 @@ class FiltrationAutomaticExecutionDriver:
         except Exception as exc:
             return self._fail(frame, f"automatic_filtration_delivery_exception:{type(exc).__name__}", failed_domain=domain)
         if not receipt.accepted:
-            return self._fail(frame, f"automatic_filtration_delivery_{receipt.status.value}", failed_domain=domain)
+            reason = f"automatic_filtration_delivery_{receipt.status.value}"
+            if receipt.details.get("definitely_not_dispatched") is True:
+                return self._blocked(frame, reason)
+            return self._fail(frame, reason, failed_domain=domain)
         if step is not FiltrationExecutionStep.BODY_OFF:
             assert frame.pool_pump_circuit_id is not None
             concept = (
