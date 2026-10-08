@@ -301,40 +301,7 @@ class PoolOSFiltrationAutomaticRuntime:
         )
         if self._latest_frame is not None and self._latest_frame.epoch_identity == frame.epoch_identity:
             return
-        previous = self._latest_frame
-        pending = self._task is not None and not self._task.done()
-        # A read-only keepalive with identical decision/safety truth must not
-        # revoke a command already admitted by the physical gateway. Material
-        # changes still invalidate the old epoch immediately.
-        benign_refresh = bool(
-            pending
-            and previous is not None
-            and not frame.external_changes.events
-            and not previous.external_changes.events
-            and frame.physical_authority_ready
-            and previous.physical_authority_ready
-            and frame.grid_on
-            and previous.grid_on
-            and frame.pool_pump_circuit_id == previous.pool_pump_circuit_id
-            and frame.thermal_candidate_ready == previous.thermal_candidate_ready
-            and frame.thermal_owned == previous.thermal_owned
-            and frame.pool_automatic_control_suppressed
-            == previous.pool_automatic_control_suppressed
-            and frame.filtration == previous.filtration
-            and frame.pump_session_id == previous.pump_session_id
-            and frame.pump_session_effective_rpm == previous.pump_session_effective_rpm
-            and frame.pump_session_effective_target == previous.pump_session_effective_target
-            and tuple(
-                (item.observation_id, item.value, item.quality, item.source_id)
-                for item in frame.observations
-            ) == tuple(
-                (item.observation_id, item.value, item.quality, item.source_id)
-                for item in previous.observations
-            )
-        )
         self._latest_frame = frame
-        if benign_refresh:
-            return
         self.authority.begin_automatic_filtration_epoch(frame.epoch_identity)
         if not self.driver.requested_enabled and self.ownership.filtration_lease is None:
             self.driver.process_disabled_epoch(frame)
