@@ -516,3 +516,30 @@ def test_pending_cleanup_revalidates_exact_current_body_entitlement() -> None:
         assert not authority.assess(request).allowed
     finally:
         module.ManualIntelliCenterFiltrationDelivery = original
+
+
+def test_inflight_ownership_change_revokes_frozen_authority_snapshot() -> None:
+    """A live registry change must not be recomputed into the old frame's signature."""
+
+    async def scenario() -> None:
+        module = _load_module()
+        runtime, hass, authority, _, driver = _runtime(module)
+        runtime.set_enabled(True)
+        runtime.observe(
+            _snapshot(NOW), _orchestration("owner-epoch-1"),
+            external_changes=ExternalChangeBatch(()),
+        )
+        first = hass.tasks[0]
+        await driver.started.wait()
+        assert authority.epochs[-1] == "owner-epoch-1"
+        runtime.ownership.owner = SimpleNamespace(value="filtration_to_thermal")
+        runtime.observe(
+            _snapshot(NOW + timedelta(seconds=1)), _orchestration("owner-epoch-2"),
+            external_changes=ExternalChangeBatch(()),
+        )
+        assert authority.epochs[-1] == "owner-epoch-2"
+        driver.release.set()
+        await first
+        await hass.tasks[-1]
+
+    asyncio.run(scenario())
