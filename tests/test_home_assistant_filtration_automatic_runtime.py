@@ -415,7 +415,7 @@ def test_partial_body_verified_cleanup_binds_exact_current_provenance() -> None:
         ):
             captured.clear()
             modified = SimpleNamespace(**{**vars(lease), **changes})
-            factory.ownership = SimpleNamespace(filtration_lease=modified)
+            object.__setattr__(factory, "ownership", SimpleNamespace(filtration_lease=modified))
             try:
                 factory.for_operation(
                     frame=frame, session_id="filtration-1",
