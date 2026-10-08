@@ -848,6 +848,10 @@ class ThermalAutomaticExecutionDriver:
         if user_spa_pump_adoption is not None:
             return user_spa_pump_adoption
 
+        user_spa_thermal_adoption = self._prospective_owned_user_spa_thermal_adoption(frame)
+        if user_spa_thermal_adoption is not None:
+            return user_spa_thermal_adoption
+
         body = self._session_body(frame)
         if self.active_session is not None:
             if frame.orchestration.lifecycle not in {
@@ -3633,6 +3637,80 @@ class ThermalAutomaticExecutionDriver:
         decision = self.orchestrator.ownership.adopt_current_pump_setpoint(
             adopted_at=frame.observed_at,
             intended_rpm=required_rpm,
+            evidence=adoption_evidence,
+            opportunity_id=lease.body_adoption.opportunity_id,
+            reason_code="witnessed_user_hot_tub_session",
+        )
+        if decision.disposition is not ThermalRuntimeOwnershipDisposition.ESTABLISHED:
+            return None
+
+        return self._publish(
+            state=ThermalAutomaticDriverState.CONVERGED,
+            evaluated_at=frame.observed_at,
+            blocker=None,
+            frame=frame,
+            body=body,
+            preflight=None,
+            failure=None,
+            command_delivery_performed=False,
+        )
+
+    def _prospective_owned_user_spa_thermal_adoption(
+        self,
+        frame: ThermalAutomaticExecutionFrame,
+    ) -> ThermalAutomaticDriverAssessment | None:
+        """Adopt exact current Eco Heat source for a witnessed user Spa session.
+
+        Manual Spa ON is BODY intent only. Once the adopted session has a fresh
+        PoolOS policy decision and native source selection exactly matches that
+        decision, PoolOS owns THERMAL unless positive operator source intent has
+        already transferred that domain. This preserves independent manual
+        Gas/Solar/Off overrides and Solar Preferred hand-back semantics.
+        """
+
+        lease = self.orchestrator.ownership.state.lease
+        if (
+            self.active_session is not None
+            or lease is None
+            or lease.status is not ThermalRuntimeOwnershipStatus.OWNED
+            or lease.body is not ThermalBody.HOT_TUB
+            or lease.body_adoption is None
+            or lease.body_adoption.reason_code != "witnessed_user_hot_tub_session"
+            or lease.owns_heat_source
+            or lease.domain_state(OwnershipDomain.THERMAL).authority
+            is OwnershipAuthority.OPERATOR
+            or frame.thermal is None
+            or frame.spa_automatic_control_suppressed
+        ):
+            return None
+
+        body = frame.thermal.hot_tub
+        intended_source = body.plan.desired.selected_source
+        if (
+            body.body_active is not True
+            or body.plan.desired.evidence.get("session_kind")
+            != SpaSessionKind.EXTERNAL_USER.value
+            or body.plan.disposition is not ThermalPlanDisposition.ALREADY_CONVERGED
+            or body.execution_currentness.purpose.kind
+            is not ThermalExecutionPurposeKind.THERMAL_CONTROL
+            or intended_source not in {
+                PhysicalHeatMode.OFF,
+                PhysicalHeatMode.GAS,
+                PhysicalHeatMode.SOLAR,
+            }
+        ):
+            return None
+
+        adoption_evidence = build_thermal_runtime_ownership_evidence(
+            generated_at=frame.observed_at,
+            observations={item.observation_id: item for item in frame.observations},
+            body=body,
+            external_changes=frame.external_changes,
+            freshness_policy=NATIVE_ORCHESTRATION_FRESHNESS,
+        )
+        decision = self.orchestrator.ownership.adopt_current_heat_source(
+            adopted_at=frame.observed_at,
+            intended_source=intended_source,
             evidence=adoption_evidence,
             opportunity_id=lease.body_adoption.opportunity_id,
             reason_code="witnessed_user_hot_tub_session",
