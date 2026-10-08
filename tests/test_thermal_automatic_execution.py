@@ -6171,6 +6171,43 @@ def test_converged_user_spa_prospectively_adopts_exact_required_pump() -> None:
     assert lease.owns_pump_setpoint
     assert lease.domain_state(OwnershipDomain.PUMP).authority is OwnershipAuthority.POOLOS
     assert lease.domain_state(OwnershipDomain.BODY).authority is OwnershipAuthority.POOLOS
+    assert not lease.owns_heat_source
+    assert delivery.calls == []
+
+    third = asyncio.run(
+        driver.process_epoch(
+            _frame(
+                orchestrator,
+                NOW + timedelta(seconds=3),
+                pool_active=False,
+                body=ThermalBody.HOT_TUB,
+                spa_active=True,
+                pump_rpm=3000,
+                configured_rpm=3000,
+                spa_pump_circuit_id="p0102",
+                spa_heater="H0001",
+                heater_active=True,
+                spa_heating_demand_active=True,
+                spa_temperature=80.0,
+                spa_target=97.0,
+                driver=driver,
+                evaluator=evaluator,
+            ),
+            delivery_factory=FakeDeliveryFactory(delivery),
+        )
+    )
+
+    assert third.state is ThermalAutomaticDriverState.CONVERGED
+    lease = orchestrator.ownership.state.lease
+    assert lease is not None
+    assert lease.heat_source is None
+    assert lease.heat_source_adoption is not None
+    assert lease.heat_source_adoption.intended_value is PhysicalHeatMode.GAS
+    assert lease.owns_heat_source
+    assert all(
+        lease.domain_state(domain).authority is OwnershipAuthority.POOLOS
+        for domain in OwnershipDomain
+    )
     assert delivery.calls == []
 
 
