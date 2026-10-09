@@ -12,7 +12,7 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_STARTED,
     EVENT_HOMEASSISTANT_STOP,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 
 
 def _enable_local_vendored_core() -> None:
@@ -788,6 +788,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
     thermal_runtime.refresh(coordinator.data)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    async def _set_manual_thermostat_delivery(call: ServiceCall) -> None:
+        if call.data.get("entry_id") != entry.entry_id:
+            raise ValueError("PoolOS config entry mismatch")
+        enabled = call.data.get("enabled")
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be boolean")
+        if call.data.get("confirm") != "TRANSFER_MANUAL_THERMOSTATS":
+            raise ValueError("Explicit transfer confirmation required")
+        if manual_intellicenter is None:
+            raise ValueError("PoolOS manual gateway unavailable")
+        if not enabled:
+            for entity_id in (
+                "switch.poolos_autonomous_pool_control",
+                "switch.poolos_autonomous_hot_tub_control",
+            ):
+                state = hass.states.get(entity_id)
+                if state is None or state.state != "off":
+                    raise ValueError("PoolOS autonomous body control must be off")
+        await manual_intellicenter.async_set_manual_thermostat_delivery(enabled)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        "poolos", "set_manual_thermostat_delivery",
+        _set_manual_thermostat_delivery,
+    )
+    entry.async_on_unload(
+        lambda: hass.services.async_remove("poolos", "set_manual_thermostat_delivery")
+    )
 
     async def async_activate_poolos_post_start() -> None:
         """Start deferred PoolOS facilities after Home Assistant startup."""
