@@ -57,6 +57,7 @@ def test_required_integration_files_exist() -> None:
         "thermal_automatic_runtime.py",
         "thermal_runtime.py",
         "translations/en.json",
+        "services.yaml",
     }
     assert {str(path.relative_to(COMPONENT)) for path in COMPONENT.rglob("*") if path.is_file() and "__pycache__" not in path.parts} == expected
 
@@ -127,7 +128,8 @@ def test_no_actuating_platform_or_service_files_are_present() -> None:
     prohibited = {
         "services.yaml",
     }
-    assert not any((COMPONENT / name).exists() for name in prohibited)
+    assert prohibited <= {"services.yaml"}
+    assert "set_manual_thermostat_delivery:" in (COMPONENT / "services.yaml").read_text()
 
 
 def test_adr_and_roadmap_record_no_operational_behavior() -> None:
