@@ -222,6 +222,12 @@ class PoolAutomaticControlSuppression:
         if not reason.strip():
             raise ValueError("suppression reason must not be empty")
         source = PoolAutomaticControlSuppressionSource(source)
+        # An observed/native OFF event cannot weaken a durable human or
+        # delegated-authority restraint into an expiring transient one.
+        if (self.state.suppressed
+                and self.state.source is PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT
+                and source in _TRANSIENT_POOL_SOURCES):
+            return self.state
         if (
             self.state.suppressed
             and self.state.source is source
@@ -348,6 +354,12 @@ class SpaAutomaticControlSuppression:
         if not reason.strip():
             raise ValueError("suppression reason must not be empty")
         source = SpaAutomaticControlSuppressionSource(source)
+        # An observed/native OFF event cannot weaken a durable human or
+        # delegated-authority restraint into an expiring transient one.
+        if (self.state.suppressed
+                and self.state.source is SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT
+                and source in _TRANSIENT_SPA_SOURCES):
+            return self.state
         if (
             self.state.suppressed
             and self.state.source is source
