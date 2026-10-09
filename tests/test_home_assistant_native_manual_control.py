@@ -111,6 +111,7 @@ def test_manual_gateway_has_no_generic_public_setparamlist_surface() -> None:
     assert public_async_methods == {
         "async_start",
         "async_stop",
+        "async_set_manual_thermostat_delivery",
         "async_set_body_active",
         "async_set_heating_setpoint",
         "async_set_body_heat_source",
