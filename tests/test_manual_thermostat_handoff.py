@@ -15,7 +15,7 @@ def test_manual_body_delivery_guard_is_rechecked_under_lock():
 def test_operator_off_suppression_is_not_armed_after_relinquishment():
     source = (ROOT / "manual_intellicenter.py").read_text()
     method = source.split("async def async_set_body_active(", 1)[1].split("async def async_set_circuit_state(", 1)[0]
-    assert method.index("not self._manual_thermostat_delivery_enabled") < method.index("pool_off_requested(datetime.now(UTC))")
+    assert method.index("not self._manual_thermostat_delivery_enabled") < method.index("pool_off_requested(")
 
 def test_ha_service_and_observation_attest_relinquishment():
     setup = (ROOT / "__init__.py").read_text()
