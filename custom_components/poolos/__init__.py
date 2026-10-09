@@ -818,12 +818,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
             )
             from datetime import UTC, datetime
             now = datetime.now(UTC)
-            runtime.pool_automatic_control.suppress(
+            entry.runtime_data.pool_automatic_control.suppress(
                 source=PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
                 suppressed_at=now,
                 reason="manual_thermostat_authority_delegated",
             )
-            runtime.spa_automatic_control.suppress(
+            entry.runtime_data.spa_automatic_control.suppress(
                 source=SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
                 suppressed_at=now,
                 reason="manual_thermostat_authority_delegated",
