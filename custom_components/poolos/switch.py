@@ -686,6 +686,11 @@ class PoolOSPoolAutonomousControlSwitch(RestoreEntity, SwitchEntity):
         """Explicitly resume future automation without issuing a command."""
 
         del kwargs
+        manual = self._runtime.manual_intellicenter
+        if manual is not None and not manual.manual_thermostat_delivery_enabled:
+            raise ManualIntelliCenterCommandError(
+                "Cannot enable PoolOS autonomy while manual thermostats are delegated"
+            )
         self._runtime.pool_automatic_control.resume(resumed_at=datetime.now(UTC))
         self.async_write_ha_state()
 
@@ -777,6 +782,11 @@ class PoolOSSpaAutonomousControlSwitch(RestoreEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         del kwargs
+        manual = self._runtime.manual_intellicenter
+        if manual is not None and not manual.manual_thermostat_delivery_enabled:
+            raise ManualIntelliCenterCommandError(
+                "Cannot enable PoolOS autonomy while manual thermostats are delegated"
+            )
         self._runtime.spa_automatic_control.resume(resumed_at=datetime.now(UTC))
         self.async_write_ha_state()
 
