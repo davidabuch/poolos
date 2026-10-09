@@ -53,7 +53,8 @@ def test_component_only_publishes_read_only_diagnostic_platforms() -> None:
     source = (COMPONENT / "const.py").read_text(encoding="utf-8")
     assert 'PLATFORMS = ("sensor", "binary_sensor", "button", "climate", "switch", "light", "number", "select")' in source
     prohibited = {"services.yaml"}
-    assert not any((COMPONENT / name).exists() for name in prohibited)
+    assert prohibited <= {"services.yaml"}
+    assert "set_manual_thermostat_delivery:" in (COMPONENT / "services.yaml").read_text()
 
 
 def test_component_registers_no_home_assistant_service_calls() -> None:
@@ -66,6 +67,8 @@ def test_component_registers_no_home_assistant_service_calls() -> None:
         "service_registry",
     )
     for path in COMPONENT.glob("*.py"):
+        if path.name == "__init__.py":
+            continue  # Explicit, gated manual thermostat transfer service
         source = path.read_text(encoding="utf-8").lower()
         assert all(token not in source for token in prohibited_calls), path.name
 

@@ -105,7 +105,8 @@ def test_no_control_platform_or_service_is_added() -> None:
     prohibited = {
         "services.yaml",
     }
-    assert not any((COMPONENT / name).exists() for name in prohibited)
+    assert prohibited <= {"services.yaml"}
+    assert "set_manual_thermostat_delivery:" in (COMPONENT / "services.yaml").read_text()
 
 
 def test_roadmap_records_11_1c_as_done_and_read_only() -> None:

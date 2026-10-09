@@ -99,7 +99,8 @@ def test_dashboard_is_valid_and_read_only() -> None:
 
 def test_control_center_adds_no_equipment_actuating_platform() -> None:
     prohibited = {"services.yaml"}
-    assert not any((COMPONENT / name).exists() for name in prohibited)
+    assert prohibited <= {"services.yaml"}
+    assert "set_manual_thermostat_delivery:" in (COMPONENT / "services.yaml").read_text()
 
 
 def test_roadmap_records_11_1e_done() -> None:

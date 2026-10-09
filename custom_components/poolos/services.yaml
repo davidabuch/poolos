@@ -1,0 +1,22 @@
+set_manual_thermostat_delivery:
+  name: Transfer PoolOS manual thermostat authority
+  description: >-
+    Relinquish or restore PoolOS manual Pool and Hot Tub thermostat commands.
+    Other equipment command paths remain available. Resets to enabled after restart.
+  fields:
+    entry_id:
+      name: PoolOS entry ID
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Enable PoolOS manual thermostats
+      required: true
+      selector:
+        boolean:
+    confirm:
+      name: Confirmation
+      description: Enter TRANSFER_MANUAL_THERMOSTATS.
+      required: true
+      selector:
+        text:

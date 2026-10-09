@@ -240,6 +240,27 @@ class ManualIntelliCenterControl:
         self._command_lock = asyncio.Lock()
         self._last_error_code: str | None = None
         self._reconnect_count = 0
+        self._manual_thermostat_delivery_enabled = True
+
+    @property
+    def manual_thermostat_delivery_enabled(self) -> bool:
+        return self._manual_thermostat_delivery_enabled
+
+    async def async_set_manual_thermostat_delivery(self, enabled: bool) -> None:
+        """Serialize handoff with any in-flight native physical dispatch."""
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be boolean")
+        async with self._command_lock:
+            self._manual_thermostat_delivery_enabled = enabled
+
+    def _require_manual_thermostat_authority(self, request: PhysicalCommandRequest) -> None:
+        if (request.source is PhysicalRequestSource.MANUAL
+                and request.target in _ALLOWED_BODY_IDS
+                and request.operation in {"body_active", "heating_setpoint"}
+                and not getattr(self, "_manual_thermostat_delivery_enabled", True)):
+            raise ManualIntelliCenterCommandNotDispatchedError(
+                "PoolOS manual thermostat delivery relinquished to native integration"
+            )
 
     @property
     def state(self) -> ManualIntelliCenterState:
@@ -298,6 +319,11 @@ class ManualIntelliCenterControl:
         """Turn Pool/Spa body circulation on or off."""
 
         self._require_body(body_objnam)
+        if (request_source is PhysicalRequestSource.MANUAL
+                and not getattr(self, "_manual_thermostat_delivery_enabled", True)):
+            raise ManualIntelliCenterCommandNotDispatchedError(
+                "PoolOS manual thermostat delivery relinquished"
+            )
         if not isinstance(active, bool):
             raise ValueError("body active state must be boolean")
 
@@ -1071,6 +1097,7 @@ class ManualIntelliCenterControl:
     ) -> None:
         """Reserve, recheck inside the command lock, and dispatch once."""
 
+        self._require_manual_thermostat_authority(request)
         self._command_authority.note_operator_request(request, at=datetime.now(UTC))
         await self._require_available()
         now = datetime.now(UTC)
@@ -1097,6 +1124,7 @@ class ManualIntelliCenterControl:
                 # This is the final PoolOS check immediately before invoking
                 # pyintellicenter's physical dispatch coroutine.  A request
                 # queued behind the lock cannot reuse an earlier permission.
+                self._require_manual_thermostat_authority(request)
                 self._command_authority.require_allowed(request)
                 self._command_authority.supersede_dispatched_expectations(request)
                 for expectation_id in expectation_ids:
