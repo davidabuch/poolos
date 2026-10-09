@@ -257,7 +257,7 @@ class ManualIntelliCenterControl:
         if (request.source is PhysicalRequestSource.MANUAL
                 and request.target in _ALLOWED_BODY_IDS
                 and request.operation in {"body_active", "heating_setpoint"}
-                and not self._manual_thermostat_delivery_enabled):
+                and not getattr(self, "_manual_thermostat_delivery_enabled", True)):
             raise ManualIntelliCenterCommandNotDispatchedError(
                 "PoolOS manual thermostat delivery relinquished to native integration"
             )
@@ -320,7 +320,7 @@ class ManualIntelliCenterControl:
 
         self._require_body(body_objnam)
         if (request_source is PhysicalRequestSource.MANUAL
-                and not self._manual_thermostat_delivery_enabled):
+                and not getattr(self, "_manual_thermostat_delivery_enabled", True)):
             raise ManualIntelliCenterCommandNotDispatchedError(
                 "PoolOS manual thermostat delivery relinquished"
             )
