@@ -275,6 +275,7 @@ class PoolOSNativeClimate(
             "observation_authority": "native_intellicenter",
             "manual_command_delivery_enabled": (
                 manual is not None and manual.available
+                and manual.manual_thermostat_delivery_enabled
             ),
             "autonomous_command_delivery_enabled": False,
         }
