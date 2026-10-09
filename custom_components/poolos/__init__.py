@@ -807,6 +807,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: PoolOSConfigEntry) -> bo
                 state = hass.states.get(entity_id)
                 if state is None or state.state != "off":
                     raise ValueError("PoolOS autonomous body control must be off")
+        # Persist a non-expiring operator restraint before delegating manual
+        # thermostats. A transient native-OFF restraint can expire at the
+        # operational-day boundary, silently re-enabling autonomy mid-session.
+        # Both autonomy controls must remain OFF throughout delegation.
+        if not enabled:
+            from poolos.pool_automatic_control_suppression import (
+                PoolAutomaticControlSuppressionSource,
+                SpaAutomaticControlSuppressionSource,
+            )
+            from datetime import UTC, datetime
+            now = datetime.now(UTC)
+            entry.runtime_data.pool_automatic_control.suppress(
+                source=PoolAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+                suppressed_at=now,
+                reason="manual_thermostat_authority_delegated",
+            )
+            entry.runtime_data.spa_automatic_control.suppress(
+                source=SpaAutomaticControlSuppressionSource.OPERATOR_RESTRAINT,
+                suppressed_at=now,
+                reason="manual_thermostat_authority_delegated",
+            )
         await manual_intellicenter.async_set_manual_thermostat_delivery(enabled)
         coordinator.async_update_listeners()
 
